@@ -2,31 +2,35 @@ workflows:
   ios-workflow:
     name: iOS Workflow
     max_build_duration: 120
+    integrations:
+      app_store_connect: Codemagic
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
-    working_directory: Abra_finance_system
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.abralogistic.abrafinance
+    working_directory: Billing_frontend/billing_frontend
     scripts:
       - name: Flutter packages get
         script: |
           flutter packages pub get
-      - name: Flutter build iOS
+      - name: Install pods
         script: |
-          flutter build ios --release --no-codesign
-      - name: Build unsigned IPA
+          find . -name "Podfile" -execdir pod install \;
+      - name: Set up code signing
         script: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -sdk iphoneos \
-            -configuration Release \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CONFIGURATION_BUILD_DIR=$CM_BUILD_DIR/output \
-            clean archive
+          xcode-project use-profiles
+      - name: Flutter build IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
-      - $CM_BUILD_DIR/output/*.app
       - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
