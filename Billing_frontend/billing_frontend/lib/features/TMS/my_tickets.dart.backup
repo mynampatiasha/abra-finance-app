@@ -1,0 +1,882 @@
+// lib/features/admin/tms/presentation/screens/my_tickets.dart
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+import 'package:audioplayers/audioplayers.dart';
+
+import 'package:abra_fleet/app/config/api_config.dart';
+import 'package:abra_fleet/core/services/safe_api_service.dart';
+
+class MyTicketsScreen extends StatefulWidget {
+  const MyTicketsScreen({super.key});
+
+  @override
+  State<MyTicketsScreen> createState() => _MyTicketsScreenState();
+}
+
+class _MyTicketsScreenState extends State<MyTicketsScreen> with SingleTickerProviderStateMixin {
+  final SafeApiService _api = SafeApiService();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  // Data
+  List<Map<String, dynamic>> _tickets = [];
+  Map<String, int> _stats = {
+    'open': 0,
+    'inProgress': 0,
+    'highPriority': 0,
+  };
+  
+  // State
+  bool _isLoading = true;
+  String _statusFilter = 'active'; // active, open, in_progress, all
+  String? _priorityFilter;
+  DateTime? _dateFrom;
+  DateTime? _dateTo;
+  
+  // Animation
+  late AnimationController _animController;
+  late Animation<double> _fadeAnimation;
+  
+  // Auto-refresh
+  Timer? _refreshTimer;
+  int _lastTicketCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAnimations();
+    _checkAuthAndFetchTickets();
+    _startAutoRefresh();
+  }
+
+  Future<void> _checkAuthAndFetchTickets() async {
+    debugPrint('🔐 My Tickets: Checking authentication...');
+    
+    // Check if user is logged in
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      debugPrint('❌ My Tickets: User not logged in');
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    debugPrint('✅ My Tickets: User logged in: ${user.email}');
+    debugPrint('   Firebase UID: ${user.uid}');
+    
+    // Check if token is valid
+    try {
+      final token = await user.getIdToken();
+      debugPrint('✅ My Tickets: Got Firebase token (length: ${token?.length ?? 0})');
+    } catch (e) {
+      debugPrint('❌ My Tickets: Failed to get Firebase token: $e');
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    // Now fetch tickets
+    await _fetchTickets();
+  }
+
+  void _initAnimations() {
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+    );
+    
+    _animController.forward();
+  }
+
+  void _startAutoRefresh() {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _fetchTickets(silent: true);
+    });
+  }
+
+  Future<void> _fetchTickets({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _isLoading = true);
+    }
+
+    try {
+      // Build query params
+      final params = <String, String>{
+        'status': _statusFilter,
+      };
+      
+      if (_priorityFilter != null && _priorityFilter != 'all') {
+        params['priority'] = _priorityFilter!;
+      }
+      
+      if (_dateFrom != null) {
+        params['dateFrom'] = DateFormat('yyyy-MM-dd').format(_dateFrom!);
+      }
+      
+      if (_dateTo != null) {
+        params['dateTo'] = DateFormat('yyyy-MM-dd').format(_dateTo!);
+      }
+
+      debugPrint('🎫 Fetching my tickets with params: $params');
+
+      final response = await _api.safeGet(
+        '/api/tickets/my',
+        queryParams: params,
+        context: 'My Tickets',
+        fallback: {'success': false, 'data': []},
+      );
+
+      debugPrint('📊 My tickets response: ${response?.keys}');
+      debugPrint('📊 Response success: ${response?['success']}');
+      debugPrint('📊 Response data length: ${response?['data']?.length}');
+
+      if (response['success'] == true && mounted) {
+        final tickets = List<Map<String, dynamic>>.from(response['data'] ?? []);
+        
+        // Check for new tickets
+        if (silent && tickets.length > _lastTicketCount) {
+          _playNotificationSound();
+          _showNewTicketNotification(tickets.length - _lastTicketCount);
+        }
+        
+        _lastTicketCount = tickets.length;
+        
+        setState(() {
+          _tickets = tickets;
+          _calculateStats();
+          _isLoading = false;
+        });
+        
+        debugPrint('✅ My tickets loaded successfully: ${tickets.length} tickets');
+        tickets.forEach((ticket) {
+          debugPrint('   - ${ticket['ticketNumber']}: ${ticket['subject']} (${ticket['status']})');
+        });
+      } else {
+        debugPrint('❌ My tickets API failed or returned no success');
+        debugPrint('   Response: $response');
+        setState(() {
+          _tickets = [];
+          _calculateStats();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ My tickets fetch error: $e');
+      if (mounted && !silent) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _calculateStats() {
+    _stats = {
+      'open': _tickets.where((t) => t['status'] == 'open').length,
+      'inProgress': _tickets.where((t) => t['status'] == 'in_progress').length,
+      'highPriority': _tickets.where((t) => t['priority'] == 'high').length,
+    };
+  }
+
+  Future<void> _playNotificationSound() async {
+    try {
+      await _audioPlayer.play(AssetSource('Notification.mp3'));
+    } catch (e) {
+      debugPrint('Failed to play sound: $e');
+    }
+  }
+
+  void _showNewTicketNotification(int count) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.notification_important, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '🎫 $count new ticket${count > 1 ? 's' : ''} assigned to you!',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.blue.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: SnackBarAction(
+          label: 'VIEW',
+          textColor: Colors.white,
+          onPressed: () => _fetchTickets(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateTicketStatus(String ticketId, String newStatus) async {
+    try {
+      final response = await _api.safePut(
+        '/api/tickets/$ticketId/status',
+        body: {'status': newStatus},
+        context: 'Update Ticket Status',
+        fallback: {'success': false},
+      );
+
+      if (response['success'] != false && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Ticket status updated to ${_formatStatus(newStatus)}'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        
+        _fetchTickets();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Failed to update status: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  String _formatStatus(String status) {
+    return status.split('_').map((word) => 
+      word[0].toUpperCase() + word.substring(1)
+    ).join(' ');
+  }
+
+  Future<void> _showTicketDetails(Map<String, dynamic> ticket) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _TicketDetailsSheet(
+        ticket: ticket,
+        onStatusChanged: (newStatus) {
+          Navigator.pop(context);
+          _updateTicketStatus(ticket['_id'], newStatus);
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFilterDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('🔍 Filter Tickets'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Status', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _buildFilterChip('Active', 'active'),
+                  _buildFilterChip('Open', 'open'),
+                  _buildFilterChip('In Progress', 'in_progress'),
+                  _buildFilterChip('All', 'all'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Priority', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _buildPriorityFilterChip('All', null),
+                  _buildPriorityFilterChip('Low', 'low'),
+                  _buildPriorityFilterChip('Medium', 'medium'),
+                  _buildPriorityFilterChip('High', 'high'),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _statusFilter = 'active';
+                _priorityFilter = null;
+                _dateFrom = null;
+                _dateTo = null;
+              });
+              Navigator.pop(context);
+              _fetchTickets();
+            },
+            child: const Text('CLEAR'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _fetchTickets();
+            },
+            child: const Text('APPLY'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, String value) {
+    final isSelected = _statusFilter == value;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) => setState(() => _statusFilter = value),
+      selectedColor: Colors.blue.shade100,
+      checkmarkColor: Colors.blue.shade700,
+    );
+  }
+
+  Widget _buildPriorityFilterChip(String label, String? value) {
+    final isSelected = _priorityFilter == value;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) => setState(() => _priorityFilter = value),
+      selectedColor: Colors.orange.shade100,
+      checkmarkColor: Colors.orange.shade700,
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _animController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.blue.shade50, Colors.indigo.shade50],
+          ),
+        ),
+        child: SafeArea(
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Column(
+              children: [
+                _buildHeader(),
+                _buildStatsCards(),
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _tickets.isEmpty
+                          ? _buildEmptyState()
+                          : _buildTicketsList(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _fetchTickets,
+        backgroundColor: Colors.blue.shade700,
+        child: const Icon(Icons.refresh),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.blue.shade700, Colors.indigo.shade700],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.shade300,
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.assignment, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'My Tickets',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Manage your assigned tickets',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          // Total tickets count
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.confirmation_number, color: Colors.white, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'Total: ${_tickets.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: _showFilterDialog,
+            icon: const Icon(Icons.filter_list, color: Colors.white),
+            tooltip: 'Filter',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsCards() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(child: _buildStatCard('Open', _stats['open']!, Colors.red)),
+          const SizedBox(width: 12),
+          Expanded(child: _buildStatCard('In Progress', _stats['inProgress']!, Colors.orange)),
+          const SizedBox(width: 12),
+          Expanded(child: _buildStatCard('High Priority', _stats['highPriority']!, Colors.purple)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade200,
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTicketsList() {
+    return RefreshIndicator(
+      onRefresh: () => _fetchTickets(),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _tickets.length,
+        itemBuilder: (context, index) => _buildTicketCard(_tickets[index]),
+      ),
+    );
+  }
+
+  Widget _buildTicketCard(Map<String, dynamic> ticket) {
+    final priority = ticket['priority'] ?? 'medium';
+    final status = ticket['status'] ?? 'open';
+    
+    Color priorityColor = Colors.green;
+    if (priority == 'high') priorityColor = Colors.red;
+    else if (priority == 'medium') priorityColor = Colors.orange;
+    
+    Color statusColor = Colors.red;
+    if (status == 'in_progress') statusColor = Colors.orange;
+    else if (status == 'closed') statusColor = Colors.green;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 2,
+      child: InkWell(
+        onTap: () => _showTicketDetails(ticket),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      ticket['ticketNumber'] ?? 'N/A',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade900,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  _buildBadge(_formatStatus(priority), priorityColor),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                ticket['subject'] ?? 'No Subject',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                ticket['message'] ?? '',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.access_time, size: 14, color: Colors.grey.shade500),
+                  const SizedBox(width: 4),
+                  Text(
+                    _formatDate(ticket['createdAt']),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const Spacer(),
+                  _buildStatusDropdown(ticket['_id'], status),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusDropdown(String ticketId, String currentStatus) {
+    return PopupMenuButton<String>(
+      initialValue: currentStatus,
+      onSelected: (newStatus) => _updateTicketStatus(ticketId, newStatus),
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'open', child: Text('🔴 Open')),
+        const PopupMenuItem(value: 'in_progress', child: Text('🟠 In Progress')),
+        const PopupMenuItem(value: 'closed', child: Text('🟢 Closed')),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: _getStatusColor(currentStatus).withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _getStatusColor(currentStatus)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _formatStatus(currentStatus),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _getStatusColor(currentStatus),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(_getStatusColor(currentStatus) == Colors.red ? Icons.arrow_drop_down : Icons.check, 
+                 size: 16, color: _getStatusColor(currentStatus)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    if (status == 'open') return Colors.red;
+    if (status == 'in_progress') return Colors.orange;
+    return Colors.green;
+  }
+
+  String _formatDate(dynamic date) {
+    if (date == null) return 'N/A';
+    try {
+      final dt = DateTime.parse(date.toString());
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      
+      if (diff.inMinutes < 1) return 'Just now';
+      if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+      if (diff.inDays < 1) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      
+      return DateFormat('MMM dd, yyyy').format(dt);
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inbox_outlined, size: 80, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          const Text(
+            'No Tickets Found',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'You have no assigned tickets',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TICKET DETAILS BOTTOM SHEET
+// ============================================================================
+
+class _TicketDetailsSheet extends StatelessWidget {
+  final Map<String, dynamic> ticket;
+  final Function(String) onStatusChanged;
+
+  const _TicketDetailsSheet({
+    required this.ticket,
+    required this.onStatusChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.blue.shade700, Colors.indigo.shade700],
+              ),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.receipt_long, color: Colors.white, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ticket['ticketNumber'] ?? 'N/A',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Text(
+                        'Ticket Details',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildDetailRow('Subject', ticket['subject']),
+                  const Divider(height: 24),
+                  _buildDetailRow('Message', ticket['message']),
+                  const Divider(height: 24),
+                  _buildDetailRow('Priority', ticket['priority']?.toString().toUpperCase()),
+                  const Divider(height: 24),
+                  _buildDetailRow('Status', ticket['status']?.toString().replaceAll('_', ' ').toUpperCase()),
+                  const Divider(height: 24),
+                  _buildDetailRow('Created By', ticket['createdBy']?['name']),
+                  const Divider(height: 24),
+                  _buildDetailRow('Created At', _formatFullDate(ticket['createdAt'])),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => onStatusChanged('in_progress'),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Start Work'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => onStatusChanged('closed'),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Close'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String? value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          value ?? 'N/A',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ],
+    );
+  }
+
+  String _formatFullDate(dynamic date) {
+    if (date == null) return 'N/A';
+    try {
+      final dt = DateTime.parse(date.toString());
+      return DateFormat('MMM dd, yyyy hh:mm a').format(dt);
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+}

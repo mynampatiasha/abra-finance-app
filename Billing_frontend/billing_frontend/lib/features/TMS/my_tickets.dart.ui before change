@@ -1,0 +1,1227 @@
+// lib/screens/tms/my_tickets_screen.dart
+// ============================================================================
+// 🎫 MY TICKETS SCREEN - Email-Based User Tickets
+// ============================================================================
+// Features:
+// - Shows ONLY tickets assigned to logged-in user's email
+// - Advanced filters (Status, Priority, Date Range)
+// - Search functionality
+// - Color-coded deadline status with animations
+// - Status update dropdown
+// - Beautiful card-based UI
+// ============================================================================
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:abra_fleet/core/services/tms_service.dart';
+
+class MyTicketsScreen extends StatefulWidget {
+  const MyTicketsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<MyTicketsScreen> createState() => _MyTicketsScreenState();
+}
+
+class _MyTicketsScreenState extends State<MyTicketsScreen>
+    with SingleTickerProviderStateMixin {
+  final _tmsService = TMSService();
+  final _searchController = TextEditingController();
+
+  List<Map<String, dynamic>> _tickets = [];
+  List<Map<String, dynamic>> _filteredTickets = [];
+  bool _isLoading = true;
+
+  // Filters
+  String _statusFilter = 'active'; // 'active', 'Open', 'In Progress', 'all'
+  String _priorityFilter = 'all'; // 'all', 'High', 'Medium', 'Low'
+  String _searchQuery = '';
+  DateTime? _dateFrom;
+  DateTime? _dateTo;
+
+  // Statistics
+  int _openCount = 0;
+  int _inProgressCount = 0;
+  int _closedCount = 0;
+  int _highPriorityCount = 0;
+
+  // Animation
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAnimation();
+    _fetchTickets();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  // ========================================================================
+  // 🎬 ANIMATION SETUP
+  // ========================================================================
+  void _setupAnimation() {
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 0.7, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  // ========================================================================
+  // 📦 FETCH TICKETS (FILTERED BY LOGGED-IN USER'S EMAIL)
+  // ========================================================================
+  Future<void> _fetchTickets() async {
+    setState(() => _isLoading = true);
+
+    final response = await _tmsService.fetchMyTickets(
+      status: _statusFilter == 'all' ? null : _statusFilter,
+    );
+
+    if (response['success'] == true && response['data'] != null) {
+      setState(() {
+        _tickets = List<Map<String, dynamic>>.from(response['data']);
+        _applyFilters();
+        _calculateStatistics();
+        _isLoading = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+      _showErrorSnackbar('Failed to load tickets');
+    }
+  }
+
+  // ========================================================================
+  // 🔍 APPLY FILTERS
+  // ========================================================================
+  void _applyFilters() {
+    setState(() {
+      _filteredTickets = _tickets.where((ticket) {
+        // Search filter
+        if (_searchQuery.isNotEmpty) {
+          final subject = ticket['subject']?.toString().toLowerCase() ?? '';
+          final ticketNumber =
+              ticket['ticket_number']?.toString().toLowerCase() ?? '';
+          final message = ticket['message']?.toString().toLowerCase() ?? '';
+          final query = _searchQuery.toLowerCase();
+
+          if (!subject.contains(query) &&
+              !ticketNumber.contains(query) &&
+              !message.contains(query)) {
+            return false;
+          }
+        }
+
+        // Priority filter
+        if (_priorityFilter != 'all') {
+          final priority = ticket['priority']?.toString() ?? '';
+          if (priority != _priorityFilter) return false;
+        }
+
+        // Date range filter
+        if (_dateFrom != null || _dateTo != null) {
+          final createdAt = ticket['created_at'];
+          if (createdAt == null) return false;
+
+          final date = DateTime.tryParse(createdAt);
+          if (date == null) return false;
+
+          if (_dateFrom != null && date.isBefore(_dateFrom!)) return false;
+          if (_dateTo != null) {
+            final endDate = DateTime(_dateTo!.year, _dateTo!.month, _dateTo!.day, 23, 59, 59);
+            if (date.isAfter(endDate)) return false;
+          }
+        }
+
+        return true;
+      }).toList();
+    });
+  }
+
+  // ========================================================================
+  // 📊 CALCULATE STATISTICS
+  // ========================================================================
+  void _calculateStatistics() {
+    _openCount = 0;
+    _inProgressCount = 0;
+    _closedCount = 0;
+    _highPriorityCount = 0;
+
+    for (final ticket in _tickets) {
+      final status = ticket['status']?.toString() ?? '';
+      final priority = ticket['priority']?.toString().toLowerCase() ?? '';
+
+      if (status == 'Open') _openCount++;
+      if (status == 'In Progress') _inProgressCount++;
+      if (status == 'closed') _closedCount++;
+      if (priority == 'high') _highPriorityCount++;
+    }
+  }
+
+  // ========================================================================
+  // 🔄 UPDATE TICKET STATUS
+  // ========================================================================
+  Future<void> _updateStatus(String ticketId, String newStatus) async {
+    final response = await _tmsService.updateTicketStatus(ticketId, newStatus);
+
+    if (response['success'] == true) {
+      _showSuccessSnackbar('Status updated successfully!');
+
+      if (newStatus == 'closed') {
+        setState(() {
+          _tickets.removeWhere((t) => t['_id'].toString() == ticketId);
+          _applyFilters();
+          _calculateStatistics();
+        });
+      } else {
+        _fetchTickets();
+      }
+    } else {
+      _showErrorSnackbar('Failed to update status');
+    }
+  }
+
+  // ========================================================================
+  // 🎨 UI HELPERS
+  // ========================================================================
+  void _showSuccessSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 12),
+            Text(message),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  void _showErrorSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error, color: Colors.white),
+            const SizedBox(width: 12),
+            Text(message),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'My Tickets',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.filter_list_rounded, color: Colors.white),
+            onPressed: _showFiltersDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: _fetchTickets,
+          ),
+        ],
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF0F172A),
+              const Color(0xFF1E293B),
+              const Color(0xFF334155),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: _isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.blue),
+                )
+              : RefreshIndicator(
+                  onRefresh: _fetchTickets,
+                  color: Colors.blue,
+                  child: Column(
+                    children: [
+                      // Statistics Cards
+                      _buildStatisticsCards(),
+
+                      // Search Bar
+                      _buildSearchBar(),
+
+                      // Active Filters Chips
+                      if (_priorityFilter != 'all' ||
+                          _dateFrom != null ||
+                          _dateTo != null)
+                        _buildActiveFiltersChips(),
+
+                      // Tickets List
+                      Expanded(child: _buildTicketsList()),
+                    ],
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 📊 STATISTICS CARDS
+  // ========================================================================
+  Widget _buildStatisticsCards() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildStatCard(
+              'Open',
+              _openCount,
+              Icons.circle_outlined,
+              const Color(0xFFEF4444),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildStatCard(
+              'In Progress',
+              _inProgressCount,
+              Icons.autorenew_rounded,
+              const Color(0xFFF59E0B),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildStatCard(
+              'High Priority',
+              _highPriorityCount,
+              Icons.priority_high_rounded,
+              const Color(0xFF8B5CF6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, int count, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.2),
+            color.withOpacity(0.1),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 8),
+          Text(
+            count.toString(),
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withOpacity(0.7),
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🔍 SEARCH BAR
+  // ========================================================================
+  Widget _buildSearchBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search_rounded, color: Colors.blue),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Search tickets...',
+                hintStyle: TextStyle(color: Colors.white54),
+                border: InputBorder.none,
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                  _applyFilters();
+                });
+              },
+            ),
+          ),
+          if (_searchQuery.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.clear_rounded, color: Colors.white54),
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                  _applyFilters();
+                });
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🏷️ ACTIVE FILTERS CHIPS
+  // ========================================================================
+  Widget _buildActiveFiltersChips() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          if (_priorityFilter != 'all')
+            _buildFilterChip(
+              'Priority: $_priorityFilter',
+              () {
+                setState(() {
+                  _priorityFilter = 'all';
+                  _applyFilters();
+                });
+              },
+            ),
+          if (_dateFrom != null)
+            _buildFilterChip(
+              'From: ${DateFormat('MMM dd').format(_dateFrom!)}',
+              () {
+                setState(() {
+                  _dateFrom = null;
+                  _applyFilters();
+                });
+              },
+            ),
+          if (_dateTo != null)
+            _buildFilterChip(
+              'To: ${DateFormat('MMM dd').format(_dateTo!)}',
+              () {
+                setState(() {
+                  _dateTo = null;
+                  _applyFilters();
+                });
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, VoidCallback onRemove) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onRemove,
+            child: const Icon(
+              Icons.close_rounded,
+              color: Colors.white,
+              size: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🎛️ FILTERS DIALOG
+  // ========================================================================
+  void _showFiltersDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(Icons.filter_list_rounded, color: Colors.blue),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Filters',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Status Filter
+              const Text(
+                'Status',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildStatusFilterButtons(),
+              const SizedBox(height: 20),
+
+              // Priority Filter
+              const Text(
+                'Priority',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildPriorityFilterButtons(),
+              const SizedBox(height: 20),
+
+              // Date Range
+              const Text(
+                'Date Range',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDateButton('From', _dateFrom, (date) {
+                      setState(() => _dateFrom = date);
+                    }),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildDateButton('To', _dateTo, (date) {
+                      setState(() => _dateTo = date);
+                    }),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Apply Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    _applyFilters();
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Apply Filters',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusFilterButtons() {
+    return Wrap(
+      spacing: 8,
+      children: [
+        _buildFilterButton('Active', _statusFilter == 'active', () {
+          setState(() => _statusFilter = 'active');
+        }),
+        _buildFilterButton('Open', _statusFilter == 'Open', () {
+          setState(() => _statusFilter = 'Open');
+        }),
+        _buildFilterButton('In Progress', _statusFilter == 'In Progress', () {
+          setState(() => _statusFilter = 'In Progress');
+        }),
+        _buildFilterButton('All', _statusFilter == 'all', () {
+          setState(() => _statusFilter = 'all');
+        }),
+      ],
+    );
+  }
+
+  Widget _buildPriorityFilterButtons() {
+    return Wrap(
+      spacing: 8,
+      children: [
+        _buildFilterButton('All', _priorityFilter == 'all', () {
+          setState(() => _priorityFilter = 'all');
+        }),
+        _buildFilterButton('High', _priorityFilter == 'High', () {
+          setState(() => _priorityFilter = 'High');
+        }),
+        _buildFilterButton('Medium', _priorityFilter == 'Medium', () {
+          setState(() => _priorityFilter = 'Medium');
+        }),
+        _buildFilterButton('Low', _priorityFilter == 'Low', () {
+          setState(() => _priorityFilter = 'Low');
+        }),
+      ],
+    );
+  }
+
+  Widget _buildFilterButton(String label, bool isSelected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blue : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? Colors.blue : Colors.white.withOpacity(0.2),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white70,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateButton(
+      String label, DateTime? date, Function(DateTime?) onDateSelected) {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime.now().add(const Duration(days: 365)),
+        );
+        if (picked != null) {
+          onDateSelected(picked);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              date == null ? label : DateFormat('MMM dd').format(date),
+              style: TextStyle(
+                color: date == null ? Colors.white54 : Colors.white,
+                fontSize: 13,
+              ),
+            ),
+            Icon(
+              Icons.calendar_today_rounded,
+              color: Colors.white.withOpacity(0.5),
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 📋 TICKETS LIST
+  // ========================================================================
+  Widget _buildTicketsList() {
+    if (_filteredTickets.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _filteredTickets.length,
+      itemBuilder: (context, index) {
+        return _buildTicketCard(_filteredTickets[index]);
+      },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.inbox_rounded,
+            size: 80,
+            color: Colors.white.withOpacity(0.3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No tickets found',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.white.withOpacity(0.7),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _searchQuery.isNotEmpty
+                ? 'Try adjusting your search'
+                : 'You have no active tickets',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.white.withOpacity(0.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🎫 TICKET CARD
+  // ========================================================================
+  Widget _buildTicketCard(Map<String, dynamic> ticket) {
+    final ticketId = ticket['_id']?.toString() ?? '';
+    final ticketNumber = ticket['ticket_number'] ?? 'N/A';
+    final subject = ticket['subject'] ?? 'No Subject';
+    final message = ticket['message'] ?? '';
+    final priority = ticket['priority'] ?? 'Medium';
+    final status = ticket['status'] ?? 'Open';
+    final timeline = ticket['timeline'];
+    final deadline = ticket['deadline'];
+    final createdAt = ticket['created_at'];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withOpacity(0.05),
+            Colors.white.withOpacity(0.02),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  _getPriorityColor(priority).withOpacity(0.2),
+                  _getPriorityColor(priority).withOpacity(0.1),
+                ],
+              ),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    ticketNumber,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildPriorityBadge(priority),
+                const Spacer(),
+                _buildStatusDropdown(ticketId, status),
+              ],
+            ),
+          ),
+
+          // Body
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Subject
+                Text(
+                  subject,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Message Preview
+                Text(
+                  message.length > 100
+                      ? '${message.substring(0, 100)}...'
+                      : message,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Timeline & Deadline
+                Row(
+                  children: [
+                    Expanded(child: _buildTimelineBadge(timeline)),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 2, child: _buildDeadlineStatus(deadline)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Created Date
+                Row(
+                  children: [
+                    Icon(
+                      Icons.access_time_rounded,
+                      size: 14,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Created: ${_formatDate(createdAt)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🎨 HELPER WIDGETS
+  // ========================================================================
+  Widget _buildPriorityBadge(String priority) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getPriorityColor(priority).withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _getPriorityColor(priority)),
+      ),
+      child: Text(
+        priority.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: _getPriorityColor(priority),
+        ),
+      ),
+    );
+  }
+
+  Color _getPriorityColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return const Color(0xFFEF4444);
+      case 'medium':
+        return const Color(0xFFF59E0B);
+      case 'low':
+        return const Color(0xFF10B981);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _buildStatusDropdown(String ticketId, String currentStatus) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: _getStatusColor(currentStatus).withOpacity(0.2),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _getStatusColor(currentStatus)),
+      ),
+      child: DropdownButton<String>(
+        value: currentStatus,
+        underline: const SizedBox(),
+        isDense: true,
+        dropdownColor: const Color(0xFF1E293B),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: _getStatusColor(currentStatus),
+        ),
+        items: const [
+          DropdownMenuItem(value: 'Open', child: Text('Open')),
+          DropdownMenuItem(value: 'In Progress', child: Text('In Progress')),
+          DropdownMenuItem(value: 'closed', child: Text('Close')),
+        ],
+        onChanged: (newStatus) {
+          if (newStatus != null && newStatus != currentStatus) {
+            if (newStatus == 'closed') {
+              _showCloseConfirmation(ticketId);
+            } else {
+              _updateStatus(ticketId, newStatus);
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'Open':
+        return const Color(0xFFEF4444);
+      case 'In Progress':
+        return const Color(0xFFF59E0B);
+      case 'closed':
+        return const Color(0xFF10B981);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  void _showCloseConfirmation(String ticketId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Close Ticket?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Are you sure you want to close this ticket? It will be moved to the Closed Tickets section.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _updateStatus(ticketId, 'closed');
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Close Ticket'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineBadge(int? minutes) {
+    if (minutes == null || minutes <= 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.schedule_rounded, size: 14, color: Colors.white.withOpacity(0.5)),
+            const SizedBox(width: 4),
+            Text(
+              'Not Set',
+              style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.5)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.timer_rounded, size: 14, color: Colors.blue),
+          const SizedBox(width: 4),
+          Text(
+            _formatTimeline(minutes),
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.blue,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTimeline(int minutes) {
+    if (minutes < 60) return '$minutes min';
+    if (minutes < 1440) {
+      final hours = (minutes / 60).floor();
+      return '$hours hour${hours > 1 ? 's' : ''}';
+    }
+    if (minutes < 10080) {
+      final days = (minutes / 1440).floor();
+      return '$days day${days > 1 ? 's' : ''}';
+    }
+    if (minutes < 43200) {
+      final weeks = (minutes / 10080).floor();
+      return '$weeks week${weeks > 1 ? 's' : ''}';
+    }
+    final months = (minutes / 43200).floor();
+    return '$months month${months > 1 ? 's' : ''}';
+  }
+
+  Widget _buildDeadlineStatus(String? deadline) {
+    if (deadline == null || deadline.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          'No deadline',
+          style: TextStyle(fontSize: 11, color: Colors.white54),
+        ),
+      );
+    }
+
+    final deadlineDate = DateTime.tryParse(deadline);
+    if (deadlineDate == null) {
+      return const Text('Invalid deadline');
+    }
+
+    final now = DateTime.now();
+    final difference = deadlineDate.difference(now);
+
+    final isOverdue = difference.isNegative;
+    final isCritical = !isOverdue && difference.inHours < 1;
+    final isWarning = !isOverdue && !isCritical && difference.inHours < 4;
+
+    Color bgColor, textColor;
+    IconData icon;
+    String statusText;
+    bool shouldPulse = false;
+
+    if (isOverdue) {
+      bgColor = const Color(0xFFEF4444).withOpacity(0.2);
+      textColor = const Color(0xFFEF4444);
+      icon = Icons.warning_rounded;
+      final hours = difference.abs().inHours;
+      final days = difference.abs().inDays;
+      statusText = days > 0
+          ? 'Overdue by $days day${days > 1 ? 's' : ''}'
+          : 'Overdue by $hours hr${hours > 1 ? 's' : ''}';
+      shouldPulse = true;
+    } else if (isCritical) {
+      bgColor = const Color(0xFFFB923C).withOpacity(0.2);
+      textColor = const Color(0xFFFB923C);
+      icon = Icons.hourglass_bottom_rounded;
+      statusText = '${difference.inMinutes} min left';
+      shouldPulse = true;
+    } else if (isWarning) {
+      bgColor = const Color(0xFFF59E0B).withOpacity(0.2);
+      textColor = const Color(0xFFF59E0B);
+      icon = Icons.hourglass_empty_rounded;
+      statusText = '${difference.inHours} hr${difference.inHours > 1 ? 's' : ''} left';
+    } else {
+      bgColor = const Color(0xFF10B981).withOpacity(0.2);
+      textColor = const Color(0xFF10B981);
+      icon = Icons.check_circle_rounded;
+      final days = difference.inDays;
+      statusText = days > 0
+          ? '$days day${days > 1 ? 's' : ''} left'
+          : '${difference.inHours} hrs left';
+    }
+
+    final content = Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: textColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: textColor),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            DateFormat('MMM dd, hh:mm a').format(deadlineDate),
+            style: TextStyle(
+              fontSize: 9,
+              color: textColor.withOpacity(0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldPulse) {
+      return FadeTransition(
+        opacity: _pulseAnimation,
+        child: content,
+      );
+    }
+
+    return content;
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'N/A';
+
+    final date = DateTime.tryParse(dateStr);
+    if (date == null) return 'Invalid';
+
+    return DateFormat('MMM dd, yyyy').format(date);
+  }
+}

@@ -1,0 +1,114 @@
+name: abra_finance
+description: Abra Finance Suite - Complete financial management application.
+
+publish_to: 'none'
+
+version: 1.0.2+6
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+    
+
+  # --- UI AND STATE MANAGEMENT ---
+  html_editor_enhanced: ^2.7.1
+  universal_html: ^2.2.4
+  webview_flutter: ^4.8.0
+  webview_flutter_android: ^3.16.0
+  webview_flutter_wkwebview: ^3.13.0
+  flutter_screenutil: ^5.9.0
+  overlay_support: ^2.1.0  # 🔥 NEW: For floating banners
+  vibration: ^2.0.0  # 🔥 NEW: For vibration support
+  provider: ^6.1.2
+  cupertino_icons: ^1.0.6
+  equatable: ^2.0.5
+  google_nav_bar: ^5.0.6
+  fl_chart: ^0.66.0
+  flutter_svg: ^2.0.10+1
+  image_picker: ^1.2.0
+  mask_text_input_formatter: ^2.5.0
+  intl_phone_field: ^3.2.0
+  file_picker: ^10.0.0
+  csv: ^5.0.2
+  excel: ^4.0.2
+  path_provider: ^2.1.1
+  permission_handler: ^11.0.2
+  share_plus: ^7.2.1
+  pdf: ^3.10.7
+  printing: ^5.11.1
+  shared_preferences: 2.3.2
+  country_picker: ^2.0.26
+  country_state_city_picker: ^1.2.8
+  csc_picker: ^0.2.7
+  dropdown_search: ^5.0.6
+  country_state_city: 0.1.6  
+  
+  uuid: ^4.2.1 
+
+  # --- NOTIFICATIONS ---
+  flutter_local_notifications: ^17.2.3
+  flutter_secure_storage: ^9.0.0
+
+  # --- NETWORKING & DATABASE ---
+  http: ^1.2.0
+  socket_io_client: ^2.0.3+1
+  mongo_dart: ^0.10.0
+  mongo_dart_query: ^5.0.2
+  web_socket_channel: ^3.0.3
+
+  # --- MAPS & LOCATION ---
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
+  url_launcher: ^6.2.0
+  
+  # --- UTILITIES ---
+  flutter_dotenv: ^5.1.0
+  audioplayers: ^6.0.0
+  intl: ^0.19.0
+  dio: ^5.4.1 
+  js: ^0.6.7 
+  open_file: ^3.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.13.1
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon/
+    - assets/images/
+    - assets/abra_finance_logo.jpg
+    - assets/logo.png
+    - assets/image.png
+    - assets/invoice.png
+    - assets/recurring_invoice.png
+    - assets/qoute.png
+    - assets/sales_order.png
+    - assets/recurring_expense.png
+    - assets/expense.png
+    - assets/bill.png
+    - assets/payment_made.png
+    - assets/purchase_order.png
+    - assets/purchase.png
+    - assets/recurring_bill.dart.png
+    - assets/vendor_credit.png
+    - .env
+    - assets/siren.mpeg
+    - assets/Notification.mp3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/abra_finance_logo.jpg"
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/abra_finance_logo.jpg"
