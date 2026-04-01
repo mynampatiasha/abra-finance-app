@@ -102,7 +102,6 @@ flutter:
     - assets/purchase.png
     - assets/recurring_bill.dart.png
     - assets/vendor_credit.png
-    - .env
     - assets/siren.mpeg
     - assets/Notification.mp3
 
