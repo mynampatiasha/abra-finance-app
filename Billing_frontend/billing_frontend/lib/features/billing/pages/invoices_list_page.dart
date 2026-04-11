@@ -255,6 +255,38 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     }
   }
 
+  Future<void> _markInvoiceAsSent(Invoice invoice) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this invoice as Sent anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await InvoiceService.markInvoiceAsSent(invoice.id);
+      _snackSuccess('Invoice marked as sent');
+      _refreshData();
+    } catch (e) {
+      _snackError('Failed to mark as sent: $e');
+    }
+  }
+
   Future<void> _downloadInvoicePDF(Invoice invoice) async {
     try {
       _snackSuccess('Preparing PDF download...');
@@ -1091,12 +1123,13 @@ void _showImportDialog() {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             onSelected: (value) async {
               switch (value) {
-                case 'view':     _viewInvoiceDetails(invoice); break;
-                case 'edit':     _openEditInvoice(invoice.id); break;
-                case 'send':     await _sendInvoice(invoice); break;
-                case 'download': await _downloadInvoicePDF(invoice); break;
-                case 'ticket':   _raiseTicket(invoice); break;
-                case 'delete':   await _deleteInvoice(invoice); break;
+                case 'view':         _viewInvoiceDetails(invoice); break;
+                case 'edit':         _openEditInvoice(invoice.id); break;
+                case 'mark_as_sent': await _markInvoiceAsSent(invoice); break;
+                case 'send':         await _sendInvoice(invoice); break;
+                case 'download':     await _downloadInvoicePDF(invoice); break;
+                case 'ticket':       _raiseTicket(invoice); break;
+                case 'delete':       await _deleteInvoice(invoice); break;
               }
             },
             itemBuilder: (_) => [
@@ -1104,6 +1137,8 @@ void _showImportDialog() {
                 child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'edit',
                 child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(value: 'mark_as_sent',
+                child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'send',
                 child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'download',

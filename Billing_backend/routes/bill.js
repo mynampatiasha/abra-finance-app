@@ -43,7 +43,7 @@ const billSchema = new mongoose.Schema({
   billNumber: {
     type: String,
     required: true,
-    unique: true,
+
     index: true
   },
   vendorId: {
@@ -304,6 +304,7 @@ billSchema.pre('save', function() {
 });
 
 // Indexes for performance
+billSchema.index({ orgId: 1, billNumber: 1 }, { unique: true });
 billSchema.index({ vendorId: 1, billDate: -1 });
 billSchema.index({ status: 1, dueDate: 1 });
 billSchema.index({ createdAt: -1 });
@@ -1110,152 +1111,66 @@ router.post('/', async (req, res) => {
   try {
     const body = req.body;
 
-    if (!body.vendorId)   return errorResponse(res, 'Vendor ID is required', 400);
-    if (!body.vendorName) return errorResponse(res, 'Vendor Name is required', 400);
-    if (!body.reason)     return errorResponse(res, 'Reason is required', 400);
+    if (!body.vendorId)   return res.status(400).json({ success: false, error: 'Vendor ID is required' });
+    if (!body.vendorName) return res.status(400).json({ success: false, error: 'Vendor Name is required' });
     if (!body.items || body.items.length === 0)
-      return errorResponse(res, 'At least one item is required', 400);
+      return res.status(400).json({ success: false, error: 'At least one item is required' });
 
-    for (const item of body.items) {
-      if (!item.itemDetails)                    return errorResponse(res, 'Item details required', 400);
-      if (!item.quantity || item.quantity <= 0) return errorResponse(res, 'Item quantity must be > 0', 400);
-      if (!item.rate     || item.rate     <= 0) return errorResponse(res, 'Item rate must be > 0', 400);
+    body.vendorId = mongoose.Types.ObjectId.isValid(body.vendorId)
+      ? new mongoose.Types.ObjectId(body.vendorId)
+      : new mongoose.Types.ObjectId();
+
+    if (!body.billNumber) {
+      body.billNumber = await generateBillNumber(req.user?.orgId || null);
     }
 
-    const credit = new VendorCredit({
-      ...body,
-      balanceAmount: body.totalAmount || 0,
-      appliedAmount: 0,
-      applications:  [],
-      refunds:       [],
-    });
+    if (!body.dueDate) {
+      body.dueDate = calculateDueDate(body.billDate || new Date(), body.paymentTerms || 'Net 30');
+    }
 
-    await credit.save();
+    body.items = body.items.map(item => ({ ...item, amount: calculateItemAmount(item) }));
+    body.createdBy = req.user?.email || req.user?.uid || 'system';
+    body.orgId = req.user?.orgId || null;
+    body.amountPaid = 0;
 
-    // ✅ COA: Full breakdown with GST + TDS + TCS
+    const bill = new Bill(body);
+    await bill.save();
+
+    // ✅ COA: Debit Expense Account + Credit Accounts Payable
     try {
       const currentOrgId = req.user?.orgId || null;
-      const [apId, cogsId, taxId, tdsPayableId, tdsReceivableId] = await Promise.all([
+      const [apId, expenseId] = await Promise.all([
         getSystemAccountId('Accounts Payable', currentOrgId),
         getSystemAccountId('Cost of Goods Sold', currentOrgId),
-        getSystemAccountId('Tax Payable', currentOrgId),
-        getSystemAccountId('TDS Payable', currentOrgId),
-        getSystemAccountId('TDS Receivable', currentOrgId),
       ]);
-      const txnDate = new Date(credit.creditDate);
-
+      const txnDate = new Date(bill.billDate);
+      if (expenseId) await postTransactionToCOA({
+        accountId: expenseId, orgId: currentOrgId, date: txnDate,
+        description: `Bill created - ${bill.billNumber} - ${bill.vendorName}`,
+        referenceType: 'Bill', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: bill.subTotal, credit: 0
+      });
       if (apId) await postTransactionToCOA({
         accountId: apId, orgId: currentOrgId, date: txnDate,
-        description: `Vendor Credit ${credit.creditNumber} - ${credit.vendorName}`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: credit.totalAmount, credit: 0,
+        description: `Bill created - ${bill.billNumber} - ${bill.vendorName}`,
+        referenceType: 'Bill', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: 0, credit: bill.totalAmount
       });
-
-      if (cogsId) await postTransactionToCOA({
-        accountId: cogsId, orgId: currentOrgId, date: txnDate,
-        description: `Vendor Credit ${credit.creditNumber} - ${credit.vendorName}`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: 0, credit: credit.subTotal || credit.totalAmount,
-      });
-
-      if (taxId && (credit.cgst + credit.sgst) > 0) await postTransactionToCOA({
-        accountId: taxId, orgId: currentOrgId, date: txnDate,
-        description: `GST reversal - Vendor Credit ${credit.creditNumber}`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: 0, credit: credit.cgst + credit.sgst,
-      });
-
-      if (tdsPayableId && credit.tdsAmount > 0) await postTransactionToCOA({
-        accountId: tdsPayableId, orgId: currentOrgId, date: txnDate,
-        description: `TDS reversal - Vendor Credit ${credit.creditNumber}`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: credit.tdsAmount, credit: 0,
-      });
-
-      if (tdsReceivableId && credit.tcsAmount > 0) await postTransactionToCOA({
-        accountId: tdsReceivableId, orgId: currentOrgId, date: txnDate,
-        description: `TCS reversal - Vendor Credit ${credit.creditNumber}`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: 0, credit: credit.tcsAmount,
-      });
-
-      console.log(`✅ COA posted for vendor credit: ${credit.creditNumber}`);
+      console.log(`✅ COA posted for bill: ${bill.billNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA error (vendor credit create):', coaErr.message);
+      console.error('⚠️ COA post error (bill create):', coaErr.message);
     }
 
-    // ✅ AUTO-APPLY TO BILL if billId is provided at creation time
-    if (body.billId) {
-      try {
-        const Bill = mongoose.models.Bill ||
-          mongoose.model('Bill', new mongoose.Schema({}, { strict: false }));
-
-        const bill = await Bill.findById(body.billId);
-        if (bill) {
-          const creditAmount = parseFloat(credit.totalAmount || 0);
-
-          // Deduct credit amount from bill
-          bill.amountPaid = (bill.amountPaid || 0) + creditAmount;
-          bill.amountDue  = Math.max(0, (bill.totalAmount || 0) - bill.amountPaid);
-
-          // Update bill status
-          if (bill.amountDue <= 0.01) {
-            bill.status    = 'PAID';
-            bill.amountDue = 0;
-          } else if (bill.amountPaid > 0) {
-            bill.status = 'PARTIALLY_PAID';
-          }
-
-          // Track credit applied on the bill side
-          bill.vendorCreditsApplied = bill.vendorCreditsApplied || [];
-          bill.vendorCreditsApplied.push({
-            creditId:    credit._id,
-            amount:      creditAmount,
-            appliedDate: new Date(),
-          });
-
-          await bill.save();
-          console.log(`✅ Bill ${bill.billNumber} auto-updated to ${bill.status}`);
-
-          // ✅ Also update credit status to reflect it's been applied
-          const totalApplied = creditAmount;
-          credit.appliedAmount = totalApplied;
-          credit.balanceAmount = credit.totalAmount - totalApplied;
-          credit.applications.push({
-            billId:      body.billId,
-            billNumber:  body.billNumber || bill.billNumber,
-            amount:      creditAmount,
-            appliedDate: new Date(),
-          });
-
-          if (credit.balanceAmount <= 0.01) {
-            credit.status        = 'CLOSED';
-            credit.balanceAmount = 0;
-          } else {
-            credit.status = 'PARTIALLY_APPLIED';
-          }
-
-          await credit.save();
-          console.log(`✅ Vendor Credit ${credit.creditNumber} auto-closed after apply`);
-        } else {
-          console.warn(`⚠️ Bill not found for auto-apply: ${body.billId}`);
-        }
-      } catch (billErr) {
-        console.error('⚠️ Bill auto-apply error:', billErr.message);
-      }
+    console.log(`✅ Bill created: ${bill.billNumber}`);
+    res.status(201).json({ success: true, message: 'Bill created successfully', data: bill });
+  } catch (error) {
+    console.error('Error creating bill:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, error: 'Bill number already exists' });
     }
-
-    return successResponse(res, credit, 'Vendor credit created', 201);
-  } catch (err) {
-    if (err.code === 11000) {
-      return errorResponse(res, 'Credit number already exists', 400, err);
-    }
-    return errorResponse(res, 'Failed to create vendor credit', 500, err);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

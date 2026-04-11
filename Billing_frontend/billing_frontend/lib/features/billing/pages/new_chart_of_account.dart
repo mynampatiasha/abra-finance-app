@@ -6,6 +6,7 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/services/chart_of_account_service.dart';
 
 const Color _navyDark  = Color(0xFF0F172A);
@@ -40,9 +41,10 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
   bool _isSaving  = false;
 
   // Controllers
-  final _codeCtrl = TextEditingController();
-  final _nameCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
+  final _codeCtrl    = TextEditingController();
+  final _nameCtrl    = TextEditingController();
+  final _descCtrl    = TextEditingController();
+  final _obAmtCtrl   = TextEditingController();
 
   // Values
   String  _accountType    = 'Asset';
@@ -51,6 +53,8 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
   bool    _isActive       = true;
   String? _parentAccountId;
   String? _parentAccountName;
+  String  _obBalanceType  = 'Dr';
+  DateTime _obDate        = DateTime.now();
 
   // Parent accounts list
   List<ChartOfAccount> _parentAccounts = [];
@@ -67,6 +71,7 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
     _codeCtrl.dispose();
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _obAmtCtrl.dispose();
     super.dispose();
   }
 
@@ -92,6 +97,11 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
         _parentAccountId    = acc.parentAccountId;
         _parentAccountName  = acc.parentAccountName;
         _isLoading          = false;
+        // Pre-fill opening balance if account has one
+        if (acc.closingBalance > 0) {
+          _obAmtCtrl.text = acc.closingBalance.toStringAsFixed(2);
+          _obBalanceType  = acc.balanceType;
+        }
       });
     } catch (e) {
       _showError('Failed to load account: $e');
@@ -121,6 +131,17 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
         acc = await ChartOfAccountService.updateAccount(widget.accountId!, data);
       } else {
         acc = await ChartOfAccountService.createAccount(data);
+      }
+
+      // Save opening balance if provided
+      final obAmt = double.tryParse(_obAmtCtrl.text.trim());
+      if (obAmt != null && obAmt > 0) {
+        await ChartOfAccountService.saveOpeningBalance(
+          acc.id,
+          amount: obAmt,
+          balanceType: _obBalanceType,
+          date: _obDate,
+        );
       }
 
       _showSuccess('Account "${acc.accountName}" saved successfully');

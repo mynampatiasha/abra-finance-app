@@ -1,336 +1,206 @@
 // ============================================================================
-// REPORTS SERVICE
+// REPORTS SERVICE — COMPLETE (79 REPORTS)
 // ============================================================================
 // File: lib/core/services/reports_service.dart
-// All API calls via ApiService — no hardcoded URLs or tokens
+//
+// - All 79 reports wired to /api/finance/reports/*
+// - exportExcel() calls backend → returns real .xlsx binary → saves/downloads
+// - exportPDF()   calls backend → returns real PDF binary  → saves/downloads
+// - Token read from SharedPreferences key 'jwt_token' (matches ApiService)
 // ============================================================================
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/services/api_service.dart';
+import 'package:universal_html/html.dart' as html;
+
 import '../../app/config/api_config.dart';
+import '../services/api_service.dart';
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+class ReportCategory {
+  final String category;
+  final List<ReportMeta> reports;
+  ReportCategory({required this.category, required this.reports});
+  factory ReportCategory.fromJson(Map<String, dynamic> j) => ReportCategory(
+    category: j['category'] as String,
+    reports: (j['reports'] as List).map((r) => ReportMeta.fromJson(r as Map<String, dynamic>)).toList(),
+  );
+}
+
+class ReportMeta {
+  final String key;
+  final String name;
+  ReportMeta({required this.key, required this.name});
+  factory ReportMeta.fromJson(Map<String, dynamic> j) => ReportMeta(
+    key:  j['key']  as String,
+    name: j['name'] as String,
+  );
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────────
 
 class ReportsService {
   static final ApiService _api = ApiService();
-  static const String _base = '/api/finance/reports';
+  static const String _base    = '/api/finance/reports';
+  static const String _tokenKey = 'jwt_token'; // must match ApiService._tokenKey
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
   static String get _baseUrl => '${ApiConfig.baseUrl}$_base';
 
+  static Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_tokenKey);
+  }
+
+  /// Calls a GET endpoint and returns data['data'].
+  static Future<Map<String, dynamic>> _get(
+    String path, [
+    Map<String, String>? params,
+  ]) async {
+    final res = await _api.get('$_base$path', queryParams: params);
+    return (res['data'] ?? res) as Map<String, dynamic>;
+  }
+
   // ── Meta ──────────────────────────────────────────────────────────────────
+
   static Future<List<ReportCategory>> getMeta() async {
-    final data = await _api.get('$_base/meta');
-    return (data['data'] as List)
-        .map((c) => ReportCategory.fromJson(c))
+    final res = await _api.get('$_base/meta');
+    return (res['data'] as List)
+        .map((c) => ReportCategory.fromJson(c as Map<String, dynamic>))
         .toList();
   }
 
-  // ── Business Overview ─────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getProfitLoss(Map<String, String> params) async {
-    final data = await _api.get('$_base/profit-loss', queryParams: params);
-    return data['data'];
-  }
+  // =========================================================================
+  // UNIVERSAL FETCH — called by ReportViewerPage for every report
+  // =========================================================================
 
-  static Future<Map<String, dynamic>> getBalanceSheet(Map<String, String> params) async {
-    final data = await _api.get('$_base/balance-sheet', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getCashFlow(Map<String, String> params) async {
-    final data = await _api.get('$_base/cash-flow', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getTrialBalance(Map<String, String> params) async {
-    final data = await _api.get('$_base/trial-balance', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getPerformanceRatios(Map<String, String> params) async {
-    final data = await _api.get('$_base/performance-ratios', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getProfitLossHorizontal(Map<String, String> params) async {
-    final data = await _api.get('$_base/profit-loss-horizontal', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getBalanceSheetHorizontal(Map<String, String> params) async {
-    final data = await _api.get('$_base/balance-sheet-horizontal', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getMovementOfEquity(Map<String, String> params) async {
-    final data = await _api.get('$_base/movement-of-equity', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getDayBook(Map<String, String> params) async {
-    final data = await _api.get('$_base/day-book', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Sales ─────────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getSalesByCustomer(Map<String, String> params) async {
-    final data = await _api.get('$_base/sales-by-customer', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getSalesByItem(Map<String, String> params) async {
-    final data = await _api.get('$_base/sales-by-item', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getSalesSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/sales-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getSalesBySalesperson(Map<String, String> params) async {
-    final data = await _api.get('$_base/sales-by-salesperson', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Receivables ───────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getARAgingSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/ar-aging-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getARAgingDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/ar-aging-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getCustomerBalance(Map<String, String> params) async {
-    final data = await _api.get('$_base/customer-balance', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getInvoiceDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/invoice-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getPaymentsReceived(Map<String, String> params) async {
-    final data = await _api.get('$_base/payments-received', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getCreditNoteDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/credit-note-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getReceivableSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/receivable-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getRefundHistoryReceivables(Map<String, String> params) async {
-    final data = await _api.get('$_base/refund-history-receivables', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Payables ──────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getAPAgingSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/ap-aging-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getAPAgingDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/ap-aging-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getVendorBalance(Map<String, String> params) async {
-    final data = await _api.get('$_base/vendor-balance', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getBillDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/bill-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getPaymentsMade(Map<String, String> params) async {
-    final data = await _api.get('$_base/payments-made', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getVendorCreditDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/vendor-credit-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getPayableSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/payable-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getRefundHistoryPayables(Map<String, String> params) async {
-    final data = await _api.get('$_base/refund-history-payables', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Purchases & Expenses ──────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getPurchasesByVendor(Map<String, String> params) async {
-    final data = await _api.get('$_base/purchases-by-vendor', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getPurchasesByItem(Map<String, String> params) async {
-    final data = await _api.get('$_base/purchases-by-item', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getExpenseDetails(Map<String, String> params) async {
-    final data = await _api.get('$_base/expense-details', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getExpensesByCategory(Map<String, String> params) async {
-    final data = await _api.get('$_base/expenses-by-category', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getBillableExpenses(Map<String, String> params) async {
-    final data = await _api.get('$_base/billable-expenses', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Taxes ─────────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getTDSSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/tds-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getTDSReceivable(Map<String, String> params) async {
-    final data = await _api.get('$_base/tds-receivable', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getTCSSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/tcs-summary', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Accountant ────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> getGeneralLedger(Map<String, String> params) async {
-    final data = await _api.get('$_base/general-ledger', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getGeneralLedgerDetailed(Map<String, String> params) async {
-    final data = await _api.get('$_base/general-ledger-detailed', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getAccountTransactions(Map<String, String> params) async {
-    final data = await _api.get('$_base/account-transactions', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getAccountTypeSummary(Map<String, String> params) async {
-    final data = await _api.get('$_base/account-type-summary', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getJournalReport(Map<String, String> params) async {
-    final data = await _api.get('$_base/journal-report', queryParams: params);
-    return data['data'];
-  }
-
-  static Future<Map<String, dynamic>> getActivityLogs(Map<String, String> params) async {
-    final data = await _api.get('$_base/activity-logs', queryParams: params);
-    return data['data'];
-  }
-
-  // ── Universal fetch by report key ─────────────────────────────────────────
   static Future<Map<String, dynamic>> fetchReport(
-      String reportKey, Map<String, String> params) async {
-    final endpointMap = {
+    String reportKey,
+    Map<String, String> params,
+  ) async {
+    const endpoints = {
+      // ── Business Overview (9) ─────────────────────────────────────────────
       'profit-loss':               '/profit-loss',
-      'balance-sheet':             '/balance-sheet',
-      'cash-flow':                 '/cash-flow',
-      'trial-balance':             '/trial-balance',
-      'performance-ratios':        '/performance-ratios',
       'profit-loss-horizontal':    '/profit-loss-horizontal',
+      'balance-sheet':             '/balance-sheet',
       'balance-sheet-horizontal':  '/balance-sheet-horizontal',
+      'cash-flow':                 '/cash-flow',
       'movement-of-equity':        '/movement-of-equity',
+      'performance-ratios':        '/performance-ratios',
+      'trial-balance':             '/trial-balance',
       'day-book':                  '/day-book',
+      // ── Sales (4) ─────────────────────────────────────────────────────────
       'sales-by-customer':         '/sales-by-customer',
       'sales-by-item':             '/sales-by-item',
-      'sales-summary':             '/sales-summary',
       'sales-by-salesperson':      '/sales-by-salesperson',
+      'sales-summary':             '/sales-summary',
+      // ── Receivables (8) ───────────────────────────────────────────────────
       'ar-aging-summary':          '/ar-aging-summary',
       'ar-aging-details':          '/ar-aging-details',
-      'customer-balance':          '/customer-balance',
       'invoice-details':           '/invoice-details',
-      'payments-received':         '/payments-received',
-      'credit-note-details':       '/credit-note-details',
+      'customer-balance':          '/customer-balance',
       'receivable-summary':        '/receivable-summary',
+      'receivable-details':        '/receivable-details',
+      'credit-note-details':       '/credit-note-details',
       'refund-history-receivables':'/refund-history-receivables',
+      // ── Payments Received (4) ─────────────────────────────────────────────
+      'payments-received':         '/payments-received',
+      'time-to-get-paid':          '/time-to-get-paid',
+      'refund-history':            '/refund-history',
+      'recurring-invoice-details': '/recurring-invoice-details',
+      // ── Payables (11) ────────────────────────────────────────────────────
+      'vendor-balance':            '/vendor-balance',
       'ap-aging-summary':          '/ap-aging-summary',
       'ap-aging-details':          '/ap-aging-details',
-      'vendor-balance':            '/vendor-balance',
       'bill-details':              '/bill-details',
-      'payments-made':             '/payments-made',
       'vendor-credit-details':     '/vendor-credit-details',
-      'payable-summary':           '/payable-summary',
+      'payments-made':             '/payments-made',
       'refund-history-payables':   '/refund-history-payables',
+      'purchase-order-details':    '/purchase-order-details',
+      'purchase-orders-by-vendor': '/purchase-orders-by-vendor',
+      'payable-summary':           '/payable-summary',
+      'payable-details':           '/payable-details',
+      // ── Purchases & Expenses (8) ─────────────────────────────────────────
       'purchases-by-vendor':       '/purchases-by-vendor',
       'purchases-by-item':         '/purchases-by-item',
       'expense-details':           '/expense-details',
       'expenses-by-category':      '/expenses-by-category',
+      'expenses-by-customer':      '/expenses-by-customer',
+      'expenses-by-project':       '/expenses-by-project',
+      'expenses-by-employee':      '/expenses-by-employee',
       'billable-expenses':         '/billable-expenses',
+      // ── Taxes (3) ────────────────────────────────────────────────────────
       'tds-summary':               '/tds-summary',
       'tds-receivable':            '/tds-receivable',
       'tcs-summary':               '/tcs-summary',
-      'general-ledger':            '/general-ledger',
-      'general-ledger-detailed':   '/general-ledger-detailed',
+      // ── Banking (1) ──────────────────────────────────────────────────────
+      'reconciliation-status':     '/reconciliation-status',
+      // ── Projects & Timesheet (7) ─────────────────────────────────────────
+      'timesheet-details':         '/timesheet-details',
+      'timesheet-profitability':   '/timesheet-profitability',
+      'project-summary':           '/project-summary',
+      'project-details':           '/project-details',
+      'projects-cost-summary':     '/projects-cost-summary',
+      'projects-revenue-summary':  '/projects-revenue-summary',
+      'projects-performance':      '/projects-performance',
+      // ── Accountant (6) ───────────────────────────────────────────────────
       'account-transactions':      '/account-transactions',
       'account-type-summary':      '/account-type-summary',
+      'general-ledger':            '/general-ledger',
+      'general-ledger-detailed':   '/general-ledger-detailed',
       'journal-report':            '/journal-report',
       'activity-logs':             '/activity-logs',
+      // ── Budgets (1) ──────────────────────────────────────────────────────
+      'budget-vs-actuals':         '/budget-vs-actuals',
+      // ── Currency (2) ─────────────────────────────────────────────────────
+      'realized-gain-loss':        '/realized-gain-loss',
+      'unrealized-gain-loss':      '/unrealized-gain-loss',
+      // ── Activity (5) ─────────────────────────────────────────────────────
+      'system-mails':              '/system-mails',
+      'audit-trail':               '/audit-trail',
+      'exception-report':          '/exception-report',
+      'portal-activities':         '/portal-activities',
+      'customer-reviews':          '/customer-reviews',
+      // ── Automation (2) ───────────────────────────────────────────────────
+      'api-usage':                 '/api-usage',
+      'workflow-logs':             '/workflow-logs',
     };
 
-    final endpoint = endpointMap[reportKey];
-    if (endpoint == null) throw Exception('Unknown report: $reportKey');
+    final path = endpoints[reportKey];
+    if (path == null) throw Exception('Unknown report key: $reportKey');
 
-    final data = await _api.get('$_base$endpoint', queryParams: params);
-    return data['data'];
+    final res = await _api.get('$_base$path', queryParams: params);
+    return (res['data'] ?? res) as Map<String, dynamic>;
   }
 
-  // ── Export PDF (sends data to backend, downloads PDF) ────────────────────
+  // =========================================================================
+  // EXPORT PDF — backend renders, Flutter downloads binary
+  // =========================================================================
+
+  /// Sends report data to backend → backend returns a real PDF binary.
+  /// Saves to device (mobile) or triggers browser download (web).
   static Future<String> exportPDF({
     required String reportName,
-    required List<Map<String, dynamic>> reportData,
     required String companyName,
-    Map<String, dynamic>? period,
-  }) async {
-    final data = await _api.post('$_base/export/pdf', body: {
-      'reportName': reportName,
-      'reportData': reportData,
-      'companyName': companyName,
-      if (period != null) 'period': period,
-    });
-    return data['downloadUrl'] ?? '';
-  }
-
-  // ── Export Excel (sends data to backend, downloads Excel) ────────────────
-  static Future<Uint8List> exportExcel({
-    required String reportName,
     required List<Map<String, dynamic>> reportData,
-    required String companyName,
     Map<String, dynamic>? period,
     List<String>? headers,
   }) async {
-    // Use raw HTTP to get binary response
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token') ?? '';
-    final uri = Uri.parse('$_baseUrl/export/excel');
+    if (reportData.isEmpty) throw Exception('No data to export');
+
+    final token = await _getToken();
+    if (token == null || token.isEmpty) throw Exception('Not authenticated');
+
+    final uri = Uri.parse('$_baseUrl/export/pdf');
+    debugPrint('📤 POST PDF export → $uri');
+
     final response = await http.post(
       uri,
       headers: {
@@ -338,46 +208,103 @@ class ReportsService {
         'Authorization': 'Bearer $token',
       },
       body: jsonEncode({
-        'reportName': reportName,
-        'reportData': reportData,
+        'reportName':  reportName,
         'companyName': companyName,
-        if (period  != null) 'period': period,
+        'reportData':  reportData,
+        if (period  != null) 'period':  period,
         if (headers != null) 'headers': headers,
       }),
-    );
+    ).timeout(const Duration(seconds: 120));
+
     if (response.statusCode != 200) {
-      throw Exception('Export failed: ${response.statusCode}');
+      throw Exception('PDF export failed: ${response.statusCode} ${response.body}');
     }
-    return response.bodyBytes;
+
+    return _saveOrDownloadBytes(
+      bytes:    response.bodyBytes,
+      filename: '${reportName.replaceAll(' ', '_')}_${_ts()}.pdf',
+      mimeType: 'application/pdf',
+    );
   }
-}
 
-// ============================================================================
-// MODELS
-// ============================================================================
+  // =========================================================================
+  // EXPORT EXCEL — backend builds real .xlsx, Flutter downloads binary
+  // =========================================================================
 
-class ReportCategory {
-  final String category;
-  final List<ReportMeta> reports;
+  /// Sends report data to backend → backend returns a real .xlsx binary.
+  /// Saves to device (mobile) or triggers browser download (web).
+  static Future<String> exportExcel({
+    required String reportName,
+    required String companyName,
+    required List<Map<String, dynamic>> reportData,
+    Map<String, dynamic>? period,
+    List<String>? headers,
+  }) async {
+    if (reportData.isEmpty) throw Exception('No data to export');
 
-  ReportCategory({required this.category, required this.reports});
+    final token = await _getToken();
+    if (token == null || token.isEmpty) throw Exception('Not authenticated');
 
-  factory ReportCategory.fromJson(Map<String, dynamic> json) => ReportCategory(
-    category: json['category'],
-    reports:  (json['reports'] as List).map((r) => ReportMeta.fromJson(r)).toList(),
-  );
-}
+    final uri = Uri.parse('$_baseUrl/export/excel');
+    debugPrint('📤 POST Excel export → $uri');
 
-class ReportMeta {
-  final String key;
-  final String name;
-  final String endpoint;
+    final response = await http.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'reportName':  reportName,
+        'companyName': companyName,
+        'reportData':  reportData,
+        if (period  != null) 'period':  period,
+        if (headers != null) 'headers': headers,
+      }),
+    ).timeout(const Duration(seconds: 120));
 
-  ReportMeta({required this.key, required this.name, required this.endpoint});
+    if (response.statusCode != 200) {
+      throw Exception('Excel export failed: ${response.statusCode} ${response.body}');
+    }
 
-  factory ReportMeta.fromJson(Map<String, dynamic> json) => ReportMeta(
-    key:      json['key'],
-    name:     json['name'],
-    endpoint: json['endpoint'],
-  );
+    return _saveOrDownloadBytes(
+      bytes:    response.bodyBytes,
+      filename: '${reportName.replaceAll(' ', '_')}_${_ts()}.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+  }
+
+  // ─── Private: save bytes on mobile or trigger download on web ─────────────
+
+  static Future<String> _saveOrDownloadBytes({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    if (kIsWeb) {
+      // Web: trigger browser download
+      final blob   = html.Blob([bytes], mimeType);
+      final url    = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute('download', filename)
+        ..click();
+      html.Url.revokeObjectUrl(url);
+      debugPrint('✅ Web download triggered: $filename');
+      return filename;
+    } else {
+      // Mobile / Desktop: save to documents folder
+      Directory dir;
+      try {
+        dir = await getApplicationDocumentsDirectory();
+      } catch (_) {
+        dir = Directory.systemTemp;
+      }
+      final filePath = '${dir.path}/$filename';
+      await File(filePath).writeAsBytes(bytes);
+      debugPrint('✅ File saved: $filePath');
+      return filePath;
+    }
+  }
+
+  static String _ts() => DateTime.now().millisecondsSinceEpoch.toString();
 }

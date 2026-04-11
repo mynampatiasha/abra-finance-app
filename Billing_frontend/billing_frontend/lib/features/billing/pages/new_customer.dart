@@ -1,3612 +1,1263 @@
 // ============================================================================
-// NEW CUSTOMER PAGE - COMPLETE IMPLEMENTATION WITH SERVICE INTEGRATION
+// NEW CUSTOMER PAGE — ZOHO BOOKS STYLE (5 TABS)
 // ============================================================================
 // File: lib/features/admin/Billing/pages/new_customer.dart
-// 
-// COMPLETE implementation with ALL 11 sections fully coded
-// - All fields from the discussion
-// - Complete validation
-// - Dynamic field visibility
-// - Professional UI matching payment page
-// - Integrated with BillingCustomersService
-// - Document upload support
+//
+// Tabs: Other Details | Tax Info | Address | Contact Persons | Remarks
+// Matches Zoho Books exactly — no transport-specific fields
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:file_picker/file_picker.dart';
 import '../../../../core/services/billing_customers_service.dart';
 
-// Navy blue gradient colors
-const Color _navyDark = Color(0xFF0D1B3E);
-const Color _navyMid = Color(0xFF1A3A6B);
-const Color _navyLight = Color(0xFF2463AE);
+// ── Brand palette (matches rest of billing system) ────────────────────────────
+const Color _navyDark   = Color(0xFF0D1B3E);
+const Color _navyMid    = Color(0xFF1A3A6B);
+const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
+const Color _green      = Color(0xFF27AE60);
+const Color _red        = Color(0xFFE74C3C);
+const Color _bgGrey     = Color(0xFFF0F4F8);
 
+// ── Zoho Books constants ──────────────────────────────────────────────────────
+const List<String> kSalutations = ['Mr.', 'Mrs.', 'Ms.', 'Miss.', 'Dr.', ''];
+
+const List<String> kPaymentTermsOptions = [
+  'Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60', 'NET 90',
+];
+
+const List<String> kCurrencies = [
+  'INR - Indian Rupee', 'USD - US Dollar', 'EUR - Euro',
+  'GBP - British Pound', 'AED - UAE Dirham', 'SGD - Singapore Dollar',
+  'AUD - Australian Dollar',
+];
+
+const List<String> kPortalLanguages = [
+  'English', 'Hindi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam',
+  'Marathi', 'Gujarati', 'Bengali',
+];
+
+const List<String> kTaxPreferences = ['Taxable', 'Tax Exempt'];
+
+// ============================================================================
 class NewCustomerPage extends StatefulWidget {
   final String? customerId;
-  
-  const NewCustomerPage({
-    Key? key,
-    this.customerId,
-  }) : super(key: key);
+  const NewCustomerPage({Key? key, this.customerId}) : super(key: key);
 
   @override
   State<NewCustomerPage> createState() => _NewCustomerPageState();
 }
 
-class _NewCustomerPageState extends State<NewCustomerPage> {
+class _NewCustomerPageState extends State<NewCustomerPage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final _formKey = GlobalKey<FormState>();
-  
-  // ============================================================================
-  // SECTION 1: BASIC INFORMATION
-  // ============================================================================
-  String selectedCustomerType = 'Individual';
-  final _customerDisplayNameController = TextEditingController();
-  final _primaryContactPersonController = TextEditingController();
-  final _primaryEmailController = TextEditingController();
-  final _primaryPhoneController = TextEditingController();
-  final _alternatePhoneController = TextEditingController();
-  final _addressLine1Controller = TextEditingController();
-  final _addressLine2Controller = TextEditingController();
-  final _cityController = TextEditingController();
-  final _stateController = TextEditingController();
-  final _postalCodeController = TextEditingController();
-  String selectedCountry = 'India';
-  
-  // ============================================================================
-  // SECTION 2: COMPANY DETAILS
-  // ============================================================================
-  final _companyRegistrationController = TextEditingController();
-  final _panNumberController = TextEditingController();
-  final _gstNumberController = TextEditingController();
-  final _tanNumberController = TextEditingController();
-  String? selectedIndustryType;
-  final _employeeStrengthController = TextEditingController();
-  final _annualContractValueController = TextEditingController();
-  
-  // ============================================================================
-  // SECTION 3: CONTACT PERSONS
-  // ============================================================================
-  List<ContactPerson> contactPersons = [];
-  bool showContactPersonsSection = false;
-  
-  // ============================================================================
-  // SECTION 4: CATEGORIZATION & SEGMENTATION
-  // ============================================================================
-  String selectedCustomerStatus = 'Active';
-  final _reasonForBlockingController = TextEditingController();
-  String? selectedCustomerTier;
-  String selectedSalesTerritory = 'Bangalore';
-  List<String> selectedTags = [];
-  
-  // ============================================================================
-  // SECTION 5: RATE CARD & PRICING
-  // ============================================================================
-  String? selectedRateCard;
-  String? selectedContractType;
-  final _contractStartDateController = TextEditingController();
-  final _contractEndDateController = TextEditingController();
-  bool autoRenewal = false;
-  final _renewalNoticePeriodController = TextEditingController();
-  
-  // Vendor-specific rate card fields
-  String? selectedVendorCommissionType;
-  final _commissionRateController = TextEditingController();
-  final _fixedAmountPerTripController = TextEditingController();
-  final _revenueShareController = TextEditingController();
-  final _minimumGuaranteeController = TextEditingController();
-  String? selectedPaymentCycle;
-  List<String> selectedVehicleTypesProvided = [];
-  final _numberOfVehiclesProvidedController = TextEditingController();
-  
-  // ============================================================================
-  // SECTION 6: PAYMENT TERMS & CREDIT
-  // ============================================================================
-  String? selectedPaymentTerms;
-  String? selectedPreferredPaymentMethod;
-  final _creditLimitController = TextEditingController();
-  final _securityDepositController = TextEditingController();
-  String? selectedSecurityDepositStatus;
-  String? selectedBillingFrequency;
-  
-  // ============================================================================
-  // SECTION 7: BILLING PREFERENCES
-  // ============================================================================
-  final _billingEmailController = TextEditingController();
-  final _billingAddressController = TextEditingController();
-  bool sameAsPrimaryAddress = true;
-  
-  // ============================================================================
-  // SECTION 8: VENDOR-SPECIFIC DETAILS
-  // ============================================================================
-  final _vendorVehiclesAvailableController = TextEditingController();
-  List<String> vendorVehicleTypes = [];
-  final _vendorAgreementStartController = TextEditingController();
-  final _vendorAgreementEndController = TextEditingController();
-  double vendorPerformanceRating = 0.0;
-  final _insuranceValidUntilController = TextEditingController();
-  final _bankNameController = TextEditingController();
-  final _bankAccountNumberController = TextEditingController();
-  final _ifscCodeController = TextEditingController();
-  final _accountHolderNameController = TextEditingController();
-  final _branchNameController = TextEditingController();
-  final _upiIdController = TextEditingController();
-  
-  // ============================================================================
-  // SECTION 9: DOCUMENT UPLOADS
-  // ============================================================================
-  Map<String, List<PlatformFile>> uploadedDocuments = {
-    'KYC Documents': [],
-    'Company Documents': [],
-    'Contracts & Agreements': [],
-    'Insurance Documents': [],
-    'Vehicle Documents': [],
-    'Other Documents': [],
-  };
-  bool showDocumentSection = false;
-  
-  // ============================================================================
-  // SECTION 10: ADDITIONAL INFORMATION
-  // ============================================================================
-  final _internalNotesController = TextEditingController();
-  final _customerInstructionsController = TextEditingController();
-  final _specialRequirementsController = TextEditingController();
-  List<CustomField> customFields = [];
-  bool showCustomFieldsSection = false;
-  
-  // ============================================================================
-  // SECTION 11: AUDIT & TRACKING (Read-only)
-  // ============================================================================
-  String customerId = '';
-  String createdBy = 'Current User';
-  DateTime? createdDate;
-  String lastModifiedBy = '';
-  DateTime? lastModifiedDate;
-  DateTime? lastTransactionDate;
-  double totalRevenueGenerated = 0.0;
-  int totalTripsCompleted = 0;
-  
-  bool isLoading = false;
-  bool isSaving = false;
-  
-  // ============================================================================
-  // DROPDOWN OPTIONS
-  // ============================================================================
-  
-  final List<String> customerTypes = ['Individual', 'Organization', /* 'Vendor', */ 'Others'];
-  final List<String> countries = ['India', 'USA', 'UK', 'UAE', 'Singapore', 'Australia'];
-  final List<String> industryTypes = [
-    'IT & Software',
-    'Manufacturing',
-    'Retail',
-    'Healthcare',
-    'Education',
-    'Finance',
-    'Real Estate',
-    'Transportation',
-    'Hospitality',
-    'Other'
-  ];
-  final List<String> customerStatuses = ['Active', 'Inactive', 'Blocked', 'Lead', 'Closed'];
-  final List<String> customerTiers = ['Gold', 'Silver', 'Bronze', 'Platinum'];
-  final List<String> salesTerritories = [
-    'Bangalore',
-    'Chennai',
-    'Mumbai',
-    'Delhi',
-    'Hyderabad',
-    'Pune',
-    'Kolkata',
-    'Ahmedabad'
-  ];
-  final List<String> availableTags = [
-    'VIP',
-    'Regular',
-    'Seasonal',
-    'Corporate',
-    'Government',
-    'High-Value',
-    'Low-Priority'
-  ];
-  
-  final List<String> rateCardOptions = [
-    'Standard Individual Rate',
-    'Corporate Rate A (City-wide Flat)',
-    'Corporate Rate B (Region-based)',
-    'Premium Customer Rate',
-    'Government Rate',
-    'Weekend Special Rate',
-  ];
-  
-  final List<String> contractTypes = [
-    'Fixed Monthly',
-    'Quarterly',
-    'Per-trip',
-    'Pay-as-you-go'
-  ];
-  
-  final List<String> vendorCommissionTypes = [
-    'Percentage',
-    'Fixed Amount per Trip',
-    'Revenue Share'
-  ];
-  
-  final List<String> paymentCycles = [
-    'Daily',
-    'Weekly',
-    'Bi-weekly',
-    'Monthly',
-    'Quarterly'
-  ];
-  
-  final List<String> vehicleTypes = [
-    'Sedan',
-    'SUV',
-    'Hatchback',
-    'Bus',
-    'Mini Van',
-    'Tempo Traveller',
-    'Luxury Car'
-  ];
-  
-  final List<String> paymentTermsOptions = [
-    'Immediate/COD',
-    '7 days',
-    '15 days',
-    '30 days',
-    '45 days',
-    '60 days',
-    'NET 90'
-  ];
-  
-  final List<String> paymentMethods = [
-    'Cash',
-    'UPI',
-    'Bank Transfer',
-    'Credit Card',
-    'Cheque',
-    'Online Payment Gateway'
-  ];
-  
-  final List<String> billingFrequencies = [
-    'Per-trip',
-    'Weekly',
-    'Bi-weekly',
-    'Monthly',
-    'Quarterly'
-  ];
-  
-  final List<String> securityDepositStatuses = [
-    'Received',
-    'Pending',
-    'Refunded'
-  ];
-  
-  final List<String> contactTypes = [
-    'Primary Contact',
-    'Billing Contact',
-    'Operations Contact',
-    'Accounts Contact',
-    'Emergency Contact'
-  ];
-  
-  final List<String> customFieldTypes = [
-    'Text',
-    'Number',
-    'Date',
-    'Dropdown',
-    'Checkbox',
-    'Email',
-    'Phone'
-  ];
-  
-  // ============================================================================
-  // LIFECYCLE METHODS
-  // ============================================================================
-  
+
+  bool _isLoading = false;
+  bool _isSaving  = false;
+  String? _loadError;
+
+  // ── TAB 1: Other Details ──────────────────────────────────────────────────
+  String   _customerType        = 'Business';
+  String   _salutation          = '';
+  final _firstNameCtrl          = TextEditingController();
+  final _lastNameCtrl           = TextEditingController();
+  final _displayNameCtrl        = TextEditingController();
+  final _companyNameCtrl        = TextEditingController();
+  final _emailCtrl              = TextEditingController();
+  final _workPhoneCtrl          = TextEditingController();
+  final _mobileCtrl             = TextEditingController();
+  final _websiteCtrl            = TextEditingController();
+  final _departmentCtrl         = TextEditingController();
+  final _designationCtrl        = TextEditingController();
+  final _twitterCtrl            = TextEditingController();
+  final _facebookCtrl           = TextEditingController();
+  String   _defaultCurrency     = 'INR - Indian Rupee';
+  String   _paymentTerms        = 'Due on Receipt';
+  String   _portalLanguage      = 'English';
+  final _openingBalanceCtrl     = TextEditingController();
+  bool     _portalEnabled       = false;
+
+  // ── TAB 2: Tax Info ───────────────────────────────────────────────────────
+  final _gstinCtrl              = TextEditingController();
+  String   _gstRegistrationType = '';
+  String   _placeOfSupply       = '';
+  final _panCtrl                = TextEditingController();
+  String   _taxPreference       = 'Taxable';
+  final _exemptionReasonCtrl    = TextEditingController();
+
+  // ── TAB 3: Address ────────────────────────────────────────────────────────
+  // Billing
+  final _bAttentionCtrl   = TextEditingController();
+  final _bStreet1Ctrl     = TextEditingController();
+  final _bStreet2Ctrl     = TextEditingController();
+  final _bCityCtrl        = TextEditingController();
+  String _bState          = '';
+  final _bZipCtrl         = TextEditingController();
+  String _bCountry        = 'India';
+  final _bPhoneCtrl       = TextEditingController();
+  final _bFaxCtrl         = TextEditingController();
+  // Shipping
+  final _sAttentionCtrl   = TextEditingController();
+  final _sStreet1Ctrl     = TextEditingController();
+  final _sStreet2Ctrl     = TextEditingController();
+  final _sCityCtrl        = TextEditingController();
+  String _sState          = '';
+  final _sZipCtrl         = TextEditingController();
+  String _sCountry        = 'India';
+  final _sPhoneCtrl       = TextEditingController();
+  final _sFaxCtrl         = TextEditingController();
+
+  // ── TAB 4: Contact Persons ────────────────────────────────────────────────
+  List<_ContactPersonForm> _contactPersons = [];
+
+  // ── TAB 5: Remarks ────────────────────────────────────────────────────────
+  final _remarksCtrl = TextEditingController();
+
+  // ── Display name suggestions ──────────────────────────────────────────────
+  List<String> _displayNameSuggestions = [];
+  bool _showSuggestions = false;
+
   @override
   void initState() {
     super.initState();
-    _initializeForm();
-    
-    // Load customer data if in edit mode
+    _tabController = TabController(length: 5, vsync: this);
+    // Listen to name fields to rebuild display name suggestions
+    _firstNameCtrl.addListener(_rebuildSuggestions);
+    _lastNameCtrl.addListener(_rebuildSuggestions);
+    _companyNameCtrl.addListener(_rebuildSuggestions);
+    _displayNameCtrl.addListener(() => setState(() {}));
+
     if (widget.customerId != null) {
-      _loadCustomerData(widget.customerId!);
+      _loadCustomer();
+    } else {
+      // Add one blank contact person by default
+      _contactPersons.add(_ContactPersonForm());
     }
   }
-  
-  void _initializeForm() {
-    customerId = 'CUST-${DateFormat('yyyyMMdd-HHmmss').format(DateTime.now())}';
-    createdDate = DateTime.now();
-    
-    if (selectedCustomerType == 'Organization' || selectedCustomerType == 'Vendor') {
-      _addPrimaryContact();
-    }
-  }
-  
-  void _addPrimaryContact() {
-    if (contactPersons.isEmpty) {
-      contactPersons.add(ContactPerson(
-        contactType: 'Primary Contact',
-        fullName: _primaryContactPersonController.text,
-        email: _primaryEmailController.text,
-        phoneNumber: _primaryPhoneController.text,
-        isPrimary: true,
-      ));
-    }
-  }
-  
+
   @override
   void dispose() {
-    _customerDisplayNameController.dispose();
-    _primaryContactPersonController.dispose();
-    _primaryEmailController.dispose();
-    _primaryPhoneController.dispose();
-    _alternatePhoneController.dispose();
-    _addressLine1Controller.dispose();
-    _addressLine2Controller.dispose();
-    _cityController.dispose();
-    _stateController.dispose();
-    _postalCodeController.dispose();
-    _companyRegistrationController.dispose();
-    _panNumberController.dispose();
-    _gstNumberController.dispose();
-    _tanNumberController.dispose();
-    _employeeStrengthController.dispose();
-    _annualContractValueController.dispose();
-    _reasonForBlockingController.dispose();
-    _contractStartDateController.dispose();
-    _contractEndDateController.dispose();
-    _renewalNoticePeriodController.dispose();
-    _commissionRateController.dispose();
-    _fixedAmountPerTripController.dispose();
-    _revenueShareController.dispose();
-    _minimumGuaranteeController.dispose();
-    _numberOfVehiclesProvidedController.dispose();
-    _creditLimitController.dispose();
-    _securityDepositController.dispose();
-    _billingEmailController.dispose();
-    _billingAddressController.dispose();
-    _vendorVehiclesAvailableController.dispose();
-    _vendorAgreementStartController.dispose();
-    _vendorAgreementEndController.dispose();
-    _insuranceValidUntilController.dispose();
-    _bankNameController.dispose();
-    _bankAccountNumberController.dispose();
-    _ifscCodeController.dispose();
-    _accountHolderNameController.dispose();
-    _branchNameController.dispose();
-    _upiIdController.dispose();
-    _internalNotesController.dispose();
-    _customerInstructionsController.dispose();
-    _specialRequirementsController.dispose();
+    _tabController.dispose();
+    for (final c in [
+      _firstNameCtrl, _lastNameCtrl, _displayNameCtrl, _companyNameCtrl,
+      _emailCtrl, _workPhoneCtrl, _mobileCtrl, _websiteCtrl,
+      _departmentCtrl, _designationCtrl, _twitterCtrl, _facebookCtrl,
+      _openingBalanceCtrl, _gstinCtrl, _panCtrl, _exemptionReasonCtrl,
+      _bAttentionCtrl, _bStreet1Ctrl, _bStreet2Ctrl, _bCityCtrl, _bZipCtrl, _bPhoneCtrl, _bFaxCtrl,
+      _sAttentionCtrl, _sStreet1Ctrl, _sStreet2Ctrl, _sCityCtrl, _sZipCtrl, _sPhoneCtrl, _sFaxCtrl,
+      _remarksCtrl,
+    ]) { c.dispose(); }
+    for (final cp in _contactPersons) { cp.dispose(); }
     super.dispose();
   }
-  
-  // ============================================================================
-  // HELPER METHODS
-  // ============================================================================
-  
-  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
-  
-  Future<void> _selectDate(TextEditingController controller) async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-    );
-    
-    if (date != null) {
-      setState(() {
-        controller.text = _formatDate(date);
-      });
-    }
-  }
-  
-  Future<void> _pickDocuments(String category) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-      );
-      
-      if (result != null) {
-        setState(() {
-          uploadedDocuments[category]!.addAll(result.files);
-        });
-      }
-    } catch (e) {
-      _showError('Failed to pick files: $e');
-    }
-  }
-  
-  void _removeDocument(String category, int index) {
-    setState(() {
-      uploadedDocuments[category]!.removeAt(index);
-    });
-  }
-  
-  void _addContactPerson() {
-    setState(() {
-      contactPersons.add(ContactPerson(
-        contactType: 'Billing Contact',
-        fullName: '',
-        email: '',
-        phoneNumber: '',
-        isPrimary: false,
-      ));
-    });
-  }
-  
-  void _removeContactPerson(int index) {
-    if (!contactPersons[index].isPrimary) {
-      setState(() {
-        contactPersons.removeAt(index);
-      });
-    }
-  }
-  
-  void _addCustomField() {
-    setState(() {
-      customFields.add(CustomField(
-        fieldName: '',
-        fieldType: 'Text',
-        fieldValue: '',
-        isMandatory: false,
-      ));
-    });
-  }
-  
-  void _removeCustomField(int index) {
-    setState(() {
-      customFields.removeAt(index);
-    });
-  }
-  
-  void _showCreateRateCardDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create New Rate Card'),
-        content: const SizedBox(
-          width: 600,
-          height: 400,
-          child: Center(
-            child: Text(
-              'Rate Card creation form will be implemented here.\n\n'
-              'Fields:\n'
-              '- Rate Card Name\n'
-              '- Vehicle Type\n'
-              '- Base Fare\n'
-              '- Per KM Rate\n'
-              '- Per Hour Rate\n'
-              '- Waiting Charges\n'
-              '- Night Charges\n'
-              '- Surcharges (custom)\n'
-              '- And more...',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showSuccess('Rate card creation will be implemented');
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3498DB),
-            ),
-            child: const Text('Save Rate Card'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-// ============================================================================
-// METHOD 3: _saveCustomer - Verify validation exists (around line 950)
-// ============================================================================
 
-Future<void> _saveCustomer() async {
-  if (!_formKey.currentState!.validate()) {
-    _showError('Please fill all required fields');
-    return;
+  // ── Display name suggestions (Zoho behaviour) ─────────────────────────────
+  void _rebuildSuggestions() {
+    final first   = _firstNameCtrl.text.trim();
+    final last    = _lastNameCtrl.text.trim();
+    final company = _companyNameCtrl.text.trim();
+    final sal     = _salutation;
+
+    final suggestions = <String>{};
+    if (first.isNotEmpty || last.isNotEmpty) {
+      final full = [first, last].where((s) => s.isNotEmpty).join(' ');
+      suggestions.add(full);
+      if (sal.isNotEmpty) suggestions.add('$sal $full'.trim());
+      if (last.isNotEmpty && first.isNotEmpty) suggestions.add('$last, $first');
+    }
+    if (company.isNotEmpty) suggestions.add(company);
+
+    setState(() {
+      _displayNameSuggestions = suggestions.toList();
+    });
   }
-  
-  // Validation for blocked status
-  if (selectedCustomerStatus == 'Blocked' && 
-      _reasonForBlockingController.text.isEmpty) {
-    _showError('Please provide reason for blocking');
-    return;
+
+  // ── Load customer for edit mode ───────────────────────────────────────────
+  Future<void> _loadCustomer() async {
+    setState(() { _isLoading = true; _loadError = null; });
+    try {
+      final c = await BillingCustomersService.getCustomerById(widget.customerId!);
+      setState(() {
+        _customerType        = c.customerType;
+        _salutation          = c.salutation;
+        _firstNameCtrl.text  = c.firstName;
+        _lastNameCtrl.text   = c.lastName;
+        _displayNameCtrl.text= c.customerDisplayName;
+        _companyNameCtrl.text= c.companyName;
+        _emailCtrl.text      = c.primaryEmail;
+        _workPhoneCtrl.text  = c.workPhone;
+        _mobileCtrl.text     = c.mobile;
+        _websiteCtrl.text    = c.website;
+        _twitterCtrl.text    = c.twitter;
+        _facebookCtrl.text   = c.facebook;
+        _defaultCurrency     = kCurrencies.firstWhere((cu) => cu.startsWith(c.defaultCurrency), orElse: () => 'INR - Indian Rupee');
+        _paymentTerms        = kPaymentTermsOptions.contains(c.paymentTerms) ? c.paymentTerms : 'Due on Receipt';
+        _portalLanguage      = c.portalLanguage;
+        _openingBalanceCtrl.text = c.openingBalance > 0 ? c.openingBalance.toStringAsFixed(2) : '';
+        _portalEnabled       = c.portalEnabled;
+
+        _gstinCtrl.text            = c.gstNumber;
+        _gstRegistrationType       = c.gstRegistrationType;
+        _placeOfSupply             = kIndianStates.contains(c.placeOfSupply) ? c.placeOfSupply : '';
+        _panCtrl.text              = c.panNumber;
+        _taxPreference             = c.taxPreference.isNotEmpty ? c.taxPreference : 'Taxable';
+        _exemptionReasonCtrl.text  = c.exemptionReason;
+
+        _bAttentionCtrl.text = c.billingAddress.attention;
+        _bStreet1Ctrl.text   = c.billingAddress.street;
+        _bCityCtrl.text      = c.billingAddress.city;
+        _bState              = kIndianStates.contains(c.billingAddress.state) ? c.billingAddress.state : '';
+        _bZipCtrl.text       = c.billingAddress.zip;
+        _bCountry            = c.billingAddress.country.isNotEmpty ? c.billingAddress.country : 'India';
+        _bPhoneCtrl.text     = c.billingAddress.phone;
+        _bFaxCtrl.text       = c.billingAddress.fax;
+
+        _sAttentionCtrl.text = c.shippingAddress.attention;
+        _sStreet1Ctrl.text   = c.shippingAddress.street;
+        _sCityCtrl.text      = c.shippingAddress.city;
+        _sState              = kIndianStates.contains(c.shippingAddress.state) ? c.shippingAddress.state : '';
+        _sZipCtrl.text       = c.shippingAddress.zip;
+        _sCountry            = c.shippingAddress.country.isNotEmpty ? c.shippingAddress.country : 'India';
+        _sPhoneCtrl.text     = c.shippingAddress.phone;
+        _sFaxCtrl.text       = c.shippingAddress.fax;
+
+        _contactPersons = c.contactPersons.map((cp) {
+          final f = _ContactPersonForm();
+          f.salutation   = cp.salutation;
+          f.firstNameCtrl.text  = cp.firstName;
+          f.lastNameCtrl.text   = cp.lastName;
+          f.emailCtrl.text      = cp.email;
+          f.workPhoneCtrl.text  = cp.workPhone;
+          f.mobileCtrl.text     = cp.mobile;
+          f.designationCtrl.text= cp.designation;
+          f.departmentCtrl.text = cp.department;
+          f.isPrimary    = cp.isPrimary;
+          f.portalAccess = cp.portalAccess;
+          return f;
+        }).toList();
+        if (_contactPersons.isEmpty) _contactPersons.add(_ContactPersonForm());
+
+        _remarksCtrl.text = c.remarks;
+        _isLoading = false;
+      });
+      _rebuildSuggestions();
+    } catch (e) {
+      setState(() { _isLoading = false; _loadError = e.toString(); });
+    }
   }
-  
-  // ✅ CRITICAL: Validation for B2B customers (must exist)
-  if ((selectedCustomerType == 'Organization' || 
-       selectedCustomerType == 'Vendor') &&
-      _gstNumberController.text.isEmpty) {
-    _showError('GST Number is required for B2B customers');
-    return;
+
+  // ── Copy billing address to shipping ──────────────────────────────────────
+  void _copyBillingToShipping() {
+    setState(() {
+      _sAttentionCtrl.text = _bAttentionCtrl.text;
+      _sStreet1Ctrl.text   = _bStreet1Ctrl.text;
+      _sStreet2Ctrl.text   = _bStreet2Ctrl.text;
+      _sCityCtrl.text      = _bCityCtrl.text;
+      _sState              = _bState;
+      _sZipCtrl.text       = _bZipCtrl.text;
+      _sCountry            = _bCountry;
+      _sPhoneCtrl.text     = _bPhoneCtrl.text;
+      _sFaxCtrl.text       = _bFaxCtrl.text;
+    });
   }
-  
-  // ✅ CRITICAL: Validation for Vendor commission type (must exist)
-  if (selectedCustomerType == 'Vendor' && 
-      selectedVendorCommissionType == null) {
-    _showError('Commission Type is required for Vendor customers');
-    return;
-  }
-  
-  setState(() => isSaving = true);
-  
-  try {
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-    
-    // Build customer data using service
-    final customerData = BillingCustomersService.buildCustomerDataFromControllers(
-      // Section 1: Basic Information
-      customerType: selectedCustomerType,
-      customerDisplayName: _customerDisplayNameController.text,
-      primaryContactPerson: _primaryContactPersonController.text,
-      primaryEmail: _primaryEmailController.text,
-      primaryPhone: _primaryPhoneController.text,
-      alternatePhone: _alternatePhoneController.text,
-      addressLine1: _addressLine1Controller.text,
-      addressLine2: _addressLine2Controller.text,
-      city: _cityController.text,
-      state: _stateController.text,
-      postalCode: _postalCodeController.text,
-      country: selectedCountry,
-      
-      // Section 2: Company Details
-      companyRegistration: _companyRegistrationController.text,
-      panNumber: _panNumberController.text,
-      gstNumber: _gstNumberController.text,
-      tanNumber: _tanNumberController.text,
-      industryType: selectedIndustryType,
-      employeeStrength: _employeeStrengthController.text,
-      annualContractValue: _annualContractValueController.text,
-      
-      // Section 3: Contact Persons
-      contactPersons: contactPersons.map((c) => c.toJson()).toList(),
-      
-      // Section 4: Categorization
-      customerStatus: selectedCustomerStatus,
-      reasonForBlocking: _reasonForBlockingController.text,
-      customerTier: selectedCustomerTier,
-      salesTerritory: selectedSalesTerritory,
-      tags: selectedTags,
-      
-      // Section 5: Rate Card & Pricing
-      rateCard: selectedRateCard,
-      contractType: selectedContractType,
-      contractStartDate: _contractStartDateController.text,
-      contractEndDate: _contractEndDateController.text,
-      autoRenewal: autoRenewal,
-      renewalNoticePeriod: _renewalNoticePeriodController.text,
-      
-      // ✅ CRITICAL: Vendor-specific fields (must be included)
-      vendorCommissionType: selectedVendorCommissionType,
-      commissionRate: _commissionRateController.text,
-      fixedAmountPerTrip: _fixedAmountPerTripController.text,
-      revenueShare: _revenueShareController.text,
-      minimumGuarantee: _minimumGuaranteeController.text,
-      paymentCycle: selectedPaymentCycle,
-      vehicleTypesProvided: selectedVehicleTypesProvided,
-      numberOfVehiclesProvided: _numberOfVehiclesProvidedController.text,
-      
-      // Section 6: Payment Terms & Credit
-      paymentTerms: selectedPaymentTerms ?? '',
-      preferredPaymentMethod: selectedPreferredPaymentMethod,
-      creditLimit: _creditLimitController.text,
-      securityDeposit: _securityDepositController.text,
-      securityDepositStatus: selectedSecurityDepositStatus,
-      billingFrequency: selectedBillingFrequency ?? '',
-      
-      // Section 7: Billing Preferences
-      billingEmail: _billingEmailController.text,
-      billingAddress: _billingAddressController.text,
-      sameAsPrimaryAddress: sameAsPrimaryAddress,
-      
-      // ✅ CRITICAL: Section 8: Vendor-Specific Details (must be included)
-      vendorVehiclesAvailable: _vendorVehiclesAvailableController.text,
-      vendorVehicleTypes: vendorVehicleTypes,
-      vendorAgreementStart: _vendorAgreementStartController.text,
-      vendorAgreementEnd: _vendorAgreementEndController.text,
-      vendorPerformanceRating: vendorPerformanceRating,
-      insuranceValidUntil: _insuranceValidUntilController.text,
-      bankName: _bankNameController.text,
-      bankAccountNumber: _bankAccountNumberController.text,
-      ifscCode: _ifscCodeController.text,
-      accountHolderName: _accountHolderNameController.text,
-      branchName: _branchNameController.text,
-      upiId: _upiIdController.text,
-      
-      // Section 10: Additional Information
-      internalNotes: _internalNotesController.text,
-      customerInstructions: _customerInstructionsController.text,
-      specialRequirements: _specialRequirementsController.text,
-      customFields: customFields.map((c) => c.toJson()).toList(),
-    );
-    
-    // Validate data
-    final validationError = BillingCustomersService.validateCustomerData(customerData);
-    if (validationError != null) {
-      Navigator.pop(context);
-      setState(() => isSaving = false);
-      _showError(validationError);
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  Future<void> _save() async {
+    // Validate required fields
+    if (_displayNameCtrl.text.trim().isEmpty) {
+      _tabController.animateTo(0);
+      _snack('Customer Display Name is required', error: true);
       return;
     }
-    
-    // Create customer via API
-    final result = await BillingCustomersService.createCustomer(customerData);
-    
-    if (result['success'] == true) {
-      final createdCustomer = result['data'];
-      final createdCustomerId = createdCustomer['_id'];
-      
-      print('✅ Customer created with ID: $createdCustomerId');
-      
-      // Upload documents if any
-      bool hasDocuments = false;
-      for (final entry in uploadedDocuments.entries) {
-        if (entry.value.isNotEmpty) {
-          hasDocuments = true;
-          break;
-        }
-      }
-      
-      if (hasDocuments) {
-        print('📤 Uploading documents...');
-        for (final entry in uploadedDocuments.entries) {
-          final category = entry.key;
-          final files = entry.value;
-          
-          if (files.isNotEmpty) {
-            try {
-              await BillingCustomersService.uploadDocuments(
-                createdCustomerId,
-                category,
-                files,
-              );
-              print('✅ Uploaded ${files.length} files in category: $category');
-            } catch (e) {
-              print('⚠️  Failed to upload documents in $category: $e');
-            }
-          }
-        }
-      }
-      
-      Navigator.pop(context);
-      setState(() => isSaving = false);
-      
-      _showSuccess('Customer saved successfully');
-      await Future.delayed(const Duration(milliseconds: 500));
-      Navigator.pop(context, true);
-      
-    } else {
-      Navigator.pop(context);
-      setState(() => isSaving = false);
-      _showError(result['message'] ?? 'Failed to save customer');
-    }
-    
-  } on BillingCustomersException catch (e) {
-    Navigator.pop(context);
-    setState(() => isSaving = false);
-    print('❌ BillingCustomersException: ${e.message}');
-    _showError(e.toUserMessage());
-    
-  } catch (e) {
-    Navigator.pop(context);
-    setState(() => isSaving = false);
-    print('❌ Unexpected error: $e');
-    _showError('Failed to save customer: ${e.toString()}');
-  }
-}
-  
-  Future<void> _saveAsDraft() async {
-    _showSuccess('Customer saved as draft');
-  }
-  
-  // ============================================================================
-  // LOAD CUSTOMER DATA FOR EDIT MODE
-  // ============================================================================
-  
-  Future<void> _loadCustomerData(String customerId) async {
-    print('\n🔄 Loading customer data for ID: $customerId');
-    setState(() => isLoading = true);
-    
-    try {
-      print('📡 Calling API: BillingCustomersService.getCustomerById($customerId)');
-      final result = await BillingCustomersService.getCustomerById(customerId);
-      print('📥 API Response: ${result['success']}');
-      
-      if (result['success'] == true) {
-        final customer = result['data'];
-        print('✅ Customer data loaded successfully: ${customer['customerDisplayName']}');
-        
-        // Populate all form fields from customer data
-        setState(() {
-          // Section 1: Basic Information
-          selectedCustomerType = customer['customerType']?.toString() ?? 'Individual';
-          _customerDisplayNameController.text = customer['customerDisplayName']?.toString() ?? '';
-          _primaryContactPersonController.text = customer['primaryContactPerson']?.toString() ?? '';
-          _primaryEmailController.text = customer['primaryEmail']?.toString() ?? '';
-          _primaryPhoneController.text = customer['primaryPhone']?.toString() ?? '';
-          _alternatePhoneController.text = customer['alternatePhone']?.toString() ?? '';
-          _addressLine1Controller.text = customer['addressLine1']?.toString() ?? '';
-          _addressLine2Controller.text = customer['addressLine2']?.toString() ?? '';
-          _cityController.text = customer['city']?.toString() ?? '';
-          _stateController.text = customer['state']?.toString() ?? '';
-          _postalCodeController.text = customer['postalCode']?.toString() ?? '';
-          selectedCountry = customer['country']?.toString() ?? 'India';
-          
-          // Section 2: Company Details
-          _companyRegistrationController.text = customer['companyRegistration']?.toString() ?? '';
-          _panNumberController.text = customer['panNumber']?.toString() ?? '';
-          _gstNumberController.text = customer['gstNumber']?.toString() ?? '';
-          _tanNumberController.text = customer['tanNumber']?.toString() ?? '';
-          selectedIndustryType = customer['industryType']?.toString();
-          _employeeStrengthController.text = customer['employeeStrength']?.toString() ?? '';
-          _annualContractValueController.text = customer['annualContractValue']?.toString() ?? '';
-          
-          // Section 3: Contact Persons
-          if (customer['contactPersons'] != null) {
-            contactPersons = (customer['contactPersons'] as List).map((cp) => ContactPerson(
-              contactType: cp['contactType'],
-              fullName: cp['fullName'],
-              email: cp['email'],
-              phoneNumber: cp['phoneNumber'],
-              designation: cp['designation'],
-              department: cp['department'],
-              isPrimary: cp['isPrimary'] ?? false,
-            )).toList();
-          }
-          
-          // Section 4: Categorization
-          selectedCustomerStatus = customer['customerStatus']?.toString() ?? 'Active';
-          _reasonForBlockingController.text = customer['reasonForBlocking']?.toString() ?? '';
-          selectedCustomerTier = customer['customerTier']?.toString();
-          selectedSalesTerritory = customer['salesTerritory']?.toString() ?? 'Bangalore';
-          selectedTags = customer['tags'] != null ? List<String>.from(customer['tags']) : [];
-          
-          // Section 5: Rate Card & Pricing
-          selectedRateCard = customer['rateCard']?.toString();
-          selectedContractType = customer['contractType']?.toString();
-          _contractStartDateController.text = customer['contractStartDate']?.toString() ?? '';
-          _contractEndDateController.text = customer['contractEndDate']?.toString() ?? '';
-          autoRenewal = customer['autoRenewal'] == true;
-          _renewalNoticePeriodController.text = customer['renewalNoticePeriod']?.toString() ?? '';
-          
-          // Vendor-specific
-          selectedVendorCommissionType = customer['vendorCommissionType']?.toString();
-          _commissionRateController.text = customer['commissionRate']?.toString() ?? '';
-          _fixedAmountPerTripController.text = customer['fixedAmountPerTrip']?.toString() ?? '';
-          _revenueShareController.text = customer['revenueShare']?.toString() ?? '';
-          _minimumGuaranteeController.text = customer['minimumGuarantee']?.toString() ?? '';
-          selectedPaymentCycle = customer['paymentCycle']?.toString();
-          selectedVehicleTypesProvided = customer['vehicleTypesProvided'] != null ? List<String>.from(customer['vehicleTypesProvided']) : [];
-          _numberOfVehiclesProvidedController.text = customer['numberOfVehiclesProvided']?.toString() ?? '';
-          
-          // Section 6: Payment Terms & Credit
-          selectedPaymentTerms = customer['paymentTerms']?.toString();
-          selectedPreferredPaymentMethod = customer['preferredPaymentMethod']?.toString();
-          _creditLimitController.text = customer['creditLimit']?.toString() ?? '';
-          _securityDepositController.text = customer['securityDeposit']?.toString() ?? '';
-          selectedSecurityDepositStatus = customer['securityDepositStatus']?.toString();
-          selectedBillingFrequency = customer['billingFrequency']?.toString();
-          
-          // Section 7: Billing Preferences
-          _billingEmailController.text = customer['billingEmail']?.toString() ?? '';
-          _billingAddressController.text = customer['billingAddress']?.toString() ?? '';
-          sameAsPrimaryAddress = customer['sameAsPrimaryAddress'] == true;
-          
-          // Section 8: Vendor-Specific Details
-          _vendorVehiclesAvailableController.text = customer['vendorVehiclesAvailable']?.toString() ?? '';
-          vendorVehicleTypes = customer['vendorVehicleTypes'] != null ? List<String>.from(customer['vendorVehicleTypes']) : [];
-          _vendorAgreementStartController.text = customer['vendorAgreementStart']?.toString() ?? '';
-          _vendorAgreementEndController.text = customer['vendorAgreementEnd']?.toString() ?? '';
-          vendorPerformanceRating = (customer['vendorPerformanceRating'] ?? 0).toDouble();
-          _insuranceValidUntilController.text = customer['insuranceValidUntil']?.toString() ?? '';
-          _bankNameController.text = customer['bankName']?.toString() ?? '';
-          _bankAccountNumberController.text = customer['bankAccountNumber']?.toString() ?? '';
-          _ifscCodeController.text = customer['ifscCode']?.toString() ?? '';
-          _accountHolderNameController.text = customer['accountHolderName']?.toString() ?? '';
-          _branchNameController.text = customer['branchName']?.toString() ?? '';
-          _upiIdController.text = customer['upiId']?.toString() ?? '';
-          
-          // Section 10: Additional Information
-          _internalNotesController.text = customer['internalNotes']?.toString() ?? '';
-          _customerInstructionsController.text = customer['customerInstructions']?.toString() ?? '';
-          _specialRequirementsController.text = customer['specialRequirements']?.toString() ?? '';
-          
-          if (customer['customFields'] != null) {
-            customFields = (customer['customFields'] as List).map((cf) => CustomField(
-              fieldName: cf['fieldName'],
-              fieldType: cf['fieldType'],
-              fieldValue: cf['fieldValue'],
-              isMandatory: cf['isMandatory'] ?? false,
-            )).toList();
-          }
-          
-          // Section 11: Audit Trail
-          this.customerId = customer['customerId']?.toString() ?? '';
-          createdBy = customer['createdBy']?.toString() ?? 'Unknown';
-          createdDate = customer['createdDate'] != null 
-              ? DateTime.tryParse(customer['createdDate'].toString())
-              : null;
-          lastModifiedBy = customer['lastModifiedBy']?.toString() ?? '';
-          lastModifiedDate = customer['lastModifiedDate'] != null 
-              ? DateTime.tryParse(customer['lastModifiedDate'].toString())
-              : null;
-          totalRevenueGenerated = (customer['totalRevenueGenerated'] ?? 0).toDouble();
-          totalTripsCompleted = customer['totalTripsCompleted'] ?? 0;
-          
-          isLoading = false;
-        });
-        
-        print('✅ All fields populated successfully');
-      } else {
-        throw Exception(result['message'] ?? 'Failed to load customer');
-      }
-    } on BillingCustomersException catch (e) {
-      print('❌ BillingCustomersException: ${e.message}');
-      setState(() => isLoading = false);
-      _showError(e.toUserMessage());
-    } catch (e) {
-      print('❌ Error loading customer: $e');
-      setState(() => isLoading = false);
-      _showError('Failed to load customer: $e');
-    }
-  }
-  
-  // ============================================================================
-  // UPDATE CUSTOMER (FOR EDIT MODE)
-  // ============================================================================
-  
-  Future<void> _updateCustomer() async {
-    if (!_formKey.currentState!.validate()) {
-      _showError('Please fill all required fields');
+    if (_emailCtrl.text.trim().isEmpty) {
+      _tabController.animateTo(0);
+      _snack('Primary Email is required', error: true);
       return;
     }
-    
-    setState(() => isSaving = true);
-    
+
+    setState(() => _isSaving = true);
     try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-      
-      // Build updated customer data
-      final customerData = BillingCustomersService.buildCustomerDataFromControllers(
-        customerType: selectedCustomerType,
-        customerDisplayName: _customerDisplayNameController.text,
-        primaryContactPerson: _primaryContactPersonController.text,
-        primaryEmail: _primaryEmailController.text,
-        primaryPhone: _primaryPhoneController.text,
-        alternatePhone: _alternatePhoneController.text,
-        addressLine1: _addressLine1Controller.text,
-        addressLine2: _addressLine2Controller.text,
-        city: _cityController.text,
-        state: _stateController.text,
-        postalCode: _postalCodeController.text,
-        country: selectedCountry,
-        companyRegistration: _companyRegistrationController.text,
-        panNumber: _panNumberController.text,
-        gstNumber: _gstNumberController.text,
-        tanNumber: _tanNumberController.text,
-        industryType: selectedIndustryType,
-        employeeStrength: _employeeStrengthController.text,
-        annualContractValue: _annualContractValueController.text,
-        contactPersons: contactPersons.map((c) => c.toJson()).toList(),
-        customerStatus: selectedCustomerStatus,
-        reasonForBlocking: _reasonForBlockingController.text,
-        customerTier: selectedCustomerTier,
-        salesTerritory: selectedSalesTerritory,
-        tags: selectedTags,
-        rateCard: selectedRateCard,
-        contractType: selectedContractType,
-        contractStartDate: _contractStartDateController.text,
-        contractEndDate: _contractEndDateController.text,
-        autoRenewal: autoRenewal,
-        renewalNoticePeriod: _renewalNoticePeriodController.text,
-        vendorCommissionType: selectedVendorCommissionType,
-        commissionRate: _commissionRateController.text,
-        fixedAmountPerTrip: _fixedAmountPerTripController.text,
-        revenueShare: _revenueShareController.text,
-        minimumGuarantee: _minimumGuaranteeController.text,
-        paymentCycle: selectedPaymentCycle,
-        vehicleTypesProvided: selectedVehicleTypesProvided,
-        numberOfVehiclesProvided: _numberOfVehiclesProvidedController.text,
-        paymentTerms: selectedPaymentTerms ?? '',
-        preferredPaymentMethod: selectedPreferredPaymentMethod,
-        creditLimit: _creditLimitController.text,
-        securityDeposit: _securityDepositController.text,
-        securityDepositStatus: selectedSecurityDepositStatus,
-        billingFrequency: selectedBillingFrequency ?? '',
-        billingEmail: _billingEmailController.text,
-        billingAddress: _billingAddressController.text,
-        sameAsPrimaryAddress: sameAsPrimaryAddress,
-        vendorVehiclesAvailable: _vendorVehiclesAvailableController.text,
-        vendorVehicleTypes: vendorVehicleTypes,
-        vendorAgreementStart: _vendorAgreementStartController.text,
-        vendorAgreementEnd: _vendorAgreementEndController.text,
-        vendorPerformanceRating: vendorPerformanceRating,
-        insuranceValidUntil: _insuranceValidUntilController.text,
-        bankName: _bankNameController.text,
-        bankAccountNumber: _bankAccountNumberController.text,
-        ifscCode: _ifscCodeController.text,
-        accountHolderName: _accountHolderNameController.text,
-        branchName: _branchNameController.text,
-        upiId: _upiIdController.text,
-        internalNotes: _internalNotesController.text,
-        customerInstructions: _customerInstructionsController.text,
-        specialRequirements: _specialRequirementsController.text,
-        customFields: customFields.map((c) => c.toJson()).toList(),
-      );
-      
-      // Update customer via API
-      final result = await BillingCustomersService.updateCustomer(
-        widget.customerId!,
-        customerData,
-      );
-      
-      if (result['success'] == true) {
-        Navigator.pop(context); // Close loading dialog
-        setState(() => isSaving = false);
-        
-        _showSuccess('Customer updated successfully');
-        await Future.delayed(const Duration(milliseconds: 500));
-        Navigator.pop(context, true);
+      final currencyCode = _defaultCurrency.split(' - ').first;
+      final data = {
+        'customerType':        _customerType,
+        'salutation':          _salutation,
+        'firstName':           _firstNameCtrl.text.trim(),
+        'lastName':            _lastNameCtrl.text.trim(),
+        'customerDisplayName': _displayNameCtrl.text.trim(),
+        'companyName':         _companyNameCtrl.text.trim(),
+        'primaryEmail':        _emailCtrl.text.trim(),
+        'primaryPhone':        _workPhoneCtrl.text.trim().isNotEmpty ? _workPhoneCtrl.text.trim() : _mobileCtrl.text.trim(),
+        'workPhone':           _workPhoneCtrl.text.trim(),
+        'mobile':              _mobileCtrl.text.trim(),
+        'website':             _websiteCtrl.text.trim(),
+        'twitter':             _twitterCtrl.text.trim(),
+        'facebook':            _facebookCtrl.text.trim(),
+        'defaultCurrency':     currencyCode,
+        'paymentTerms':        _paymentTerms,
+        'portalLanguage':      _portalLanguage,
+        'openingBalance':      double.tryParse(_openingBalanceCtrl.text) ?? 0,
+        'portalEnabled':       _portalEnabled,
+        // Tax
+        'gstNumber':           _gstinCtrl.text.trim().toUpperCase(),
+        'gstRegistrationType': _gstRegistrationType,
+        'placeOfSupply':       _placeOfSupply,
+        'panNumber':           _panCtrl.text.trim().toUpperCase(),
+        'taxPreference':       _taxPreference,
+        'exemptionReason':     _exemptionReasonCtrl.text.trim(),
+        // Billing address
+        'billingAddress': {
+          'attention': _bAttentionCtrl.text.trim(),
+          'street':    _bStreet1Ctrl.text.trim(),
+          'street2':   _bStreet2Ctrl.text.trim(),
+          'city':      _bCityCtrl.text.trim(),
+          'state':     _bState,
+          'zip':       _bZipCtrl.text.trim(),
+          'country':   _bCountry,
+          'phone':     _bPhoneCtrl.text.trim(),
+          'fax':       _bFaxCtrl.text.trim(),
+        },
+        // Shipping address
+        'shippingAddress': {
+          'attention': _sAttentionCtrl.text.trim(),
+          'street':    _sStreet1Ctrl.text.trim(),
+          'street2':   _sStreet2Ctrl.text.trim(),
+          'city':      _sCityCtrl.text.trim(),
+          'state':     _sState,
+          'zip':       _sZipCtrl.text.trim(),
+          'country':   _sCountry,
+          'phone':     _sPhoneCtrl.text.trim(),
+          'fax':       _sFaxCtrl.text.trim(),
+        },
+        // Contact persons
+        'contactPersons': _contactPersons.map((cp) => {
+          'salutation':  cp.salutation,
+          'firstName':   cp.firstNameCtrl.text.trim(),
+          'lastName':    cp.lastNameCtrl.text.trim(),
+          'email':       cp.emailCtrl.text.trim(),
+          'workPhone':   cp.workPhoneCtrl.text.trim(),
+          'mobile':      cp.mobileCtrl.text.trim(),
+          'designation': cp.designationCtrl.text.trim(),
+          'department':  cp.departmentCtrl.text.trim(),
+          'isPrimary':   cp.isPrimary,
+          'portalAccess':cp.portalAccess,
+        }).toList(),
+        // Remarks
+        'remarks':      _remarksCtrl.text.trim(),
+        // Kept for backward compat / list page
+        'customerStatus':  'Active',
+        'salesTerritory':  '',
+        'tags':            [],
+      };
+
+      if (widget.customerId != null) {
+        await BillingCustomersService.updateCustomer(widget.customerId!, data);
+        _snack('Customer updated successfully');
       } else {
-        Navigator.pop(context);
-        setState(() => isSaving = false);
-        _showError(result['message'] ?? 'Failed to update customer');
+        await BillingCustomersService.createCustomer(data);
+        _snack('Customer created successfully');
       }
-      
-    } on BillingCustomersException catch (e) {
-      Navigator.pop(context);
-      setState(() => isSaving = false);
-      _showError(e.toUserMessage());
+
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      Navigator.pop(context);
-      setState(() => isSaving = false);
-      _showError('Failed to update customer: $e');
+      _snack('Failed to save: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
-  
-  void _resetForm() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Reset Form'),
-        content: const Text(
-          'Are you sure you want to reset the form? All unsaved changes will be lost.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _formKey.currentState?.reset();
-                _initializeForm();
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Reset'),
-          ),
-        ],
-      ),
-    );
+
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: error ? _red : _green,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
-  
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-  
-  void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-  
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'Active':
-        return Colors.green;
-      case 'Inactive':
-        return Colors.grey;
-      case 'Blocked':
-        return Colors.red;
-      case 'Lead':
-        return Colors.blue;
-      case 'Closed':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-  
-  Color _getTierColor(String tier) {
-    switch (tier) {
-      case 'Platinum':
-        return const Color(0xFF95A5A6);
-      case 'Gold':
-        return const Color(0xFFF39C12);
-      case 'Silver':
-        return const Color(0xFFBDC3C7);
-      case 'Bronze':
-        return const Color(0xFFCD7F32);
-      default:
-        return Colors.grey;
-    }
-  }
-  
-  Color _getCustomerTypeColor() {
-    switch (selectedCustomerType) {
-      case 'Individual':
-        return const Color(0xFF3498DB);
-      case 'Organization':
-        return const Color(0xFF9B59B6);
-      case 'Vendor':
-        return const Color(0xFFE67E22);
-      case 'Others':
-        return const Color(0xFF95A5A6);
-      default:
-        return const Color(0xFF3498DB);
-    }
-  }
-  
-  IconData _getCustomerTypeIcon(String type) {
-    switch (type) {
-      case 'Individual':
-        return Icons.person_outline;
-      case 'Organization':
-        return Icons.business_outlined;
-      case 'Vendor':
-        return Icons.local_shipping_outlined;
-      case 'Others':
-        return Icons.more_horiz;
-      default:
-        return Icons.person_outline;
-    }
-  }
-  
-  String _getCustomerTypeDescription() {
-    switch (selectedCustomerType) {
-      case 'Individual':
-        return 'For individual customers or end-users';
-      case 'Organization':
-        return 'For corporate clients and business entities';
-      case 'Vendor':
-        return 'For transport vendors and fleet partners';
-      case 'Others':
-        return 'For customers that don\'t fit other categories';
-      default:
-        return '';
-    }
-  }
-  
-  IconData _getDocumentCategoryIcon(String category) {
-    switch (category) {
-      case 'KYC Documents':
-        return Icons.badge_outlined;
-      case 'Company Documents':
-        return Icons.business_center_outlined;
-      case 'Contracts & Agreements':
-        return Icons.description_outlined;
-      case 'Insurance Documents':
-        return Icons.shield_outlined;
-      case 'Vehicle Documents':
-        return Icons.directions_car_outlined;
-      default:
-        return Icons.folder_outlined;
-    }
-  }
-  
-  IconData _getFileIcon(String? extension) {
-    switch (extension?.toLowerCase()) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Icons.image;
-      case 'doc':
-      case 'docx':
-        return Icons.description;
-      case 'xls':
-      case 'xlsx':
-        return Icons.table_chart;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-  
-  // ============================================================================
-  // BUILD METHOD
-  // ============================================================================
-  
+
+  // ==========================================================================
+  // BUILD
+  // ==========================================================================
+
   @override
-Widget build(BuildContext context) {
-  final screenWidth = MediaQuery.of(context).size.width;
-  final isMobile = screenWidth < 900;
-  
-  return Scaffold(
-    backgroundColor: Colors.grey[100],
-    appBar: AppBar(
-      title: Text(widget.customerId == null ? 'New Customer' : 'Edit Customer'),
-      backgroundColor: const Color(0xFF2C3E50),
+  Widget build(BuildContext context) {
+    final isEdit = widget.customerId != null;
+    return Scaffold(
+      backgroundColor: _bgGrey,
+      appBar: _buildAppBar(isEdit),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: _navyLight))
+          : _loadError != null
+              ? _buildLoadError()
+              : _buildBody(),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(bool isEdit) {
+    return AppBar(
+      backgroundColor: _navyDark,
       foregroundColor: Colors.white,
-      elevation: 1,
+      elevation: 0,
+      title: Text(isEdit ? 'Edit Customer' : 'New Customer',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
       actions: [
-        // Mobile: Show icon buttons only
-        if (isMobile) ...[
-          IconButton(
-            onPressed: _saveAsDraft,
-            icon: const Icon(Icons.save_outlined),
-            tooltip: 'Save as Draft',
-          ),
-          IconButton(
-            onPressed: isSaving ? null : () {
-              if (widget.customerId != null) {
-                _updateCustomer();
-              } else {
-                _saveCustomer();
-              }
-            },
-            icon: const Icon(Icons.check),
-            tooltip: widget.customerId != null ? 'Update Customer' : 'Save & Activate',
-          ),
-        ]
-        // Desktop: Show full buttons
-        else ...[
-          OutlinedButton.icon(
-            onPressed: _saveAsDraft,
-            icon: const Icon(Icons.save_outlined, size: 18),
-            label: const Text('Save as Draft'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white70),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-          ),
-          const SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: isSaving ? null : () {
-              if (widget.customerId != null) {
-                _updateCustomer();
-              } else {
-                _saveCustomer();
-              }
-            },
-            icon: const Icon(Icons.check, size: 18),
-            label: Text(widget.customerId != null ? 'Update Customer' : 'Save & Activate'),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white70, fontSize: 14)),
+        ),
+        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          child: ElevatedButton(
+            onPressed: _isSaving ? null : _save,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3498DB),
+              backgroundColor: _navyAccent,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
+            child: _isSaving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : Text(isEdit ? 'Update' : 'Save', style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
-          const SizedBox(width: 16),
-        ],
+        ),
+        const SizedBox(width: 8),
       ],
-    ),
-    body: isLoading
-        ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3498DB)),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  widget.customerId != null 
-                      ? 'Loading customer data...' 
-                      : 'Initializing form...',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey,
-                  ),
-                ),
-                if (widget.customerId != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Customer ID: ${widget.customerId}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          )
-        : Form(
-            key: _formKey,
-            child: isMobile
-                // Mobile Layout: Single column with all content
-                ? SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Customer Type Selection
-                        _buildCustomerTypeSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 1: Basic Information
-                        _buildBasicInformationSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 2: Company Details (for Organization/Vendor)
-                        if (selectedCustomerType == 'Organization' ||
-                            selectedCustomerType == 'Vendor')
-                          ...[
-                            _buildCompanyDetailsSection(),
-                            const SizedBox(height: 20),
-                          ],
-                        
-                        // Section 3: Contact Persons (for Organization/Vendor)
-                        if (selectedCustomerType == 'Organization' ||
-                            selectedCustomerType == 'Vendor')
-                          ...[
-                            _buildContactPersonsSection(),
-                            const SizedBox(height: 20),
-                          ],
-                        
-                        // Section 4: Categorization & Segmentation
-                        _buildCategorizationSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 5: Rate Card & Pricing
-                        _buildRateCardSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 6: Payment Terms & Credit
-                        _buildPaymentTermsSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 7: Billing Preferences
-                        _buildBillingPreferencesSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 8: Vendor-Specific Details (for Vendor only)
-                        if (selectedCustomerType == 'Vendor')
-                          ...[
-                            _buildVendorSpecificSection(),
-                            const SizedBox(height: 20),
-                          ],
-                        
-                        // Section 9: Document Uploads
-                        _buildDocumentUploadsSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Section 10: Additional Information
-                        _buildAdditionalInformationSection(),
-                        const SizedBox(height: 20),
-                        
-                        // Mobile: Summary sections at bottom
-                        _buildCustomerSummarySection(),
-                        const Divider(height: 32),
-                        _buildAuditTrailSection(),
-                        const Divider(height: 32),
-                        _buildQuickActionsSection(),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
-                  )
-                // Desktop Layout: Row with sidebar
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Main content area (left side)
-                      Expanded(
-                        flex: 3,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Customer Type Selection
-                              _buildCustomerTypeSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 1: Basic Information
-                              _buildBasicInformationSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 2: Company Details (for Organization/Vendor)
-                              if (selectedCustomerType == 'Organization' ||
-                                  selectedCustomerType == 'Vendor')
-                                ...[
-                                  _buildCompanyDetailsSection(),
-                                  const SizedBox(height: 24),
-                                ],
-                              
-                              // Section 3: Contact Persons (for Organization/Vendor)
-                              if (selectedCustomerType == 'Organization' ||
-                                  selectedCustomerType == 'Vendor')
-                                ...[
-                                  _buildContactPersonsSection(),
-                                  const SizedBox(height: 24),
-                                ],
-                              
-                              // Section 4: Categorization & Segmentation
-                              _buildCategorizationSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 5: Rate Card & Pricing
-                              _buildRateCardSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 6: Payment Terms & Credit
-                              _buildPaymentTermsSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 7: Billing Preferences
-                              _buildBillingPreferencesSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 8: Vendor-Specific Details (for Vendor only)
-                              if (selectedCustomerType == 'Vendor')
-                                ...[
-                                  _buildVendorSpecificSection(),
-                                  const SizedBox(height: 24),
-                                ],
-                              
-                              // Section 9: Document Uploads
-                              _buildDocumentUploadsSection(),
-                              const SizedBox(height: 24),
-                              
-                              // Section 10: Additional Information
-                              _buildAdditionalInformationSection(),
-                              const SizedBox(height: 24),
-                            ],
-                          ),
-                        ),
-                      ),
-                      
-                      // Right sidebar - Summary & Audit Trail (Desktop only)
-                      Container(
-                        width: 350,
-                        color: Colors.white,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildCustomerSummarySection(),
-                              const Divider(height: 32),
-                              _buildAuditTrailSection(),
-                              const Divider(height: 32),
-                              _buildQuickActionsSection(),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-  );
-}
-  
-  // ============================================================================
-  // CUSTOMER TYPE SELECTION SECTION
-  // ============================================================================
-  
-  Widget _buildCustomerTypeSection() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
+      bottom: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white54,
+        indicatorColor: _navyAccent,
+        indicatorWeight: 3,
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
+        tabs: const [
+          Tab(text: 'Other Details'),
+          Tab(text: 'Tax Info'),
+          Tab(text: 'Address'),
+          Tab(text: 'Contact Persons'),
+          Tab(text: 'Remarks'),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  Widget _buildBody() {
+    return Form(
+      key: _formKey,
+      child: TabBarView(
+        controller: _tabController,
         children: [
-          Row(
-            children: [
-              const Text(
-                'Customer Type',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                  color: Colors.black87,
-                ),
-              ),
-              const Text(
-                ' *',
-                style: TextStyle(color: Colors.red, fontSize: 15),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _getCustomerTypeColor(),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  selectedCustomerType.toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: customerTypes.map((type) {
-              final isSelected = selectedCustomerType == type;
-              return InkWell(
-                onTap: () {
-                  setState(() {
-                    selectedCustomerType = type;
-                    // Reset type-specific fields
-                    if (type != 'Organization' && type != 'Vendor') {
-                      contactPersons.clear();
-                    } else {
-                      _addPrimaryContact();
-                    }
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFF3498DB).withOpacity(0.1)
-                        : Colors.grey[50],
-                    border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFF3498DB)
-                          : Colors.grey[300]!,
-                      width: isSelected ? 2 : 1,
+          _buildOtherDetailsTab(),
+          _buildTaxInfoTab(),
+          _buildAddressTab(),
+          _buildContactPersonsTab(),
+          _buildRemarksTab(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.error_outline, size: 64, color: _red),
+      const SizedBox(height: 16),
+      const Text('Failed to load customer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      Text(_loadError ?? '', style: const TextStyle(color: Colors.grey)),
+      const SizedBox(height: 16),
+      ElevatedButton.icon(
+        onPressed: _loadCustomer,
+        icon: const Icon(Icons.refresh),
+        label: const Text('Retry'),
+        style: ElevatedButton.styleFrom(backgroundColor: _navyLight, foregroundColor: Colors.white),
+      ),
+    ]));
+  }
+
+  // ==========================================================================
+  // TAB 1 — OTHER DETAILS
+  // ==========================================================================
+
+  Widget _buildOtherDetailsTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: LayoutBuilder(builder: (ctx, cs) {
+        final wide = cs.maxWidth > 700;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // ── Customer Type ──────────────────────────────────────────────────
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _sectionHeader('Customer Type'),
+            const SizedBox(height: 12),
+            Row(children: ['Business', 'Individual'].map((t) {
+              final sel = _customerType == t;
+              return Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: InkWell(
+                  onTap: () => setState(() => _customerType = t),
+                  borderRadius: BorderRadius.circular(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: sel ? _navyLight.withOpacity(0.1) : Colors.grey[50],
+                      border: Border.all(color: sel ? _navyLight : Colors.grey[300]!, width: sel ? 2 : 1),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _getCustomerTypeIcon(type),
-                        color: isSelected
-                            ? const Color(0xFF3498DB)
-                            : Colors.grey[600],
-                        size: 20,
-                      ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(t == 'Business' ? Icons.business_outlined : Icons.person_outline,
+                          size: 18, color: sel ? _navyLight : Colors.grey[600]),
                       const SizedBox(width: 8),
-                      Text(
-                        type,
-                        style: TextStyle(
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          fontSize: 14,
-                          color: isSelected
-                              ? const Color(0xFF3498DB)
-                              : Colors.black87,
-                        ),
-                      ),
-                    ],
+                      Text(t, style: TextStyle(
+                          fontSize: 14, fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                          color: sel ? _navyLight : Colors.grey[800])),
+                    ]),
                   ),
                 ),
               );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _getCustomerTypeDescription(),
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // ============================================================================
-  // SECTION 1: BASIC INFORMATION
-  // ============================================================================
-  
-  Widget _buildBasicInformationSection() {
-    return _buildSection(
-      title: 'Basic Information',
-      icon: Icons.info_outline,
-      child: Column(
-        children: [
-          // Customer Display Name / Company Name
-          _buildRequiredField(
-            label: selectedCustomerType == 'Organization' || 
-                    selectedCustomerType == 'Vendor'
-                ? 'Company Name'
-                : 'Customer Display Name',
-            child: TextFormField(
-              controller: _customerDisplayNameController,
-              decoration: _inputDecoration(
-                hintText: selectedCustomerType == 'Organization' || 
-                         selectedCustomerType == 'Vendor'
-                    ? 'Enter company name'
-                    : 'Enter customer name',
-              ),
-              validator: (value) =>
-                  value?.isEmpty == true ? 'Required' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Primary Contact Person Name (for Organization/Vendor)
-          if (selectedCustomerType == 'Organization' ||
-              selectedCustomerType == 'Vendor')
-            ...[
-              _buildRequiredField(
-                label: 'Primary Contact Person Name',
-                child: TextFormField(
-                  controller: _primaryContactPersonController,
-                  decoration: _inputDecoration(
-                    hintText: 'Enter contact person name',
-                  ),
-                  validator: (value) =>
-                      value?.isEmpty == true ? 'Required' : null,
-                  onChanged: (value) {
-                    if (contactPersons.isNotEmpty) {
-                      contactPersons[0].fullName = value;
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          
-          // Primary Email
-          _buildRequiredField(
-            label: 'Primary Email',
-            child: TextFormField(
-              controller: _primaryEmailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: _inputDecoration(
-                hintText: 'email@example.com',
-                prefixIcon: Icons.email_outlined,
-              ),
-              validator: (value) {
-                if (value?.isEmpty == true) return 'Required';
-                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                    .hasMatch(value!)) {
-                  return 'Invalid email format';
-                }
-                return null;
-              },
-              onChanged: (value) {
-                if (contactPersons.isNotEmpty) {
-                  contactPersons[0].email = value;
-                }
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Primary Phone Number
-          _buildRequiredField(
-            label: 'Primary Phone Number',
-            child: TextFormField(
-              controller: _primaryPhoneController,
-              keyboardType: TextInputType.phone,
-              decoration: _inputDecoration(
-                hintText: '+91 98765 43210',
-                prefixIcon: Icons.phone_outlined,
-              ),
-              validator: (value) {
-                if (value?.isEmpty == true) return 'Required';
-                if (!RegExp(r'^[+]?[0-9]{10,15}$').hasMatch(value!)) {
-                  return 'Invalid phone number';
-                }
-                return null;
-              },
-              onChanged: (value) {
-                if (contactPersons.isNotEmpty) {
-                  contactPersons[0].phoneNumber = value;
-                }
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Alternate Phone
-          _buildOptionalField(
-            label: 'Alternate Phone',
-            child: TextFormField(
-              controller: _alternatePhoneController,
-              keyboardType: TextInputType.phone,
-              decoration: _inputDecoration(
-                hintText: '+91 98765 43210',
-                prefixIcon: Icons.phone_outlined,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Address Line 1
-          _buildRequiredField(
-            label: 'Address Line 1',
-            child: TextFormField(
-              controller: _addressLine1Controller,
-              decoration: _inputDecoration(
-                hintText: 'Street address, building number',
-              ),
-              validator: (value) =>
-                  value?.isEmpty == true ? 'Required' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Address Line 2
-          _buildOptionalField(
-            label: 'Address Line 2',
-            child: TextFormField(
-              controller: _addressLine2Controller,
-              decoration: _inputDecoration(
-                hintText: 'Apartment, suite, floor (optional)',
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // City and State (Responsive Row)
-          _buildResponsiveRow(
-            context,
-            [
-              _buildRequiredField(
-                label: 'City',
-                child: TextFormField(
-                  controller: _cityController,
-                  decoration: _inputDecoration(
-                    hintText: 'City',
-                  ),
-                  validator: (value) =>
-                      value?.isEmpty == true ? 'Required' : null,
-                ),
-              ),
-              const SizedBox(width: 16),
-              _buildRequiredField(
-                label: 'State/Province',
-                child: TextFormField(
-                  controller: _stateController,
-                  decoration: _inputDecoration(
-                    hintText: 'State',
-                  ),
-                  validator: (value) =>
-                      value?.isEmpty == true ? 'Required' : null,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          
-          // Postal Code and Country (Responsive Row)
-          _buildResponsiveRow(
-            context,
-            [
-              _buildOptionalField(
-                label: 'Postal/PIN Code',
-                child: TextFormField(
-                  controller: _postalCodeController,
-                  keyboardType: TextInputType.number,
-                  decoration: _inputDecoration(
-                    hintText: '560001',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              _buildRequiredField(
-                label: 'Country',
-                child: DropdownButtonFormField<String>(
-                  value: selectedCountry,
-                  decoration: _inputDecoration(),
-                  items: countries.map((country) {
-                    return DropdownMenuItem(
-                      value: country,
-                      child: Text(country),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedCountry = value!);
-                  },
-                  validator: (value) =>
-                      value?.isEmpty == true ? 'Required' : null,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  
-  // ============================================================================
-  // SECTION 2: COMPANY DETAILS - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildCompanyDetailsSection() {
-    return _buildSection(
-      title: 'Company Details',
-      icon: Icons.business_center_outlined,
-      child: Column(
-        children: [
-          // Company Registration Number
-          _buildOptionalField(
-            label: 'Company Registration Number',
-            child: TextFormField(
-              controller: _companyRegistrationController,
-              decoration: _inputDecoration(
-                hintText: 'Enter registration number',
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // PAN Number
-          _buildOptionalField(
-            label: 'PAN Number',
-            child: TextFormField(
-              controller: _panNumberController,
-              decoration: _inputDecoration(
-                hintText: 'ABCDE1234F',
-              ),
-              textCapitalization: TextCapitalization.characters,
-              validator: (value) {
-                if (value?.isNotEmpty == true &&
-                    !RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$').hasMatch(value!)) {
-                  return 'Invalid PAN format';
-                }
-                return null;
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // GST Number
-          _buildRequiredField(
-            label: 'GST Number/GSTIN',
-            showRequired: selectedCustomerType == 'Organization' ||
-                          selectedCustomerType == 'Vendor',
-            child: TextFormField(
-              controller: _gstNumberController,
-              decoration: _inputDecoration(
-                hintText: '22AAAAA0000A1Z5',
-              ),
-              textCapitalization: TextCapitalization.characters,
-              validator: (value) {
-                if ((selectedCustomerType == 'Organization' ||
-                     selectedCustomerType == 'Vendor') &&
-                    value?.isEmpty == true) {
-                  return 'Required for B2B customers';
-                }
-                if (value?.isNotEmpty == true &&
-                    !RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$')
-                        .hasMatch(value!)) {
-                  return 'Invalid GST format';
-                }
-                return null;
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // TAN Number (for Organization only)
-          if (selectedCustomerType == 'Organization')
-            ...[
-              _buildOptionalField(
-                label: 'TAN Number',
-                child: TextFormField(
-                  controller: _tanNumberController,
-                  decoration: _inputDecoration(
-                    hintText: 'ABCD12345E',
-                  ),
-                  textCapitalization: TextCapitalization.characters,
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          
-          // Industry Type (for Organization only)
-          if (selectedCustomerType == 'Organization')
-            ...[
-              _buildOptionalField(
-                label: 'Industry Type',
-                child: DropdownButtonFormField<String>(
-                  value: selectedIndustryType,
-                  decoration: _inputDecoration(),
-                  hint: const Text('Select industry'),
-                  items: industryTypes.map((industry) {
-                    return DropdownMenuItem(
-                      value: industry,
-                      child: Text(industry),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() => selectedIndustryType = value);
-                  },
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          
-          // Employee Strength (for Organization only)
-          if (selectedCustomerType == 'Organization')
-            ...[
-              _buildOptionalField(
-                label: 'Employee Strength',
-                child: TextFormField(
-                  controller: _employeeStrengthController,
-                  keyboardType: TextInputType.number,
-                  decoration: _inputDecoration(
-                    hintText: 'Number of employees',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          
-          // Annual Contract Value (for Organization only)
-          if (selectedCustomerType == 'Organization')
-            _buildOptionalField(
-              label: 'Annual Contract Value (ACV)',
-              child: TextFormField(
-                controller: _annualContractValueController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(
-                  hintText: 'Enter amount',
-                  prefixText: '₹ ',
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  
-  // ============================================================================
-  // SECTION 3: CONTACT PERSONS - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildContactPersonsSection() {
-    return _buildExpandableSection(
-      title: 'Contact Persons',
-      icon: Icons.contacts_outlined,
-      isExpanded: showContactPersonsSection,
-      onToggle: () {
-        setState(() {
-          showContactPersonsSection = !showContactPersonsSection;
-        });
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Manage multiple contact persons for different purposes (billing, operations, accounts, etc.)',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          
-          // List of contact persons
-          ...contactPersons.asMap().entries.map((entry) {
-            final index = entry.key;
-            final contact = entry.value;
-            return Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: contact.isPrimary ? const Color(0xFF3498DB) : Colors.grey[700],
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          contact.isPrimary ? 'PRIMARY' : 'CONTACT ${index + 1}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      if (!contact.isPrimary)
-                        IconButton(
-                          onPressed: () => _removeContactPerson(index),
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          color: Colors.red,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Contact Type
-                  _buildOptionalField(
-                    label: 'Contact Type',
-                    child: DropdownButtonFormField<String>(
-                      value: contact.contactType,
-                      decoration: _inputDecoration(),
-                      items: contactTypes.map((type) {
-                        return DropdownMenuItem(
-                          value: type,
-                          child: Text(type),
-                          enabled: !contact.isPrimary || type == 'Primary Contact',
-                        );
-                      }).toList(),
-                      onChanged: contact.isPrimary
-                          ? null
-                          : (value) {
-                              setState(() {
-                                contactPersons[index].contactType = value!;
-                              });
-                            },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Full Name
-                  _buildRequiredField(
-                    label: 'Full Name',
-                    child: TextFormField(
-                      initialValue: contact.fullName,
-                      decoration: _inputDecoration(hintText: 'Enter full name'),
-                      enabled: !contact.isPrimary,
-                      onChanged: (value) {
-                        contactPersons[index].fullName = value;
-                      },
-                      validator: (value) => value?.isEmpty == true ? 'Required' : null,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Email and Phone (Responsive Row)
-                  _buildResponsiveRow(
-                    context,
-                    [
-                      _buildRequiredField(
-                        label: 'Email',
-                        child: TextFormField(
-                          initialValue: contact.email,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: _inputDecoration(hintText: 'email@example.com'),
-                          enabled: !contact.isPrimary,
-                          onChanged: (value) {
-                            contactPersons[index].email = value;
-                          },
-                          validator: (value) {
-                            if (value?.isEmpty == true) return 'Required';
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value!)) {
-                              return 'Invalid email';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      _buildRequiredField(
-                        label: 'Phone Number',
-                        child: TextFormField(
-                          initialValue: contact.phoneNumber,
-                          keyboardType: TextInputType.phone,
-                          decoration: _inputDecoration(hintText: '+91 98765 43210'),
-                          enabled: !contact.isPrimary,
-                          onChanged: (value) {
-                            contactPersons[index].phoneNumber = value;
-                          },
-                          validator: (value) {
-                            if (value?.isEmpty == true) return 'Required';
-                            if (!RegExp(r'^[+]?[0-9]{10,15}$').hasMatch(value!)) {
-                              return 'Invalid phone';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Designation and Department (Responsive Row)
-                  _buildResponsiveRow(
-                    context,
-                    [
-                      _buildOptionalField(
-                        label: 'Designation/Role',
-                        child: TextFormField(
-                          initialValue: contact.designation,
-                          decoration: _inputDecoration(hintText: 'Manager, CEO, etc.'),
-                          onChanged: (value) {
-                            contactPersons[index].designation = value;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      _buildOptionalField(
-                        label: 'Department',
-                        child: TextFormField(
-                          initialValue: contact.department,
-                          decoration: _inputDecoration(hintText: 'Sales, Finance, etc.'),
-                          onChanged: (value) {
-                            contactPersons[index].department = value;
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-          
+            }).toList()),
+          ])),
           const SizedBox(height: 16),
-          
-          // Add Contact Person Button
-          OutlinedButton.icon(
-            onPressed: _addContactPerson,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add Contact Person'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF3498DB),
-              side: const BorderSide(color: Color(0xFF3498DB)),
-            ),
-          ),
-        ],
-      ),
+
+          // ── Name fields ────────────────────────────────────────────────────
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _sectionHeader('Primary Contact'),
+            const SizedBox(height: 16),
+
+            // Salutation + First + Last  (responsive)
+            wide
+                ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    SizedBox(width: 120, child: _salutationDropdown()),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('First Name', _firstNameCtrl, hint: 'First name')),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('Last Name', _lastNameCtrl, hint: 'Last name')),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _salutationDropdown(),
+                    const SizedBox(height: 12),
+                    _field('First Name', _firstNameCtrl, hint: 'First name'),
+                    const SizedBox(height: 12),
+                    _field('Last Name', _lastNameCtrl, hint: 'Last name'),
+                  ]),
+            const SizedBox(height: 16),
+
+            // Company Name (Business only)
+            if (_customerType == 'Business') ...[
+              _field('Company Name', _companyNameCtrl, hint: 'Enter company name'),
+              const SizedBox(height: 16),
+            ],
+
+            // Display Name (required) — with suggestions dropdown
+            _fieldLabel('Customer Display Name', required: true),
+            const SizedBox(height: 6),
+            _displayNameField(),
+            const SizedBox(height: 16),
+
+            // Email
+            _field('Customer Email', _emailCtrl,
+                hint: 'email@example.com', required: true,
+                keyboard: TextInputType.emailAddress),
+            const SizedBox(height: 16),
+
+            // Work Phone + Mobile
+            wide
+                ? Row(children: [
+                    Expanded(child: _field('Work Phone', _workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('Mobile', _mobileCtrl, hint: 'Mobile number', keyboard: TextInputType.phone)),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _field('Work Phone', _workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone),
+                    const SizedBox(height: 12),
+                    _field('Mobile', _mobileCtrl, hint: 'Mobile number', keyboard: TextInputType.phone),
+                  ]),
+            const SizedBox(height: 16),
+
+            // Website
+            _field('Website', _websiteCtrl, hint: 'https://example.com', keyboard: TextInputType.url),
+            const SizedBox(height: 16),
+
+            // Department + Designation
+            wide
+                ? Row(children: [
+                    Expanded(child: _field('Designation', _designationCtrl, hint: 'e.g. Manager')),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('Department', _departmentCtrl, hint: 'e.g. Finance')),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _field('Designation', _designationCtrl, hint: 'e.g. Manager'),
+                    const SizedBox(height: 12),
+                    _field('Department', _departmentCtrl, hint: 'e.g. Finance'),
+                  ]),
+            const SizedBox(height: 16),
+
+            // Twitter + Facebook
+            wide
+                ? Row(children: [
+                    Expanded(child: _field('Twitter', _twitterCtrl, hint: '@username', prefix: Icons.alternate_email)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('Facebook', _facebookCtrl, hint: 'Facebook URL', prefix: Icons.facebook)),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _field('Twitter', _twitterCtrl, hint: '@username', prefix: Icons.alternate_email),
+                    const SizedBox(height: 12),
+                    _field('Facebook', _facebookCtrl, hint: 'Facebook URL', prefix: Icons.facebook),
+                  ]),
+          ])),
+          const SizedBox(height: 16),
+
+          // ── Financial / Portal ─────────────────────────────────────────────
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _sectionHeader('Preferences'),
+            const SizedBox(height: 16),
+
+            // Currency + Payment Terms
+            wide
+                ? Row(children: [
+                    Expanded(child: _labelDropdown('Default Currency', _defaultCurrency, kCurrencies, (v) => setState(() => _defaultCurrency = v!))),
+                    const SizedBox(width: 12),
+                    Expanded(child: _labelDropdown('Payment Terms', _paymentTerms, kPaymentTermsOptions, (v) => setState(() => _paymentTerms = v!))),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _labelDropdown('Default Currency', _defaultCurrency, kCurrencies, (v) => setState(() => _defaultCurrency = v!)),
+                    const SizedBox(height: 12),
+                    _labelDropdown('Payment Terms', _paymentTerms, kPaymentTermsOptions, (v) => setState(() => _paymentTerms = v!)),
+                  ]),
+            const SizedBox(height: 16),
+
+            // Portal Language + Opening Balance
+            wide
+                ? Row(children: [
+                    Expanded(child: _labelDropdown('Portal Language', _portalLanguage, kPortalLanguages, (v) => setState(() => _portalLanguage = v!))),
+                    const SizedBox(width: 12),
+                    Expanded(child: _field('Opening Balance', _openingBalanceCtrl, hint: '0.00', keyboard: TextInputType.number, prefix: Icons.currency_rupee)),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _labelDropdown('Portal Language', _portalLanguage, kPortalLanguages, (v) => setState(() => _portalLanguage = v!)),
+                    const SizedBox(height: 12),
+                    _field('Opening Balance', _openingBalanceCtrl, hint: '0.00', keyboard: TextInputType.number, prefix: Icons.currency_rupee),
+                  ]),
+            const SizedBox(height: 16),
+
+            // Portal toggle
+            _portalToggle(),
+          ])),
+        ]);
+      }),
     );
   }
 
-  
-  // ============================================================================
-  // SECTION 4: CATEGORIZATION & SEGMENTATION - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildCategorizationSection() {
-    return _buildSection(
-      title: 'Categorization & Segmentation',
-      icon: Icons.category_outlined,
-      child: Column(
-        children: [
-          // Customer Status
-          _buildRequiredField(
-            label: 'Customer Status',
-            child: DropdownButtonFormField<String>(
-              value: selectedCustomerStatus,
-              decoration: _inputDecoration(),
-              items: customerStatuses.map((status) {
-                return DropdownMenuItem(
-                  value: status,
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(status),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(status),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedCustomerStatus = value!);
-              },
-              validator: (value) => value?.isEmpty == true ? 'Required' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Reason for Blocking (if status is Blocked)
-          if (selectedCustomerStatus == 'Blocked') ...[
-            _buildRequiredField(
-              label: 'Reason for Blocking',
-              child: TextFormField(
-                controller: _reasonForBlockingController,
-                maxLines: 3,
-                decoration: _inputDecoration(
-                  hintText: 'Please provide reason for blocking this customer',
-                ),
-                validator: (value) =>
-                    value?.isEmpty == true ? 'Required when blocked' : null,
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-          
-          // Customer Tier
-          _buildOptionalField(
-            label: 'Customer Tier',
-            child: DropdownButtonFormField<String>(
-              value: selectedCustomerTier,
-              decoration: _inputDecoration(),
-              hint: const Text('Select tier'),
-              items: customerTiers.map((tier) {
-                return DropdownMenuItem(
-                  value: tier,
-                  child: Row(
-                    children: [
-                      Icon(Icons.star, size: 16, color: _getTierColor(tier)),
-                      const SizedBox(width: 8),
-                      Text(tier),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedCustomerTier = value);
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Sales Territory
-          _buildRequiredField(
-            label: 'Sales Territory',
-            child: DropdownButtonFormField<String>(
-              value: selectedSalesTerritory,
-              decoration: _inputDecoration(),
-              items: salesTerritories.map((territory) {
-                return DropdownMenuItem(value: territory, child: Text(territory));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedSalesTerritory = value!);
-              },
-              validator: (value) => value?.isEmpty == true ? 'Required' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Tags/Labels
-          _buildOptionalField(
-            label: 'Tags/Labels',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: availableTags.map((tag) {
-                    final isSelected = selectedTags.contains(tag);
-                    return FilterChip(
-                      label: Text(tag),
-                      selected: isSelected,
-                      onSelected: (selected) {
-                        setState(() {
-                          if (selected) {
-                            selectedTags.add(tag);
-                          } else {
-                            selectedTags.remove(tag);
-                          }
-                        });
-                      },
-                      selectedColor: const Color(0xFF3498DB).withOpacity(0.2),
-                      checkmarkColor: const Color(0xFF3498DB),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Select multiple tags to categorize this customer',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
+  Widget _displayNameField() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextFormField(
+        controller: _displayNameCtrl,
+        onTap: () => setState(() => _showSuggestions = _displayNameSuggestions.isNotEmpty),
+        onChanged: (_) => setState(() => _showSuggestions = false),
+        validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+        decoration: _inputDeco(hint: 'Select or enter display name'),
       ),
+      if (_showSuggestions && _displayNameSuggestions.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(top: 2),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 2))],
+          ),
+          child: Column(
+            children: _displayNameSuggestions.map((s) => InkWell(
+              onTap: () => setState(() { _displayNameCtrl.text = s; _showSuggestions = false; }),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Align(alignment: Alignment.centerLeft, child: Text(s, style: const TextStyle(fontSize: 13, color: _navyDark))),
+              ),
+            )).toList(),
+          ),
+        ),
+    ]);
+  }
+
+  Widget _salutationDropdown() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fieldLabel('Salutation'),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: _salutation,
+        decoration: _inputDeco(),
+        isExpanded: true,
+        items: kSalutations.map((s) => DropdownMenuItem(value: s, child: Text(s.isEmpty ? '—' : s, style: const TextStyle(fontSize: 13)))).toList(),
+        onChanged: (v) { setState(() { _salutation = v ?? ''; _rebuildSuggestions(); }); },
+      ),
+    ]);
+  }
+
+  Widget _portalToggle() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _portalEnabled ? _green.withOpacity(0.06) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _portalEnabled ? _green.withOpacity(0.3) : Colors.grey[200]!),
+      ),
+      child: Row(children: [
+        Container(width: 36, height: 36, decoration: BoxDecoration(
+            color: (_portalEnabled ? _green : Colors.grey[400]!).withOpacity(0.15), shape: BoxShape.circle),
+            child: Icon(Icons.person_pin_outlined, size: 20, color: _portalEnabled ? _green : Colors.grey[500])),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Customer Portal', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _portalEnabled ? _green : _navyDark)),
+          Text(_portalEnabled ? 'Portal access is enabled' : 'Portal access is not enabled',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        ])),
+        Switch(
+          value: _portalEnabled,
+          activeColor: _green,
+          onChanged: (v) => setState(() => _portalEnabled = v),
+        ),
+      ]),
     );
   }
-  
-  // ============================================================================
-  // SECTION 5: RATE CARD & PRICING - FULLY IMPLEMENTED
-  // ============================================================================
-  
-Widget _buildRateCardSection() {
-  final isVendor = selectedCustomerType == 'Vendor';
-  
-  return _buildSection(
-    title: 'Rate Card & Pricing',
-    icon: Icons.payments_outlined,
-    isOptional: true,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+
+  // ==========================================================================
+  // TAB 2 — TAX INFO
+  // ==========================================================================
+
+  Widget _buildTaxInfoTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: LayoutBuilder(builder: (ctx, cs) {
+        final wide = cs.maxWidth > 700;
+        return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _sectionHeader('Tax Information'),
+          const SizedBox(height: 16),
+
+          // GSTIN
+          _field('GSTIN / UIN', _gstinCtrl,
+              hint: '22AAAAA0000A1Z5',
+              caps: TextCapitalization.characters,
+              validator: (v) {
+                if (v == null || v.isEmpty) return null;
+                if (!RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$').hasMatch(v)) {
+                  return 'Invalid GSTIN format';
+                }
+                return null;
+              }),
+          const SizedBox(height: 16),
+
+          // GST Registration Type
+          _labelDropdown(
+            'GST Registration Type',
+            _gstRegistrationType.isEmpty ? null : _gstRegistrationType,
+            kGstRegistrationTypes,
+            (v) => setState(() => _gstRegistrationType = v ?? ''),
+            nullable: true,
+            nullLabel: 'Select GST Registration Type',
+          ),
+          const SizedBox(height: 16),
+
+          // Place of Supply
+          _labelDropdown(
+            'Place of Supply',
+            _placeOfSupply.isEmpty ? null : _placeOfSupply,
+            kIndianStates,
+            (v) => setState(() => _placeOfSupply = v ?? ''),
+            nullable: true,
+            nullLabel: 'Select Place of Supply',
+          ),
+          const SizedBox(height: 16),
+
+          // PAN
+          _field('PAN Number', _panCtrl,
+              hint: 'ABCDE1234F',
+              caps: TextCapitalization.characters,
+              validator: (v) {
+                if (v == null || v.isEmpty) return null;
+                if (!RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$').hasMatch(v)) return 'Invalid PAN format';
+                return null;
+              }),
+          const SizedBox(height: 16),
+
+          // Tax Preference
+          _labelDropdown(
+            'Tax Preference',
+            _taxPreference,
+            kTaxPreferences,
+            (v) => setState(() => _taxPreference = v ?? 'Taxable'),
+          ),
+          const SizedBox(height: 16),
+
+          // Exemption Reason (if tax exempt)
+          if (_taxPreference == 'Tax Exempt') ...[
+            _field('Exemption Reason', _exemptionReasonCtrl,
+                hint: 'Provide reason for tax exemption'),
+            const SizedBox(height: 16),
+          ],
+
+          // Info box
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.info_outline, size: 16, color: Color(0xFF1D4ED8)),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                'GST details are used to calculate taxes on invoices. Make sure the GSTIN and PAN are accurate.',
+                style: TextStyle(fontSize: 12, color: Colors.blue[900]),
+              )),
+            ]),
+          ),
+        ]));
+      }),
+    );
+  }
+
+  // ==========================================================================
+  // TAB 3 — ADDRESS
+  // ==========================================================================
+
+  Widget _buildAddressTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: LayoutBuilder(builder: (ctx, cs) {
+        final wide = cs.maxWidth > 700;
+        return wide
+            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: _buildBillingAddressCard()),
+                const SizedBox(width: 16),
+                Expanded(child: _buildShippingAddressCard()),
+              ])
+            : Column(children: [
+                _buildBillingAddressCard(),
+                const SizedBox(height: 16),
+                _buildShippingAddressCard(),
+              ]);
+      }),
+    );
+  }
+
+  Widget _buildBillingAddressCard() {
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.location_on_outlined, size: 18, color: _navyAccent),
+        const SizedBox(width: 8),
+        const Text('Billing Address', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+      ]),
+      const SizedBox(height: 16),
+      _field('Attention', _bAttentionCtrl, hint: 'Person/Department name'),
+      const SizedBox(height: 12),
+      _field('Street 1', _bStreet1Ctrl, hint: 'Street address line 1'),
+      const SizedBox(height: 12),
+      _field('Street 2', _bStreet2Ctrl, hint: 'Street address line 2'),
+      const SizedBox(height: 12),
+      _field('City', _bCityCtrl, hint: 'City'),
+      const SizedBox(height: 12),
+      _labelDropdown('State', _bState.isEmpty ? null : _bState, kIndianStates,
+          (v) => setState(() => _bState = v ?? ''), nullable: true, nullLabel: 'Select State'),
+      const SizedBox(height: 12),
+      _field('Zip Code', _bZipCtrl, hint: 'PIN / ZIP', keyboard: TextInputType.number),
+      const SizedBox(height: 12),
+      _countryDropdown('Country', _bCountry, (v) => setState(() => _bCountry = v!)),
+      const SizedBox(height: 12),
+      _field('Phone', _bPhoneCtrl, hint: 'Phone', keyboard: TextInputType.phone),
+      const SizedBox(height: 12),
+      _field('Fax', _bFaxCtrl, hint: 'Fax number'),
+    ]));
+  }
+
+  Widget _buildShippingAddressCard() {
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.local_shipping_outlined, size: 18, color: _navyAccent),
+        const SizedBox(width: 8),
+        const Text('Shipping Address', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: _copyBillingToShipping,
+          icon: const Icon(Icons.copy_outlined, size: 14),
+          label: const Text('Copy Billing', style: TextStyle(fontSize: 12)),
+          style: TextButton.styleFrom(foregroundColor: _navyAccent, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
+        ),
+      ]),
+      const SizedBox(height: 16),
+      _field('Attention', _sAttentionCtrl, hint: 'Person/Department name'),
+      const SizedBox(height: 12),
+      _field('Street 1', _sStreet1Ctrl, hint: 'Street address line 1'),
+      const SizedBox(height: 12),
+      _field('Street 2', _sStreet2Ctrl, hint: 'Street address line 2'),
+      const SizedBox(height: 12),
+      _field('City', _sCityCtrl, hint: 'City'),
+      const SizedBox(height: 12),
+      _labelDropdown('State', _sState.isEmpty ? null : _sState, kIndianStates,
+          (v) => setState(() => _sState = v ?? ''), nullable: true, nullLabel: 'Select State'),
+      const SizedBox(height: 12),
+      _field('Zip Code', _sZipCtrl, hint: 'PIN / ZIP', keyboard: TextInputType.number),
+      const SizedBox(height: 12),
+      _countryDropdown('Country', _sCountry, (v) => setState(() => _sCountry = v!)),
+      const SizedBox(height: 12),
+      _field('Phone', _sPhoneCtrl, hint: 'Phone', keyboard: TextInputType.phone),
+      const SizedBox(height: 12),
+      _field('Fax', _sFaxCtrl, hint: 'Fax number'),
+    ]));
+  }
+
+  Widget _countryDropdown(String label, String value, ValueChanged<String?> onChanged) {
+    final countries = ['India', 'USA', 'UK', 'UAE', 'Singapore', 'Australia', 'Germany', 'France', 'Japan', 'China'];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fieldLabel(label),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: countries.contains(value) ? value : 'India',
+        decoration: _inputDeco(),
+        isExpanded: true,
+        items: countries.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 13)))).toList(),
+        onChanged: onChanged,
+      ),
+    ]);
+  }
+
+  // ==========================================================================
+  // TAB 4 — CONTACT PERSONS
+  // ==========================================================================
+
+  Widget _buildContactPersonsTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Info banner
         Container(
           padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
-            color: Colors.blue[50],
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.blue[200]!),
+            color: const Color(0xFFF0F9FF),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFBAE6FD)),
           ),
-          child: Row(
-            children: [
-              Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Rate card is optional. You can assign or create a rate card now, or do it later from the Rate Card module.',
-                  style: TextStyle(color: Colors.blue[900], fontSize: 13),
-                ),
-              ),
-            ],
+          child: Row(children: [
+            const Icon(Icons.info_outline, size: 16, color: Color(0xFF0369A1)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(
+              'Add multiple contact persons for this customer. Each contact can optionally have portal access.',
+              style: TextStyle(fontSize: 12, color: Colors.blue[900]),
+            )),
+          ]),
+        ),
+
+        // Contact person cards
+        ..._contactPersons.asMap().entries.map((e) => _buildContactPersonCard(e.key, e.value)),
+
+        // Add button
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => setState(() => _contactPersons.add(_ContactPersonForm())),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add Contact Person'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _navyAccent,
+            side: const BorderSide(color: _navyAccent),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
-        const SizedBox(height: 20),
-        
-        // ✅ REGULAR CUSTOMER RATE CARD (for non-vendors)
-        if (!isVendor) ...[
-          // Regular customer rate card
-          _buildOptionalField(
-            label: 'Assigned Rate Card',
-            child: Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: selectedRateCard,
-                    decoration: _inputDecoration(),
-                    hint: const Text('Select rate card (or skip)'),
-                    items: rateCardOptions.map((card) {
-                      return DropdownMenuItem(value: card, child: Text(card));
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() => selectedRateCard = value);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: _showCreateRateCardDialog,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Create New'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF3498DB),
-                    side: const BorderSide(color: Color(0xFF3498DB)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Contract Type
-          _buildOptionalField(
-            label: 'Contract Type',
-            child: DropdownButtonFormField<String>(
-              value: selectedContractType,
-              decoration: _inputDecoration(),
-              hint: const Text('Select contract type'),
-              items: contractTypes.map((type) {
-                return DropdownMenuItem(value: type, child: Text(type));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedContractType = value);
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Contract Dates (Responsive Row)
-          _buildResponsiveRow(
-            context,
-            [
-              _buildOptionalField(
-                label: 'Contract Start Date',
-                child: TextFormField(
-                  controller: _contractStartDateController,
-                  readOnly: true,
-                  decoration: _inputDecoration(
-                    hintText: 'Select date',
-                    suffixIcon: Icons.calendar_today,
-                  ),
-                  onTap: () => _selectDate(_contractStartDateController),
-                ),
-              ),
-              const SizedBox(width: 16),
-              _buildOptionalField(
-                label: 'Contract End Date',
-                child: TextFormField(
-                  controller: _contractEndDateController,
-                  readOnly: true,
-                  decoration: _inputDecoration(
-                    hintText: 'Select date',
-                    suffixIcon: Icons.calendar_today,
-                  ),
-                  onTap: () => _selectDate(_contractEndDateController),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          
-          // Auto-renewal
-          CheckboxListTile(
-            title: const Text('Auto-renewal', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            subtitle: const Text('Automatically renew contract when it expires', style: TextStyle(fontSize: 12)),
-            value: autoRenewal,
-            onChanged: (value) {
-              setState(() => autoRenewal = value!);
-            },
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-          ),
-          
-          if (autoRenewal) ...[
-            const SizedBox(height: 16),
-            _buildOptionalField(
-              label: 'Renewal Notice Period (days)',
-              child: TextFormField(
-                controller: _renewalNoticePeriodController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'Days before contract end'),
-              ),
-            ),
-          ],
-        ],
-        
-        // ✅ VENDOR-SPECIFIC RATE CARD (commission-based) - THIS MUST NOT BE COMMENTED
-        if (isVendor) ...[
-          const Text(
-            'Vendor Commission Structure',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
-          ),
-          const SizedBox(height: 16),
-          
-          // Vendor Commission Type
-          _buildRequiredField(
-            label: 'Commission Type',
-            child: DropdownButtonFormField<String>(
-              value: selectedVendorCommissionType,
-              decoration: _inputDecoration(),
-              hint: const Text('Select commission type'),
-              items: vendorCommissionTypes.map((type) {
-                return DropdownMenuItem(value: type, child: Text(type));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedVendorCommissionType = value);
-              },
-              validator: (value) => value?.isEmpty == true ? 'Required for vendors' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Commission fields based on type
-          if (selectedVendorCommissionType == 'Percentage') ...[
-            _buildRequiredField(
-              label: 'Commission Rate (%)',
-              child: TextFormField(
-                controller: _commissionRateController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'e.g., 10', suffixText: '%'),
-                validator: (value) => value?.isEmpty == true ? 'Required' : null,
-              ),
-            ),
-          ] else if (selectedVendorCommissionType == 'Fixed Amount per Trip') ...[
-            _buildRequiredField(
-              label: 'Fixed Amount per Trip',
-              child: TextFormField(
-                controller: _fixedAmountPerTripController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'Enter amount', prefixText: '₹ '),
-                validator: (value) => value?.isEmpty == true ? 'Required' : null,
-              ),
-            ),
-          ] else if (selectedVendorCommissionType == 'Revenue Share') ...[
-            _buildRequiredField(
-              label: 'Revenue Share (%)',
-              child: TextFormField(
-                controller: _revenueShareController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'e.g., 15', suffixText: '%'),
-                validator: (value) => value?.isEmpty == true ? 'Required' : null,
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          
-          // Minimum Guarantee Amount
-          _buildOptionalField(
-            label: 'Minimum Guarantee Amount',
-            child: TextFormField(
-              controller: _minimumGuaranteeController,
-              keyboardType: TextInputType.number,
-              decoration: _inputDecoration(hintText: 'Enter amount', prefixText: '₹ '),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Payment Cycle
-          _buildRequiredField(
-            label: 'Payment Cycle',
-            child: DropdownButtonFormField<String>(
-              value: selectedPaymentCycle,
-              decoration: _inputDecoration(),
-              hint: const Text('Select payment cycle'),
-              items: paymentCycles.map((cycle) {
-                return DropdownMenuItem(value: cycle, child: Text(cycle));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedPaymentCycle = value);
-              },
-              validator: (value) => value?.isEmpty == true ? 'Required for vendors' : null,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Vehicle Types Provided
-          _buildOptionalField(
-            label: 'Vehicle Types Provided',
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: vehicleTypes.map((vehicle) {
-                final isSelected = selectedVehicleTypesProvided.contains(vehicle);
-                return FilterChip(
-                  label: Text(vehicle),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        selectedVehicleTypesProvided.add(vehicle);
-                      } else {
-                        selectedVehicleTypesProvided.remove(vehicle);
-                      }
-                    });
-                  },
-                  selectedColor: const Color(0xFFE67E22).withOpacity(0.2),
-                  checkmarkColor: const Color(0xFFE67E22),
-                );
-              }).toList(),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Number of Vehicles
-          _buildOptionalField(
-            label: 'Number of Vehicles',
-            child: TextFormField(
-              controller: _numberOfVehiclesProvidedController,
-              keyboardType: TextInputType.number,
-              decoration: _inputDecoration(hintText: 'Total vehicles available'),
-            ),
-          ),
-        ],
-      ],
-    ),
-  );
-}
-  
-  // ============================================================================
-  // SECTION 6: PAYMENT TERMS & CREDIT - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildPaymentTermsSection() {
-    final isVendor = selectedCustomerType == 'Vendor';
-    
-    return _buildSection(
-      title: 'Payment Terms & Credit',
-      icon: Icons.account_balance_wallet_outlined,
-      child: Column(
-        children: [
-          // Payment Terms
-          _buildOptionalField(
-            label: 'Payment Terms',
-            child: DropdownButtonFormField<String>(
-              value: selectedPaymentTerms,
-              decoration: _inputDecoration(),
-              hint: const Text('Select payment terms'),
-              items: paymentTermsOptions.map((term) {
-                return DropdownMenuItem(value: term, child: Text(term));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedPaymentTerms = value);
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Preferred Payment Method
-          _buildOptionalField(
-            label: 'Preferred Payment Method',
-            child: DropdownButtonFormField<String>(
-              value: selectedPreferredPaymentMethod,
-              decoration: _inputDecoration(),
-              hint: const Text('Select payment method'),
-              items: paymentMethods.map((method) {
-                return DropdownMenuItem(value: method, child: Text(method));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedPreferredPaymentMethod = value);
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Credit Limit (not for vendors)
-          if (!isVendor) ...[
-            _buildOptionalField(
-              label: 'Credit Limit',
-              child: TextFormField(
-                controller: _creditLimitController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: '0 = No limit', prefixText: '₹ '),
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-          
-          // Security Deposit (for Organization/Vendor)
-          if (selectedCustomerType == 'Organization' || isVendor) ...[
-            _buildOptionalField(
-              label: 'Security Deposit Amount',
-              child: TextFormField(
-                controller: _securityDepositController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'Enter amount', prefixText: '₹ '),
-              ),
-            ),
-            const SizedBox(height: 20),
-            
-            // Security Deposit Status
-            _buildOptionalField(
-              label: 'Security Deposit Status',
-              child: DropdownButtonFormField<String>(
-                value: selectedSecurityDepositStatus,
-                decoration: _inputDecoration(),
-                hint: const Text('Select status'),
-                items: securityDepositStatuses.map((status) {
-                  return DropdownMenuItem(value: status, child: Text(status));
-                }).toList(),
-                onChanged: (value) {
-                  setState(() => selectedSecurityDepositStatus = value);
-                },
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-          
-          // Billing Frequency
-          _buildOptionalField(
-            label: 'Billing Frequency',
-            child: DropdownButtonFormField<String>(
-              value: selectedBillingFrequency,
-              decoration: _inputDecoration(),
-              hint: const Text('Select billing frequency'),
-              items: billingFrequencies.map((freq) {
-                return DropdownMenuItem(value: freq, child: Text(freq));
-              }).toList(),
-              onChanged: (value) {
-                setState(() => selectedBillingFrequency = value);
-              },
-            ),
-          ),
-        ],
-      ),
+      ]),
     );
   }
-  
-  
-  // ============================================================================
-  // SECTION 7: BILLING PREFERENCES - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildBillingPreferencesSection() {
-    return _buildSection(
-      title: 'Billing Preferences',
-      icon: Icons.receipt_long_outlined,
-      child: Column(
-        children: [
-          // Billing Email
-          _buildOptionalField(
-            label: 'Billing Email',
-            child: TextFormField(
-              controller: _billingEmailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: _inputDecoration(hintText: 'Defaults to primary email if empty'),
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Same as Primary Address checkbox
-          CheckboxListTile(
-            title: const Text('Billing Address same as Primary Address', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            value: sameAsPrimaryAddress,
-            onChanged: (value) {
-              setState(() {
-                sameAsPrimaryAddress = value!;
-                if (value) {
-                  _billingAddressController.text =
-                      '${_addressLine1Controller.text}\n${_addressLine2Controller.text}\n'
-                      '${_cityController.text}, ${_stateController.text} ${_postalCodeController.text}\n$selectedCountry';
-                }
-              });
-            },
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-          ),
-          const SizedBox(height: 16),
-          
-          // Billing Address
-          if (!sameAsPrimaryAddress) ...[
-            _buildOptionalField(
-              label: 'Billing Address',
-              child: TextFormField(
-                controller: _billingAddressController,
-                maxLines: 4,
-                decoration: _inputDecoration(hintText: 'Enter billing address'),
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-        ],
+
+  Widget _buildContactPersonCard(int index, _ContactPersonForm cp) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cp.isPrimary ? _navyAccent.withOpacity(0.4) : Colors.grey[200]!),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
       ),
-    );
-  }
-  
-  // ============================================================================
-  // SECTION 8: VENDOR-SPECIFIC DETAILS - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildVendorSpecificSection() {
-  return _buildSection(
-    title: 'Vendor-Specific Details',
-    icon: Icons.local_shipping_outlined,
-    child: Column(
-      children: [
-        // Number of Vehicles Available
-        _buildOptionalField(
-          label: 'Number of Vehicles Available',
-          child: TextFormField(
-            controller: _vendorVehiclesAvailableController,
-            keyboardType: TextInputType.number,
-            decoration: _inputDecoration(hintText: 'Total vehicles in fleet'),
+      child: Column(children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: cp.isPrimary ? _navyLight.withOpacity(0.06) : Colors.grey[50],
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
           ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Vehicle Types Available
-        _buildOptionalField(
-          label: 'Vehicle Types Available',
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: vehicleTypes.map((vehicle) {
-              final isSelected = vendorVehicleTypes.contains(vehicle);
-              return FilterChip(
-                label: Text(vehicle),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() {
-                    if (selected) {
-                      vendorVehicleTypes.add(vehicle);
-                    } else {
-                      vendorVehicleTypes.remove(vehicle);
-                    }
-                  });
-                },
-                selectedColor: const Color(0xFFE67E22).withOpacity(0.2),
-                checkmarkColor: const Color(0xFFE67E22),
-              );
-            }).toList(),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Vendor Agreement Dates (Responsive Row)
-        _buildResponsiveRow(
-          context,
-          [
-            _buildOptionalField(
-              label: 'Agreement Start Date',
-              child: TextFormField(
-                controller: _vendorAgreementStartController,
-                readOnly: true,
-                decoration: _inputDecoration(hintText: 'Select date', suffixIcon: Icons.calendar_today),
-                onTap: () => _selectDate(_vendorAgreementStartController),
-              ),
-            ),
-            const SizedBox(width: 16),
-            _buildOptionalField(
-              label: 'Agreement End Date',
-              child: TextFormField(
-                controller: _vendorAgreementEndController,
-                readOnly: true,
-                decoration: _inputDecoration(hintText: 'Select date', suffixIcon: Icons.calendar_today),
-                onTap: () => _selectDate(_vendorAgreementEndController),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        
-        // Vendor Performance Rating
-        _buildOptionalField(
-          label: 'Vendor Performance Rating',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: List.generate(5, (index) {
-                  return IconButton(
-                    onPressed: () {
-                      setState(() {
-                        vendorPerformanceRating = (index + 1).toDouble();
-                      });
-                    },
-                    icon: Icon(
-                      index < vendorPerformanceRating ? Icons.star : Icons.star_border,
-                      color: const Color(0xFFF39C12),
-                      size: 32,
-                    ),
-                  );
-                }),
-              ),
-              if (vendorPerformanceRating > 0)
-                Text(
-                  '${vendorPerformanceRating.toStringAsFixed(1)} out of 5 stars',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Insurance Valid Until
-        _buildOptionalField(
-          label: 'Insurance Valid Until',
-          child: TextFormField(
-            controller: _insuranceValidUntilController,
-            readOnly: true,
-            decoration: _inputDecoration(hintText: 'Select date', suffixIcon: Icons.calendar_today),
-            onTap: () => _selectDate(_insuranceValidUntilController),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Bank Details Section
-        const Divider(height: 32),
-        const Text(
-          'Bank Account Details',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
-        ),
-        const SizedBox(height: 16),
-        
-        // Bank Name
-        _buildOptionalField(
-          label: 'Bank Name',
-          child: TextFormField(
-            controller: _bankNameController,
-            decoration: _inputDecoration(hintText: 'Enter bank name'),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Account Number and IFSC Code (Responsive Row)
-        _buildResponsiveRow(
-          context,
-          [
-            _buildOptionalField(
-              label: 'Bank Account Number',
-              child: TextFormField(
-                controller: _bankAccountNumberController,
-                keyboardType: TextInputType.number,
-                decoration: _inputDecoration(hintText: 'Account number'),
-              ),
-            ),
-            const SizedBox(width: 16),
-            _buildOptionalField(
-              label: 'IFSC Code',
-              child: TextFormField(
-                controller: _ifscCodeController,
-                decoration: _inputDecoration(hintText: 'IFSC code'),
-                textCapitalization: TextCapitalization.characters,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        
-        // Account Holder Name
-        _buildOptionalField(
-          label: 'Account Holder Name',
-          child: TextFormField(
-            controller: _accountHolderNameController,
-            decoration: _inputDecoration(hintText: 'As per bank records'),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // Branch Name
-        _buildOptionalField(
-          label: 'Branch Name',
-          child: TextFormField(
-            controller: _branchNameController,
-            decoration: _inputDecoration(hintText: 'Bank branch'),
-          ),
-        ),
-        const SizedBox(height: 20),
-        
-        // UPI ID
-        _buildOptionalField(
-          label: 'UPI ID',
-          child: TextFormField(
-            controller: _upiIdController,
-            decoration: _inputDecoration(hintText: 'upiid@bank'),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-  
-  // ============================================================================
-  // SECTION 9: DOCUMENT UPLOADS - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildDocumentUploadsSection() {
-    return _buildExpandableSection(
-      title: 'Document Uploads',
-      icon: Icons.upload_file_outlined,
-      isExpanded: showDocumentSection,
-      onToggle: () {
-        setState(() {
-          showDocumentSection = !showDocumentSection;
-        });
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Upload relevant documents for record keeping and compliance. All file types allowed.',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          
-          ...uploadedDocuments.entries.map((entry) {
-            final category = entry.key;
-            final files = entry.value;
-            
-            // Skip categories not relevant to customer type
-            if (category == 'KYC Documents' && selectedCustomerType != 'Individual') {
-              return const SizedBox.shrink();
-            }
-            if (category == 'Company Documents' &&
-                selectedCustomerType != 'Organization' && selectedCustomerType != 'Vendor') {
-              return const SizedBox.shrink();
-            }
-            if ((category == 'Insurance Documents' || category == 'Vehicle Documents') &&
-                selectedCustomerType != 'Vendor') {
-              return const SizedBox.shrink();
-            }
-            
-            return Container(
-              margin: const EdgeInsets.only(bottom: 20),
-              padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
+                color: cp.isPrimary ? _navyLight : Colors.grey[600],
+                borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(_getDocumentCategoryIcon(category), color: const Color(0xFF3498DB), size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(category, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _pickDocuments(category),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add Files'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF3498DB),
-                          side: const BorderSide(color: Color(0xFF3498DB)),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (files.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    ...files.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final file = entry.value;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(_getFileIcon(file.extension), color: const Color(0xFF3498DB), size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    file.name,
-                                    style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    '${(file.size / 1024).toStringAsFixed(1)} KB',
-                                    style: TextStyle(color: Colors.grey[600], fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => _removeDocument(category, index),
-                              icon: const Icon(Icons.close, size: 18),
-                              color: Colors.red,
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ],
-                ],
-              ),
-            );
-          }).toList(),
-        ],
-      ),
-    );
-  }
-  
-  // ============================================================================
-  // SECTION 10: ADDITIONAL INFORMATION - FULLY IMPLEMENTED
-  // ============================================================================
-  
-  Widget _buildAdditionalInformationSection() {
-    return _buildSection(
-      title: 'Additional Information',
-      icon: Icons.notes_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Internal Notes
-          _buildOptionalField(
-            label: 'Internal Notes',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextFormField(
-                  controller: _internalNotesController,
-                  maxLines: 4,
-                  decoration: _inputDecoration(hintText: 'Add internal notes (visible only to internal team)'),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'These notes are for internal use only and not visible to the customer',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
-                ),
-              ],
+              child: Text(cp.isPrimary ? 'PRIMARY' : 'CONTACT ${index + 1}',
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
             ),
-          ),
-          const SizedBox(height: 24),
-          
-          // Custom Fields Section
-          const Divider(height: 32),
-          Row(
-            children: [
-              const Text(
-                'Custom Fields',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
+            const Spacer(),
+            if (!cp.isPrimary && _contactPersons.length > 1)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18, color: _red),
+                onPressed: () => setState(() => _contactPersons.removeAt(index)),
+                tooltip: 'Remove',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    showCustomFieldsSection = !showCustomFieldsSection;
-                  });
-                },
-                icon: Icon(showCustomFieldsSection ? Icons.expand_less : Icons.expand_more, size: 20),
-                label: Text(showCustomFieldsSection ? 'Hide' : 'Show', style: const TextStyle(fontSize: 13)),
-              ),
-            ],
-          ),
-          
-          if (showCustomFieldsSection) ...[
-            const SizedBox(height: 16),
-            const Text(
-              'Add custom fields specific to your business needs',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
-            ),
-            const SizedBox(height: 20),
-            
-            // Custom fields list
-            ...customFields.asMap().entries.map((entry) {
-              final index = entry.key;
-              final field = entry.value;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                padding: const EdgeInsets.all(16),
+          ]),
+        ),
+
+        // Fields
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: LayoutBuilder(builder: (ctx, cs) {
+            final wide = cs.maxWidth > 500;
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Salutation + First + Last
+              wide
+                  ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SizedBox(width: 110, child: _cpSalutation(cp)),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field('First Name', cp.firstNameCtrl, hint: 'First name')),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field('Last Name', cp.lastNameCtrl, hint: 'Last name')),
+                    ])
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      _cpSalutation(cp),
+                      const SizedBox(height: 10),
+                      _field('First Name', cp.firstNameCtrl, hint: 'First name'),
+                      const SizedBox(height: 10),
+                      _field('Last Name', cp.lastNameCtrl, hint: 'Last name'),
+                    ]),
+              const SizedBox(height: 12),
+
+              // Email
+              _field('Email', cp.emailCtrl, hint: 'email@example.com', keyboard: TextInputType.emailAddress),
+              const SizedBox(height: 12),
+
+              // Work Phone + Mobile
+              wide
+                  ? Row(children: [
+                      Expanded(child: _field('Work Phone', cp.workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone)),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field('Mobile', cp.mobileCtrl, hint: 'Mobile', keyboard: TextInputType.phone)),
+                    ])
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      _field('Work Phone', cp.workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone),
+                      const SizedBox(height: 10),
+                      _field('Mobile', cp.mobileCtrl, hint: 'Mobile', keyboard: TextInputType.phone),
+                    ]),
+              const SizedBox(height: 12),
+
+              // Designation + Department
+              wide
+                  ? Row(children: [
+                      Expanded(child: _field('Designation', cp.designationCtrl, hint: 'Job title')),
+                      const SizedBox(width: 10),
+                      Expanded(child: _field('Department', cp.departmentCtrl, hint: 'Department')),
+                    ])
+                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      _field('Designation', cp.designationCtrl, hint: 'Job title'),
+                      const SizedBox(height: 10),
+                      _field('Department', cp.departmentCtrl, hint: 'Department'),
+                    ]),
+              const SizedBox(height: 14),
+
+              // Portal access toggle
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: cp.portalAccess ? _green.withOpacity(0.06) : Colors.grey[50],
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
+                  border: Border.all(color: cp.portalAccess ? _green.withOpacity(0.25) : Colors.grey[200]!),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[700],
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'FIELD ${index + 1}',
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: () => _removeCustomField(index),
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          color: Colors.red,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Field Name
-                    _buildRequiredField(
-                      label: 'Field Name/Label',
-                      child: TextFormField(
-                        initialValue: field.fieldName,
-                        decoration: _inputDecoration(hintText: 'e.g., Preferred Driver Name'),
-                        onChanged: (value) {
-                          customFields[index].fieldName = value;
-                        },
-                        validator: (value) => value?.isEmpty == true ? 'Required' : null,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Field Type
-                    _buildRequiredField(
-                      label: 'Field Type',
-                      child: DropdownButtonFormField<String>(
-                        value: field.fieldType,
-                        decoration: _inputDecoration(),
-                        items: customFieldTypes.map((type) {
-                          return DropdownMenuItem(value: type, child: Text(type));
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            customFields[index].fieldType = value!;
-                          });
-                        },
-                        validator: (value) => value?.isEmpty == true ? 'Required' : null,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Field Value
-                    _buildOptionalField(
-                      label: 'Field Value',
-                      child: TextFormField(
-                        initialValue: field.fieldValue,
-                        decoration: _inputDecoration(hintText: 'Enter value'),
-                        onChanged: (value) {
-                          customFields[index].fieldValue = value;
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Is Mandatory
-                    CheckboxListTile(
-                      title: const Text('This field is mandatory', style: TextStyle(fontSize: 13)),
-                      value: field.isMandatory,
-                      onChanged: (value) {
-                        setState(() {
-                          customFields[index].isMandatory = value!;
-                        });
-                      },
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-            
-            const SizedBox(height: 16),
-            
-            // Add Custom Field Button (Disabled)
-            OutlinedButton.icon(
-              onPressed: null, // Disabled
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add Custom Field'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.grey,
-                side: const BorderSide(color: Colors.grey),
-                disabledForegroundColor: Colors.grey,
+                child: Row(children: [
+                  Icon(Icons.vpn_key_outlined, size: 16, color: cp.portalAccess ? _green : Colors.grey[500]),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text('Enable customer portal access',
+                      style: TextStyle(fontSize: 13, color: cp.portalAccess ? _green : Colors.grey[700], fontWeight: FontWeight.w500))),
+                  Switch(
+                    value: cp.portalAccess,
+                    activeColor: _green,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) => setState(() => cp.portalAccess = v),
+                  ),
+                ]),
               ),
-            ),
-          ],
-        ],
+            ]);
+          }),
+        ),
+      ]),
+    );
+  }
+
+  Widget _cpSalutation(_ContactPersonForm cp) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fieldLabel('Salutation'),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: cp.salutation,
+        decoration: _inputDeco(),
+        isExpanded: true,
+        items: kSalutations.map((s) => DropdownMenuItem(value: s, child: Text(s.isEmpty ? '—' : s, style: const TextStyle(fontSize: 13)))).toList(),
+        onChanged: (v) => setState(() => cp.salutation = v ?? ''),
       ),
-    );
+    ]);
   }
-  
-  // ============================================================================
-  // RIGHT SIDEBAR SECTIONS
-  // ============================================================================
-  
-  Widget _buildCustomerSummarySection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Customer Summary',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50)),
-        ),
-        const SizedBox(height: 20),
-        _buildSummaryRow('Customer ID:', customerId),
-        _buildSummaryRow('Type:', selectedCustomerType),
-        _buildSummaryRow('Status:', selectedCustomerStatus),
-        if (selectedCustomerTier != null) _buildSummaryRow('Tier:', selectedCustomerTier!),
-        _buildSummaryRow('Territory:', selectedSalesTerritory),
-        if (selectedRateCard != null) ...[
-          const Divider(height: 24),
-          _buildSummaryRow('Rate Card:', selectedRateCard!),
-        ],
-        if (selectedCustomerType == 'Vendor' && selectedVendorCommissionType != null) ...[
-          const Divider(height: 24),
-          _buildSummaryRow('Commission:', selectedVendorCommissionType!),
-        ],
-      ],
-    );
-  }
-  
-  Widget _buildAuditTrailSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Audit Trail',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50)),
-        ),
+
+  // ==========================================================================
+  // TAB 5 — REMARKS
+  // ==========================================================================
+
+  Widget _buildRemarksTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _sectionHeader('Remarks'),
+        const SizedBox(height: 8),
+        Text('Add internal notes or remarks about this customer. This is for internal use only.',
+            style: TextStyle(fontSize: 13, color: Colors.grey[600])),
         const SizedBox(height: 16),
-        _buildAuditRow(Icons.person_outline, 'Created By', createdBy),
-        _buildAuditRow(
-          Icons.calendar_today,
-          'Created Date',
-          createdDate != null ? _formatDate(createdDate!) : '-',
-        ),
-        if (lastModifiedBy.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _buildAuditRow(Icons.edit_outlined, 'Last Modified By', lastModifiedBy),
-        ],
-        if (lastModifiedDate != null) ...[
-          _buildAuditRow(Icons.update, 'Last Modified', _formatDate(lastModifiedDate!)),
-        ],
-      ],
-    );
-  }
-  
-  Widget _buildQuickActionsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Quick Actions',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50)),
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _resetForm,
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('Reset Form'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.red,
-              side: const BorderSide(color: Colors.red),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-          ),
+        TextFormField(
+          controller: _remarksCtrl,
+          maxLines: 10,
+          minLines: 6,
+          decoration: _inputDeco(hint: 'Enter any internal notes or remarks about this customer...'),
+          style: const TextStyle(fontSize: 14, height: 1.5),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.visibility_outlined, size: 18),
-            label: const Text('Preview'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF3498DB),
-              side: const BorderSide(color: Color(0xFF3498DB)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          ValueListenableBuilder(
+            valueListenable: _remarksCtrl,
+            builder: (_, v, __) => Text('${_remarksCtrl.text.length} characters',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500])),
           ),
-        ),
-      ],
+        ]),
+      ])),
     );
   }
-  
-  Widget _buildSummaryRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-          ),
-          Expanded(
-            child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          ),
-        ],
+
+  // ==========================================================================
+  // SHARED HELPERS
+  // ==========================================================================
+
+  Widget _card({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
       ),
+      child: child,
     );
   }
-  
-  Widget _buildAuditRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.grey[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 11)),
-                Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12)),
-              ],
-            ),
-          ),
-        ],
+
+  Widget _sectionHeader(String title) {
+    return Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark));
+  }
+
+  Widget _fieldLabel(String label, {bool required = false}) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navyDark)),
+      if (required) const Text(' *', style: TextStyle(color: _red, fontSize: 13)),
+    ]);
+  }
+
+  InputDecoration _inputDeco({String? hint, IconData? prefix}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
+      prefixIcon: prefix != null ? Icon(prefix, size: 18, color: Colors.grey[500]) : null,
+      filled: true,
+      fillColor: const Color(0xFFFAFBFC),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      isDense: true,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _navyLight, width: 1.5)),
+      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _red)),
+      focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _red, width: 1.5)),
+    );
+  }
+
+  Widget _field(
+    String label,
+    TextEditingController ctrl, {
+    String? hint,
+    bool required = false,
+    TextInputType keyboard = TextInputType.text,
+    TextCapitalization caps = TextCapitalization.none,
+    IconData? prefix,
+    String? Function(String?)? validator,
+  }) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fieldLabel(label, required: required),
+      const SizedBox(height: 6),
+      TextFormField(
+        controller: ctrl,
+        keyboardType: keyboard,
+        textCapitalization: caps,
+        decoration: _inputDeco(hint: hint, prefix: prefix),
+        style: const TextStyle(fontSize: 13),
+        validator: validator ?? (required ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null : null),
       ),
-    );
+    ]);
   }
-  
-  // ============================================================================
-  // HELPER WIDGETS
-  // ============================================================================
-  
-  // Helper to create responsive row/column for form fields
-  Widget _buildResponsiveRow(BuildContext context, List<Widget> children) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 900;
-    
-    if (isMobile) {
-      // Mobile: Stack vertically
-      return Column(
-        children: children.map((child) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: child,
-          );
-        }).toList(),
-      );
-    } else {
-      // Desktop: Show horizontally
-      return Row(
-        children: children.map((child) {
-          if (child is SizedBox && child.width != null) {
-            return child; // Keep SizedBox spacers as is
-          }
-          return Expanded(child: child);
-        }).toList(),
-      );
+
+  Widget _labelDropdown(
+    String label,
+    String? value,
+    List<String> items,
+    ValueChanged<String?> onChanged, {
+    bool nullable = false,
+    String? nullLabel,
+  }) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fieldLabel(label),
+      const SizedBox(height: 6),
+      DropdownButtonFormField<String>(
+        value: value,
+        decoration: _inputDeco(),
+        isExpanded: true,
+        hint: nullLabel != null ? Text(nullLabel, style: TextStyle(fontSize: 13, color: Colors.grey[400])) : null,
+        items: [
+          if (nullable) DropdownMenuItem<String>(value: null, child: Text(nullLabel ?? 'None', style: TextStyle(fontSize: 13, color: Colors.grey[400]))),
+          ...items.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13)))),
+        ],
+        onChanged: onChanged,
+      ),
+    ]);
+  }
+}
+
+// ============================================================================
+// CONTACT PERSON FORM MODEL
+// ============================================================================
+class _ContactPersonForm {
+  String salutation   = '';
+  final firstNameCtrl  = TextEditingController();
+  final lastNameCtrl   = TextEditingController();
+  final emailCtrl      = TextEditingController();
+  final workPhoneCtrl  = TextEditingController();
+  final mobileCtrl     = TextEditingController();
+  final designationCtrl= TextEditingController();
+  final departmentCtrl = TextEditingController();
+  bool isPrimary   = false;
+  bool portalAccess= false;
+
+  void dispose() {
+    for (final c in [firstNameCtrl, lastNameCtrl, emailCtrl, workPhoneCtrl,
+                     mobileCtrl, designationCtrl, departmentCtrl]) {
+      c.dispose();
     }
   }
-  
-  Widget _buildSection({
-    required String title,
-    required IconData icon,
-    required Widget child,
-    bool isOptional = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF3498DB), size: 22),
-              const SizedBox(width: 12),
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
-              ),
-              if (isOptional) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'OPTIONAL',
-                    style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 20),
-          child,
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildExpandableSection({
-    required String title,
-    required IconData icon,
-    required bool isExpanded,
-    required VoidCallback onToggle,
-    required Widget child,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: onToggle,
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Icon(icon, color: const Color(0xFF3498DB), size: 22),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
-                    ),
-                  ),
-                  Icon(
-                    isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: Colors.grey[600],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (isExpanded) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: child,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildRequiredField({
-    required String label,
-    required Widget child,
-    bool showRequired = true,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87),
-            ),
-            if (showRequired)
-              const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        child,
-      ],
-    );
-  }
-  
-  Widget _buildOptionalField({
-    required String label,
-    required Widget child,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87),
-        ),
-        const SizedBox(height: 8),
-        child,
-      ],
-    );
-  }
-  
-  InputDecoration _inputDecoration({
-    String? hintText,
-    IconData? prefixIcon,
-    IconData? suffixIcon,
-    String? prefixText,
-    String? suffixText,
-  }) {
-    return InputDecoration(
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: BorderSide(color: Colors.grey[300]!),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: BorderSide(color: Colors.grey[300]!),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: const BorderSide(color: Color(0xFF3498DB), width: 2),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      hintText: hintText,
-      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-      prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: Colors.grey[600], size: 20) : null,
-      suffixIcon: suffixIcon != null ? Icon(suffixIcon, color: Colors.grey[600], size: 20) : null,
-      prefixText: prefixText,
-      suffixText: suffixText,
-    );
-  }
-}
-
-// ============================================================================
-// DATA MODELS
-// ============================================================================
-
-class ContactPerson {
-  String contactType;
-  String fullName;
-  String email;
-  String phoneNumber;
-  String? designation;
-  String? department;
-  bool isPrimary;
-  
-  ContactPerson({
-    required this.contactType,
-    required this.fullName,
-    required this.email,
-    required this.phoneNumber,
-    this.designation,
-    this.department,
-    this.isPrimary = false,
-  });
-  
-  Map<String, dynamic> toJson() => {
-    'contactType': contactType,
-    'fullName': fullName,
-    'email': email,
-    'phoneNumber': phoneNumber,
-    'designation': designation,
-    'department': department,
-    'isPrimary': isPrimary,
-  };
-}
-
-class CustomField {
-  String fieldName;
-  String fieldType;
-  String fieldValue;
-  bool isMandatory;
-  
-  CustomField({
-    required this.fieldName,
-    required this.fieldType,
-    required this.fieldValue,
-    required this.isMandatory,
-  });
-  
-  Map<String, dynamic> toJson() => {
-    'fieldName': fieldName,
-    'fieldType': fieldType,
-    'fieldValue': fieldValue,
-    'isMandatory': isMandatory,
-  };
 }

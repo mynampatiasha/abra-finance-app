@@ -1,18 +1,19 @@
 // permissions_finance.dart
 // Finance permissions — service + full overlay UI in one file.
-// Modules grouped by: Sales, Purchases, Inventory, Accounting, Expenses, Reports, Settings.
-// Navy gradient color system from new_credit_note.dart.
+// Modules ordered EXACTLY as the sidebar in billing_main_shell.dart:
+// 1. TMS  2. Items  3. Sales  4. Purchases  5. Time Tracking
+// 6. Banking  7. Accountant  8. Reports  9. Role Access Control  10. My Profile
 
 import 'package:flutter/material.dart';
 import '../data/services/finance_auth_service.dart';
 
-// ── Colors ───────────────────────────────────────────────────────────────────
+// ── Colors ────────────────────────────────────────────────────────────────────
 const Color _navyDark   = Color(0xFF0D1B3E);
 const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
-// ── Service ──────────────────────────────────────────────────────────────────
+// ── Service ───────────────────────────────────────────────────────────────────
 class FinancePermissionsService {
   static Future<Map<String, dynamic>> fetchPermissions(String userId) =>
       FinanceAuthService.get('/api/finance/users/$userId/permissions');
@@ -27,69 +28,12 @@ class FinancePermissionsService {
       );
 }
 
-// ── Finance permission modules ────────────────────────────────────────────────
+// ── Finance permission modules ─────────────────────────────────────────────────
+// ORDER matches billing_main_shell.dart sidebar exactly.
+// KEY names match _kPermissionRouteMap in billing_main_shell.dart exactly.
+// Dashboard is intentionally excluded (always visible to all).
 const List<Map<String, dynamic>> _kModules = [
-  {
-    'group': 'Sales',
-    'icon': Icons.point_of_sale,
-    'permissions': {
-      'invoices':           'Invoices',
-      'customers':          'Customers',
-      'credit_notes':       'Credit Notes',
-      'quotes':             'Quotes',
-      'sales_orders':       'Sales Orders',
-      'payments_received':  'Payments Received',
-      'delivery_challans':  'Delivery Challans',
-      'recurring_invoices': 'Recurring Invoices',
-    },
-  },
-  {
-    'group': 'Purchases',
-    'icon': Icons.shopping_cart_outlined,
-    'permissions': {
-      'bills':              'Bills',
-      'vendors':            'Vendors',
-      'purchase_orders':    'Purchase Orders',
-      'vendor_credits':     'Vendor Credits',
-      'payments_made':      'Payments Made',
-      'recurring_bills':    'Recurring Bills',
-    },
-  },
-  {
-    'group': 'Inventory',
-    'icon': Icons.inventory_2_outlined,
-    'permissions': {
-      'items': 'Items / Products',
-    },
-  },
-  {
-    'group': 'Expenses',
-    'icon': Icons.receipt_outlined,
-    'permissions': {
-      'expenses':           'Expenses',
-      'recurring_expenses': 'Recurring Expenses',
-    },
-  },
-  {
-    'group': 'Accounting',
-    'icon': Icons.account_balance_outlined,
-    'permissions': {
-      'chart_of_accounts':    'Chart of Accounts',
-      'manual_journals':      'Manual Journals',
-      'currency_adjustments': 'Currency Adjustments',
-      'reconciliation':       'Reconciliation',
-      'budgets':              'Budgets',
-      'bank_accounts':        'Bank Accounts',
-    },
-  },
-  {
-    'group': 'Time Tracking',
-    'icon': Icons.access_time_outlined,
-    'permissions': {
-      'projects':   'Projects',
-      'timesheets': 'Timesheets',
-    },
-  },
+  // ── 1. TMS ──────────────────────────────────────────────────────────────
   {
     'group': 'TMS',
     'icon': Icons.confirmation_number_outlined,
@@ -100,26 +44,108 @@ const List<Map<String, dynamic>> _kModules = [
       'closed_tickets': 'Closed Tickets',
     },
   },
+
+  // ── 2. Items ─────────────────────────────────────────────────────────────
   {
-    'group': 'Reports',
-    'icon': Icons.analytics_outlined,
+    'group': 'Items',
+    'icon': Icons.inventory_2_outlined,
     'permissions': {
-      'reports':       'All Reports',
-      'profit_loss':   'Profit & Loss',
-      'balance_sheet': 'Balance Sheet',
-      'cash_flow':     'Cash Flow',
-      'aging_reports': 'Aging Reports',
+      'items': 'Items / Products',
     },
   },
+
+  // ── 3. Sales ─────────────────────────────────────────────────────────────
   {
-    'group': 'Settings',
-    'icon': Icons.settings_outlined,
+    'group': 'Sales',
+    'icon': Icons.shopping_cart_outlined,
     'permissions': {
-      'banking':             'Banking',
-      'rate_cards':          'Rate Cards',
-      'org_settings':        'Organization Settings',
-      'tax_settings':        'Tax Settings',
+      'customers':          'Customers',
+      'invoices':           'Invoices',
+      'recurring_invoices': 'Recurring Invoices',
+      'payments_received':  'Payments Received',
+      'credit_notes':       'Credit Notes',
+      'quotes':             'Quotes',
+      'sales_orders':       'Sales Orders',
+      'delivery_challans':  'Delivery Challans',
+    },
+  },
+
+  // ── 4. Purchases ─────────────────────────────────────────────────────────
+  {
+    'group': 'Purchases',
+    'icon': Icons.shopping_bag_outlined,
+    'permissions': {
+      'vendors':            'Vendors',
+      'expenses':           'Expenses',
+      'assets':             'Fixed Assets',
+      'recurring_expenses': 'Recurring Expenses',
+      'purchase_orders':    'Purchase Orders',
+      'bills':              'Bills',
+      'recurring_bills':    'Recurring Bills',
+      'payments_made':      'Payments Made',
+      'vendor_credits':     'Vendor Credits',
+      'eway_bills':         'E-Way Bills',
+      'payment_links':      'Payment Links',
+    },
+  },
+
+  // ── 5. Time Tracking ─────────────────────────────────────────────────────
+  {
+    'group': 'Time Tracking',
+    'icon': Icons.access_time_outlined,
+    'permissions': {
+      'projects':   'Projects',
+      'timesheets': 'Timesheet',
+    },
+  },
+
+  // ── 6. Banking ───────────────────────────────────────────────────────────
+  {
+    'group': 'Banking',
+    'icon': Icons.account_balance_outlined,
+    'permissions': {
+      'banking': 'Banking',
+    },
+  },
+
+  // ── 7. Accountant ────────────────────────────────────────────────────────
+  {
+    'group': 'Accountant',
+    'icon': Icons.person_outline,
+    'permissions': {
+      'manual_journals':      'Manual Journals',
+      'currency_adjustments': 'Currency Adjustments',
+      'chart_of_accounts':    'Chart of Accounts',
+      'budgets':              'Budgets',
+    },
+  },
+
+  // ── 8. Reports ───────────────────────────────────────────────────────────
+  {
+    'group': 'Reports',
+    'icon': Icons.bar_chart_outlined,
+    'permissions': {
+      'reports': 'Reports',
+    },
+  },
+
+  // ── 9. Role Access Control ───────────────────────────────────────────────
+  {
+    'group': 'Role Access Control',
+    'icon': Icons.admin_panel_settings_outlined,
+    'permissions': {
       'role_access_control': 'Role Access Control',
+    },
+  },
+
+  // ── 10. My Profile ───────────────────────────────────────────────────────
+  // Note: My Profile is always visible to all users in the sidebar.
+  // This permission controls whether the user can EDIT their profile.
+  {
+    'group': 'My Profile',
+    'icon': Icons.person_pin_outlined,
+    'permissions': {
+      'my_profile': 'My Profile',
     },
   },
 ];
@@ -129,9 +155,17 @@ class FinancePermissionsScreen extends StatefulWidget {
   final String userId;
   final String userName;
 
-  const FinancePermissionsScreen({super.key, required this.userId, required this.userName});
+  const FinancePermissionsScreen({
+    super.key,
+    required this.userId,
+    required this.userName,
+  });
 
-  static Future<void> showOverlay(BuildContext context, {required String userId, required String userName}) {
+  static Future<void> showOverlay(
+    BuildContext context, {
+    required String userId,
+    required String userName,
+  }) {
     return showDialog(
       context: context,
       barrierDismissible: false,
@@ -169,7 +203,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     final res = await FinancePermissionsService.fetchPermissions(widget.userId);
     if (!mounted) return;
     if (res['success'] == true) {
-      final raw = (res['data']?['permissions'] ?? res['permissions'] ?? {}) as Map<String, dynamic>;
+      final raw = (res['data']?['permissions'] ?? res['permissions'] ?? {})
+          as Map<String, dynamic>;
       final converted = <String, Map<String, dynamic>>{};
       raw.forEach((k, v) {
         if (v is Map) {
@@ -193,15 +228,15 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     if (!mounted) return;
     setState(() => _saving = false);
     if (res['success'] == true) {
-      _toast('Permissions saved!');
+      _toast('Permissions saved successfully!');
       await Future.delayed(const Duration(milliseconds: 900));
       if (mounted) Navigator.pop(context);
     } else {
-      _toast(res['message'] ?? 'Failed to save', error: true);
+      _toast(res['message'] ?? 'Failed to save permissions', error: true);
     }
   }
 
-  // ── Permission helpers ─────────────────────────────────────────────────────
+  // ── Permission helpers ────────────────────────────────────────────────────
   bool _access(String k) => _perms[k]?['can_access']  == true;
   bool _edit(String k)   => _perms[k]?['edit_delete'] == true;
 
@@ -209,7 +244,10 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     setState(() {
       _perms[k] ??= {};
       _perms[k]![type] = v;
-      if (type == 'can_access' && !v) _perms[k]!['edit_delete'] = false;
+      // If removing access, also remove edit/delete
+      if (type == 'can_access' && !v) {
+        _perms[k]!['edit_delete'] = false;
+      }
     });
   }
 
@@ -232,7 +270,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     });
   }
 
-  int _enabled(Map<String, String> perms) => perms.keys.where(_access).length;
+  int _enabledCount(Map<String, String> perms) =>
+      perms.keys.where(_access).length;
 
   // ── BUILD ─────────────────────────────────────────────────────────────────
   @override
@@ -244,11 +283,20 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
         return Center(
           child: Container(
             margin: EdgeInsets.all(isWide ? 24 : 8),
-            constraints: BoxConstraints(maxWidth: isWide ? 720 : double.infinity, maxHeight: constraints.maxHeight - 32),
+            constraints: BoxConstraints(
+              maxWidth:  isWide ? 720 : double.infinity,
+              maxHeight: constraints.maxHeight - 32,
+            ),
             decoration: BoxDecoration(
               color: const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 16))],
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 40,
+                  offset: const Offset(0, 16),
+                )
+              ],
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
@@ -257,7 +305,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
                 _buildQuickActions(),
                 Expanded(
                   child: _loading
-                      ? const Center(child: CircularProgressIndicator(color: _navyLight))
+                      ? const Center(
+                          child: CircularProgressIndicator(color: _navyLight))
                       : ListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                           itemCount: _kModules.length,
@@ -278,7 +327,11 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 20, 12, 20),
       decoration: const BoxDecoration(
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [_navyDark, _navyMid]),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_navyDark, _navyMid],
+        ),
       ),
       child: Row(children: [
         Container(
@@ -290,21 +343,42 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
           child: const Icon(Icons.security, color: Colors.white, size: 22),
         ),
         const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.13), borderRadius: BorderRadius.circular(50), border: Border.all(color: Colors.white.withOpacity(0.25))),
-            child: const Text('Finance Permissions', style: TextStyle(color: Color(0xFF93C5FD), fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
-          ),
-          const SizedBox(height: 5),
-          const Text('Manage Access', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
-          Text('for ${widget.userName}', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13)),
-        ])),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.13),
+                borderRadius: BorderRadius.circular(50),
+                border: Border.all(color: Colors.white.withOpacity(0.25)),
+              ),
+              child: const Text('Finance Permissions',
+                  style: TextStyle(
+                    color: Color(0xFF93C5FD),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  )),
+            ),
+            const SizedBox(height: 5),
+            const Text('Manage Access',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900)),
+            Text('for ${widget.userName}',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.7), fontSize: 13)),
+          ]),
+        ),
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Container(
             width: 34, height: 34,
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              shape: BoxShape.circle,
+            ),
             child: const Icon(Icons.close, color: Colors.white, size: 18),
           ),
         ),
@@ -312,41 +386,59 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     );
   }
 
-  // ── Quick action buttons ───────────────────────────────────────────────────
+  // ── Quick actions ─────────────────────────────────────────────────────────
   Widget _buildQuickActions() {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(children: [
-        _qBtn('Select All',  Icons.check_circle_outline, const Color(0xFF16A34A), const Color(0xFFF0FDF4), const Color(0xFF86EFAC), () => _setAll(true)),
+        _qBtn('Select All', Icons.check_circle_outline,
+            const Color(0xFF16A34A), const Color(0xFFF0FDF4),
+            const Color(0xFF86EFAC), () => _setAll(true)),
         const SizedBox(width: 8),
-        _qBtn('Edit All',    Icons.edit_outlined,        _navyLight,               const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), () {
+        _qBtn('Edit All', Icons.edit_outlined,
+            _navyLight, const Color(0xFFEFF6FF),
+            const Color(0xFFBFDBFE), () {
           setState(() {
             for (final m in _kModules) {
               for (final k in (m['permissions'] as Map<String, String>).keys) {
-                _perms[k] ??= {};
-                _perms[k]!['edit_delete'] = true;
+                _perms[k] ??= {'can_access': false};
+                // Only enable edit_delete if can_access is true
+                if (_perms[k]!['can_access'] == true) {
+                  _perms[k]!['edit_delete'] = true;
+                }
               }
             }
           });
         }),
         const SizedBox(width: 8),
-        _qBtn('Clear All',   Icons.clear_all,            const Color(0xFFDC2626), const Color(0xFFFEF2F2), const Color(0xFFFECACA), () => _setAll(false)),
+        _qBtn('Clear All', Icons.clear_all,
+            const Color(0xFFDC2626), const Color(0xFFFEF2F2),
+            const Color(0xFFFECACA), () => _setAll(false)),
       ]),
     );
   }
 
-  Widget _qBtn(String label, IconData icon, Color color, Color bg, Color border, VoidCallback onTap) {
+  Widget _qBtn(String label, IconData icon, Color color, Color bg,
+      Color border, VoidCallback onTap) {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(color: bg, border: Border.all(color: border, width: 1.5), borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: bg,
+            border: Border.all(color: border, width: 1.5),
+            borderRadius: BorderRadius.circular(8),
+          ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, color: color, size: 14),
             const SizedBox(width: 5),
-            Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+            Text(label,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800)),
           ]),
         ),
       ),
@@ -358,7 +450,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     final group = module['group'] as String;
     final icon  = module['icon'] as IconData;
     final perms = module['permissions'] as Map<String, String>;
-    final en    = _enabled(perms);
+    final en    = _enabledCount(perms);
     final total = perms.length;
     final hasAny = en > 0;
 
@@ -367,40 +459,77 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: hasAny ? _navyAccent.withOpacity(0.4) : const Color(0xFFE2E8F0), width: hasAny ? 1.5 : 1),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        border: Border.all(
+          color: hasAny ? _navyAccent.withOpacity(0.4) : const Color(0xFFE2E8F0),
+          width: hasAny ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(children: [
         // Card header
         Container(
           padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Color(0xFFEFF6FF), Color(0xFFDBEAFE)]),
-            borderRadius: const BorderRadius.only(topLeft: Radius.circular(15), topRight: Radius.circular(15)),
-            border: Border(bottom: BorderSide(color: hasAny ? const Color(0xFFBFDBFE) : const Color(0xFFE2E8F0), width: hasAny ? 1.5 : 1)),
+            gradient: const LinearGradient(
+                colors: [Color(0xFFEFF6FF), Color(0xFFDBEAFE)]),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(15),
+              topRight: Radius.circular(15),
+            ),
+            border: Border(
+              bottom: BorderSide(
+                color: hasAny
+                    ? const Color(0xFFBFDBFE)
+                    : const Color(0xFFE2E8F0),
+                width: hasAny ? 1.5 : 1,
+              ),
+            ),
           ),
           child: Row(children: [
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [_navyDark, _navyLight]),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_navyDark, _navyLight],
+                ),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: Colors.white, size: 20),
             ),
             const SizedBox(width: 12),
-            Expanded(child: Text(group, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: _navyDark))),
-            if (hasAny) Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(color: _navyDark, borderRadius: BorderRadius.circular(20)),
-              child: Text('$en/$total', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+            Expanded(
+              child: Text(group,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: _navyDark)),
             ),
+            if (hasAny)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                    color: _navyDark,
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text('$en/$total',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800)),
+              ),
             const SizedBox(width: 6),
             _mBtn('All',   const Color(0xFF16A34A), () => _setGroup(perms, true)),
             const SizedBox(width: 4),
             _mBtn('Clear', const Color(0xFFDC2626), () => _setGroup(perms, false)),
           ]),
         ),
+
         // Permissions list
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -410,9 +539,9 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(children: [
                 const Expanded(child: SizedBox()),
-                _colHdr('Access',       const Color(0xFF16A34A)),
+                _colHdr('Access',      const Color(0xFF16A34A)),
                 const SizedBox(width: 4),
-                _colHdr('Edit/Delete',  _navyLight),
+                _colHdr('Edit/Delete', _navyLight),
               ]),
             ),
             ...perms.entries.map((e) => _permRow(e.key, e.value)).toList(),
@@ -422,19 +551,31 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     );
   }
 
-  Widget _mBtn(String label, Color color, VoidCallback onTap) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(color: color.withOpacity(0.08), border: Border.all(color: color.withOpacity(0.35)), borderRadius: BorderRadius.circular(6)),
-      child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800)),
-    ),
-  );
+  Widget _mBtn(String label, Color color, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            border: Border.all(color: color.withOpacity(0.35)),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+        ),
+      );
 
   Widget _colHdr(String label, Color color) => SizedBox(
     width: 80,
-    child: Text(label, textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.3)),
+    child: Text(label,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+            color: color,
+            letterSpacing: 0.3)),
   );
 
   Widget _permRow(String key, String label) {
@@ -444,23 +585,60 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       margin: const EdgeInsets.only(bottom: 5),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: canAccess ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
+        color: canAccess
+            ? const Color(0xFFF0FDF4)
+            : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: canAccess ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: canAccess
+              ? const Color(0xFF86EFAC)
+              : const Color(0xFFE2E8F0),
+        ),
       ),
       child: Row(children: [
-        Expanded(child: Text(label, style: TextStyle(
-          fontSize: 13,
-          fontWeight: canAccess ? FontWeight.w700 : FontWeight.w500,
-          color: canAccess ? const Color(0xFF1E293B) : const Color(0xFF64748B),
-        ))),
-        SizedBox(width: 80, child: Center(child: _checkbox(canAccess, const Color(0xFF16A34A), (v) => _toggle(key, 'can_access', v ?? false)))),
-        SizedBox(width: 80, child: Center(child: _checkbox(canEdit, _navyLight, canAccess ? (v) => _toggle(key, 'edit_delete', v ?? false) : null, enabled: canAccess))),
+        Expanded(
+          child: Text(label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: canAccess ? FontWeight.w700 : FontWeight.w500,
+                color: canAccess
+                    ? const Color(0xFF1E293B)
+                    : const Color(0xFF64748B),
+              )),
+        ),
+        // Access checkbox
+        SizedBox(
+          width: 80,
+          child: Center(
+            child: _checkbox(
+              canAccess,
+              const Color(0xFF16A34A),
+              (v) => _toggle(key, 'can_access', v ?? false),
+            ),
+          ),
+        ),
+        // Edit/Delete checkbox — disabled if no access
+        SizedBox(
+          width: 80,
+          child: Center(
+            child: _checkbox(
+              canEdit,
+              _navyLight,
+              canAccess ? (v) => _toggle(key, 'edit_delete', v ?? false) : null,
+              enabled: canAccess,
+            ),
+          ),
+        ),
       ]),
     );
   }
 
-  Widget _checkbox(bool value, Color color, ValueChanged<bool?>? onChange, {bool enabled = true}) {
+  Widget _checkbox(
+    bool value,
+    Color color,
+    ValueChanged<bool?>? onChange, {
+    bool enabled = true,
+  }) {
     return Transform.scale(
       scale: 1.1,
       child: Checkbox(
@@ -468,7 +646,12 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
         onChanged: enabled ? onChange : null,
         activeColor: color,
         checkColor: Colors.white,
-        side: BorderSide(color: enabled ? (value ? color : const Color(0xFFCBD5E1)) : const Color(0xFFE2E8F0), width: 1.5),
+        side: BorderSide(
+          color: enabled
+              ? (value ? color : const Color(0xFFCBD5E1))
+              : const Color(0xFFE2E8F0),
+          width: 1.5,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
@@ -476,43 +659,84 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     );
   }
 
-  // ── Submit bar ─────────────────────────────────────────────────────────────
+  // ── Submit bar ────────────────────────────────────────────────────────────
   Widget _buildSubmitBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
       decoration: const BoxDecoration(
-        gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [_navyDark, _navyMid]),
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [_navyDark, _navyMid],
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
       ),
       child: Row(children: [
-        Expanded(child: GestureDetector(
-          onTap: _saving ? null : () => Navigator.pop(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5), borderRadius: BorderRadius.circular(12)),
-            child: const Center(child: Text('Cancel', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700))),
-          ),
-        )),
-        const SizedBox(width: 12),
-        Expanded(flex: 2, child: GestureDetector(
-          onTap: _saving ? null : _save,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [_navyAccent, _navyLight]),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [BoxShadow(color: _navyAccent.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
+        Expanded(
+          child: GestureDetector(
+            onTap: _saving ? null : () => Navigator.pop(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.3), width: 1.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Center(
+                child: Text('Cancel',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700)),
+              ),
             ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _saving
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.save_rounded, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text(_saving ? 'Saving...' : 'Save Permissions',
-                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900)),
-            ]),
           ),
-        )),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 2,
+          child: GestureDetector(
+            onTap: _saving ? null : _save,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                    colors: [_navyAccent, _navyLight]),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                      color: _navyAccent.withOpacity(0.4),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6))
+                ],
+              ),
+              child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.save_rounded,
+                            color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      _saving ? 'Saving...' : 'Save Permissions',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900),
+                    ),
+                  ]),
+            ),
+          ),
+        ),
       ]),
     );
   }
@@ -521,11 +745,16 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        Icon(error ? Icons.error_outline : Icons.check_circle_outline, color: Colors.white, size: 18),
+        Icon(
+          error ? Icons.error_outline : Icons.check_circle_outline,
+          color: Colors.white,
+          size: 18,
+        ),
         const SizedBox(width: 8),
         Expanded(child: Text(msg)),
       ]),
-      backgroundColor: error ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+      backgroundColor:
+          error ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       margin: const EdgeInsets.all(16),

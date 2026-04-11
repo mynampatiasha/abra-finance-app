@@ -355,6 +355,30 @@ class PaymentService {
     }
   }
 
+  /// Mark payment as sent (without sending email)
+  static Future<void> markPaymentAsSent(String paymentId) async {
+    try {
+      print('📤 PUT: $_baseEndpoint/$paymentId/mark-sent');
+      await _api.put('$_baseEndpoint/$paymentId/mark-sent', body: {});
+      print('✅ Payment marked as sent');
+    } catch (e) {
+      print('❌ Error marking payment as sent: $e');
+      rethrow;
+    }
+  }
+
+  /// Send payment receipt email to customer
+  static Future<void> sendPaymentEmail(String paymentId) async {
+    try {
+      print('📤 POST: $_baseEndpoint/$paymentId/send-email');
+      await _api.post('$_baseEndpoint/$paymentId/send-email', body: {});
+      print('✅ Payment email sent');
+    } catch (e) {
+      print('❌ Error sending payment email: $e');
+      rethrow;
+    }
+  }
+
   /// Export payments to CSV
   static Future<String> exportPaymentsCSV({
     String? filter,

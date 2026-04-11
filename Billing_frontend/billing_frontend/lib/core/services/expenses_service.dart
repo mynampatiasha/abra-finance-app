@@ -96,6 +96,7 @@ Future<Map<String, dynamic>> createExpense({
   bool isItemized = false,
   List<Map<String, dynamic>>? itemizedExpenses,
   File? receiptFile,
+  String? providerTransactionId,
 }) async {
   try {
     print('📤 POST: $_baseEndpoint (multipart)');
@@ -172,6 +173,10 @@ Future<Map<String, dynamic>> createExpense({
     }
     
     request.fields['isItemized'] = isItemized.toString();
+    
+    if (providerTransactionId != null && providerTransactionId.isNotEmpty) {
+      request.fields['providerTransactionId'] = providerTransactionId;
+    }
     
     if (itemizedExpenses != null && itemizedExpenses.isNotEmpty) {
       request.fields['itemizedExpenses'] = json.encode(itemizedExpenses);
@@ -276,6 +281,7 @@ Future<Map<String, dynamic>> createExpense({
     List<Map<String, dynamic>>? itemizedExpenses,
     File? receiptFile,
     bool deleteReceipt = false,
+    String? providerTransactionId,
   }) async {
     try {
       print('📤 PUT: $_baseEndpoint/$id (multipart)');
@@ -315,6 +321,7 @@ Future<Map<String, dynamic>> createExpense({
       
       if (notes != null) request.fields['notes'] = notes;
       if (isItemized != null) request.fields['isItemized'] = isItemized.toString();
+      if (providerTransactionId != null) request.fields['providerTransactionId'] = providerTransactionId;
       
       if (itemizedExpenses != null) {
         request.fields['itemizedExpenses'] = json.encode(itemizedExpenses);

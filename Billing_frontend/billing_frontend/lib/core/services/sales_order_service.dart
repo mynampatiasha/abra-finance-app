@@ -304,6 +304,28 @@ class SalesOrderService {
   }
   
   // ============================================================================
+  // MARK AS SENT (no email — status change only)
+  // ============================================================================
+
+  static Future<void> markAsSent(String id) async {
+    try {
+      final token = await _getToken();
+      final response = await http.patch(
+        Uri.parse('$baseUrl/api/finance/sales-orders/$id/mark-as-sent'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Failed to mark as sent: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Error marking as sent: $e');
+    }
+  }
+
+  // ============================================================================
   // BULK IMPORT SALES ORDERS
   // ============================================================================
   
@@ -365,8 +387,15 @@ class SalesOrder {
   final String? customerNotes;
   final String? termsAndConditions;
   final String status;
+  final String  customerGSTIN;
+  final String  customerPAN;
+  final String  gstRegistrationType;
+  final bool    isInterState;
+  final double  totalCGST;
+  final double  totalSGST;
+  final double  totalIGST;
   final String? convertedFromQuoteNumber;
-  final bool convertedToInvoice;
+  final bool    convertedToInvoice;
   final String? convertedToInvoiceNumber;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -399,6 +428,13 @@ class SalesOrder {
     this.customerNotes,
     this.termsAndConditions,
     required this.status,
+    this.customerGSTIN       = '',
+    this.customerPAN         = '',
+    this.gstRegistrationType = '',
+    this.isInterState        = false,
+    this.totalCGST           = 0,
+    this.totalSGST           = 0,
+    this.totalIGST           = 0,
     this.convertedFromQuoteNumber,
     required this.convertedToInvoice,
     this.convertedToInvoiceNumber,
@@ -439,6 +475,13 @@ class SalesOrder {
       customerNotes: json['customerNotes'],
       termsAndConditions: json['termsAndConditions'],
       status: json['status'] ?? 'DRAFT',
+      customerGSTIN:        json['customerGSTIN']        ?? '',
+      customerPAN:          json['customerPAN']           ?? '',
+      gstRegistrationType:  json['gstRegistrationType']  ?? '',
+      isInterState:         json['isInterState']          ?? false,
+      totalCGST:            (json['totalCGST']            ?? json['cgst'] ?? 0).toDouble(),
+      totalSGST:            (json['totalSGST']            ?? json['sgst'] ?? 0).toDouble(),
+      totalIGST:            (json['totalIGST']            ?? json['igst'] ?? 0).toDouble(),
       convertedFromQuoteNumber: json['convertedFromQuoteNumber'],
       convertedToInvoice: json['convertedToInvoice'] ?? false,
       convertedToInvoiceNumber: json['convertedToInvoiceNumber'],

@@ -28,10 +28,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../../../core/services/purchase_order_service.dart';
 import '../../../core/services/billing_vendors_service.dart';
 import 'new_vendor.dart';
 import '../widgets/document_preview_buttons.dart';
+import '../../../app/config/api_config.dart';
 
 // Navy gradient colors — exact match to new_payment_made.dart
 const Color _navyDark   = Color(0xFF0D1B3E);
@@ -39,6 +43,57 @@ const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 const Color _green      = Color(0xFF27AE60);
+
+// Column widths for items table (same as new_invoice.dart)
+const double _colNo      = 36.0;
+const double _colDesc    = 200.0;
+const double _colHsn     = 110.0;
+const double _colUnit    = 80.0;
+const double _colQty     = 70.0;
+const double _colRate    = 95.0;
+const double _colDisc    = 110.0;
+const double _colGst     = 80.0;
+const double _colTaxable = 100.0;
+const double _colTax1    = 90.0;
+const double _colAmt     = 95.0;
+const double _colDel     = 44.0;
+
+const List<double> _kGstRates = [0, 5, 12, 18, 28];
+const List<String> _kUnits    = ['Nos','Hrs','Kg','Pcs','Box','Mtr','Ltr','Dz','MT','Set'];
+
+const List<String> kPoIndianStates = [
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+  'Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh',
+  'Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab',
+  'Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
+  'Uttarakhand','West Bengal','Andaman and Nicobar Islands','Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu','Delhi','Jammu and Kashmir',
+  'Ladakh','Lakshadweep','Puducherry',
+];
+
+class _PoAddress {
+  String attention; String street; String city;
+  String state;     String zip;    String country; String phone;
+  _PoAddress({this.attention='',this.street='',this.city='',
+    this.state='',this.zip='',this.country='India',this.phone=''});
+  Map<String,dynamic> toJson() => {
+    'attention':attention,'street':street,'city':city,
+    'state':state,'zip':zip,'country':country,'phone':phone,
+  };
+  factory _PoAddress.fromJson(Map<String,dynamic>? j) {
+    if (j == null) return _PoAddress();
+    return _PoAddress(
+      attention: j['attention']?.toString() ?? '',
+      street:    j['street']?.toString()    ?? '',
+      city:      j['city']?.toString()      ?? '',
+      state:     j['state']?.toString()     ?? '',
+      zip:       j['zip']?.toString()       ?? '',
+      country:   j['country']?.toString()   ?? 'India',
+      phone:     j['phone']?.toString()     ?? '',
+    );
+  }
+  factory _PoAddress.fromMap(Map<String,dynamic> j) => _PoAddress.fromJson(j);
+}
 
 // ============================================================================
 // SCREEN
@@ -69,32 +124,49 @@ class _NewPurchaseOrderScreenState
   final _vendorNotesController        = TextEditingController();
   final _termsConditionsController    = TextEditingController();
 
-  // Form Data — all unchanged
+  // Form Data
   String?   _selectedVendorId;
   String?   _selectedVendorName;
   String?   _selectedVendorEmail;
+  String?   _selectedVendorPhone;
+  String    _selectedVendorGSTIN   = '';
+  String    _selectedVendorPAN     = '';
+  String    _gstRegistrationType   = '';
+  String?   _selectedVendorCompany;
   DateTime  _poDate                = DateTime.now();
   String    _selectedPaymentTerms  = 'Net 30';
   DateTime? _expectedDeliveryDate;
   String?   _salesperson;
 
-  // Tax Settings — all unchanged
+  // Addresses
+  _PoAddress _billingAddress  = _PoAddress();
+  _PoAddress _shippingAddress = _PoAddress();
+  bool       _sameAsBilling   = true;
+
+  // Place of supply
+  String _placeOfSupply = '';
+  String _orgState      = '';
+  bool   _isInterState  = false;
+
+  // Tax Settings
   double _tdsRate   = 0;
   double _tcsRate   = 0;
-  double _gstRate   = 18;
   bool   _enableTDS = false;
   bool   _enableTCS = false;
-  bool   _enableGST = true;
 
-  // Items — unchanged
+  // Items
   List<PurchaseOrderItem> _items = [];
+  final List<TextEditingController> _descControllers = [];
 
-  // Calculations — unchanged
-  double _subTotal     = 0;
-  double _tdsAmount    = 0;
-  double _tcsAmount    = 0;
-  double _gstAmount    = 0;
-  double _totalAmount  = 0;
+  // Calculations
+  double _subTotal      = 0;
+  double _totalCGST     = 0;
+  double _totalSGST     = 0;
+  double _totalIGST     = 0;
+  double _totalTax      = 0;
+  double _tdsAmount     = 0;
+  double _tcsAmount     = 0;
+  double _totalAmount   = 0;
   int    _totalQuantity = 0;
 
   // Dropdown options — unchanged
@@ -107,6 +179,7 @@ class _NewPurchaseOrderScreenState
   void initState() {
     super.initState();
     _addNewItem();
+    _loadOrgState();
     if (widget.purchaseOrderId != null) _loadPurchaseOrderData();
   }
 
@@ -118,45 +191,109 @@ class _NewPurchaseOrderScreenState
     _shipmentPreferenceController.dispose();
     _vendorNotesController.dispose();
     _termsConditionsController.dispose();
+    for (final c in _descControllers) { c.dispose(); }
     super.dispose();
   }
 
   // ============================================================================
   // CALCULATIONS — unchanged
   // ============================================================================
+  // ORG STATE
+  // ============================================================================
+
+  Future<void> _loadOrgState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
+      final resp  = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/finance/invoices/org-state'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        setState(() => _orgState = body['data']?['state'] ?? '');
+        _updateInterState();
+      }
+    } catch (_) {}
+  }
+
+  void _updateInterState() {
+    final newVal = _placeOfSupply.isNotEmpty && _orgState.isNotEmpty &&
+        _placeOfSupply.toLowerCase() != _orgState.toLowerCase();
+    if (newVal != _isInterState) {
+      setState(() => _isInterState = newVal);
+      _calculateAmounts();
+    }
+  }
+
+  // ============================================================================
+  // CALCULATIONS
+  // ============================================================================
 
   void _calculateAmounts() {
     setState(() {
       _subTotal      = 0;
+      _totalCGST     = 0;
+      _totalSGST     = 0;
+      _totalIGST     = 0;
       _totalQuantity = 0;
       for (var item in _items) {
         if (item.quantity > 0 && item.rate > 0) {
-          double itemAmount = item.quantity * item.rate;
+          double taxable = item.quantity * item.rate;
           if (item.discount > 0) {
-            if (item.discountType == 'percentage') {
-              itemAmount = itemAmount - (itemAmount * item.discount / 100);
-            } else {
-              itemAmount = itemAmount - item.discount;
-            }
+            taxable = item.discountType == 'percentage'
+                ? taxable - (taxable * item.discount / 100)
+                : taxable - item.discount;
           }
-          item.amount     = itemAmount;
-          _subTotal      += itemAmount;
+          taxable = double.parse(taxable.toStringAsFixed(2));
+          item.taxableAmount = taxable;
+          final gst = item.itemGstRate;
+          if (_isInterState) {
+            item.igstAmount = double.parse((taxable * gst / 100).toStringAsFixed(2));
+            item.cgstAmount = 0;
+            item.sgstAmount = 0;
+          } else {
+            item.cgstAmount = double.parse((taxable * (gst / 2) / 100).toStringAsFixed(2));
+            item.sgstAmount = item.cgstAmount;
+            item.igstAmount = 0;
+          }
+          item.amount     = double.parse((taxable + item.cgstAmount + item.sgstAmount + item.igstAmount).toStringAsFixed(2));
+          _subTotal      += taxable;
+          _totalCGST     += item.cgstAmount;
+          _totalSGST     += item.sgstAmount;
+          _totalIGST     += item.igstAmount;
           _totalQuantity += item.quantity.toInt();
+        } else {
+          item.taxableAmount = 0;
+          item.cgstAmount    = 0;
+          item.sgstAmount    = 0;
+          item.igstAmount    = 0;
+          item.amount        = 0;
         }
       }
-      _tdsAmount = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
-      _tcsAmount = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
-      double gstBase = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount     = _enableGST ? (gstBase * _gstRate / 100) : 0;
-      _totalAmount   = _subTotal - _tdsAmount + _tcsAmount + _gstAmount;
+      _subTotal    = double.parse(_subTotal.toStringAsFixed(2));
+      _totalCGST   = double.parse(_totalCGST.toStringAsFixed(2));
+      _totalSGST   = double.parse(_totalSGST.toStringAsFixed(2));
+      _totalIGST   = double.parse(_totalIGST.toStringAsFixed(2));
+      _totalTax    = double.parse((_totalCGST + _totalSGST + _totalIGST).toStringAsFixed(2));
+      _tdsAmount   = _enableTDS ? double.parse((_subTotal * _tdsRate / 100).toStringAsFixed(2)) : 0;
+      _tcsAmount   = _enableTCS ? double.parse((_subTotal * _tcsRate / 100).toStringAsFixed(2)) : 0;
+      _totalAmount = double.parse((_subTotal + _totalTax - _tdsAmount + _tcsAmount).toStringAsFixed(2));
     });
   }
 
-  void _addNewItem() => setState(() => _items.add(PurchaseOrderItem()));
+  void _addNewItem() {
+    setState(() {
+      _items.add(PurchaseOrderItem(itemGstRate: 18));
+      _descControllers.add(TextEditingController());
+    });
+  }
 
   void _removeItem(int index) {
     setState(() {
       _items.removeAt(index);
+      _descControllers[index].dispose();
+      _descControllers.removeAt(index);
       _calculateAmounts();
     });
   }
@@ -174,6 +311,12 @@ class _NewPurchaseOrderScreenState
         _selectedVendorId    = po.vendorId;
         _selectedVendorName  = po.vendorName;
         _selectedVendorEmail = po.vendorEmail;
+        _selectedVendorGSTIN = po.vendorGSTIN ?? '';
+        _selectedVendorPAN   = po.vendorPAN ?? '';
+        _gstRegistrationType = po.gstRegistrationType ?? '';
+        _billingAddress      = _PoAddress.fromJson(po.billingAddress.toJson());
+        _shippingAddress     = _PoAddress.fromJson(po.shippingAddress.toJson());
+        _placeOfSupply       = po.placeOfSupply ?? '';
         _referenceNumberController.text    = po.referenceNumber ?? '';
         _poDate                            = po.purchaseOrderDate;
         _expectedDeliveryDate              = po.expectedDeliveryDate;
@@ -186,10 +329,8 @@ class _NewPurchaseOrderScreenState
         _termsConditionsController.text    = po.termsAndConditions ?? '';
         _tdsRate   = po.tdsRate;
         _tcsRate   = po.tcsRate;
-        _gstRate   = po.gstRate;
         _enableTDS = po.tdsRate > 0;
         _enableTCS = po.tcsRate > 0;
-        _enableGST = po.gstRate > 0;
         _items = po.items.map((item) => PurchaseOrderItem(
           itemDetails:  item.itemDetails,
           quantity:     item.quantity,
@@ -197,7 +338,16 @@ class _NewPurchaseOrderScreenState
           discount:     item.discount,
           discountType: item.discountType,
           amount:       item.amount,
+          hsnCode:      item.hsnCode,
+          unit:         item.unit,
+          itemGstRate:  item.itemGstRate,
         )).toList();
+        for (final c in _descControllers) { c.dispose(); }
+        _descControllers.clear();
+        for (final item in _items) {
+          _descControllers.add(TextEditingController(text: item.itemDetails));
+        }
+        _updateInterState();
         _calculateAmounts();
       });
     } catch (e) {
@@ -245,6 +395,14 @@ class _NewPurchaseOrderScreenState
       'vendorId':            _selectedVendorId,
       'vendorName':          _selectedVendorName,
       'vendorEmail':         _selectedVendorEmail,
+      'vendorPhone':         _selectedVendorPhone ?? '',
+      'vendorGSTIN':         _selectedVendorGSTIN,
+      'vendorPAN':           _selectedVendorPAN,
+      'gstRegistrationType': _gstRegistrationType,
+      'billingAddress':      _billingAddress.toJson(),
+      'shippingAddress':     _sameAsBilling ? _billingAddress.toJson() : _shippingAddress.toJson(),
+      'placeOfSupply':       _placeOfSupply,
+      'isInterState':        _isInterState,
       'referenceNumber':     _referenceNumberController.text.trim(),
       'purchaseOrderDate':   _poDate.toIso8601String(),
       'expectedDeliveryDate': _expectedDeliveryDate?.toIso8601String(),
@@ -258,7 +416,12 @@ class _NewPurchaseOrderScreenState
       'termsAndConditions':  _termsConditionsController.text.trim(),
       'tdsRate':             _enableTDS ? _tdsRate : 0,
       'tcsRate':             _enableTCS ? _tcsRate : 0,
-      'gstRate':             _enableGST ? _gstRate : 0,
+      'subTotal':            _subTotal,
+      'totalCGST':           _totalCGST,
+      'totalSGST':           _totalSGST,
+      'totalIGST':           _totalIGST,
+      'totalTax':            _totalTax,
+      'totalAmount':         _totalAmount,
       'status':              status,
     };
   }
@@ -511,6 +674,8 @@ class _NewPurchaseOrderScreenState
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _buildVendorSection(),
       const SizedBox(height: 20),
+      _buildAddressSection(),
+      const SizedBox(height: 20),
       _buildPODetailsSection(),
       const SizedBox(height: 20),
       _buildItemsSection(),
@@ -544,10 +709,8 @@ class _NewPurchaseOrderScreenState
               _selectedVendorName ?? 'Select Vendor *',
               style: TextStyle(
                 fontSize: 15,
-                color: _selectedVendorName != null
-                    ? _navyDark : Colors.grey[600],
-                fontWeight: _selectedVendorName != null
-                    ? FontWeight.w600 : FontWeight.normal,
+                color: _selectedVendorName != null ? _navyDark : Colors.grey[600],
+                fontWeight: _selectedVendorName != null ? FontWeight.w600 : FontWeight.normal,
               ),
             )),
             const Icon(Icons.arrow_drop_down, color: Colors.grey),
@@ -559,12 +722,155 @@ class _NewPurchaseOrderScreenState
         Row(children: [
           const Icon(Icons.email_outlined, size: 16, color: Colors.grey),
           const SizedBox(width: 6),
-          Text(_selectedVendorEmail!,
+          Text(_selectedVendorEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+        ]),
+      ],
+      if (_selectedVendorPhone != null && _selectedVendorPhone!.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Row(children: [
+          const Icon(Icons.phone_outlined, size: 16, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text(_selectedVendorPhone!, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+        ]),
+      ],
+      if (_selectedVendorGSTIN.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Row(children: [
+          const Icon(Icons.business, size: 16, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text('GSTIN: $_selectedVendorGSTIN',
               style: TextStyle(color: Colors.grey[700], fontSize: 13)),
         ]),
       ],
+      if (_selectedVendorPAN.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Row(children: [
+          const Icon(Icons.credit_card_outlined, size: 16, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text('PAN: $_selectedVendorPAN',
+              style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+        ]),
+      ],
+      if (_gstRegistrationType.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: _navyAccent.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(_gstRegistrationType,
+              style: TextStyle(fontSize: 12, color: _navyMid, fontWeight: FontWeight.w500)),
+        ),
+      ],
     ]),
   );
+
+  // ============================================================================
+  // ADDRESS + PLACE OF SUPPLY SECTION
+  // ============================================================================
+
+  Widget _buildAddressSection() => _card(
+    title: 'Address & Place of Supply',
+    icon: Icons.location_on_outlined,
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Place of Supply
+      DropdownButtonFormField<String>(
+        value: kPoIndianStates.contains(_placeOfSupply) ? _placeOfSupply : null,
+        decoration: InputDecoration(
+          labelText: 'Place of Supply',
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          prefixIcon: const Icon(Icons.map_outlined),
+        ),
+        items: kPoIndianStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+        onChanged: (v) {
+          setState(() => _placeOfSupply = v ?? '');
+          _updateInterState();
+        },
+      ),
+      if (_placeOfSupply.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _isInterState ? Colors.orange.shade50 : Colors.green.shade50,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: _isInterState ? Colors.orange.shade200 : Colors.green.shade200),
+          ),
+          child: Row(children: [
+            Icon(_isInterState ? Icons.swap_horiz : Icons.check_circle_outline,
+                size: 14, color: _isInterState ? Colors.orange.shade700 : Colors.green.shade700),
+            const SizedBox(width: 6),
+            Text(_isInterState ? 'Inter-State Supply — IGST applies' : 'Intra-State Supply — CGST + SGST applies',
+                style: TextStyle(fontSize: 12,
+                    color: _isInterState ? Colors.orange.shade700 : Colors.green.shade700)),
+          ]),
+        ),
+      ],
+      const SizedBox(height: 16),
+
+      // Billing Address
+      Text('Billing Address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navyDark)),
+      const SizedBox(height: 8),
+      _buildAddressFields(_billingAddress, onChanged: (addr) => setState(() {
+        _billingAddress = addr;
+        if (_sameAsBilling) _shippingAddress = addr;
+      })),
+      const SizedBox(height: 12),
+
+      // Same as billing toggle
+      Row(children: [
+        Checkbox(
+          value: _sameAsBilling,
+          activeColor: _navyAccent,
+          onChanged: (v) => setState(() {
+            _sameAsBilling = v ?? true;
+            if (_sameAsBilling) _shippingAddress = _billingAddress;
+          }),
+        ),
+        const Text('Shipping address same as billing', style: TextStyle(fontSize: 13)),
+      ]),
+
+      if (!_sameAsBilling) ...[
+        const SizedBox(height: 8),
+        Text('Shipping Address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navyDark)),
+        const SizedBox(height: 8),
+        _buildAddressFields(_shippingAddress, onChanged: (addr) => setState(() => _shippingAddress = addr)),
+      ],
+    ]),
+  );
+
+  Widget _buildAddressFields(_PoAddress addr, {required void Function(_PoAddress) onChanged}) {
+    return Column(children: [
+      Row(children: [
+        Expanded(child: TextFormField(
+          initialValue: addr.street,
+          decoration: InputDecoration(labelText: 'Street', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(_PoAddress(street: v, city: addr.city, state: addr.state, zip: addr.zip, country: addr.country)),
+        )),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: TextFormField(
+          initialValue: addr.city,
+          decoration: InputDecoration(labelText: 'City', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(_PoAddress(street: addr.street, city: v, state: addr.state, zip: addr.zip, country: addr.country)),
+        )),
+        const SizedBox(width: 8),
+        Expanded(child: TextFormField(
+          initialValue: addr.state,
+          decoration: InputDecoration(labelText: 'State', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(_PoAddress(street: addr.street, city: addr.city, state: v, zip: addr.zip, country: addr.country)),
+        )),
+        const SizedBox(width: 8),
+        SizedBox(width: 100, child: TextFormField(
+          initialValue: addr.zip,
+          decoration: InputDecoration(labelText: 'PIN', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(_PoAddress(street: addr.street, city: addr.city, state: addr.state, zip: v, country: addr.country)),
+        )),
+      ]),
+    ]);
+  }
 
   // ============================================================================
   // PO DETAILS SECTION
@@ -748,283 +1054,325 @@ class _NewPurchaseOrderScreenState
   // ITEMS SECTION
   // ============================================================================
 
-  Widget _buildItemsSection() => _card(
-    title: 'Items',
-    icon: Icons.list_alt,
-    trailing: ElevatedButton.icon(
-      onPressed: _addNewItem,
-      icon: const Icon(Icons.add, size: 18),
-      label: const Text('Add Item'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: _navyAccent,
-        foregroundColor: Colors.white,
-      ),
-    ),
-    child: Column(children: [
-      // Gradient table header — matches new_payment_made.dart
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [_navyDark, _navyMid],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: LayoutBuilder(builder: (_, cs) {
-          if (cs.maxWidth < 600) {
-            return const Text('ITEMS',
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold));
-          }
-          return const Row(children: [
-            Expanded(flex: 3, child: Text('ITEM DETAILS',
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold, fontSize: 12))),
-            SizedBox(width: 8),
-            SizedBox(width: 80, child: Text('QTY',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold, fontSize: 12))),
-            SizedBox(width: 8),
-            SizedBox(width: 100, child: Text('RATE (₹)',
-                textAlign: TextAlign.right,
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold, fontSize: 12))),
-            SizedBox(width: 8),
-            SizedBox(width: 100, child: Text('DISCOUNT',
-                textAlign: TextAlign.right,
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold, fontSize: 12))),
-            SizedBox(width: 8),
-            SizedBox(width: 120, child: Text('AMOUNT (₹)',
-                textAlign: TextAlign.right,
-                style: TextStyle(color: Colors.white,
-                    fontWeight: FontWeight.bold, fontSize: 12))),
-            SizedBox(width: 50),
-          ]);
-        }),
-      ),
+  Widget _buildItemsSection() {
+    final double tableWidth = _colNo + _colDesc + _colHsn + _colUnit + _colQty +
+        _colRate + _colDisc + _colGst + _colTaxable + _colTax1 + _colTax1 + _colAmt + _colDel;
 
-      const SizedBox(height: 8),
+    return _card(
+      title: 'Items',
+      icon: Icons.list_alt,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SizedBox(height: 4),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Header
+              Container(
+                decoration: const BoxDecoration(
+                  color: _navyDark,
+                  borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                ),
+                child: Row(children: [
+                  _thCell('#',           _colNo),
+                  _thCell('DESCRIPTION', _colDesc),
+                  _thCell('HSN / SAC',   _colHsn),
+                  _thCell('UNIT',        _colUnit),
+                  _thCell('QTY',         _colQty,     align: TextAlign.center),
+                  _thCell('RATE (₹)',    _colRate,    align: TextAlign.right),
+                  _thCell('DISCOUNT',    _colDisc,    align: TextAlign.right),
+                  _thCell('GST %',       _colGst,     align: TextAlign.center),
+                  _thCell('TAXABLE',     _colTaxable, align: TextAlign.right),
+                  _thCell('CGST',        _colTax1,    align: TextAlign.right),
+                  _thCell('SGST',        _colTax1,    align: TextAlign.right),
+                  _thCell('AMOUNT',      _colAmt,     align: TextAlign.right),
+                  SizedBox(width: _colDel),
+                ]),
+              ),
 
-      if (_items.isEmpty)
-        Center(child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(children: [
-            Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 12),
-            Text('No items added yet',
-                style: TextStyle(color: Colors.grey[600])),
-            const SizedBox(height: 6),
-            Text('Use Add Item button above',
-                style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-          ]),
-        ))
-      else
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _items.length,
-          separatorBuilder: (_, __) => const Divider(height: 16),
-          itemBuilder: (_, i) => _buildItemRow(i),
-        ),
-    ]),
-  );
+              // Rows
+              if (_items.isEmpty)
+                Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    border: Border(
+                      left: BorderSide(color: Colors.grey[200]!),
+                      right: BorderSide(color: Colors.grey[200]!),
+                      bottom: BorderSide(color: Colors.grey[200]!),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.inbox_outlined, size: 20, color: Colors.grey[400]),
+                    const SizedBox(width: 8),
+                    Text('No items — click Add Item below',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  ]),
+                )
+              else
+                ...List.generate(_items.length, (i) => _buildItemTableRow(i)),
 
-  Widget _buildItemRow(int index) {
-    final item = _items[index];
-
-    return LayoutBuilder(builder: (_, cs) {
-      // Mobile layout
-      if (cs.maxWidth < 600) {
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-              Text('Item ${index + 1}',
-                  style: TextStyle(fontWeight: FontWeight.w600,
-                      fontSize: 12, color: _navyMid)),
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: Colors.red, size: 18),
-                onPressed: () => _removeItem(index),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              // Add Item row
+              InkWell(
+                onTap: _addNewItem,
+                borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                child: Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: _navyAccent.withOpacity(0.05),
+                    borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    border: Border(
+                      left: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      right: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      bottom: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.add_circle_outline, size: 18, color: _navyAccent),
+                    const SizedBox(width: 8),
+                    Text('+ Add Item',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyAccent)),
+                  ]),
+                ),
               ),
             ]),
-            const SizedBox(height: 8),
-            TextFormField(
-              initialValue: item.itemDetails,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _thCell(String text, double width, {TextAlign align = TextAlign.left}) =>
+      SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Text(text, textAlign: align,
+              style: const TextStyle(color: Colors.white, fontSize: 11,
+                  fontWeight: FontWeight.bold, letterSpacing: 0.4)),
+        ),
+      );
+
+  Widget _buildItemTableRow(int index) {
+    final item     = _items[index];
+    final isOdd    = index.isOdd;
+    final descCtrl = _descControllers[index];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isOdd ? const Color(0xFFF7F9FC) : Colors.white,
+        border: Border(
+          left: BorderSide(color: Colors.grey[200]!),
+          right: BorderSide(color: Colors.grey[200]!),
+          bottom: BorderSide(color: Colors.grey[200]!),
+        ),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        // #
+        SizedBox(width: _colNo,
+            child: Center(child: Text('${index + 1}',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])))),
+
+        // Description (multiline)
+        SizedBox(width: _colDesc,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: TextFormField(
+              controller: descCtrl,
               decoration: InputDecoration(
-                labelText: 'Item Description',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6)),
+                hintText: 'Item description',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 isDense: true,
               ),
-              maxLines: 2,
-              onChanged: (v) => item.itemDetails = v,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              onChanged: (v) { item.itemDetails = v; },
             ),
-            const SizedBox(height: 8),
-            Row(children: [
-              Expanded(child: TextFormField(
-                initialValue: item.quantity > 0
-                    ? item.quantity.toString() : '',
-                decoration: InputDecoration(
-                  labelText: 'Qty',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6)),
-                  isDense: true,
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (v) {
-                  item.quantity = double.tryParse(v) ?? 0;
-                  _calculateAmounts();
-                },
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: TextFormField(
-                initialValue: item.rate > 0
-                    ? item.rate.toStringAsFixed(2) : '',
-                decoration: InputDecoration(
-                  labelText: 'Rate (₹)',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6)),
-                  isDense: true,
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
-                onChanged: (v) {
-                  item.rate = double.tryParse(v) ?? 0;
-                  _calculateAmounts();
-                },
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                child: Text('₹${item.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.right),
-              )),
-            ]),
-          ]),
-        );
-      }
+          ),
+        ),
 
-      // Desktop layout — same column widths as header
-      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(flex: 3, child: TextFormField(
-          initialValue: item.itemDetails,
-          decoration: InputDecoration(
-            hintText: 'Enter item description',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 12),
-          ),
-          maxLines: 2,
-          onChanged: (v) => item.itemDetails = v,
-        )),
-        const SizedBox(width: 8),
-        SizedBox(width: 80, child: TextFormField(
-          initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-          decoration: InputDecoration(
-            hintText: '0',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 12),
-          ),
-          keyboardType: TextInputType.number,
-          textAlign: TextAlign.center,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          onChanged: (v) {
-            item.quantity = double.tryParse(v) ?? 0;
-            _calculateAmounts();
-          },
-        )),
-        const SizedBox(width: 8),
-        SizedBox(width: 100, child: TextFormField(
-          initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-          decoration: InputDecoration(
-            hintText: '0.00',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 12),
-          ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          textAlign: TextAlign.right,
-          onChanged: (v) {
-            item.rate = double.tryParse(v) ?? 0;
-            _calculateAmounts();
-          },
-        )),
-        const SizedBox(width: 8),
-        SizedBox(width: 100, child: Row(children: [
-          Expanded(child: TextFormField(
-            initialValue: item.discount > 0 ? item.discount.toString() : '',
-            decoration: InputDecoration(
-              hintText: '0',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 12),
+        // HSN/SAC
+        SizedBox(width: _colHsn,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: TextFormField(
+              initialValue: item.hsnCode,
+              decoration: InputDecoration(
+                hintText: 'HSN/SAC',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                isDense: true,
+              ),
+              onChanged: (v) => item.hsnCode = v,
             ),
-            keyboardType: const TextInputType.numberWithOptions(
-                decimal: true),
-            textAlign: TextAlign.right,
-            onChanged: (v) {
-              item.discount = double.tryParse(v) ?? 0;
-              _calculateAmounts();
-            },
-          )),
-          PopupMenuButton<String>(
-            initialValue: item.discountType,
-            icon: const Icon(Icons.arrow_drop_down, size: 20),
-            onSelected: (v) => setState(() {
-              item.discountType = v;
-              _calculateAmounts();
-            }),
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'percentage', child: Text('%')),
-              const PopupMenuItem(value: 'amount',     child: Text('₹')),
-            ],
           ),
-        ])),
-        const SizedBox(width: 8),
-        Container(
-          width: 120,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[300]!),
+        ),
+
+        // Unit
+        SizedBox(width: _colUnit,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: DropdownButtonFormField<String>(
+              value: _kUnits.contains(item.unit) ? item.unit : 'Nos',
+              isExpanded: true,
+              decoration: InputDecoration(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                isDense: true,
+              ),
+              items: _kUnits.map((u) => DropdownMenuItem(
+                  value: u, child: Text(u, style: const TextStyle(fontSize: 12)))).toList(),
+              onChanged: (v) => setState(() => item.unit = v ?? 'Nos'),
+            ),
           ),
-          child: Text(item.amount.toStringAsFixed(2),
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 14),
-              textAlign: TextAlign.right),
         ),
-        const SizedBox(width: 8),
-        IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.red),
-          onPressed: () => _removeItem(index),
-          tooltip: 'Remove item',
+
+        // Qty
+        SizedBox(width: _colQty,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: TextFormField(
+              initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+              decoration: InputDecoration(
+                hintText: '0',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+              onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); },
+            ),
+          ),
         ),
-      ]);
-    });
+
+        // Rate
+        SizedBox(width: _colRate,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: TextFormField(
+              initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+              decoration: InputDecoration(
+                hintText: '0.00',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                isDense: true,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textAlign: TextAlign.right,
+              onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); },
+            ),
+          ),
+        ),
+
+        // Discount
+        SizedBox(width: _colDisc,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Row(children: [
+              Expanded(child: TextFormField(
+                initialValue: item.discount > 0 ? item.discount.toString() : '',
+                decoration: InputDecoration(
+                  hintText: '0',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  isDense: true,
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.right,
+                onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); },
+              )),
+              PopupMenuButton<String>(
+                initialValue: item.discountType,
+                icon: const Icon(Icons.arrow_drop_down, size: 18),
+                padding: EdgeInsets.zero,
+                onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'percentage', child: Text('%')),
+                  const PopupMenuItem(value: 'amount',     child: Text('₹')),
+                ],
+              ),
+            ]),
+          ),
+        ),
+
+        // GST %
+        SizedBox(width: _colGst,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: DropdownButtonFormField<double>(
+              value: _kGstRates.contains(item.itemGstRate) ? item.itemGstRate : 18.0,
+              isExpanded: true,
+              decoration: InputDecoration(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                isDense: true,
+              ),
+              items: _kGstRates.map((r) => DropdownMenuItem(
+                  value: r, child: Text('${r.toInt()}%', style: const TextStyle(fontSize: 12)))).toList(),
+              onChanged: (v) => setState(() { item.itemGstRate = v ?? 18; _calculateAmounts(); }),
+            ),
+          ),
+        ),
+
+        // Taxable (read-only)
+        SizedBox(width: _colTaxable,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(item.taxableAmount.toStringAsFixed(2),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+
+        // CGST (read-only)
+        SizedBox(width: _colTax1,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(item.cgstAmount.toStringAsFixed(2),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+
+        // SGST (read-only)
+        SizedBox(width: _colTax1,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(item.sgstAmount.toStringAsFixed(2),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+
+        // Amount (read-only)
+        SizedBox(width: _colAmt,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(item.amount.toStringAsFixed(2),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navyDark)),
+          ),
+        ),
+
+        // Delete
+        SizedBox(width: _colDel,
+          child: IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+            onPressed: () => _removeItem(index),
+            tooltip: 'Remove',
+          ),
+        ),
+      ]),
+    );
   }
 
   // ============================================================================
@@ -1060,7 +1408,7 @@ class _NewPurchaseOrderScreenState
   );
 
   // ============================================================================
-  // TAX SETTINGS SECTION (sidebar) — exact match to new_payment_made.dart
+  // TAX SETTINGS SECTION (sidebar)
   // ============================================================================
 
   Widget _buildTaxSettingsSection() => Column(
@@ -1068,34 +1416,6 @@ class _NewPurchaseOrderScreenState
     children: [
       _sectionTitle('Tax Settings', Icons.calculate),
       const SizedBox(height: 16),
-
-      // GST
-      SwitchListTile(
-        title: const Text('Enable GST'),
-        value: _enableGST,
-        activeColor: _navyAccent,
-        contentPadding: EdgeInsets.zero,
-        onChanged: (v) => setState(() { _enableGST = v; _calculateAmounts(); }),
-      ),
-      if (_enableGST) ...[
-        const SizedBox(height: 8),
-        TextFormField(
-          initialValue: _gstRate.toString(),
-          decoration: InputDecoration(
-            labelText: 'GST Rate (%)',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            suffixText: '%',
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 12),
-          ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          onChanged: (v) => setState(() {
-            _gstRate = double.tryParse(v) ?? 18;
-            _calculateAmounts();
-          }),
-        ),
-      ],
-      const SizedBox(height: 12),
 
       // TDS
       SwitchListTile(
@@ -1179,12 +1499,16 @@ class _NewPurchaseOrderScreenState
         _summaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%)', _tcsAmount),
         const SizedBox(height: 6),
       ],
-      if (_enableGST && _gstAmount > 0) ...[
-        _summaryRow('CGST (${(_gstRate / 2).toStringAsFixed(1)}%)',
-            _gstAmount / 2),
+      if (_totalCGST > 0) ...[
+        _summaryRow('CGST', _totalCGST),
         const SizedBox(height: 6),
-        _summaryRow('SGST (${(_gstRate / 2).toStringAsFixed(1)}%)',
-            _gstAmount / 2),
+      ],
+      if (_totalSGST > 0) ...[
+        _summaryRow('SGST', _totalSGST),
+        const SizedBox(height: 6),
+      ],
+      if (_totalIGST > 0) ...[
+        _summaryRow('IGST', _totalIGST),
         const SizedBox(height: 6),
       ],
       const Divider(thickness: 2),
@@ -1310,10 +1634,17 @@ class _NewPurchaseOrderScreenState
                       ? raw
                       : (raw['vendors'] as List? ?? []);
                   vendors = list.map<Map<String, dynamic>>((v) => {
-                    '_id':         v['_id'] ?? '',
-                    'vendorName':  v['vendorName'] ?? '',
-                    'email':       v['email'] ?? '',
-                    'companyName': v['companyName'],
+                    '_id':            v['_id'] ?? '',
+                    'vendorName':     v['vendorName'] ?? '',
+                    'email':          v['email'] ?? '',
+                    'vendorPhone':    v['vendorPhone'] ?? v['phone'] ?? '',
+                    'gstNumber':      v['gstNumber'] ?? '',
+                    'panNumber':      v['panNumber'] ?? '',
+                    'gstType':        v['gstType'] ?? v['gstRegistrationType'] ?? '',
+                    'companyName':    v['companyName'],
+                    'billingAddress': v['billingAddress'] ?? {},
+                    'shippingAddress':v['shippingAddress'] ?? {},
+                    'state':          v['state'] ?? (v['billingAddress'] is Map ? v['billingAddress']['state'] : '') ?? '',
                   }).toList();
                   filteredVendors = vendors;
                 }
@@ -1418,11 +1749,27 @@ class _NewPurchaseOrderScreenState
                                       ],
                                     ),
                                     onTap: () {
+                                      final ba = v['billingAddress'];
+                                      final sa = v['shippingAddress'];
                                       setState(() {
-                                        _selectedVendorId    = v['_id'].toString();
-                                        _selectedVendorName  = v['vendorName'].toString();
-                                        _selectedVendorEmail = v['email'].toString();
+                                        _selectedVendorId      = v['_id'].toString();
+                                        _selectedVendorName    = v['vendorName'].toString();
+                                        _selectedVendorEmail   = v['email'].toString();
+                                        _selectedVendorPhone   = v['vendorPhone']?.toString() ?? '';
+                                        _selectedVendorGSTIN   = v['gstNumber']?.toString() ?? '';
+                                        _selectedVendorPAN     = v['panNumber']?.toString() ?? '';
+                                        _gstRegistrationType   = v['gstType']?.toString() ?? '';
+                                        _selectedVendorCompany = v['companyName']?.toString();
+                                        _billingAddress  = _PoAddress.fromMap(ba is Map ? Map<String, dynamic>.from(ba) : {});
+                                        _shippingAddress = _PoAddress.fromMap(sa is Map ? Map<String, dynamic>.from(sa) : {});
+                                        _sameAsBilling   = true;
+                                        // Auto-set place of supply from vendor state
+                                        final vendorState = v['state']?.toString() ?? '';
+                                        if (vendorState.isNotEmpty && _placeOfSupply.isEmpty) {
+                                          _placeOfSupply = vendorState;
+                                        }
                                       });
+                                      _updateInterState();
                                       Navigator.pop(ctx);
                                     },
                                   );
@@ -1469,12 +1816,20 @@ class _NewPurchaseOrderScreenState
     );
     if (result != null && result is Map<String, dynamic>) {
       setState(() {
-        _selectedVendorId    = result['id'];
-        _selectedVendorName  = result['vendorName'];
-        _selectedVendorEmail = result['email'];
+        _selectedVendorId      = result['id'];
+        _selectedVendorName    = result['vendorName'];
+        _selectedVendorEmail   = result['email'];
+        _selectedVendorPhone   = result['vendorPhone']?.toString() ?? result['phone']?.toString() ?? '';
+        _selectedVendorGSTIN   = result['gstNumber']?.toString() ?? '';
+        _selectedVendorPAN     = result['panNumber']?.toString() ?? '';
+        _gstRegistrationType   = result['gstType']?.toString() ?? '';
+        _selectedVendorCompany = result['companyName']?.toString();
+        final ba = result['billingAddress'];
+        _billingAddress  = _PoAddress.fromMap(ba is Map ? Map<String, dynamic>.from(ba) : {});
+        _shippingAddress = _billingAddress;
+        _sameAsBilling   = true;
       });
-      _showSuccessSnackbar(
-          'Vendor "${result['vendorName']}" added successfully');
+      _showSuccessSnackbar('Vendor "${result['vendorName']}" added successfully');
     }
   }
 

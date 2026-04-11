@@ -1,9 +1,7 @@
 ﻿// ============================================================================
-// PROJECTS BACKEND — Time Tracking Module
+// PROJECTS BACKEND — UPDATED (Timer + Dashboard + Task fields + Clone)
 // ============================================================================
 // File: backend/routes/projects.js
-// Register in app.js:
-//   app.use('/api/finance/projects', require('./routes/projects'));
 // ============================================================================
 
 const express    = require('express');
@@ -19,16 +17,15 @@ async function postTransactionToCOA(db, orgId, {
   try {
     const coa = await db.collection('chart_of_accounts').findOne({ orgId, accountName, isActive: true });
     if (!coa) return;
-    const closing = (coa.closingBalance || 0) + debit - credit;
     await db.collection('chart_of_accounts').updateOne(
       { _id: coa._id },
       { $inc: { closingBalance: debit - credit }, $set: { updatedAt: new Date() } }
     );
     await db.collection('account_transactions').insertOne({
       orgId, accountId: coa._id, accountName, accountType,
-      transactionDate: new Date(transactionDate),
+      date: new Date(transactionDate),
       description, referenceType, referenceId, referenceNumber,
-      debit, credit, closingBalance: closing, createdAt: new Date(),
+      debit, credit, createdAt: new Date(),
     });
   } catch (err) { console.error('COA post error (projects):', err.message); }
 }
@@ -36,15 +33,15 @@ async function postTransactionToCOA(db, orgId, {
 // ── seed COA accounts ─────────────────────────────────────────────────────────
 async function seedProjectCOAAccounts(db, orgId) {
   const accounts = [
-    { accountName: 'Unbilled Revenue',    accountType: 'Income', accountCode: 'INC-UNBILLED', isSystem: true },
-    { accountName: 'Project Revenue',     accountType: 'Income', accountCode: 'INC-PROJECT',  isSystem: true },
-    { accountName: 'Accounts Receivable', accountType: 'Asset',  accountCode: 'ASSET-AR',     isSystem: true },
+    { accountName: 'Unbilled Revenue',    accountType: 'Income', accountCode: 'INC-UNBILLED', isSystemAccount: true },
+    { accountName: 'Project Revenue',     accountType: 'Income', accountCode: 'INC-PROJECT',  isSystemAccount: true },
+    { accountName: 'Accounts Receivable', accountType: 'Asset',  accountCode: 'ASSET-AR',     isSystemAccount: true },
   ];
   for (const acc of accounts) {
     const exists = await db.collection('chart_of_accounts').findOne({ orgId, accountName: acc.accountName });
     if (!exists) {
       await db.collection('chart_of_accounts').insertOne({
-        ...acc, orgId, parentAccount: null,
+        ...acc, orgId,
         description: `System account — ${acc.accountName}`,
         currency: 'INR', openingBalance: 0, closingBalance: 0,
         isActive: true, createdAt: new Date(), updatedAt: new Date(),
@@ -55,8 +52,6 @@ async function seedProjectCOAAccounts(db, orgId) {
 
 // ── auto-number ───────────────────────────────────────────────────────────────
 async function nextProjectNumber(db, orgId) {
-  const { generateNumber } = require('../utils/numberGenerator');
-  // projects.js uses raw mongo driver — build a lightweight model-like wrapper
   const docs = await db.collection('projects')
     .find({ orgId, projectNumber: { $regex: '^PROJ\\d' } }, { projection: { projectNumber: 1 } })
     .toArray();
@@ -110,10 +105,13 @@ router.get('/stats', verifyFinanceJWT, async (req, res) => {
       { $match: { orgId, isBillable: true, status: 'Approved' } },
       { $group: { _id: null, totalHours: { $sum: '$hours' } } },
     ]).toArray();
+    // Active timers count
+    const activeTimers = await db.collection('timers').countDocuments({ orgId, status: 'running' });
     res.json({ success: true, data: {
       total, active, completed, inactive, onHold,
       totalBillableHours: billableAgg[0]?.totalHours || 0,
       unbilledHours: unbilledAgg[0]?.totalHours || 0,
+      activeTimers,
     }});
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -150,8 +148,93 @@ router.get('/', verifyFinanceJWT, async (req, res) => {
         { $group: { _id: null, hours: { $sum: '$hours' } } },
       ]).toArray();
       p.unbilledHours = agg[0]?.hours || 0;
+      // Active timers for this project
+      p.activeTimerCount = await db.collection('timers').countDocuments({ orgId, projectId: p._id.toString(), status: 'running' });
     }
     res.json({ success: true, data: projects, pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / parseInt(limit)) } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// =============================================================================
+// GET /:id/dashboard — project dashboard data
+// =============================================================================
+router.get('/:id/dashboard', verifyFinanceJWT, async (req, res) => {
+  try {
+    const db = req.db; const orgId = req.user.orgId;
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    // All timesheet entries for this project
+    const entries = await db.collection('timesheets').find({ orgId, projectId: req.params.id }).toArray();
+    const approvedEntries = entries.filter(e => e.status === 'Approved' && e.isBillable);
+    const billedEntries   = entries.filter(e => e.status === 'Billed');
+
+    const totalLoggedHours  = entries.reduce((s, e) => s + e.hours, 0);
+    const unbilledHours     = approvedEntries.reduce((s, e) => s + e.hours, 0);
+    const billedHours       = billedEntries.reduce((s, e) => s + e.hours, 0);
+    const budgetHours       = project.budgetAmount > 0 && project.budgetType === 'Hours' ? project.budgetAmount : 0;
+    const burntPercent      = budgetHours > 0 ? Math.min(100, Math.round((totalLoggedHours / budgetHours) * 100)) : 0;
+
+    // Revenue vs cost
+    const unbilledAmount = calcBillableAmount(project, approvedEntries);
+    const totalBilledAmount = project.totalBilledAmount || 0;
+
+    // Staff breakdown
+    const staffMap = {};
+    for (const e of entries) {
+      const key = e.userId || 'unassigned';
+      if (!staffMap[key]) staffMap[key] = { userId: key, userName: e.userName || 'Unassigned', totalHours: 0, billableHours: 0 };
+      staffMap[key].totalHours += e.hours;
+      if (e.isBillable) staffMap[key].billableHours += e.hours;
+    }
+
+    // Task breakdown
+    const taskMap = {};
+    for (const t of (project.tasks || [])) {
+      const taskEntries = entries.filter(e => e.taskId === t.taskId);
+      taskMap[t.taskId] = {
+        taskId:            t.taskId,
+        taskName:          t.taskName,
+        status:            t.status || 'Open',
+        estimatedHours:    t.estimatedHours || 0,
+        loggedHours:       taskEntries.reduce((s, e) => s + e.hours, 0),
+        completionPercent: t.completionPercent || 0,
+        deadline:          t.deadline || null,
+        assignedStaff:     t.assignedStaffName || '',
+      };
+    }
+
+    // Active timers
+    const activeTimers = await db.collection('timers').find({ orgId, projectId: req.params.id, status: { $in: ['running', 'paused'] } }).toArray();
+
+    // Recent entries
+    const recentEntries = entries.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
+
+    // Budget utilization
+    const budgetAmount   = project.budgetAmount || 0;
+    const budgetUsed     = project.budgetType === 'Hours' ? totalLoggedHours : totalBilledAmount;
+    const budgetPercent  = budgetAmount > 0 ? Math.min(100, Math.round((budgetUsed / budgetAmount) * 100)) : 0;
+
+    res.json({ success: true, data: {
+      project,
+      totalLoggedHours, unbilledHours, billedHours,
+      budgetHours, burntPercent,
+      budgetAmount, budgetUsed, budgetPercent,
+      unbilledAmount, totalBilledAmount,
+      remainingBudget: Math.max(0, budgetAmount - budgetUsed),
+      staffBreakdown:  Object.values(staffMap),
+      taskBreakdown:   Object.values(taskMap),
+      activeTimers,
+      recentEntries,
+      entryCounts: {
+        total:     entries.length,
+        unbilled:  entries.filter(e => e.status === 'Unbilled').length,
+        submitted: entries.filter(e => e.status === 'Submitted').length,
+        approved:  entries.filter(e => e.status === 'Approved').length,
+        billed:    entries.filter(e => e.status === 'Billed').length,
+        rejected:  entries.filter(e => e.status === 'Rejected').length,
+      },
+    }});
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -168,6 +251,7 @@ router.get('/:id', verifyFinanceJWT, async (req, res) => {
       { $group: { _id: '$status', hours: { $sum: '$hours' }, count: { $sum: 1 } } },
     ]).toArray();
     project.timesheetSummary = tsAgg;
+    project.activeTimerCount = await db.collection('timers').countDocuments({ orgId, projectId: req.params.id, status: 'running' });
     res.json({ success: true, data: project });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -207,14 +291,23 @@ router.post('/', verifyFinanceJWT, async (req, res) => {
       endDate: endDate ? new Date(endDate) : null,
       status,
       tasks: (tasks || []).map((t, i) => ({
-        taskId: t.taskId || `TASK-${i+1}`, taskName: t.taskName || '',
-        hourlyRate: parseFloat(t.hourlyRate) || 0,
-        estimatedHours: parseFloat(t.estimatedHours) || 0,
-        description: t.description || '', status: t.status || 'Active',
+        taskId:            t.taskId || `TASK-${Date.now()}-${i}`,
+        taskName:          t.taskName || '',
+        hourlyRate:        parseFloat(t.hourlyRate) || 0,
+        estimatedHours:    parseFloat(t.estimatedHours) || 0,
+        description:       t.description || '',
+        status:            t.status || 'Open',
+        completionPercent: parseFloat(t.completionPercent) || 0,
+        deadline:          t.deadline ? new Date(t.deadline) : null,
+        assignedStaffId:   t.assignedStaffId || '',
+        assignedStaffName: t.assignedStaffName || '',
       })),
       staff: (staff || []).map(s => ({
-        userId: s.userId || '', name: s.name || '', email: s.email || '',
-        role: s.role || 'staff', hourlyRate: parseFloat(s.hourlyRate) || 0,
+        userId:    s.userId    || '',
+        name:      s.name      || '',
+        email:     s.email     || '',
+        role:      s.role      || 'staff',
+        hourlyRate: parseFloat(s.hourlyRate) || 0,
       })),
       notes: notes || '', termsAndConditions: termsAndConditions || '',
       totalLoggedHours: 0, totalBilledAmount: 0, invoicesGenerated: [],
@@ -244,16 +337,25 @@ router.put('/:id', verifyFinanceJWT, async (req, res) => {
     if (req.body.endDate !== undefined) $set.endDate = req.body.endDate ? new Date(req.body.endDate) : null;
     if (req.body.tasks) {
       $set.tasks = req.body.tasks.map((t, i) => ({
-        taskId: t.taskId || `TASK-${i+1}`, taskName: t.taskName || '',
-        hourlyRate: parseFloat(t.hourlyRate) || 0,
-        estimatedHours: parseFloat(t.estimatedHours) || 0,
-        description: t.description || '', status: t.status || 'Active',
+        taskId:            t.taskId || `TASK-${Date.now()}-${i}`,
+        taskName:          t.taskName || '',
+        hourlyRate:        parseFloat(t.hourlyRate) || 0,
+        estimatedHours:    parseFloat(t.estimatedHours) || 0,
+        description:       t.description || '',
+        status:            t.status || 'Open',
+        completionPercent: parseFloat(t.completionPercent) || 0,
+        deadline:          t.deadline ? new Date(t.deadline) : null,
+        assignedStaffId:   t.assignedStaffId || '',
+        assignedStaffName: t.assignedStaffName || '',
       }));
     }
     if (req.body.staff) {
       $set.staff = req.body.staff.map(s => ({
-        userId: s.userId || '', name: s.name || '', email: s.email || '',
-        role: s.role || 'staff', hourlyRate: parseFloat(s.hourlyRate) || 0,
+        userId:    s.userId    || '',
+        name:      s.name      || '',
+        email:     s.email     || '',
+        role:      s.role      || 'staff',
+        hourlyRate: parseFloat(s.hourlyRate) || 0,
       }));
     }
     await db.collection('projects').updateOne({ _id: new ObjectId(req.params.id) }, { $set });
@@ -277,6 +379,64 @@ router.patch('/:id/status', verifyFinanceJWT, async (req, res) => {
     );
     if (result.matchedCount === 0) return res.status(404).json({ success: false, message: 'Project not found' });
     res.json({ success: true, message: `Project status updated to ${status}` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// =============================================================================
+// PATCH /:id/task/:taskId/status — update single task status
+// =============================================================================
+router.patch('/:id/task/:taskId/status', verifyFinanceJWT, async (req, res) => {
+  try {
+    const db = req.db; const orgId = req.user.orgId;
+    const { status, completionPercent } = req.body;
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    const tasks = (project.tasks || []).map(t => {
+      if (t.taskId === req.params.taskId) {
+        return {
+          ...t,
+          status: status || t.status,
+          completionPercent: completionPercent !== undefined ? parseFloat(completionPercent) : t.completionPercent,
+          updatedAt: new Date(),
+        };
+      }
+      return t;
+    });
+    await db.collection('projects').updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { tasks, updatedAt: new Date() } }
+    );
+    res.json({ success: true, message: 'Task updated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// =============================================================================
+// POST /:id/clone — clone a project
+// =============================================================================
+router.post('/:id/clone', verifyFinanceJWT, async (req, res) => {
+  try {
+    const db = req.db; const orgId = req.user.orgId;
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    const projectNumber = await nextProjectNumber(db, orgId);
+    const now = new Date();
+    const { _id, ...rest } = project;
+    const cloned = {
+      ...rest,
+      projectNumber,
+      projectName: `Copy of ${project.projectName}`,
+      status: 'Active',
+      totalLoggedHours: 0,
+      totalBilledAmount: 0,
+      invoicesGenerated: [],
+      tasks: (project.tasks || []).map(t => ({ ...t, completionPercent: 0, status: 'Open' })),
+      createdBy: req.user.email,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = await db.collection('projects').insertOne(cloned);
+    cloned._id = result.insertedId;
+    res.status(201).json({ success: true, message: 'Project cloned', data: cloned });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -348,9 +508,16 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
     const gstRate = parseFloat(req.body.gstRate) || 18;
     const gstAmount = subTotal * gstRate / 100;
     const totalAmount = subTotal + gstAmount;
-    const { generateNumber } = require('../utils/numberGenerator');
-    const Invoice = mongoose.models.Invoice || mongoose.model('Invoice', new mongoose.Schema({}, { strict: false }));
-    const invNum = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId);
+
+    // Generate invoice number
+    const invDocs = await db.collection('invoices').find({ orgId, invoiceNumber: { $regex: '^INV' } }, { projection: { invoiceNumber: 1 } }).toArray();
+    let maxInv = 0;
+    for (const d of invDocs) {
+      const n = parseInt((d.invoiceNumber || '').slice('INV'.length), 10);
+      if (!isNaN(n) && n > maxInv) maxInv = n;
+    }
+    const invNum = `INV${String(maxInv + 1).padStart(6, '0')}`;
+
     const now = new Date();
     const dueDate = new Date(now); dueDate.setDate(dueDate.getDate() + 30);
     const invoice = {
@@ -374,10 +541,13 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
     const totalBilledHours = entries.reduce((s, e) => s + e.hours, 0);
     await db.collection('projects').updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $inc: { totalBilledAmount: totalAmount, totalLoggedHours: totalBilledHours }, $push: { invoicesGenerated: invResult.insertedId.toString() }, $set: { updatedAt: now } }
+      { $inc: { totalBilledAmount: totalAmount, totalLoggedHours: 0 }, $push: { invoicesGenerated: invResult.insertedId.toString() }, $set: { updatedAt: now } }
     );
+    // COA: Debit AR, Credit Project Revenue, reverse Unbilled Revenue
     await postTransactionToCOA(db, orgId, { accountName: 'Accounts Receivable', accountType: 'Asset', transactionDate: now, description: `Invoice ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: totalAmount, credit: 0 });
     await postTransactionToCOA(db, orgId, { accountName: 'Project Revenue', accountType: 'Income', transactionDate: now, description: `Invoice ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: 0, credit: subTotal });
+    // Reverse Unbilled Revenue for billed entries
+    await postTransactionToCOA(db, orgId, { accountName: 'Unbilled Revenue', accountType: 'Income', transactionDate: now, description: `Reversal on billing — ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: subTotal, credit: 0 });
     res.status(201).json({ success: true, message: `Invoice ${invNum} generated successfully`, data: { invoiceId: invResult.insertedId, invoiceNumber: invNum, totalAmount, entriesBilled: entries.length } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -393,6 +563,7 @@ router.delete('/:id', verifyFinanceJWT, async (req, res) => {
     if (project.invoicesGenerated?.length > 0)
       return res.status(400).json({ success: false, message: 'Cannot delete project with generated invoices. Close the project instead.' });
     await db.collection('timesheets').deleteMany({ orgId, projectId: req.params.id });
+    await db.collection('timers').deleteMany({ orgId, projectId: req.params.id });
     await db.collection('projects').deleteOne({ _id: new ObjectId(req.params.id) });
     res.json({ success: true, message: 'Project deleted' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

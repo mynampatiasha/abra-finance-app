@@ -242,6 +242,144 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     }
   }
 
+  Future<void> _showApplyCreditDialog(CreditNote cn) async {
+    if (cn.status != 'OPEN') {
+      _snackError('Only OPEN credit notes can be applied to an invoice');
+      return;
+    }
+    if (cn.invoiceId == null || cn.invoiceId!.isEmpty) {
+      _snackError('No invoice linked to this credit note');
+      return;
+    }
+
+    final amountController = TextEditingController(
+      text: cn.creditBalance.toStringAsFixed(2),
+    );
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          const Icon(Icons.check_circle_outline,
+              color: Color(0xFF27AE60), size: 22),
+          const SizedBox(width: 8),
+          const Text('Apply Credit to Invoice',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 16)),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F4F8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Credit Note : ${cn.creditNoteNumber}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  Text('Invoice      : ${cn.invoiceNumber ?? '-'}',
+                      style: TextStyle(
+                          fontSize: 13, color: Colors.grey[600])),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Available    : ₹${cn.creditBalance.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF27AE60),
+                        fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Amount to Apply',
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: amountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true),
+              decoration: InputDecoration(
+                prefixText: '₹ ',
+                hintText: '0.00',
+                filled: true,
+                fillColor: const Color(0xFFF7F9FC),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        const BorderSide(color: Color(0xFFDDE3EE))),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        const BorderSide(color: Color(0xFFDDE3EE))),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                        color: Color(0xFF1e3a8a), width: 1.5)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF27AE60),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Apply Credit',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final amount = double.tryParse(amountController.text);
+      if (amount == null || amount <= 0) {
+        _snackError('Please enter a valid amount');
+        return;
+      }
+      if (amount > cn.creditBalance) {
+        _snackError(
+            'Amount exceeds available balance ₹${cn.creditBalance.toStringAsFixed(2)}');
+        return;
+      }
+
+      try {
+        await CreditNoteService.applyCredit(
+          cn.id,
+          {
+            'invoiceId': cn.invoiceId,
+            'invoiceNumber': cn.invoiceNumber ?? '',
+            'amount': amount,
+          },
+        );
+        _snackSuccess(
+            '✅ ₹${amount.toStringAsFixed(2)} applied to ${cn.invoiceNumber}');
+        _refreshData();
+      } catch (e) {
+        _snackError('Failed to apply credit: $e');
+      }
+    }
+  }
+
   Future<void> _sendCreditNote(CreditNote cn) async {
     try {
       await CreditNoteService.sendCreditNote(cn.id);
@@ -249,6 +387,35 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       _refreshData();
     } catch (e) {
       _snackError('Failed to send credit note: $e');
+    }
+  }
+
+  Future<void> _markCreditNoteAsSent(CreditNote cn) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this credit note as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1e3a8a), foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await CreditNoteService.markCreditNoteAsSent(cn.id);
+      _snackSuccess('Credit note marked as sent');
+      _refreshData();
+    } catch (e) {
+      _snackError('Failed to mark as sent: $e');
     }
   }
 
@@ -1505,6 +1672,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                   case 'edit':
                     _openEditCreditNote(creditNote.id);
                     break;
+                  case 'mark_as_sent':
+                    await _markCreditNoteAsSent(creditNote);
+                    break;
                   case 'send':
                     await _sendCreditNote(creditNote);
                     break;
@@ -1513,6 +1683,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                     break;
                   case 'ticket':
                     _raiseTicket(creditNote);
+                    break;
+                  case 'apply':
+                    _showApplyCreditDialog(creditNote);
                     break;
                   case 'delete':
                     await _deleteCreditNote(creditNote);
@@ -1544,6 +1717,14 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                       contentPadding: EdgeInsets.zero),
                 ),
                 const PopupMenuItem(
+                  value: 'mark_as_sent',
+                  child: ListTile(
+                      leading: Icon(Icons.mark_email_read_outlined,
+                          size: 17, color: Color(0xFFE67E22)),
+                      title: Text('Mark as Sent'),
+                      contentPadding: EdgeInsets.zero),
+                ),
+                const PopupMenuItem(
                   value: 'download',
                   child: ListTile(
                       leading: Icon(Icons.download_outlined,
@@ -1559,6 +1740,16 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                       title: Text('Raise Ticket',
                           style: TextStyle(color: Color(0xFFE67E22))),
                       contentPadding: EdgeInsets.zero),
+                ),
+                const PopupMenuItem(
+                  value: 'apply',
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle_outline,
+                        size: 17, color: Color(0xFF27AE60)),
+                    title: Text('Apply to Invoice',
+                        style: TextStyle(color: Color(0xFF27AE60))),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
                 const PopupMenuItem(
                   value: 'delete',

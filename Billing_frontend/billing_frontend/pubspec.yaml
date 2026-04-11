@@ -3,7 +3,7 @@ description: Abra Finance Suite - Complete financial management application.
 
 publish_to: 'none'
 
-version: 1.0.2+6
+version: 1.0.2+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -98,6 +98,7 @@ flutter:
     - assets/expense.png
     - assets/bill.png
     - assets/payment_made.png
+    - assets/payment_received.png
     - assets/purchase_order.png
     - assets/purchase.png
     - assets/recurring_bill.dart.png
@@ -107,8 +108,12 @@ flutter:
     - assets/Notification.mp3
 
 flutter_launcher_icons:
-  android: true
+  android: "ic_launcher"
   ios: true
   image_path: "assets/abra_finance_logo.jpg"
+  min_sdk_android: 21
+  remove_alpha_ios: true
   adaptive_icon_background: "#ffffff"
   adaptive_icon_foreground: "assets/abra_finance_logo.jpg"
+  web:
+    generate: false

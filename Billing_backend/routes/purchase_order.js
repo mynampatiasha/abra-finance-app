@@ -93,7 +93,7 @@ const purchaseOrderSchema = new mongoose.Schema({
   purchaseOrderNumber: {
     type: String,
     required: true,
-    unique: true,
+
     index: true
   },
   vendorId: {
@@ -125,32 +125,71 @@ const purchaseOrderSchema = new mongoose.Schema({
   salesperson: String,
   subject: String,
 
+  // Vendor details
+  vendorGSTIN:         { type: String, default: '' },
+  vendorPAN:           { type: String, default: '' },
+  gstRegistrationType: { type: String, default: '' },
+
+  // Addresses
+  billingAddress: {
+    attention: { type: String, default: '' },
+    street:    { type: String, default: '' },
+    city:      { type: String, default: '' },
+    state:     { type: String, default: '' },
+    zip:       { type: String, default: '' },
+    country:   { type: String, default: 'India' },
+    phone:     { type: String, default: '' },
+  },
+  shippingAddress: {
+    attention: { type: String, default: '' },
+    street:    { type: String, default: '' },
+    city:      { type: String, default: '' },
+    state:     { type: String, default: '' },
+    zip:       { type: String, default: '' },
+    country:   { type: String, default: 'India' },
+    phone:     { type: String, default: '' },
+  },
+
+  // Place of supply / GST routing
+  placeOfSupply: { type: String, default: '' },
+  sourceState:   { type: String, default: '' },
+  isInterState:  { type: Boolean, default: false },
+
   items: [{
-    itemDetails: { type: String, required: true },
-    quantity: { type: Number, required: true, min: 0 },
-    rate: { type: Number, required: true, min: 0 },
-    discount: { type: Number, default: 0, min: 0 },
-    discountType: {
-      type: String,
-      enum: ['percentage', 'amount'],
-      default: 'percentage'
-    },
-    amount: { type: Number, required: true }
+    itemDetails:   { type: String, required: true },
+    hsnCode:       { type: String, default: '' },
+    sacCode:       { type: String, default: '' },
+    unit:          { type: String, default: 'Nos' },
+    quantity:      { type: Number, required: true, min: 0 },
+    rate:          { type: Number, required: true, min: 0 },
+    discount:      { type: Number, default: 0, min: 0 },
+    discountType:  { type: String, enum: ['percentage', 'amount'], default: 'percentage' },
+    taxableAmount: { type: Number, default: 0 },
+    itemGstRate:   { type: Number, default: 0 },
+    cgstAmount:    { type: Number, default: 0 },
+    sgstAmount:    { type: Number, default: 0 },
+    igstAmount:    { type: Number, default: 0 },
+    amount:        { type: Number, required: true },
   }],
 
   vendorNotes: String,
   termsAndConditions: String,
 
   // Financial
-  subTotal: { type: Number, required: true, default: 0 },
-  tdsRate: { type: Number, default: 0, min: 0, max: 100 },
-  tdsAmount: { type: Number, default: 0 },
-  tcsRate: { type: Number, default: 0, min: 0, max: 100 },
-  tcsAmount: { type: Number, default: 0 },
-  gstRate: { type: Number, default: 18, min: 0, max: 100 },
-  cgst: { type: Number, default: 0 },
-  sgst: { type: Number, default: 0 },
-  igst: { type: Number, default: 0 },
+  subTotal:   { type: Number, required: true, default: 0 },
+  totalCGST:  { type: Number, default: 0 },
+  totalSGST:  { type: Number, default: 0 },
+  totalIGST:  { type: Number, default: 0 },
+  totalTax:   { type: Number, default: 0 },
+  // Legacy compat
+  gstRate:    { type: Number, default: 0 },
+  cgst:       { type: Number, default: 0 },
+  sgst:       { type: Number, default: 0 },
+  igst:       { type: Number, default: 0 },
+  tdsRate:    { type: Number, default: 0, min: 0, max: 100 },
+  tdsAmount:  { type: Number, default: 0 },
+  tcsRate:    { type: Number, default: 0, min: 0, max: 100 },
+  tcsAmount:  { type: Number, default: 0 },
   totalAmount: { type: Number, required: true, default: 0 },
 
   // Status
@@ -228,20 +267,72 @@ const purchaseOrderSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// Pre-save: calculate amounts
-purchaseOrderSchema.pre('save', function () {
-  this.subTotal = this.items.reduce((sum, item) => sum + (item.amount || 0), 0);
-  this.tdsAmount = (this.subTotal * this.tdsRate) / 100;
-  this.tcsAmount = (this.subTotal * this.tcsRate) / 100;
-  const gstBase   = this.subTotal - this.tdsAmount + this.tcsAmount;
-  const gstAmount = (gstBase * this.gstRate) / 100;
-  this.cgst        = gstAmount / 2;
-  this.sgst        = gstAmount / 2;
-  this.igst        = 0;
-  this.totalAmount = this.subTotal - this.tdsAmount + this.tcsAmount + gstAmount;
+// Pre-save: auto-generate PO number + per-item GST calculation
+purchaseOrderSchema.pre('save', async function () {
+  // 1. Auto-generate PO number if missing
+  if (!this.purchaseOrderNumber) {
+    const { generateNumber } = require('../utils/numberGenerator');
+    this.purchaseOrderNumber = await generateNumber(
+      mongoose.model('PurchaseOrder'), 'purchaseOrderNumber', 'PO', this.orgId || null
+    );
+  }
+
+  // 2. Per-item GST calculation (inter/intra state)
+  const placeOfSupply = (this.placeOfSupply || '').trim().toLowerCase();
+  const sourceState   = (this.sourceState   || '').trim().toLowerCase();
+  this.isInterState   = placeOfSupply !== '' && sourceState !== '' &&
+                        placeOfSupply !== sourceState;
+
+  let subTotal = 0;
+  for (const item of this.items) {
+    let taxable = (item.quantity || 0) * (item.rate || 0);
+    if (item.discount > 0) {
+      taxable = item.discountType === 'percentage'
+        ? taxable - (taxable * item.discount / 100)
+        : taxable - item.discount;
+    }
+    taxable = Math.round(taxable * 100) / 100;
+    item.taxableAmount = taxable;
+    subTotal += taxable;
+
+    const gstRate = item.itemGstRate || 0;
+    if (this.isInterState) {
+      item.igstAmount = Math.round(taxable * gstRate / 100 * 100) / 100;
+      item.cgstAmount = 0;
+      item.sgstAmount = 0;
+    } else {
+      item.cgstAmount = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
+      item.sgstAmount = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
+      item.igstAmount = 0;
+    }
+    item.amount = Math.round((taxable + item.cgstAmount + item.sgstAmount + item.igstAmount) * 100) / 100;
+  }
+  this.subTotal = Math.round(subTotal * 100) / 100;
+
+  let totalCGST = 0, totalSGST = 0, totalIGST = 0;
+  for (const item of this.items) {
+    totalCGST += item.cgstAmount || 0;
+    totalSGST += item.sgstAmount || 0;
+    totalIGST += item.igstAmount || 0;
+  }
+  this.totalCGST = Math.round(totalCGST * 100) / 100;
+  this.totalSGST = Math.round(totalSGST * 100) / 100;
+  this.totalIGST = Math.round(totalIGST * 100) / 100;
+  this.totalTax  = Math.round((totalCGST + totalSGST + totalIGST) * 100) / 100;
+
+  // Legacy compat
+  this.cgst = this.totalCGST;
+  this.sgst = this.totalSGST;
+  this.igst = this.totalIGST;
+
+  this.tdsAmount = Math.round(this.subTotal * (this.tdsRate || 0) / 100 * 100) / 100;
+  this.tcsAmount = Math.round(this.subTotal * (this.tcsRate || 0) / 100 * 100) / 100;
+  this.totalAmount = Math.round(
+    (this.subTotal + this.totalTax - this.tdsAmount + this.tcsAmount) * 100
+  ) / 100;
 });
 
-purchaseOrderSchema.index({ vendorId: 1, purchaseOrderDate: -1 });
+purchaseOrderSchema.index({ orgId: 1, purchaseOrderNumber: 1 }, { unique: true });
 purchaseOrderSchema.index({ status: 1, expectedDeliveryDate: 1 });
 purchaseOrderSchema.index({ createdAt: -1 });
 
@@ -275,6 +366,27 @@ const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', vendorSchema);
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+function formatPOAddress(addr) {
+  if (!addr) return '';
+  return [addr.attention, addr.street, addr.city, addr.state,
+          addr.zip || addr.pincode, addr.country]
+    .filter(Boolean).join(', ');
+}
+
+async function getPOOrgData(orgId) {
+  try {
+    const OrgModel = mongoose.models.Organization ||
+      mongoose.model('Organization', new mongoose.Schema({
+        orgId: String, orgName: String, gstNumber: String,
+        address: String, email: String, phone: String, state: String,
+      }), 'organizations');
+    return await OrgModel.findOne({ orgId }).lean();
+  } catch (e) {
+    console.warn('⚠️ Could not fetch org data:', e.message);
+    return null;
+  }
+}
 
 // Number to words (for PDF amount in words)
 function numberToWords(n) {
@@ -349,85 +461,180 @@ async function generatePurchaseOrderPDF(po, orgId) {
       doc.pipe(stream);
       const pageW = 515;
 
-      // ── Header ──────────────────────────────────────────────────────────────
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
-
+      // ── Header (white background, invoice style) ────────────────────────────
       const logoPath = getLogoPath(orgId);
       let logoLoaded = false;
+
+      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY  = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH       = 55;
+      const logoY       = logoCenterY - (logoH / 2);
+      const textX       = logoPath ? 126 : 50;
+
       if (logoPath) {
-        try { doc.image(logoPath, 44, 35, { width: 75, height: 60, fit: [75, 60] }); logoLoaded = true; }
+        try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); logoLoaded = true; }
         catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
       }
-      const textX = logoLoaded ? 126 : 50;
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold').text(orgName.toUpperCase(), textX, 40, { width: 200 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('BILLING & FINANCE', textX, 56, { width: 200, characterSpacing: 1 });
-      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let cY = 68; contactLines.forEach(l => { doc.text(l, textX, cY, { width: 240 }); cY += 9; });
 
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold').text('PURCHASE ORDER', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold').text(po.purchaseOrderNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica')
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+      doc.fontSize(7).fillColor('#000000');
+      let cY = textStartY + 26;
+      contactLines.forEach(l => { doc.text(l, textX, cY, { width: 240 }); cY += 9; });
+
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+         .text('PURCHASE ORDER', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+         .text(po.purchaseOrderNumber, 380, 52, { width: 170, align: 'right' });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(po.purchaseOrderDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold')
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text(`${(po.status || 'DRAFT').replace(/_/g,' ')}${po.expectedDeliveryDate ? ' · Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}`, 380, 92, { width: 170, align: 'right' });
 
-      // ── Meta boxes ───────────────────────────────────────────────────────────
-      const metaY = 132, metaBoxW = pageW / 2;
-      const metas = [
-        { label: 'Vendor / Ship To',
-          val: po.vendorName || 'N/A',
-          sub: [po.vendorEmail, po.vendorPhone, po.deliveryAddress].filter(Boolean).join(' | ') },
-        { label: 'PO Details',
-          val: `Terms: ${po.paymentTerms || 'Net 30'}`,
-          sub: `${po.referenceNumber ? 'Ref: ' + po.referenceNumber : ''}${po.expectedDeliveryDate ? ' | Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}` },
-      ];
-      metas.forEach((m, i) => {
-        const bx = 40 + i * metaBoxW;
-        doc.rect(bx, metaY, metaBoxW, 46).fillAndStroke('#f7f9fc', '#dde4ef');
-        doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text(m.label.toUpperCase(), bx + 8, metaY + 7, { width: metaBoxW - 16, characterSpacing: 0.8 });
-        doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(m.val, bx + 8, metaY + 18, { width: metaBoxW - 16, ellipsis: true });
-        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(m.sub, bx + 8, metaY + 30, { width: metaBoxW - 16, ellipsis: true });
-      });
+      // ── Meta boxes — 3-column invoice style ──────────────────────────────────
+      const metaY = 132;
+      const colW  = pageW / 3;
+      const metaH = 90;
 
-      // ── Items table ──────────────────────────────────────────────────────────
-      const tableY = metaY + 58;
-      doc.rect(40, tableY, pageW, 22).fill('#0f1e3d');
-      doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
-      doc.text('#', 48, tableY + 7, { width: 20 });
-      doc.text('DESCRIPTION', 72, tableY + 7, { width: 200 });
-      doc.text('QTY', 275, tableY + 7, { width: 60, align: 'center' });
-      doc.text('RATE', 340, tableY + 7, { width: 80, align: 'right' });
-      doc.text('AMOUNT', 420, tableY + 7, { width: 90, align: 'right' });
+      // Col 1: Vendor / Bill To
+      const billX = 40;
+      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('VENDOR / BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(po.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      const ba = po.billingAddress || {};
+      const baLine = [ba.street, ba.city, ba.state, ba.zip].filter(Boolean).join(', ');
+      if (baLine) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(baLine, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+      } else if (po.vendorEmail) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(po.vendorEmail, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+      }
+      if (po.vendorGSTIN) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(`GSTIN: ${po.vendorGSTIN}`, billX + 8, metaY + 40, { width: colW - 16, ellipsis: true });
+      }
 
-      let rowY = tableY + 22;
+      // Col 2: Ship To / Delivery Address
+      const shipX = 40 + colW;
+      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('SHIP TO / DELIVERY', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      const sa = po.shippingAddress || {};
+      const saLine = [sa.street, sa.city, sa.state, sa.zip].filter(Boolean).join(', ');
+      if (saLine) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(saLine, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      } else if (po.deliveryAddress) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(po.deliveryAddress, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      } else {
+        doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
+           .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
+      }
+
+      // Col 3: PO Details
+      const detX = 40 + colW * 2;
+      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('PO DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`PO #: ${po.purchaseOrderNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(`Terms: ${po.paymentTerms || 'Net 30'}`, detX + 8, metaY + 29, { width: colW - 16 });
+      if (po.referenceNumber) {
+        doc.text(`Ref: ${po.referenceNumber}`, detX + 8, metaY + 39, { width: colW - 16 });
+      }
+      if (po.expectedDeliveryDate) {
+        doc.text(`Del: ${new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`, detX + 8, metaY + 49, { width: colW - 16 });
+      }
+
+      let tableStartY = metaY + metaH + 12;
+
+      // ── Items table — invoice style columns ──────────────────────────────────
+      const cols = {
+        num:    { x: 40,  w: 16  },
+        desc:   { x: 56,  w: 130 },
+        hsn:    { x: 186, w: 50  },
+        unit:   { x: 236, w: 28  },
+        qty:    { x: 264, w: 28  },
+        rate:   { x: 292, w: 50  },
+        disc:   { x: 342, w: 36  },
+        taxable:{ x: 378, w: 50  },
+        gst:    { x: 428, w: 28  },
+        amount: { x: 456, w: 59  },
+      };
+
+      doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+      doc.text('#',        cols.num.x   + 2, tableStartY + 7, { width: cols.num.w });
+      doc.text('ITEM',     cols.desc.x  + 2, tableStartY + 7, { width: cols.desc.w });
+      doc.text('HSN/SAC',  cols.hsn.x   + 2, tableStartY + 7, { width: cols.hsn.w });
+      doc.text('UNIT',     cols.unit.x  + 2, tableStartY + 7, { width: cols.unit.w });
+      doc.text('QTY',      cols.qty.x   + 2, tableStartY + 7, { width: cols.qty.w,    align: 'center' });
+      doc.text('RATE',     cols.rate.x  + 2, tableStartY + 7, { width: cols.rate.w,   align: 'right' });
+      doc.text('DISC',     cols.disc.x  + 2, tableStartY + 7, { width: cols.disc.w,   align: 'right' });
+      doc.text('TAXABLE',  cols.taxable.x+2, tableStartY + 7, { width: cols.taxable.w,align: 'right' });
+      doc.text('GST%',     cols.gst.x   + 2, tableStartY + 7, { width: cols.gst.w,    align: 'center' });
+      doc.text('AMOUNT',   cols.amount.x+ 2, tableStartY + 7, { width: cols.amount.w, align: 'right' });
+
+      let rowY = tableStartY + 20;
       po.items.forEach((item, idx) => {
-        const rowH = 24;
-        doc.rect(40, rowY, pageW, rowH).fill(idx % 2 === 0 ? '#ffffff' : '#f7f9fc');
-        doc.rect(40, rowY, pageW, rowH).lineWidth(1.5).strokeColor('#000000').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold').text(String(idx + 1), 48, rowY + 8, { width: 20 });
-        doc.font('Helvetica').text(item.itemDetails || 'N/A', 72, rowY + 8, { width: 200, ellipsis: true });
-        doc.text(String(item.quantity || 0), 275, rowY + 8, { width: 60, align: 'center' });
-        doc.text(`Rs.${(item.rate || 0).toFixed(2)}`, 340, rowY + 8, { width: 80, align: 'right' });
-        doc.font('Helvetica-Bold').text(`Rs.${(item.amount || 0).toFixed(2)}`, 420, rowY + 8, { width: 90, align: 'right' });
+        const descText  = item.itemDetails || 'N/A';
+        const descWidth = cols.desc.w - 4;
+        const vPad      = 8;
+        doc.font('Helvetica').fontSize(7);
+        const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
+        const rowH  = Math.max(20, descH + vPad * 2);
+
+        const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+        doc.rect(40, rowY, 515, rowH).fill(fill);
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+        const hsnSac  = item.hsnCode || item.sacCode || '';
+        const discStr = item.discount > 0
+          ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
+          : '—';
+        const taxable = item.taxableAmount || 0;
+        const gstRate = item.itemGstRate || 0;
+        const cellY   = rowY + vPad;
+
+        doc.fontSize(7).fillColor('#000000');
+        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
+        doc.font('Helvetica').text(descText, cols.desc.x + 2, cellY, { width: descWidth, lineGap: 1 });
+        doc.text(hsnSac,                           cols.hsn.x   + 2, cellY, { width: cols.hsn.w - 2,  ellipsis: true });
+        doc.text(item.unit || 'Nos',               cols.unit.x  + 2, cellY, { width: cols.unit.w });
+        doc.text(String(item.quantity || 0),       cols.qty.x   + 2, cellY, { width: cols.qty.w,    align: 'center' });
+        doc.text(`${(item.rate || 0).toFixed(2)}`, cols.rate.x  + 2, cellY, { width: cols.rate.w,   align: 'right' });
+        doc.text(discStr,                          cols.disc.x  + 2, cellY, { width: cols.disc.w,   align: 'right' });
+        doc.text(`${taxable.toFixed(2)}`,          cols.taxable.x+2, cellY, { width: cols.taxable.w,align: 'right' });
+        doc.text(`${gstRate}%`,                    cols.gst.x   + 2, cellY, { width: cols.gst.w,    align: 'center' });
+        doc.font('Helvetica-Bold')
+           .text(`${(item.amount || 0).toFixed(2)}`, cols.amount.x+2, cellY, { width: cols.amount.w, align: 'right' });
         rowY += rowH;
       });
 
       // ── Totals ───────────────────────────────────────────────────────────────
-      const totalsX = 355, totalsW = 200, labelX = totalsX, amountX = totalsX + totalsW;
-      let totalsY = rowY + 16;
+      const totalsX = 315, totalsW = 240, labelX = totalsX, amountX = totalsX + totalsW;
+      let totalsY = rowY + 12;
       const tRow = (label, amount, bold = false) => {
-        doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, labelX, totalsY, { width: 120 });
-        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(amount, labelX + 120, totalsY, { width: 80, align: 'right' });
+        doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, labelX, totalsY, { width: 140 });
+        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
         doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11).lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
         totalsY += 14;
       };
       tRow('Subtotal:', `Rs. ${(po.subTotal || 0).toFixed(2)}`);
-      if (po.cgst > 0)      tRow(`CGST (${po.gstRate / 2}%):`, `Rs. ${po.cgst.toFixed(2)}`);
-      if (po.sgst > 0)      tRow(`SGST (${po.gstRate / 2}%):`, `Rs. ${po.sgst.toFixed(2)}`);
-      if (po.igst > 0)      tRow(`IGST (${po.gstRate}%):`,     `Rs. ${po.igst.toFixed(2)}`);
-      if (po.tdsAmount > 0) tRow('TDS Deducted:',               `- Rs. ${po.tdsAmount.toFixed(2)}`);
-      if (po.tcsAmount > 0) tRow('TCS Collected:',              `Rs. ${po.tcsAmount.toFixed(2)}`);
+      if (po.totalCGST > 0) tRow(`CGST:`, `Rs. ${po.totalCGST.toFixed(2)}`);
+      if (po.totalSGST > 0) tRow(`SGST:`, `Rs. ${po.totalSGST.toFixed(2)}`);
+      if (po.totalIGST > 0) tRow(`IGST:`, `Rs. ${po.totalIGST.toFixed(2)}`);
+      if (po.tdsAmount > 0) tRow('TDS Deducted:',  `- Rs. ${po.tdsAmount.toFixed(2)}`);
+      if (po.tcsAmount > 0) tRow('TCS Collected:', `Rs. ${po.tcsAmount.toFixed(2)}`);
       totalsY += 4;
       doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
       doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('Grand Total', labelX + 6, totalsY + 7);
@@ -440,20 +647,33 @@ async function generatePurchaseOrderPDF(po, orgId) {
       doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold').text(`In Words: ${numberToWords(Math.round(po.totalAmount || 0))} Only`, 48, wordsY + 5, { width: pageW - 16 });
 
       // Notes
+      let notesY = wordsY + 28;
       if (po.vendorNotes || po.notes) {
-        const nY = wordsY + 28;
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold').text('NOTES', 40, nY, { characterSpacing: 0.8 });
-        doc.moveTo(40, nY + 9).lineTo(555, nY + 9).lineWidth(0.5).strokeColor('#dde4ef').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica').text(po.vendorNotes || po.notes, 40, nY + 14, { width: pageW });
+        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold').text('NOTES', 40, notesY, { characterSpacing: 0.8 });
+        doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        doc.fontSize(8).fillColor('#000000').font('Helvetica').text(po.vendorNotes || po.notes, 40, notesY + 14, { width: pageW });
+        notesY += 40;
       }
 
       // T&C
       if (po.termsAndConditions) {
-        const tcY = 660;
+        const tcY = notesY + 6;
         doc.rect(40, tcY, pageW, 14).fill('#f9f9f9').stroke();
         doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold').text('TERMS & CONDITIONS', 48, tcY + 3, { characterSpacing: 0.8 });
         doc.fontSize(7).fillColor('#000000').font('Helvetica').text(po.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
+        notesY = tcY + 30;
       }
+
+      // Authorized Signatory
+      const signSectionY = notesY + 10;
+      const signBoxW     = 220;
+      const authBoxX     = 555 - signBoxW;
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      doc.moveTo(authBoxX, signSectionY + 30).lineTo(authBoxX + signBoxW, signSectionY + 30)
+         .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;

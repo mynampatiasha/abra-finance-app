@@ -21,17 +21,29 @@ class VendorCredit {
   final String vendorName;
   final String? vendorEmail;
   final String? vendorGSTIN;
+  final String? vendorPAN;
   final String? vendorPhone;
+  final String gstRegistrationType;
+  final Map<String, dynamic> billingAddress;
+  final Map<String, dynamic> shippingAddress;
+  final String placeOfSupply;
+  final bool isInterState;
   final DateTime creditDate;
   final String? billId;
   final String? billNumber;
   final String reason;
-  final String status; // OPEN, PARTIALLY_APPLIED, CLOSED, VOID
+  final String status;
   final double subTotal;
+  final double totalCGST;
+  final double totalSGST;
+  final double totalIGST;
+  final double totalTax;
   final double gstRate;
   final double cgst;
   final double sgst;
+  final double tdsRate;
   final double tdsAmount;
+  final double tcsRate;
   final double tcsAmount;
   final double totalAmount;
   final double appliedAmount;
@@ -49,17 +61,29 @@ class VendorCredit {
     required this.vendorName,
     this.vendorEmail,
     this.vendorGSTIN,
+    this.vendorPAN,
     this.vendorPhone,
+    this.gstRegistrationType = '',
+    this.billingAddress = const {},
+    this.shippingAddress = const {},
+    this.placeOfSupply = '',
+    this.isInterState = false,
     required this.creditDate,
     this.billId,
     this.billNumber,
     required this.reason,
     required this.status,
     required this.subTotal,
+    this.totalCGST = 0,
+    this.totalSGST = 0,
+    this.totalIGST = 0,
+    this.totalTax = 0,
     required this.gstRate,
     required this.cgst,
     required this.sgst,
+    this.tdsRate = 0,
     required this.tdsAmount,
+    this.tcsRate = 0,
     required this.tcsAmount,
     required this.totalAmount,
     required this.appliedAmount,
@@ -73,30 +97,42 @@ class VendorCredit {
 
   factory VendorCredit.fromJson(Map<String, dynamic> json) {
     return VendorCredit(
-      id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
-      creditNumber: json['creditNumber']?.toString() ?? '',
-      vendorId: json['vendorId']?.toString() ?? '',
-      vendorName: json['vendorName']?.toString() ?? '',
-      vendorEmail: json['vendorEmail']?.toString(),
-      vendorGSTIN: json['vendorGSTIN']?.toString(),
-      vendorPhone: json['vendorPhone']?.toString(),
+      id:                   json['_id']?.toString() ?? json['id']?.toString() ?? '',
+      creditNumber:         json['creditNumber']?.toString() ?? '',
+      vendorId:             json['vendorId']?.toString() ?? '',
+      vendorName:           json['vendorName']?.toString() ?? '',
+      vendorEmail:          json['vendorEmail']?.toString(),
+      vendorGSTIN:          json['vendorGSTIN']?.toString(),
+      vendorPAN:            json['vendorPAN']?.toString(),
+      vendorPhone:          json['vendorPhone']?.toString(),
+      gstRegistrationType:  json['gstRegistrationType']?.toString() ?? '',
+      billingAddress:       Map<String, dynamic>.from(json['billingAddress'] ?? {}),
+      shippingAddress:      Map<String, dynamic>.from(json['shippingAddress'] ?? {}),
+      placeOfSupply:        json['placeOfSupply']?.toString() ?? '',
+      isInterState:         json['isInterState'] == true,
       creditDate: json['creditDate'] != null
           ? DateTime.parse(json['creditDate'].toString())
           : DateTime.now(),
-      billId: json['billId']?.toString(),
-      billNumber: json['billNumber']?.toString(),
-      reason: json['reason']?.toString() ?? '',
-      status: json['status']?.toString() ?? 'OPEN',
-      subTotal: _toDouble(json['subTotal']),
-      gstRate: _toDouble(json['gstRate']),
-      cgst: _toDouble(json['cgst']),
-      sgst: _toDouble(json['sgst']),
-      tdsAmount: _toDouble(json['tdsAmount']),
-      tcsAmount: _toDouble(json['tcsAmount']),
-      totalAmount: _toDouble(json['totalAmount']),
-      appliedAmount: _toDouble(json['appliedAmount']),
-      balanceAmount: _toDouble(json['balanceAmount']),
-      notes: json['notes']?.toString(),
+      billId:       json['billId']?.toString(),
+      billNumber:   json['billNumber']?.toString(),
+      reason:       json['reason']?.toString() ?? '',
+      status:       json['status']?.toString() ?? 'OPEN',
+      subTotal:     _toDouble(json['subTotal']),
+      totalCGST:    _toDouble(json['totalCGST']),
+      totalSGST:    _toDouble(json['totalSGST']),
+      totalIGST:    _toDouble(json['totalIGST']),
+      totalTax:     _toDouble(json['totalTax']),
+      gstRate:      _toDouble(json['gstRate']),
+      cgst:         _toDouble(json['cgst']),
+      sgst:         _toDouble(json['sgst']),
+      tdsRate:      _toDouble(json['tdsRate']),
+      tdsAmount:    _toDouble(json['tdsAmount']),
+      tcsRate:      _toDouble(json['tcsRate']),
+      tcsAmount:    _toDouble(json['tcsAmount']),
+      totalAmount:  _toDouble(json['totalAmount']),
+      appliedAmount:_toDouble(json['appliedAmount']),
+      balanceAmount:_toDouble(json['balanceAmount']),
+      notes:        json['notes']?.toString(),
       items: (json['items'] as List<dynamic>? ?? [])
           .map((i) => VendorCreditItem.fromJson(i as Map<String, dynamic>))
           .toList(),
@@ -123,42 +159,74 @@ class VendorCredit {
 class VendorCreditItem {
   final String itemDetails;
   final String? account;
+  final String hsnCode;
+  final String sacCode;
+  final String unit;
   final double quantity;
   final double rate;
   final double discount;
   final String discountType;
+  final double taxableAmount;
+  final double itemGstRate;
+  final double cgstAmount;
+  final double sgstAmount;
+  final double igstAmount;
   final double amount;
 
   VendorCreditItem({
     required this.itemDetails,
     this.account,
+    this.hsnCode = '',
+    this.sacCode = '',
+    this.unit = 'Nos',
     required this.quantity,
     required this.rate,
     required this.discount,
     required this.discountType,
+    this.taxableAmount = 0,
+    this.itemGstRate = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
     required this.amount,
   });
 
   factory VendorCreditItem.fromJson(Map<String, dynamic> json) {
     return VendorCreditItem(
-      itemDetails: json['itemDetails']?.toString() ?? '',
-      account: json['account']?.toString(),
-      quantity: VendorCredit._toDouble(json['quantity']),
-      rate: VendorCredit._toDouble(json['rate']),
-      discount: VendorCredit._toDouble(json['discount']),
-      discountType: json['discountType']?.toString() ?? 'percentage',
-      amount: VendorCredit._toDouble(json['amount']),
+      itemDetails:   json['itemDetails']?.toString() ?? '',
+      account:       json['account']?.toString(),
+      hsnCode:       json['hsnCode']?.toString() ?? '',
+      sacCode:       json['sacCode']?.toString() ?? '',
+      unit:          json['unit']?.toString() ?? 'Nos',
+      quantity:      VendorCredit._toDouble(json['quantity']),
+      rate:          VendorCredit._toDouble(json['rate']),
+      discount:      VendorCredit._toDouble(json['discount']),
+      discountType:  json['discountType']?.toString() ?? 'percentage',
+      taxableAmount: VendorCredit._toDouble(json['taxableAmount']),
+      itemGstRate:   VendorCredit._toDouble(json['itemGstRate']),
+      cgstAmount:    VendorCredit._toDouble(json['cgstAmount']),
+      sgstAmount:    VendorCredit._toDouble(json['sgstAmount']),
+      igstAmount:    VendorCredit._toDouble(json['igstAmount']),
+      amount:        VendorCredit._toDouble(json['amount']),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails': itemDetails,
-    'account': account,
-    'quantity': quantity,
-    'rate': rate,
-    'discount': discount,
-    'discountType': discountType,
-    'amount': amount,
+    'itemDetails':   itemDetails,
+    'account':       account,
+    'hsnCode':       hsnCode,
+    'sacCode':       sacCode,
+    'unit':          unit,
+    'quantity':      quantity,
+    'rate':          rate,
+    'discount':      discount,
+    'discountType':  discountType,
+    'taxableAmount': taxableAmount,
+    'itemGstRate':   itemGstRate,
+    'cgstAmount':    cgstAmount,
+    'sgstAmount':    sgstAmount,
+    'igstAmount':    igstAmount,
+    'amount':        amount,
   };
 }
 
@@ -401,6 +469,16 @@ class VendorCreditService {
     }
   }
 
+  // MARK AS SENT
+  static Future<void> markAsSent(String id) async {
+    final headers = await _getHeaders();
+    final response = await http.put(Uri.parse('$_base/$id/mark-as-sent'), headers: headers);
+    final data = jsonDecode(response.body);
+    if (response.statusCode != 200 || data['success'] != true) {
+      throw Exception(data['message'] ?? 'Failed to mark vendor credit as sent');
+    }
+  }
+
   // APPLY credit to a bill
   static Future<void> applyToBill(String creditId, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
@@ -509,29 +587,73 @@ class VendorCreditService {
 class MutableCreditItem {
   String itemDetails;
   String? account;
+  String hsnCode;
+  String sacCode;
+  String unit;
   double quantity;
   double rate;
   double discount;
   String discountType;
+  double taxableAmount;
+  double itemGstRate;
+  double cgstAmount;
+  double sgstAmount;
+  double igstAmount;
   double amount;
 
   MutableCreditItem({
-    this.itemDetails = '',
+    this.itemDetails   = '',
     this.account,
-    this.quantity = 0,
-    this.rate = 0,
-    this.discount = 0,
-    this.discountType = 'percentage',
-    this.amount = 0,
+    this.hsnCode       = '',
+    this.sacCode       = '',
+    this.unit          = 'Nos',
+    this.quantity      = 0,
+    this.rate          = 0,
+    this.discount      = 0,
+    this.discountType  = 'percentage',
+    this.taxableAmount = 0,
+    this.itemGstRate   = 18,
+    this.cgstAmount    = 0,
+    this.sgstAmount    = 0,
+    this.igstAmount    = 0,
+    this.amount        = 0,
   });
 
+  void recalculate({bool isInterState = false}) {
+    double taxable = quantity * rate;
+    if (discount > 0) {
+      taxable = discountType == 'percentage'
+          ? taxable - (taxable * discount / 100)
+          : taxable - discount;
+    }
+    taxableAmount = double.parse(taxable.toStringAsFixed(2));
+    if (isInterState) {
+      igstAmount = double.parse((taxable * itemGstRate / 100).toStringAsFixed(2));
+      cgstAmount = 0;
+      sgstAmount = 0;
+    } else {
+      cgstAmount = double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      sgstAmount = double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      igstAmount = 0;
+    }
+    amount = double.parse((taxableAmount + cgstAmount + sgstAmount + igstAmount).toStringAsFixed(2));
+  }
+
   Map<String, dynamic> toJson() => {
-    'itemDetails': itemDetails,
-    'account': account,
-    'quantity': quantity,
-    'rate': rate,
-    'discount': discount,
-    'discountType': discountType,
-    'amount': amount,
+    'itemDetails':   itemDetails,
+    'account':       account,
+    'hsnCode':       hsnCode,
+    'sacCode':       sacCode,
+    'unit':          unit,
+    'quantity':      quantity,
+    'rate':          rate,
+    'discount':      discount,
+    'discountType':  discountType,
+    'taxableAmount': taxableAmount,
+    'itemGstRate':   itemGstRate,
+    'cgstAmount':    cgstAmount,
+    'sgstAmount':    sgstAmount,
+    'igstAmount':    igstAmount,
+    'amount':        amount,
   };
 }

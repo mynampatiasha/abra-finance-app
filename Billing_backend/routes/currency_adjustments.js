@@ -104,7 +104,8 @@ async function seedExchangeAccounts() {
     if (!exists) { await ChartOfAccount.create(acc); console.log(`✅ Seeded: ${acc.accountName}`); }
   }
 }
-seedExchangeAccounts().catch(console.error);
+// seedExchangeAccounts is called after DB connects (see index.js start())
+module.exports.seedExchangeAccounts = seedExchangeAccounts;
 
 // ============================================================================
 // HELPERS

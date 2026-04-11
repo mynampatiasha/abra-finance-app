@@ -32,6 +32,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/recurring_bill_service.dart';
 import '../../../../core/services/billing_vendors_service.dart';
+import 'new_vendor.dart';
 
 // Navy gradient colors — exact match to new_payment_made.dart
 const Color _navyDark   = Color(0xFF0D1B3E);
@@ -415,6 +416,22 @@ class _NewRecurringBillScreenState
               ),
             ])),
             actions: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => NewVendorPage()),
+                  );
+                  if (result == true) _showVendorSelector();
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Vendor'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navyAccent,
+                  side: const BorderSide(color: _navyAccent),
+                ),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancel'),

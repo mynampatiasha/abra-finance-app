@@ -23,6 +23,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import '../../../../core/utils/export_helper.dart';
@@ -179,6 +180,16 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             !(e.vendor?.toLowerCase().contains(q) ?? false) &&
             !(e.customerName?.toLowerCase().contains(q) ?? false) &&
             !(e.invoiceNumber?.toLowerCase().contains(q) ?? false)) return false;
+        // status filter — match against paidThrough as a proxy since Expense has no status field,
+        // but the status dropdown maps to logical states derived from the expense data
+        if (_selectedStatus != 'All') {
+          final st = _selectedStatus.toLowerCase();
+          final paid = e.paidThrough.toLowerCase();
+          // 'Paid' = has a non-empty paidThrough that isn't 'unpaid'
+          if (st == 'paid'     && (paid.isEmpty || paid == 'unpaid')) return false;
+          if (st == 'pending'  && paid.isNotEmpty && paid != 'unpaid') return false;
+          // Approved / Rejected / other statuses: pass through (no field to match)
+        }
         // account filter
         if (_selectedAccount != 'All' && e.expenseAccount != _selectedAccount) return false;
         // date filters
@@ -188,7 +199,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         if (_toDate != null) {
           try { if (DateTime.parse(e.date).isAfter(_toDate!.add(const Duration(days: 1)))) return false; } catch (_) {}
         }
-        // NEW: proof filter
+        // proof filter
         if (_proofFilter == 'With Proof'    && e.proofFile == null) return false;
         if (_proofFilter == 'Without Proof' && e.proofFile != null) return false;
         return true;
@@ -360,23 +371,45 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     String?    mimeType;
 
     if (source == 'camera') {
-      // Camera — only available on mobile
-      if (kIsWeb) { _showError('Camera not supported on web. Please use "Choose File".'); return; }
-      try {
-        final picker = ImagePicker();
-        final picked = await picker.pickImage(
-          source: ImageSource.camera,
-          imageQuality: 85,
-          maxWidth: 2048,
-          maxHeight: 2048,
-        );
-        if (picked == null) return;
-        bytes    = await picked.readAsBytes();
-        fileName = picked.name.isNotEmpty ? picked.name : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        mimeType = 'image/jpeg';
-      } catch (e) {
-        _showError('Could not open camera: $e');
-        return;
+      if (kIsWeb) {
+        // Use browser native camera via html input
+        final completer = Completer<void>();
+        final input = html.FileUploadInputElement()
+          ..accept = 'image/*'
+          ..setAttribute('capture', 'environment');
+        input.click();
+        input.onChange.listen((e) {
+          final file = input.files?.first;
+          if (file == null) { completer.complete(); return; }
+          final reader = html.FileReader();
+          reader.readAsArrayBuffer(file);
+          reader.onLoad.listen((_) {
+            bytes    = Uint8List.fromList(reader.result as List<int>);
+            fileName = file.name.isNotEmpty ? file.name : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            mimeType = file.type.isNotEmpty ? file.type : 'image/jpeg';
+            completer.complete();
+          });
+          reader.onError.listen((_) => completer.complete());
+        });
+        await completer.future;
+        if (bytes == null) return;
+      } else {
+        try {
+          final picker = ImagePicker();
+          final picked = await picker.pickImage(
+            source: ImageSource.camera,
+            imageQuality: 85,
+            maxWidth: 2048,
+            maxHeight: 2048,
+          );
+          if (picked == null) return;
+          bytes    = await picked.readAsBytes();
+          fileName = picked.name.isNotEmpty ? picked.name : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          mimeType = 'image/jpeg';
+        } catch (e) {
+          _showError('Could not open camera: $e');
+          return;
+        }
       }
     } else {
       // File picker — image or PDF
@@ -403,8 +436,9 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
     // Size check — 10 MB
     const maxBytes = 10 * 1024 * 1024;
-    if (bytes!.length > maxBytes) {
-      _showError('File is too large (${(bytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Maximum allowed is 10 MB.');
+    final nonNullBytes = bytes!;
+    if (nonNullBytes.length > maxBytes) {
+      _showError('File is too large (${(nonNullBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Maximum allowed is 10 MB.');
       return;
     }
 
@@ -420,7 +454,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         if (k.toLowerCase() != 'content-type') request.headers[k] = v;
       });
       request.files.add(http.MultipartFile.fromBytes(
-        'proof', bytes,
+        'proof', nonNullBytes,
         filename: fileName,
         // contentType is inferred from filename by the backend multer filter
       ));
@@ -465,14 +499,12 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     if (phone.isEmpty && expense.customerName != null && expense.customerName!.isNotEmpty) {
       try {
         final resp = await BillingCustomersService.getAllCustomers(limit: 200);
-        if (resp['success'] == true) {
-          for (final c in (resp['data'] as List? ?? [])) {
-            final name = (c['customerName'] ?? c['companyName'] ?? '').toString();
-            if (name.toLowerCase() == expense.customerName!.toLowerCase()) {
-              phone     = (c['primaryPhone'] ?? c['phone'] ?? c['mobilePhone'] ?? '').toString().trim();
-              recipient = name;
-              break;
-            }
+        for (final c in resp.customers) {
+          final name = c.customerDisplayName;
+          if (name.toLowerCase() == expense.customerName!.toLowerCase()) {
+            phone     = c.primaryPhone.trim().isNotEmpty ? c.primaryPhone.trim() : c.mobile.trim();
+            recipient = name;
+            break;
           }
         }
       } catch (_) {}
@@ -982,10 +1014,19 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   // ── stats cards ───────────────────────────────────────────────────────────
 
   Widget _buildStatsCards() {
-    final total     = _stats?.totalExpenses ?? 0;
-    final billable  = _stats?.totalBillable ?? 0;
-    final count     = _stats?.expenseCount  ?? 0;
-    final thisMonth = total * 0.3;
+    final total    = _stats?.totalExpenses ?? 0;
+    final billable = _stats?.totalBillable ?? 0;
+    final count    = _stats?.expenseCount  ?? 0;
+
+    // Compute this-month total from the loaded expenses list
+    final now = DateTime.now();
+    double thisMonth = 0;
+    for (final e in _expenses) {
+      try {
+        final d = DateTime.parse(e.date);
+        if (d.year == now.year && d.month == now.month) thisMonth += e.total;
+      } catch (_) {}
+    }
 
     final cards = [
       _StatCardData(label: 'Total Expenses', value: '₹${_fmtAmt(total)}', icon: Icons.receipt_long_rounded, color: _navy, gradientColors: const [Color(0xFF2463AE), Color(0xFF1e3a8a)]),
@@ -1410,16 +1451,14 @@ class _ProofSourceSheet extends StatelessWidget {
           style: TextStyle(fontSize: 13, color: Colors.grey[600]),
         ),
         const SizedBox(height: 20),
-        if (!kIsWeb) ...[
-          _SourceTile(
-            icon: Icons.camera_alt_rounded,
-            color: _navy,
-            title: 'Take Photo',
-            subtitle: 'Use camera to capture the receipt',
-            onTap: () => Navigator.pop(context, 'camera'),
-          ),
-          const SizedBox(height: 10),
-        ],
+        _SourceTile(
+          icon: Icons.camera_alt_rounded,
+          color: _navy,
+          title: 'Take Photo',
+          subtitle: 'Use camera to capture the receipt',
+          onTap: () => Navigator.pop(context, 'camera'),
+        ),
+        const SizedBox(height: 10),
         _SourceTile(
           icon: Icons.folder_open_rounded,
           color: _purple,

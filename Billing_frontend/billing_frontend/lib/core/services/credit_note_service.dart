@@ -146,6 +146,19 @@ class CreditNoteService {
     }
   }
 
+  /// Mark credit note as sent without sending email
+  static Future<CreditNote> markCreditNoteAsSent(String creditNoteId) async {
+    try {
+      print('📤 PATCH: $_baseEndpoint/$creditNoteId/mark-as-sent');
+      final data = await _api.patch('$_baseEndpoint/$creditNoteId/mark-as-sent');
+      print('✅ Credit note marked as sent: ${data['data']['creditNoteNumber']}');
+      return CreditNote.fromJson(data['data']);
+    } catch (e) {
+      print('❌ Error marking credit note as sent: $e');
+      rethrow;
+    }
+  }
+
   /// Record refund for credit note
   static Future<RefundResponse> recordRefund(
     String creditNoteId,
@@ -652,9 +665,38 @@ class RefundResponse {
   }
 }
 
+/// Lightweight credit note summary returned by the /apply endpoint.
+/// The API returns only 5 fields (not the full document), so we avoid
+/// parsing a full CreditNote which would crash on missing createdAt/updatedAt.
+class CreditNoteSummary {
+  final String creditNoteNumber;
+  final double totalAmount;
+  final double creditUsed;
+  final double creditBalance;
+  final String status;
+
+  CreditNoteSummary({
+    required this.creditNoteNumber,
+    required this.totalAmount,
+    required this.creditUsed,
+    required this.creditBalance,
+    required this.status,
+  });
+
+  factory CreditNoteSummary.fromJson(Map<String, dynamic> json) {
+    return CreditNoteSummary(
+      creditNoteNumber: json['creditNoteNumber'] ?? '',
+      totalAmount:      (json['totalAmount']   ?? 0).toDouble(),
+      creditUsed:       (json['creditUsed']    ?? 0).toDouble(),
+      creditBalance:    (json['creditBalance'] ?? 0).toDouble(),
+      status:           json['status']          ?? '',
+    );
+  }
+}
+
 /// Credit Application Response
 class CreditApplicationResponse {
-  final CreditNote creditNote;
+  final CreditNoteSummary creditNote;
   final CreditApplication application;
 
   CreditApplicationResponse({
@@ -664,7 +706,7 @@ class CreditApplicationResponse {
 
   factory CreditApplicationResponse.fromJson(Map<String, dynamic> json) {
     return CreditApplicationResponse(
-      creditNote: CreditNote.fromJson(json['creditNote']),
+      creditNote:  CreditNoteSummary.fromJson(json['creditNote']),
       application: CreditApplication.fromJson(json['application']),
     );
   }

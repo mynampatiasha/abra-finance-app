@@ -17,6 +17,8 @@ import '../../../../core/services/project_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_project.dart';
+import 'project_dashboard_page.dart';
+import 'new_time_entry.dart';
 
 const Color _navy   = Color(0xFF1e3a8a);
 const Color _purple = Color(0xFF9B59B6);
@@ -194,6 +196,26 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
     if (ok != true) return;
     try { await ProjectService.deleteProject(p.id); _showSuccess('Project deleted'); _refresh(); }
     catch (e) { _showError('Failed: $e'); }
+  }
+
+  Future<void> _cloneProject(Project p) async {
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Clone Project?', style: TextStyle(fontWeight: FontWeight.bold)),
+      content: Text('Create a copy of "${p.projectName}"?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _purple, foregroundColor: Colors.white),
+            child: const Text('Clone')),
+      ],
+    ));
+    if (ok != true) return;
+    try {
+      await ProjectService.cloneProject(p.id);
+      _showSuccess('Project cloned successfully');
+      _refresh();
+    } catch (e) { _showError('Failed: $e'); }
   }
 
   void _raiseTicket(Project p) {
@@ -678,23 +700,52 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
           Tooltip(message: 'Generate Invoice', child: InkWell(onTap: () => _generateInvoice(p),
               child: Container(width: 32, height: 32, decoration: BoxDecoration(color: _green.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.receipt_long_outlined, size: 16, color: _green)))),
           const SizedBox(width: 4),
+          Tooltip(message: 'Start Timer', child: InkWell(
+            onTap: () async {
+              final ok = await Navigator.push(context, MaterialPageRoute(
+                builder: (_) => NewTimeEntryScreen(preselectedProjectId: p.id),
+              ));
+              if (ok == true) _refresh();
+            },
+            child: Container(width: 32, height: 32,
+              decoration: BoxDecoration(color: _orange.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.play_circle_outline, size: 16, color: _orange)),
+          )),
+          const SizedBox(width: 4),
+          Tooltip(message: 'Dashboard', child: InkWell(
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ProjectDashboardPage(projectId: p.id, projectName: p.projectName),
+            )),
+            child: Container(width: 32, height: 32,
+              decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.dashboard_outlined, size: 16, color: _blue)),
+          )),
+          const SizedBox(width: 4),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, size: 20),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             itemBuilder: (_) => [
-              _menuItem('edit',    Icons.edit_outlined,               _navy,   'Edit'),
-              _menuItem('status',  Icons.swap_vert_outlined,          _blue,   'Change Status'),
-              _menuItem('invoice', Icons.receipt_long_outlined,       _green,  'Generate Invoice'),
-              _menuItem('ticket',  Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
-              _menuItem('delete',  Icons.delete_outline,              _red,    'Delete', textColor: _red),
+              _menuItem('edit',      Icons.edit_outlined,               _navy,   'Edit'),
+              _menuItem('status',    Icons.swap_vert_outlined,          _blue,   'Change Status'),
+              _menuItem('invoice',   Icons.receipt_long_outlined,       _green,  'Generate Invoice'),
+              _menuItem('dashboard', Icons.dashboard_outlined,          _blue,   'Dashboard'),
+              _menuItem('clone',     Icons.copy_outlined,               _purple, 'Clone Project'),
+              _menuItem('ticket',    Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+              _menuItem('delete',    Icons.delete_outline,              _red,    'Delete', textColor: _red),
             ],
             onSelected: (v) {
               switch (v) {
-                case 'edit':    _openEdit(p);       break;
-                case 'status':  _changeStatus(p);  break;
-                case 'invoice': _generateInvoice(p); break;
-                case 'ticket':  _raiseTicket(p);   break;
-                case 'delete':  _delete(p);        break;
+                case 'edit':      _openEdit(p);        break;
+                case 'status':    _changeStatus(p);   break;
+                case 'invoice':   _generateInvoice(p); break;
+                case 'dashboard':
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ProjectDashboardPage(projectId: p.id, projectName: p.projectName),
+                  ));
+                  break;
+                case 'clone':     _cloneProject(p);   break;
+                case 'ticket':    _raiseTicket(p);    break;
+                case 'delete':    _delete(p);         break;
               }
             },
           ),

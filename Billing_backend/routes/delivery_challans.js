@@ -80,7 +80,7 @@ const deliveryChallanSchema = new mongoose.Schema({
   challanNumber: {
     type: String,
     required: true,
-    unique: true,
+
     index: true
   },
   customerId: {
@@ -287,6 +287,9 @@ deliveryChallanSchema.methods._updateStatusBasedOnQuantities = function() {
   }
 };
 
+
+// Add this after the schema definition, before the model creation
+deliveryChallanSchema.index({ orgId: 1, challanNumber: 1 }, { unique: true });
 const DeliveryChallan = mongoose.models.DeliveryChallan || mongoose.model('DeliveryChallan', deliveryChallanSchema);
 
 // ============================================================================
@@ -357,36 +360,40 @@ async function generateChallanPDF(challan, orgId) {
       const pageW    = 515;
       const logoPath = getLogoPath(orgId);
 
-      // -- Header bar ------------------------------------------------------
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
-
+      // -- Header (white background, invoice style) -------------------------
       let logoLoaded = false;
+
+      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY  = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH       = 55;
+      const logoY       = logoCenterY - (logoH / 2);
+      const textX       = logoPath ? 126 : 50;
+
       if (logoPath) {
         try {
-          doc.image(logoPath, 44, 35, { width: 75, height: 60, fit: [75, 60] });
+          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('Logo load failed:', e.message); }
       }
 
-      const textX = logoLoaded ? 126 : 50;
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold')
-         .text(orgName.toUpperCase(), textX, 40, { width: 200 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
-         .text('BILLING & FINANCE', textX, 56, { width: 200 });
-
-      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let cY = 68;
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+      doc.fontSize(7).fillColor('#000000');
+      let cY = textStartY + 26;
       contactLines.forEach(line => { doc.text(line, textX, cY, { width: 240 }); cY += 9; });
 
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold')
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('DELIVERY CHALLAN', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold')
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
          .text(challan.challanNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica')
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`,
                380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold')
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text(`Status: ${challan.status.replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // -- Meta boxes ------------------------------------------------------
@@ -503,6 +510,19 @@ async function generateChallanPDF(challan, orgId) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
            .text(challan.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
       }
+
+      // -- Authorized Signatory ----------------------------------------------
+      const signSectionY = rowY + 10;
+      const signBoxW     = 220;
+      const authBoxX     = 555 - signBoxW;
+
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      doc.moveTo(authBoxX, signSectionY + 30)
+         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+         .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
 
       // -- Footer ------------------------------------------------------------
       const footY = 760;
@@ -817,6 +837,24 @@ router.put('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating delivery challan:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Mark as Sent (no email — status change only)
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    if (!challan) return res.status(404).json({ success: false, error: 'Delivery challan not found' });
+
+    challan.status    = 'OPEN';
+    challan.updatedBy = req.user?.email || req.user?.uid || 'system';
+    await challan.save();
+
+    console.log(`✅ Delivery challan marked as sent: ${challan.challanNumber}`);
+    res.json({ success: true, message: 'Delivery challan marked as sent', data: challan });
+  } catch (error) {
+    console.error('Error marking challan as sent:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

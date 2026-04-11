@@ -36,6 +36,8 @@ import '../../../../core/services/billing_api_service.dart';
 import '../../../../core/services/payment_service.dart';
 import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/add_account_service.dart';
+import 'new_customer.dart';
+import '../widgets/document_preview_buttons.dart';
 
 // Navy gradient colors — exact match to new_payment_made.dart
 const Color _navyDark   = Color(0xFF0D1B3E);
@@ -50,14 +52,26 @@ const Color _green      = Color(0xFF27AE60);
 
 class NewPaymentPage extends StatefulWidget {
   final String? invoiceId;
+  final String? paymentId; // non-null → edit mode
   final String? prefilledCustomerName;
   final double? prefilledAmount;
+  final DateTime? prefilledDate;
+  final String? prefilledReference;
+  final String? providerTransactionId;
+  final bool showAppBar;
+  final Function(String recordId)? onSavedCallback;
 
   const NewPaymentPage({
     Key? key,
     this.invoiceId,
+    this.paymentId,
     this.prefilledCustomerName,
     this.prefilledAmount,
+    this.prefilledDate,
+    this.prefilledReference,
+    this.providerTransactionId,
+    this.showAppBar = true,
+    this.onSavedCallback,
   }) : super(key: key);
 
   @override
@@ -66,6 +80,9 @@ class NewPaymentPage extends StatefulWidget {
 
 class _NewPaymentPageState extends State<NewPaymentPage> {
   final _formKey = GlobalKey<FormState>();
+
+  // Saved payment ID — set after first save, enables PDF/email preview
+  String? _savedPaymentId;
 
   // Controllers
   final _amountController       = TextEditingController();
@@ -78,7 +95,7 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
   // Dropdown values
   String? selectedCustomerId;
   String  selectedCustomerName  = '';
-  String  selectedPaymentMode   = 'Cash';
+  String  selectedPaymentMode   = 'UPI';
   String  selectedTaxDeduction  = 'No Tax deducted';
   bool    sendThankYouNote      = false;
 
@@ -107,6 +124,9 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
   bool   _enableGST = false; double _gstRate = 18;
   bool   _enableTDS = false; double _tdsRate = 0;
   bool   _enableTCS = false; double _tcsRate = 0;
+  bool   _isSaving  = false;
+
+  bool get _isEdit => widget.paymentId != null;
 
   // ============================================================================
   @override
@@ -133,24 +153,101 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
     setState(() => isLoading = true);
     try {
       await Future.wait([_loadCustomers(), _loadBankAccounts()]);
+      if (_isEdit) {
+        await _loadPaymentData();
+      } else {
+        await _generatePaymentNumber();
+        if (widget.prefilledCustomerName != null) {
+          _selectCustomerByName(widget.prefilledCustomerName!);
+        }
+        if (widget.prefilledAmount != null) {
+          _amountController.text = widget.prefilledAmount!.toStringAsFixed(2);
+        }
+        if (widget.prefilledDate != null) {
+          _paymentDateController.text = _formatDate(widget.prefilledDate!);
+        }
+        if (widget.prefilledReference != null && widget.prefilledReference!.isNotEmpty) {
+          _referenceController.text = widget.prefilledReference!;
+        }
+      }
       setState(() => isLoading = false);
-      await _generatePaymentNumber();
-      if (widget.prefilledCustomerName != null) {
-        _selectCustomerByName(widget.prefilledCustomerName!);
-      }
-      if (widget.prefilledAmount != null) {
-        _amountController.text = widget.prefilledAmount!.toStringAsFixed(2);
-      }
     } catch (e) {
       setState(() => isLoading = false);
       _showError('Failed to load data: $e');
     }
   }
 
+  Future<void> _loadPaymentData() async {
+    try {
+      final data = await PaymentService.getPayment(widget.paymentId!);
+      final p = data['data'] ?? data;
+      setState(() {
+        _savedPaymentId = p['_id']?.toString() ?? p['id']?.toString();
+        _paymentNumberController.text = p['paymentNumber']?.toString() ?? '';
+        _amountController.text        = (p['amountReceived'] ?? 0).toString();
+        _bankChargesController.text   = (p['bankCharges'] ?? 0).toString();
+        _referenceController.text     = p['referenceNumber']?.toString() ?? '';
+        _notesController.text         = p['notes']?.toString() ?? '';
+        selectedPaymentMode           = p['paymentMode']?.toString() ?? 'UPI';
+        sendThankYouNote              = p['sendThankYouNote'] == true;
+
+        // Payment date
+        if (p['paymentDate'] != null) {
+          try {
+            final dt = DateTime.parse(p['paymentDate'].toString());
+            _paymentDateController.text = _formatDate(dt);
+          } catch (_) {
+            _paymentDateController.text = p['paymentDate'].toString();
+          }
+        }
+
+        // Customer
+        final custId = p['customerId']?.toString() ?? p['customer']?.toString();
+        if (custId != null) {
+          final match = customers.where((c) => c.id == custId).toList();
+          if (match.isNotEmpty) {
+            selectedCustomerId   = match.first.id;
+            selectedCustomerName = match.first.customerName;
+          }
+        }
+        if (selectedCustomerName.isEmpty) {
+          selectedCustomerName = p['customerName']?.toString() ?? '';
+        }
+
+        // Deposit account
+        final depositId = p['depositTo']?.toString();
+        if (depositId != null && depositOptions.any((d) => d['id'] == depositId)) {
+          selectedDepositToId = depositId;
+        }
+
+        // Tax toggles
+        final gst = double.tryParse(p['gstRate']?.toString() ?? '0') ?? 0;
+        final tds = double.tryParse(p['tdsRate']?.toString() ?? '0') ?? 0;
+        final tcs = double.tryParse(p['tcsRate']?.toString() ?? '0') ?? 0;
+        _enableGST = gst > 0; _gstRate = gst > 0 ? gst : 18;
+        _enableTDS = tds > 0; _tdsRate = tds;
+        _enableTCS = tcs > 0; _tcsRate = tcs;
+
+        // Invoice payments map
+        if (p['invoicePayments'] is Map) {
+          invoicePayments = Map<String, double>.from(
+            (p['invoicePayments'] as Map).map(
+              (k, v) => MapEntry(k.toString(), double.tryParse(v.toString()) ?? 0.0),
+            ),
+          );
+        }
+      });
+      // Load unpaid invoices for the customer
+      if (selectedCustomerId != null) await _loadUnpaidInvoices();
+    } catch (e) {
+      _showError('Failed to load payment: $e');
+    }
+  }
+
   Future<void> _loadCustomers() async {
     try {
       final customerResponse = await InvoiceService.getBillingCustomers(
-        activeOnly: true, limit: 100,
+        limit: 100,
       );
       setState(() => customers = customerResponse.customers);
     } catch (e) {
@@ -301,12 +398,50 @@ Future<void> _loadBankAccounts() async {
   void _removePaymentProof(int index) =>
       setState(() => paymentProofFiles.removeAt(index));
 
-  // ── save ─────────────────────────────────────────────────────────────────────
+  // ── mark as sent ─────────────────────────────────────────────────────────────
 
-  Future<void> _savePayment() async {
+  Future<void> _markAsSent() async {
     if (!_formKey.currentState!.validate()) return;
     if (selectedCustomerId == null) { _showError('Please select a customer'); return; }
-    if (selectedDepositToId == null) { _showError('Please select a deposit account'); return; }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this payment as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      // Save first if not yet saved
+      final savedId = await _doSavePayment();
+      if (savedId == null) return;
+      await PaymentService.markPaymentAsSent(savedId);
+      _showSuccess('Payment marked as sent');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────────
+
+  /// Core save logic — returns the created payment ID, or null on failure.
+  Future<String?> _doSavePayment() async {
+    if (selectedDepositToId == null) { _showError('Please select a deposit account'); return null; }
 
     if (paymentProofFiles.isEmpty) {
       final confirm = await showDialog<bool>(
@@ -317,8 +452,7 @@ Future<void> _loadBankAccounts() async {
             'No payment proof uploaded. It is recommended to upload payment proof for record keeping. Continue anyway?',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(backgroundColor: _navyAccent),
@@ -327,15 +461,15 @@ Future<void> _loadBankAccounts() async {
           ],
         ),
       );
-      if (confirm != true) return;
+      if (confirm != true) return null;
     }
 
-    try {
-      showDialog(
-        context: context, barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
+    showDialog(
+      context: context, barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
 
+    try {
       final paymentData = {
         'customerId':       selectedCustomerId,
         'customerName':     selectedCustomerName,
@@ -354,16 +488,34 @@ Future<void> _loadBankAccounts() async {
         'gstRate':          _enableGST ? _gstRate : 0,
         'tdsRate':          _enableTDS ? _tdsRate : 0,
         'tcsRate':          _enableTCS ? _tcsRate : 0,
+        if (widget.providerTransactionId != null) 'providerTransactionId': widget.providerTransactionId,
       };
 
-      await PaymentService.createPayment(paymentData, paymentProofFiles);
-      Navigator.pop(context);
-      _showSuccess('Payment recorded successfully');
-      Navigator.pop(context, true);
+      String savedId;
+      if (_isEdit) {
+        await PaymentService.updatePayment(widget.paymentId!, paymentData);
+        savedId = widget.paymentId!;
+      } else {
+        final result = await PaymentService.createPayment(paymentData, paymentProofFiles);
+        savedId = result['data']?['id']?.toString() ?? result['data']?['_id']?.toString() ?? '';
+      }
+      Navigator.pop(context); // dismiss loader
+      widget.onSavedCallback?.call(savedId);
+      return savedId;
     } catch (e) {
-      Navigator.pop(context);
+      Navigator.pop(context); // dismiss loader
       _showError('Failed to save payment: $e');
+      return null;
     }
+  }
+
+  Future<void> _savePayment() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (selectedCustomerId == null) { _showError('Please select a customer'); return; }
+    final id = await _doSavePayment();
+    if (id == null) return;
+    _showSuccess(_isEdit ? 'Payment updated successfully' : 'Payment recorded successfully');
+    Navigator.pop(context, true);
   }
 
   void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
@@ -382,7 +534,7 @@ Future<void> _loadBankAccounts() async {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: _buildAppBar(),
+      appBar: widget.showAppBar ? _buildAppBar() : null,
       body: isLoading
           ? const Center(child: CircularProgressIndicator(
               valueColor: AlwaysStoppedAnimation<Color>(_navyAccent)))
@@ -446,21 +598,54 @@ Future<void> _loadBankAccounts() async {
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
-        title: const Text(
-          'Record Payment',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        title: Text(
+          _isEdit ? 'Edit Payment' : 'Record Payment',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
+          // Preview PDF — only visible after payment is saved
+          if (_savedPaymentId != null) ...[
+            IconButton(
+              tooltip: 'Preview PDF',
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white70, size: 20),
+              onPressed: () => openDocumentPdf(
+                context: context,
+                docId: _savedPaymentId,
+                pdfEndpoint: '/api/finance/payments-received',
+                docNumber: 'Payment Receipt',
+              ),
+            ),
+            IconButton(
+              tooltip: 'Preview Email',
+              icon: const Icon(Icons.email_outlined, color: Colors.white70, size: 20),
+              onPressed: () => openEmailPreview(
+                context: context,
+                docId: _savedPaymentId,
+                emailEndpoint: '/api/finance/payments-received',
+                sendEndpoint: '/api/finance/payments-received',
+              ),
+            ),
+          ],
           TextButton.icon(
             onPressed: () => Navigator.pop(context),
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
           ),
           const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _isSaving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+            label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white38),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+          ),
+          const SizedBox(width: 8),
           ElevatedButton.icon(
             onPressed: _savePayment,
             icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: const Text('Save Payment'),
+            label: Text(_isEdit ? 'Update Payment' : 'Save Payment'),
             style: ElevatedButton.styleFrom(
               backgroundColor: _navyAccent,
               foregroundColor: Colors.white,
@@ -519,29 +704,30 @@ Future<void> _loadBankAccounts() async {
         ],
       ),
       const SizedBox(height: 16),
-      DropdownButtonFormField<String>(
-        value: selectedCustomerId,
-        decoration: InputDecoration(
-          labelText: 'Customer Name *',
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          prefixIcon: const Icon(Icons.person_outlined),
+      InkWell(
+        onTap: _showCustomerSelector,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            const Icon(Icons.person_outline, color: _navyAccent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                selectedCustomerName.isNotEmpty ? selectedCustomerName : 'Select Customer *',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: selectedCustomerName.isNotEmpty ? _navyDark : Colors.grey[600],
+                  fontWeight: selectedCustomerName.isNotEmpty ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, color: Colors.grey),
+          ]),
         ),
-        hint: const Text('Select Customer'),
-        items: customers.map((customer) => DropdownMenuItem(
-          value: customer.id,
-          child: Text(customer.customerName),
-        )).toList(),
-        onChanged: (value) {
-          if (value != null) {
-            final customer = customers.firstWhere((c) => c.id == value);
-            setState(() {
-              selectedCustomerId   = value;
-              selectedCustomerName = customer.customerName;
-            });
-            _loadUnpaidInvoices();
-          }
-        },
-        validator: (value) => value == null ? 'Please select a customer' : null,
       ),
       const SizedBox(height: 10),
       InkWell(
@@ -556,6 +742,121 @@ Future<void> _loadBankAccounts() async {
       ),
     ],
   ));
+
+  // ============================================================================
+  // CUSTOMER SELECTOR DIALOG
+  // ============================================================================
+
+  Future<void> _showCustomerSelector() async {
+    final searchController = TextEditingController();
+    List<BillingCustomer> allCustomers      = [];
+    List<BillingCustomer> filteredCustomers = [];
+    bool isLoading      = true;
+    String? errorMessage;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        if (isLoading && allCustomers.isEmpty) {
+          InvoiceService.getBillingCustomers(limit: 100).then((response) {
+            setS(() {
+              allCustomers      = response.customers;
+              filteredCustomers = allCustomers;
+              isLoading         = false;
+            });
+          }).catchError((e) {
+            setS(() { errorMessage = e.toString(); isLoading = false; });
+          });
+        }
+
+        return AlertDialog(
+          title: const Text('Select Customer'),
+          content: SizedBox(width: 520, height: 440, child: Column(children: [
+            TextField(
+              controller: searchController,
+              decoration: InputDecoration(
+                hintText: 'Search customers...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onChanged: (v) => setS(() {
+                filteredCustomers = v.isEmpty
+                    ? allCustomers
+                    : allCustomers.where((c) =>
+                        c.customerName.toLowerCase().contains(v.toLowerCase()) ||
+                        c.customerEmail.toLowerCase().contains(v.toLowerCase())).toList();
+              }),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(_navyAccent)))
+                  : errorMessage != null
+                      ? Center(child: Text('Error: $errorMessage'))
+                      : filteredCustomers.isEmpty
+                          ? const Center(child: Text('No customers found'))
+                          : ListView.builder(
+                              itemCount: filteredCustomers.length,
+                              itemBuilder: (_, i) {
+                                final c = filteredCustomers[i];
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: _navyAccent,
+                                    child: Text(
+                                      c.customerName.isNotEmpty ? c.customerName[0].toUpperCase() : '?',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                  title: Text(c.customerName,
+                                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  subtitle: Text(c.customerEmail),
+                                  onTap: () {
+                                    setState(() {
+                                      selectedCustomerId   = c.id;
+                                      selectedCustomerName = c.customerName;
+                                    });
+                                    Navigator.pop(ctx);
+                                    _loadUnpaidInvoices();
+                                  },
+                                );
+                              },
+                            ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NewCustomerPage()),
+                  );
+                  if (result == true) {
+                    await _loadCustomers();
+                    _showCustomerSelector();
+                  }
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add New Customer'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navyAccent,
+                  side: const BorderSide(color: _navyAccent),
+                ),
+              ),
+            ),
+          ])),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
 
   // ============================================================================
   // PAYMENT DETAILS SECTION
@@ -1378,6 +1679,22 @@ Future<void> _loadBankAccounts() async {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _isSaving ? null : _markAsSent,
+              icon: const Icon(Icons.mark_email_read_outlined),
+              label: const Text('Mark as Sent'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _navyMid,
+                side: BorderSide(color: _navyMid),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),

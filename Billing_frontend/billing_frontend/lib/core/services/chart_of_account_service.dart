@@ -328,4 +328,26 @@ class ChartOfAccountService {
     final result = await getAccounts(isActive: true, limit: 500);
     return result.accounts;
   }
+
+  // ── Opening Balance ───────────────────────────────────────────────────────
+
+  static Future<void> saveOpeningBalance(
+    String id, {
+    required double amount,
+    required String balanceType,
+    required DateTime date,
+  }) async {
+    final headers = await _getHeaders();
+    final res = await http.post(
+      Uri.parse('$_base/$id/opening-balance'),
+      headers: headers,
+      body: jsonEncode({
+        'amount'     : amount,
+        'balanceType': balanceType,
+        'date'       : date.toIso8601String(),
+      }),
+    );
+    final body = jsonDecode(res.body);
+    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to save opening balance');
+  }
 }

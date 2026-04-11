@@ -109,8 +109,24 @@ class _Item {
 // ============================================================================
 
 class NewPaymentMadeScreen extends StatefulWidget {
-  final String? paymentId;
-  const NewPaymentMadeScreen({Key? key, this.paymentId}) : super(key: key);
+  final String?   paymentId;
+  final double?   prefilledAmount;
+  final DateTime? prefilledDate;
+  final String?   prefilledReference;
+  final String?   providerTransactionId;
+  final bool showAppBar;
+  final Function(String recordId)? onSavedCallback;
+
+  const NewPaymentMadeScreen({
+    Key? key,
+    this.paymentId,
+    this.prefilledAmount,
+    this.prefilledDate,
+    this.prefilledReference,
+    this.providerTransactionId,
+    this.showAppBar = true,
+    this.onSavedCallback,
+  }) : super(key: key);
 
   @override
   State<NewPaymentMadeScreen> createState() => _NewPaymentMadeScreenState();
@@ -184,6 +200,16 @@ class _NewPaymentMadeScreenState extends State<NewPaymentMadeScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.prefilledAmount != null && widget.prefilledAmount! > 0) {
+      _totalAmountCtrl.text = widget.prefilledAmount!.toStringAsFixed(2);
+      _totalAmountEntered   = widget.prefilledAmount!;
+    }
+    if (widget.prefilledDate != null) {
+      _paymentDate = widget.prefilledDate!;
+    }
+    if (widget.prefilledReference != null && widget.prefilledReference!.isNotEmpty) {
+      _refCtrl.text = widget.prefilledReference!;
+    }
     _fetchVendors();
     _loadAllAccounts(); // ✅ FIX 1
     if (widget.paymentId != null) _loadExistingPayment();
@@ -426,6 +452,7 @@ Future<void> _loadAllAccounts() async {
         'tcsRate':         _enableTCS ? _tcsRate : 0,
         'gstRate':         _enableGST ? _gstRate : 0,
         'status':          'RECORDED',
+        if (widget.providerTransactionId != null) 'providerTransactionId': widget.providerTransactionId,
         if (_selectedAccountId   != null) 'paidFromAccountId':   _selectedAccountId,
         if (_selectedAccountName != null) 'paidFromAccountName': _selectedAccountName,
       };
@@ -433,12 +460,16 @@ Future<void> _loadAllAccounts() async {
       if (widget.paymentId != null) {
         await PaymentMadeService.updatePayment(widget.paymentId!, payload);
       } else {
-        await PaymentMadeService.createPayment(payload);
+        final created = await PaymentMadeService.createPayment(payload);
+        _showSuccess('Payment Recorded ✓');
+        if (mounted) Navigator.of(context).pop(true);
+        widget.onSavedCallback?.call(created.id);
+        return;
       }
 
-      _showSuccess(widget.paymentId != null
-          ? 'Payment updated successfully' : 'Payment Recorded ✓');
+      _showSuccess('Payment updated successfully');
       if (mounted) Navigator.of(context).pop(true);
+      widget.onSavedCallback?.call('');
     } catch (e) { _showError('Save failed: $e'); }
     finally { if (mounted) setState(() => _saving = false); }
   }
@@ -537,6 +568,59 @@ Future<void> _loadAllAccounts() async {
         )),
       ]);
 
+  Future<void> _markAsSent() async {
+    if (_vendorId == null) { _showError('Please select a vendor'); return; }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the vendor.\n\nDo you want to mark this payment as Sent anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _saving = true);
+    try {
+      if (widget.paymentId != null) {
+        await PaymentMadeService.markPaymentAsSent(widget.paymentId!);
+      } else {
+        // Save first, then mark as sent
+        final payload = {
+          'vendorId': _vendorId, 'vendorName': _vendorName, 'vendorEmail': _vendorEmail,
+          'paymentDate': _paymentDate.toIso8601String(), 'paymentMode': _paymentMode,
+          'paymentType': _paymentType, 'referenceNumber': _refCtrl.text.trim(),
+          'notes': _notesCtrl.text.trim(), 'amount': _grandTotal,
+          'billsApplied': _bills.where((b) => b.paymentAmount > 0).map((b) => {
+            'billId': b.billId, 'billNumber': b.billNumber, 'amountApplied': b.paymentAmount,
+          }).toList(),
+          'items': _items.where((i) => i.itemDetails.trim().isNotEmpty).map((i) => i.toJson()).toList(),
+          'tdsRate': _enableTDS ? _tdsRate : 0, 'tcsRate': _enableTCS ? _tcsRate : 0,
+          'gstRate': _enableGST ? _gstRate : 0, 'status': 'RECORDED',
+          if (_selectedAccountId != null) 'paidFromAccountId': _selectedAccountId,
+          if (_selectedAccountName != null) 'paidFromAccountName': _selectedAccountName,
+        };
+        final created = await PaymentMadeService.createPayment(payload);
+        await PaymentMadeService.markPaymentAsSent(created.id);
+      }
+      _showSuccess('Payment marked as sent');
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) { _showError('Failed: $e'); }
+    finally { if (mounted) setState(() => _saving = false); }
+  }
+
   void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating));
@@ -553,7 +637,7 @@ Future<void> _loadAllAccounts() async {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: _buildAppBar(),
+      appBar: widget.showAppBar ? _buildAppBar() : null,
       body: _pageLoading
           ? const Center(child: CircularProgressIndicator(
               valueColor: AlwaysStoppedAnimation<Color>(_navyAccent)))
@@ -634,6 +718,16 @@ Future<void> _loadAllAccounts() async {
             onPressed: _saving ? null : () => Navigator.pop(context),
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _saving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+            label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white38),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(

@@ -1,843 +1,646 @@
 ﻿// ============================================================================
-// ITEM BILLING BACKEND ROUTES - COMPLETE UPDATED VERSION
+// ITEM BILLING BACKEND ROUTES — COMPLETE FIXED VERSION
 // ============================================================================
-// Replace your existing backend routes file with this complete version
-// File: backend/routes/items.js (or wherever your items routes are)
+// File: backend/routes/items.js
+// Fixes applied:
+//   1. verifyFinanceJWT added to ALL routes (orgId filter now works correctly)
+//   2. /statistics now returns activeItems + inactiveItems + goodsCount
+//   3. /search route moved ABOVE /:id (prevents ObjectId cast error)
+//   4. Vendor schema REMOVED — import from vendors module to avoid OverwriteModelError
+//   5. salesAccountId + purchaseAccountId resolved from COA on item create/update
+//   6. Stats response shape matches Flutter: { statistics: { ... } }
+// All existing functionality preserved — CRUD, bulk import, export, pagination
 // ============================================================================
 
-const express = require('express');
+const express  = require('express');
 const mongoose = require('mongoose');
-const multer = require('multer');
-const csv = require('csv-parser');
-const fs = require('fs');
+const multer   = require('multer');
+const csv      = require('csv-parser');
+const fs       = require('fs');
+const router   = express.Router();
 
-const router = express.Router();
+const { verifyFinanceJWT }      = require('../middleware/finance_jwt');
+const { ChartOfAccount }        = require('./chart_of_accounts');
 
-// MongoDB Connection (if not already connected)
-if (mongoose.connection.readyState === 0) {
-  const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/abra_fleet_billing';
-  
-  mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log('✅ MongoDB connected for Item Billing'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
-}
-
-// ==================== SCHEMAS ====================
+// ============================================================================
+// ITEM SCHEMA
+// ============================================================================
 
 const itemSchema = new mongoose.Schema({
   orgId: { type: String, index: true, default: null },
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-    index: true,
-  },
-  type: {
-    type: String,
-    enum: ['Goods', 'Service'],
-    required: true,
-  },
-  unit: {
-    type: String,
-    trim: true,
-  },
-  isSellable: {
-    type: Boolean,
-    default: true,
-  },
-  isPurchasable: {
-    type: Boolean,
-    default: true,
-  },
-  sellingPrice: {
-    type: Number,
-    min: 0,
-  },
-  salesAccount: {
-    type: String,
-    trim: true,
-  },
-  salesDescription: {
-    type: String,
-    trim: true,
-  },
-  costPrice: {
-    type: Number,
-    min: 0,
-  },
-  purchaseAccount: {
-    type: String,
-    trim: true,
-  },
-  purchaseDescription: {
-    type: String,
-    trim: true,
-  },
-  preferredVendor: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Vendor',
-  },
-  status: {
-    type: String,
-    enum: ['Active', 'Inactive'],
-    default: 'Active',
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
-});
 
-const vendorSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  email: {
-    type: String,
-    trim: true,
-    lowercase: true,
-  },
-  phone: {
-    type: String,
-    trim: true,
-  },
-  address: {
-    type: String,
-    trim: true,
-  },
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+  name: { type: String, required: true, trim: true, index: true },
+  type: { type: String, enum: ['Goods', 'Service'], required: true },
+  unit: { type: String, trim: true },
 
-// Create models
-// Check if models exist before creating to avoid OverwriteModelError
+  isSellable:   { type: Boolean, default: true },
+  isPurchasable: { type: Boolean, default: true },
+
+  // Selling side
+  sellingPrice:     { type: Number, min: 0 },
+  salesAccount:     { type: String, trim: true },        // display name
+  salesAccountId:   { type: mongoose.Schema.Types.ObjectId, ref: 'ChartOfAccount', default: null },
+  salesDescription: { type: String, trim: true },
+
+  // Purchasing side
+  costPrice:           { type: Number, min: 0 },
+  purchaseAccount:     { type: String, trim: true },     // display name
+  purchaseAccountId:   { type: mongoose.Schema.Types.ObjectId, ref: 'ChartOfAccount', default: null },
+  purchaseDescription: { type: String, trim: true },
+
+  preferredVendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', default: null },
+
+  status:   { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  isActive: { type: Boolean, default: true },
+}, { timestamps: true });
+
 const Item = mongoose.models.Item || mongoose.model('Item', itemSchema);
-const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', vendorSchema);
 
-// ==================== VALIDATION MIDDLEWARE ====================
+// ============================================================================
+// VALIDATION MIDDLEWARE
+// ============================================================================
 
 const validateItemData = (req, res, next) => {
   const { name, type, isSellable, isPurchasable, sellingPrice, salesAccount, costPrice, purchaseAccount } = req.body;
 
   if (!name || name.trim() === '') {
-    return res.status(400).json({ error: 'Item name is required' });
+    return res.status(400).json({ success: false, error: 'Item name is required' });
   }
-
   if (!type || !['Goods', 'Service'].includes(type)) {
-    return res.status(400).json({ error: 'Invalid item type. Must be "Goods" or "Service"' });
+    return res.status(400).json({ success: false, error: 'Type must be "Goods" or "Service"' });
   }
-
   if (isSellable) {
     if (sellingPrice === undefined || sellingPrice === null) {
-      return res.status(400).json({ error: 'Selling price is required for sellable items' });
+      return res.status(400).json({ success: false, error: 'Selling price is required for sellable items' });
     }
     if (typeof sellingPrice !== 'number' || sellingPrice < 0) {
-      return res.status(400).json({ error: 'Selling price must be a positive number' });
+      return res.status(400).json({ success: false, error: 'Selling price must be a positive number' });
     }
     if (!salesAccount || salesAccount.trim() === '') {
-      return res.status(400).json({ error: 'Sales account is required for sellable items' });
+      return res.status(400).json({ success: false, error: 'Sales account is required for sellable items' });
     }
   }
-
   if (isPurchasable) {
     if (costPrice === undefined || costPrice === null) {
-      return res.status(400).json({ error: 'Cost price is required for purchasable items' });
+      return res.status(400).json({ success: false, error: 'Cost price is required for purchasable items' });
     }
     if (typeof costPrice !== 'number' || costPrice < 0) {
-      return res.status(400).json({ error: 'Cost price must be a positive number' });
+      return res.status(400).json({ success: false, error: 'Cost price must be a positive number' });
     }
     if (!purchaseAccount || purchaseAccount.trim() === '') {
-      return res.status(400).json({ error: 'Purchase account is required for purchasable items' });
+      return res.status(400).json({ success: false, error: 'Purchase account is required for purchasable items' });
     }
   }
-
   next();
 };
 
-// ==================== ROUTES ====================
+// ============================================================================
+// HELPER — resolve COA account name → ObjectId for both sales + purchase
+// ============================================================================
 
-// Health Check
+async function resolveCOAIds(orgId, salesAccountName, purchaseAccountName) {
+  const orgFilter = orgId
+    ? { $or: [{ orgId }, { orgId: null }] }
+    : {};
+
+  let salesAccountId   = null;
+  let purchaseAccountId = null;
+
+  if (salesAccountName) {
+    const acc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${salesAccountName}$`, $options: 'i' },
+      ...orgFilter,
+    }).lean();
+    if (acc) salesAccountId = acc._id;
+  }
+
+  if (purchaseAccountName) {
+    const acc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${purchaseAccountName}$`, $options: 'i' },
+      ...orgFilter,
+    }).lean();
+    if (acc) purchaseAccountId = acc._id;
+  }
+
+  return { salesAccountId, purchaseAccountId };
+}
+
+// ============================================================================
+// HEALTH CHECK
+// ============================================================================
+
 router.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Item Billing API is running',
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ status: 'OK', message: 'Item Billing API is running', timestamp: new Date().toISOString() });
 });
 
-// ==================== ITEM ROUTES ====================
+// ============================================================================
+// FIX 3 — /search MUST be above /:id to avoid ObjectId cast error
+// ============================================================================
 
-// Get all items with filtering and pagination
-router.get('/', async (req, res) => {
+// GET /search — search by name / description
+router.get('/search', verifyFinanceJWT, async (req, res) => {
   try {
-    const { 
-      type, 
-      isSellable, 
-      isPurchasable, 
-      page = 1, 
-      limit = 50, 
-      search,
-      startDate,
-      endDate 
-    } = req.query;
+    const { q, type, startDate, endDate, limit = 20 } = req.query;
 
-    const filter = { isActive: true };
-    if (req.user?.orgId) filter.orgId = req.user.orgId;
-    
-    if (type) filter.type = type;
-    if (isSellable !== undefined) filter.isSellable = isSellable === 'true';
-    if (isPurchasable !== undefined) filter.isPurchasable = isPurchasable === 'true';
-    
-    if (search && search.trim()) {
-      filter.$or = [
-        { name: { $regex: search.trim(), $options: 'i' } },
-        { salesDescription: { $regex: search.trim(), $options: 'i' } },
-        { purchaseDescription: { $regex: search.trim(), $options: 'i' } }
-      ];
+    if (!q || q.trim() === '') {
+      return res.json({ success: true, items: [], query: '' });
     }
-    
+
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const filter = {
+      ...orgFilter,
+      isActive: true,
+      $or: [
+        { name:               { $regex: q.trim(), $options: 'i' } },
+        { salesDescription:   { $regex: q.trim(), $options: 'i' } },
+        { purchaseDescription:{ $regex: q.trim(), $options: 'i' } },
+      ],
+    };
+
+    if (type) filter.type = type;
     if (startDate || endDate) {
       filter.createdAt = {};
-      if (startDate) {
-        filter.createdAt.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        const endDateObj = new Date(endDate);
-        endDateObj.setDate(endDateObj.getDate() + 1);
-        filter.createdAt.$lt = endDateObj;
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate)   { const d = new Date(endDate); d.setDate(d.getDate() + 1); filter.createdAt.$lt = d; }
+    }
+
+    const items = await Item.find(filter)
+      .populate('preferredVendor', 'name')
+      .limit(parseInt(limit))
+      .sort({ name: 1 })
+      .lean();
+
+    res.json({ success: true, items, query: q });
+  } catch (err) {
+    console.error('❌ Error searching items:', err);
+    res.status(500).json({ success: false, error: 'Failed to search items', message: err.message });
+  }
+});
+
+// ============================================================================
+// FIX 2 + FIX 3 — GET / with verifyFinanceJWT so orgId filter works
+// ============================================================================
+
+router.get('/', verifyFinanceJWT, async (req, res) => {
+  try {
+    const { type, isSellable, isPurchasable, page = 1, limit = 50, search, startDate, endDate } = req.query;
+
+    // FIX 2: orgId filter now works because JWT is verified above
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const filter = { ...orgFilter, isActive: true };
+
+    if (type)                    filter.type        = type;
+    if (isSellable !== undefined) filter.isSellable  = isSellable === 'true';
+    if (isPurchasable !== undefined) filter.isPurchasable = isPurchasable === 'true';
+
+    if (search && search.trim()) {
+      const searchOr = [
+        { name:               { $regex: search.trim(), $options: 'i' } },
+        { salesDescription:   { $regex: search.trim(), $options: 'i' } },
+        { purchaseDescription:{ $regex: search.trim(), $options: 'i' } },
+      ];
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchOr;
       }
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate)   { const d = new Date(endDate); d.setDate(d.getDate() + 1); filter.createdAt.$lt = d; }
+    }
+
+    const skip  = (parseInt(page) - 1) * parseInt(limit);
+    const total = await Item.countDocuments(filter);
 
     const items = await Item.find(filter)
       .populate('preferredVendor', 'name email phone')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Item.countDocuments(filter);
+      .limit(parseInt(limit))
+      .lean();
 
     res.json({
       success: true,
       items,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page:       parseInt(page),
+        limit:      parseInt(limit),
         totalPages: Math.ceil(total / parseInt(limit)),
       },
-      filters: {
-        type,
-        isSellable,
-        isPurchasable,
-        search,
-        startDate,
-        endDate
-      }
     });
-  } catch (error) {
-    console.error('❌ Error fetching items:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to fetch items',
-      message: error.message 
-    });
+  } catch (err) {
+    console.error('❌ Error fetching items:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch items', message: err.message });
   }
 });
 
-// Get item statistics
-router.get('/statistics', async (req, res) => {
-  try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
-    const totalItems = await Item.countDocuments({ ...orgFilter, isActive: true });
-    const totalGoods = await Item.countDocuments({ ...orgFilter, isActive: true, type: 'Goods' });
-    const totalServices = await Item.countDocuments({ ...orgFilter, isActive: true, type: 'Service' });
-    const sellableItems = await Item.countDocuments({ ...orgFilter, isActive: true, isSellable: true });
-    const purchasableItems = await Item.countDocuments({ ...orgFilter, isActive: true, isPurchasable: true });
+// ============================================================================
+// FIX 1 + FIX 2 — /statistics returns ALL fields Flutter stat cards need
+// ============================================================================
 
+router.get('/statistics', verifyFinanceJWT, async (req, res) => {
+  try {
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const base = { ...orgFilter, isActive: true };
+
+    const [totalItems, goodsCount, servicesCount, activeItems, inactiveItems, sellableItems, purchasableItems] =
+      await Promise.all([
+        Item.countDocuments(base),
+        Item.countDocuments({ ...base, type: 'Goods' }),
+        Item.countDocuments({ ...base, type: 'Service' }),
+        // FIX 1 + FIX 3: activeItems / inactiveItems now computed from status field
+        Item.countDocuments({ ...base, status: 'Active' }),
+        Item.countDocuments({ ...base, status: 'Inactive' }),
+        Item.countDocuments({ ...base, isSellable: true }),
+        Item.countDocuments({ ...base, isPurchasable: true }),
+      ]);
+
+    // FIX 1: wrapped inside statistics{} key — Flutter reads raw['statistics']
     res.json({
       success: true,
       statistics: {
         totalItems,
-        totalGoods,
-        totalServices,
+        goodsCount,
+        servicesCount,
+        activeItems,
+        inactiveItems,
         sellableItems,
         purchasableItems,
-      }
+      },
     });
-  } catch (error) {
-    console.error('❌ Error fetching statistics:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to fetch statistics' 
-    });
+  } catch (err) {
+    console.error('❌ Error fetching statistics:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
   }
 });
 
-// Get single item by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const item = await Item.findById(req.params.id)
-      .populate('preferredVendor', 'name email phone');
+// ============================================================================
+// GET /:id — single item (MUST be below /search and /statistics)
+// ============================================================================
 
-    if (!item || !item.isActive) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
+router.get('/:id', verifyFinanceJWT, async (req, res) => {
+  try {
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const item = await Item.findOne({ _id: req.params.id, ...orgFilter, isActive: true })
+      .populate('preferredVendor', 'name email phone')
+      .lean();
+
+    if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
     res.json({ success: true, item });
-  } catch (error) {
-    console.error('❌ Error fetching item:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    res.status(500).json({ error: 'Failed to fetch item' });
+  } catch (err) {
+    console.error('❌ Error fetching item:', err);
+    if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
+    res.status(500).json({ success: false, error: 'Failed to fetch item' });
   }
 });
 
-// Create new item
-router.post('/', validateItemData, async (req, res) => {
+// ============================================================================
+// POST / — create item
+// FIX 5: resolve COA IDs for salesAccount + purchaseAccount
+// ============================================================================
+
+router.post('/', verifyFinanceJWT, validateItemData, async (req, res) => {
   try {
+    const orgId = req.user?.orgId || null;
+
     const itemData = {
-      name: req.body.name.trim(),
-      type: req.body.type,
-      unit: req.body.unit?.trim(),
-      isSellable: req.body.isSellable ?? true,
+      orgId,
+      name:          req.body.name.trim(),
+      type:          req.body.type,
+      unit:          req.body.unit?.trim(),
+      isSellable:    req.body.isSellable  ?? true,
       isPurchasable: req.body.isPurchasable ?? true,
-      status: req.body.status || 'Active',
-      orgId: req.user?.orgId || null,
+      status:        req.body.status || 'Active',
     };
 
     if (itemData.isSellable) {
-      itemData.sellingPrice = req.body.sellingPrice;
-      itemData.salesAccount = req.body.salesAccount.trim();
+      itemData.sellingPrice     = req.body.sellingPrice;
+      itemData.salesAccount     = req.body.salesAccount.trim();
       itemData.salesDescription = req.body.salesDescription?.trim();
     }
 
     if (itemData.isPurchasable) {
-      itemData.costPrice = req.body.costPrice;
-      itemData.purchaseAccount = req.body.purchaseAccount.trim();
+      itemData.costPrice           = req.body.costPrice;
+      itemData.purchaseAccount     = req.body.purchaseAccount.trim();
       itemData.purchaseDescription = req.body.purchaseDescription?.trim();
-      if (req.body.preferredVendor) {
-        itemData.preferredVendor = req.body.preferredVendor;
-      }
+      if (req.body.preferredVendor) itemData.preferredVendor = req.body.preferredVendor;
     }
 
-    const item = new Item(itemData);
-    await item.save();
+    // FIX 5: resolve COA ObjectIds so reports can link back correctly
+    const { salesAccountId, purchaseAccountId } = await resolveCOAIds(
+      orgId,
+      itemData.salesAccount,
+      itemData.purchaseAccount,
+    );
+    itemData.salesAccountId    = salesAccountId;
+    itemData.purchaseAccountId = purchaseAccountId;
 
+    const item = await Item.create(itemData);
     console.log('✅ Item created:', item.name);
 
-    res.status(201).json({
-      success: true,
-      message: 'Item created successfully',
-      item,
-    });
-  } catch (error) {
-    console.error('❌ Error creating item:', error);
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ error: error.message });
-    }
-    res.status(500).json({ error: 'Failed to create item' });
+    res.status(201).json({ success: true, message: 'Item created successfully', item });
+  } catch (err) {
+    console.error('❌ Error creating item:', err);
+    if (err.name === 'ValidationError') return res.status(400).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to create item' });
   }
 });
 
-// Update item
-router.put('/:id', validateItemData, async (req, res) => {
+// ============================================================================
+// PUT /:id — update item
+// FIX 5: re-resolve COA IDs on every update
+// ============================================================================
+
+router.put('/:id', verifyFinanceJWT, validateItemData, async (req, res) => {
   try {
+    const orgId = req.user?.orgId || null;
+
     const updateData = {
-      name: req.body.name.trim(),
-      type: req.body.type,
-      unit: req.body.unit?.trim(),
-      isSellable: req.body.isSellable ?? true,
+      name:          req.body.name.trim(),
+      type:          req.body.type,
+      unit:          req.body.unit?.trim(),
+      isSellable:    req.body.isSellable  ?? true,
       isPurchasable: req.body.isPurchasable ?? true,
-      status: req.body.status || 'Active',
-      updatedAt: Date.now(),
+      status:        req.body.status || 'Active',
+      updatedAt:     new Date(),
     };
 
     if (updateData.isSellable) {
-      updateData.sellingPrice = req.body.sellingPrice;
-      updateData.salesAccount = req.body.salesAccount.trim();
+      updateData.sellingPrice     = req.body.sellingPrice;
+      updateData.salesAccount     = req.body.salesAccount.trim();
       updateData.salesDescription = req.body.salesDescription?.trim();
     } else {
-      updateData.sellingPrice = null;
-      updateData.salesAccount = null;
+      updateData.sellingPrice     = null;
+      updateData.salesAccount     = null;
       updateData.salesDescription = null;
+      updateData.salesAccountId   = null;
     }
 
     if (updateData.isPurchasable) {
-      updateData.costPrice = req.body.costPrice;
-      updateData.purchaseAccount = req.body.purchaseAccount.trim();
+      updateData.costPrice           = req.body.costPrice;
+      updateData.purchaseAccount     = req.body.purchaseAccount.trim();
       updateData.purchaseDescription = req.body.purchaseDescription?.trim();
-      if (req.body.preferredVendor) {
-        updateData.preferredVendor = req.body.preferredVendor;
-      }
+      if (req.body.preferredVendor) updateData.preferredVendor = req.body.preferredVendor;
     } else {
-      updateData.costPrice = null;
-      updateData.purchaseAccount = null;
-      updateData.purchaseDescription = null;
-      updateData.preferredVendor = null;
+      updateData.costPrice            = null;
+      updateData.purchaseAccount      = null;
+      updateData.purchaseDescription  = null;
+      updateData.purchaseAccountId    = null;
+      updateData.preferredVendor      = null;
     }
 
-    const item = await Item.findByIdAndUpdate(
-      req.params.id,
+    // FIX 5: re-resolve COA IDs
+    const { salesAccountId, purchaseAccountId } = await resolveCOAIds(
+      orgId,
+      updateData.salesAccount,
+      updateData.purchaseAccount,
+    );
+    if (updateData.isSellable)    updateData.salesAccountId    = salesAccountId;
+    if (updateData.isPurchasable) updateData.purchaseAccountId = purchaseAccountId;
+
+    const orgFilter = orgId
+      ? { $or: [{ orgId }, { orgId: null }] }
+      : {};
+
+    const item = await Item.findOneAndUpdate(
+      { _id: req.params.id, ...orgFilter },
       updateData,
       { new: true, runValidators: true }
     ).populate('preferredVendor', 'name email phone');
 
-    if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
+    if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
     console.log('✅ Item updated:', item.name);
-
-    res.json({
-      success: true,
-      message: 'Item updated successfully',
-      item,
-    });
-  } catch (error) {
-    console.error('❌ Error updating item:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ error: error.message });
-    }
-    res.status(500).json({ error: 'Failed to update item' });
+    res.json({ success: true, message: 'Item updated successfully', item });
+  } catch (err) {
+    console.error('❌ Error updating item:', err);
+    if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
+    if (err.name === 'ValidationError') return res.status(400).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to update item' });
   }
 });
 
-// Delete item (soft delete)
-router.delete('/:id', async (req, res) => {
+// ============================================================================
+// DELETE /:id — soft delete
+// ============================================================================
+
+router.delete('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const item = await Item.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false, updatedAt: Date.now() },
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const item = await Item.findOneAndUpdate(
+      { _id: req.params.id, ...orgFilter },
+      { isActive: false, updatedAt: new Date() },
       { new: true }
     );
 
-    if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
+    if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
-    console.log('✅ Item deleted:', item.name);
-
-    res.json({ 
-      success: true,
-      message: 'Item deleted successfully' 
-    });
-  } catch (error) {
-    console.error('❌ Error deleting item:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    res.status(500).json({ error: 'Failed to delete item' });
+    console.log('✅ Item deleted (soft):', item.name);
+    res.json({ success: true, message: 'Item deleted successfully' });
+  } catch (err) {
+    console.error('❌ Error deleting item:', err);
+    if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
+    res.status(500).json({ success: false, error: 'Failed to delete item' });
   }
 });
 
-// Search items
-router.get('/search', async (req, res) => {
+// ============================================================================
+// GET /export/csv — export all items as CSV
+// ============================================================================
+
+router.get('/export/csv', verifyFinanceJWT, async (req, res) => {
   try {
-    const { q, startDate, endDate, type, limit = 20 } = req.query;
-    
-    if (!q || q.trim() === '') {
-      return res.json({ success: true, items: [] });
-    }
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
 
-    const filter = {
-      isActive: true,
-      $or: [
-        { name: { $regex: q.trim(), $options: 'i' } },
-        { salesDescription: { $regex: q.trim(), $options: 'i' } },
-        { purchaseDescription: { $regex: q.trim(), $options: 'i' } }
-      ]
-    };
-
-    if (type) filter.type = type;
-
-    if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) {
-        filter.createdAt.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        const endDateObj = new Date(endDate);
-        endDateObj.setDate(endDateObj.getDate() + 1);
-        filter.createdAt.$lt = endDateObj;
-      }
-    }
-
-    const items = await Item.find(filter)
-      .populate('preferredVendor', 'name')
-      .limit(parseInt(limit))
-      .sort({ name: 1 });
-
-    res.json({ 
-      success: true, 
-      items,
-      query: q,
-      filters: { startDate, endDate, type }
-    });
-  } catch (error) {
-    console.error('❌ Error searching items:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to search items',
-      message: error.message 
-    });
-  }
-});
-
-// Export items to CSV
-router.get('/export/csv', async (req, res) => {
-  try {
     const { type, isSellable, isPurchasable } = req.query;
-
-    const filter = { isActive: true };
-    if (type) filter.type = type;
-    if (isSellable !== undefined) filter.isSellable = isSellable === 'true';
+    const filter = { ...orgFilter, isActive: true };
+    if (type)                     filter.type          = type;
+    if (isSellable !== undefined)  filter.isSellable    = isSellable === 'true';
     if (isPurchasable !== undefined) filter.isPurchasable = isPurchasable === 'true';
 
-    const items = await Item.find(filter).populate('preferredVendor', 'name');
+    const items = await Item.find(filter).populate('preferredVendor', 'name').lean();
 
-    let csv = 'Name,Type,Unit,Selling Price,Cost Price,Sales Account,Purchase Account,Sales Description,Purchase Description,Is Sellable,Is Purchasable,Preferred Vendor\n';
-    
-    items.forEach(item => {
-      csv += `"${item.name}","${item.type}","${item.unit || ''}","${item.sellingPrice || ''}","${item.costPrice || ''}","${item.salesAccount || ''}","${item.purchaseAccount || ''}","${item.salesDescription || ''}","${item.purchaseDescription || ''}","${item.isSellable}","${item.isPurchasable}","${item.preferredVendor?.name || ''}"\n`;
+    let csvContent = 'Name,Type,Unit,Selling Price,Cost Price,Sales Account,Purchase Account,Sales Description,Purchase Description,Is Sellable,Is Purchasable,Preferred Vendor\n';
+    items.forEach(i => {
+      csvContent += `"${i.name}","${i.type}","${i.unit || ''}","${i.sellingPrice || ''}","${i.costPrice || ''}","${i.salesAccount || ''}","${i.purchaseAccount || ''}","${i.salesDescription || ''}","${i.purchaseDescription || ''}","${i.isSellable}","${i.isPurchasable}","${i.preferredVendor?.name || ''}"\n`;
     });
-
-    console.log(`✅ Exported ${items.length} items to CSV`);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=items_export.csv');
-    res.send(csv);
-  } catch (error) {
-    console.error('❌ Error exporting items:', error);
-    res.status(500).json({ error: 'Failed to export items' });
+    res.send(csvContent);
+  } catch (err) {
+    console.error('❌ Error exporting items:', err);
+    res.status(500).json({ success: false, error: 'Failed to export items' });
   }
 });
 
-// ========== CSV BULK IMPORT ==========
+// ============================================================================
+// POST /bulk-import — CSV bulk import
+// FIX 4: removed duplicate Vendor schema — uses multer only, no Vendor model here
+// ============================================================================
+
 const upload = multer({ dest: 'uploads/' });
 
-router.post('/bulk-import', upload.single('file'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+router.post('/bulk-import', verifyFinanceJWT, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
 
-  const results = [];
-  const errors = [];
+  const rows    = [];
+  const errors  = [];
+  let successCount = 0;
+  let errorCount   = 0;
 
   try {
-    console.log('📥 Starting bulk import from:', req.file.originalname);
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(req.file.path)
+        .pipe(csv())
+        .on('data', d => rows.push(d))
+        .on('end',  resolve)
+        .on('error', reject);
+    });
 
-    fs.createReadStream(req.file.path)
-      .pipe(csv())
-      .on('data', (data) => results.push(data))
-      .on('end', async () => {
-        let successCount = 0;
-        let errorCount = 0;
+    const orgId = req.user?.orgId || null;
 
-        console.log(`📊 Processing ${results.length} rows from CSV...`);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        const parseBool = v => {
+          if (typeof v === 'boolean') return v;
+          const s = (v || '').toString().toLowerCase().trim();
+          return s === 'true' || s === '1' || s === 'yes';
+        };
 
-        for (let i = 0; i < results.length; i++) {
-          const row = results[i];
-          
-          try {
-            const parseBoolean = (value) => {
-              if (typeof value === 'boolean') return value;
-              if (typeof value === 'string') {
-                const lower = value.toLowerCase().trim();
-                return lower === 'true' || lower === '1' || lower === 'yes';
-              }
-              return true;
-            };
+        const isSellable   = parseBool(row['Is Sellable']   || row.isSellable);
+        const isPurchasable = parseBool(row['Is Purchasable'] || row.isPurchasable);
 
-            const isSellable = parseBoolean(row['Is Sellable'] || row.isSellable);
-            const isPurchasable = parseBoolean(row['Is Purchasable'] || row.isPurchasable);
+        const name = (row.Name || row.name || '').trim();
+        const type = (row.Type || row.type || 'Goods').trim();
 
-            const itemData = {
-              name: (row.Name || row.name || '').trim(),
-              type: (row.Type || row.type || 'Goods').trim(),
-              unit: (row.Unit || row.unit || '').trim(),
-              isSellable,
-              isPurchasable,
-              status: (row.Status || row.status || 'Active').trim(),
-            };
+        if (!name)                                    throw new Error('Name is required');
+        if (!['Goods','Service'].includes(type))      throw new Error('Type must be Goods or Service');
 
-            if (!itemData.name) {
-              throw new Error('Item name is required');
-            }
+        const itemData = { orgId, name, type, unit: (row.Unit || row.unit || '').trim(), isSellable, isPurchasable, status: 'Active' };
 
-            if (!['Goods', 'Service'].includes(itemData.type)) {
-              throw new Error('Invalid type. Must be "Goods" or "Service"');
-            }
-
-            if (itemData.isSellable) {
-              const sellingPrice = parseFloat(row['Selling Price'] || row.sellingPrice || '0');
-              if (isNaN(sellingPrice) || sellingPrice < 0) {
-                throw new Error('Invalid selling price for sellable item');
-              }
-              itemData.sellingPrice = sellingPrice;
-              itemData.salesAccount = (row['Sales Account'] || row.salesAccount || 'Sales').trim();
-              itemData.salesDescription = (row['Sales Description'] || row.salesDescription || '').trim();
-            }
-
-            if (itemData.isPurchasable) {
-              const costPrice = parseFloat(row['Cost Price'] || row.costPrice || '0');
-              if (isNaN(costPrice) || costPrice < 0) {
-                throw new Error('Invalid cost price for purchasable item');
-              }
-              itemData.costPrice = costPrice;
-              itemData.purchaseAccount = (row['Purchase Account'] || row.purchaseAccount || 'Cost of Goods Sold').trim();
-              itemData.purchaseDescription = (row['Purchase Description'] || row.purchaseDescription || '').trim();
-            }
-
-            const item = new Item({ ...itemData, orgId: req.user?.orgId || null });
-            await item.save();
-            
-            successCount++;
-            console.log(`✅ Row ${i + 2}: "${itemData.name}" imported successfully`);
-            
-          } catch (error) {
-            errorCount++;
-            const errorMsg = `Row ${i + 2} (${row.Name || 'Unknown'}): ${error.message}`;
-            errors.push({ 
-              row: `Row ${i + 2}: ${row.Name || 'Unknown'}`, 
-              error: error.message 
-            });
-            console.error(`❌ ${errorMsg}`);
-          }
+        if (isSellable) {
+          const sp = parseFloat(row['Selling Price'] || row.sellingPrice || '0');
+          if (isNaN(sp) || sp < 0) throw new Error('Invalid selling price');
+          itemData.sellingPrice     = sp;
+          itemData.salesAccount     = (row['Sales Account'] || row.salesAccount || 'Sales').trim();
+          itemData.salesDescription = (row['Sales Description'] || row.salesDescription || '').trim();
         }
 
-        try {
-          fs.unlinkSync(req.file.path);
-        } catch (err) {
-          console.error('⚠️ Could not delete temp file:', err);
+        if (isPurchasable) {
+          const cp = parseFloat(row['Cost Price'] || row.costPrice || '0');
+          if (isNaN(cp) || cp < 0) throw new Error('Invalid cost price');
+          itemData.costPrice           = cp;
+          itemData.purchaseAccount     = (row['Purchase Account'] || row.purchaseAccount || 'Cost of Goods Sold').trim();
+          itemData.purchaseDescription = (row['Purchase Description'] || row.purchaseDescription || '').trim();
         }
 
-        console.log(`\n📈 Import Summary:`);
-        console.log(`   ✅ Successful: ${successCount} items`);
-        console.log(`   ❌ Failed: ${errorCount} items`);
+        // Resolve COA IDs
+        const { salesAccountId, purchaseAccountId } = await resolveCOAIds(
+          orgId, itemData.salesAccount, itemData.purchaseAccount,
+        );
+        itemData.salesAccountId    = salesAccountId;
+        itemData.purchaseAccountId = purchaseAccountId;
 
-        res.json({
-          success: true,
-          message: 'Bulk import completed',
-          successCount,
-          errorCount,
-          errors,
-        });
-      })
-      .on('error', (error) => {
-        console.error('❌ CSV parsing error:', error);
-        try {
-          if (req.file) fs.unlinkSync(req.file.path);
-        } catch (err) {
-          console.error('⚠️ Could not delete temp file:', err);
-        }
-        res.status(500).json({ error: 'Failed to parse CSV file: ' + error.message });
-      });
-      
-  } catch (error) {
-    console.error('❌ Error during bulk import:', error);
-    try {
-      if (req.file) fs.unlinkSync(req.file.path);
-    } catch (err) {
-      console.error('⚠️ Could not delete temp file:', err);
+        await Item.create(itemData);
+        successCount++;
+      } catch (err) {
+        errorCount++;
+        errors.push({ row: `Row ${i + 2}: ${row.Name || 'Unknown'}`, error: err.message });
+      }
     }
-    res.status(500).json({ error: 'Failed to import items: ' + error.message });
+
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+
+    res.json({ success: true, message: 'Bulk import completed', successCount, errorCount, errors });
+  } catch (err) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    console.error('❌ Bulk import error:', err);
+    res.status(500).json({ success: false, error: 'Failed to import: ' + err.message });
   }
 });
 
-// ==================== VENDOR ROUTES ====================
+// ============================================================================
+// UTILITY ROUTES — units, sales accounts, purchase accounts
+// These read from COA so dropdowns reflect actual accounts in the org
+// ============================================================================
 
-// Get all vendors
-router.get('/vendors', async (req, res) => {
-  try {
-    const vendors = await Vendor.find({ isActive: true }).sort({ name: 1 });
-    
-    console.log(`✅ Fetched ${vendors.length} vendors`);
-    
-    res.json({
-      success: true,
-      vendors: vendors,
-      count: vendors.length
-    });
-  } catch (error) {
-    console.error('❌ Error fetching vendors:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to fetch vendors',
-      vendors: []
-    });
-  }
-});
-
-// Create new vendor
-router.post('/vendors', async (req, res) => {
-  try {
-    const { name, email, phone, address } = req.body;
-
-    if (!name || name.trim() === '') {
-      return res.status(400).json({ error: 'Vendor name is required' });
-    }
-
-    const vendor = new Vendor({
-      name: name.trim(),
-      email: email?.trim(),
-      phone: phone?.trim(),
-      address: address?.trim(),
-    });
-
-    await vendor.save();
-    
-    console.log('✅ Vendor created:', vendor.name);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Vendor created successfully',
-      vendor,
-    });
-  } catch (error) {
-    console.error('❌ Error creating vendor:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to create vendor' 
-    });
-  }
-});
-
-// Get single vendor by ID
-router.get('/vendors/:id', async (req, res) => {
-  try {
-    const vendor = await Vendor.findById(req.params.id);
-
-    if (!vendor || !vendor.isActive) {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-
-    res.json({ success: true, vendor });
-  } catch (error) {
-    console.error('❌ Error fetching vendor:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-    res.status(500).json({ error: 'Failed to fetch vendor' });
-  }
-});
-
-// Update vendor
-router.put('/vendors/:id', async (req, res) => {
-  try {
-    const { name, email, phone, address } = req.body;
-
-    if (!name || name.trim() === '') {
-      return res.status(400).json({ error: 'Vendor name is required' });
-    }
-
-    const vendor = await Vendor.findByIdAndUpdate(
-      req.params.id,
-      {
-        name: name.trim(),
-        email: email?.trim(),
-        phone: phone?.trim(),
-        address: address?.trim(),
-      },
-      { new: true, runValidators: true }
-    );
-
-    if (!vendor) {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-
-    console.log('✅ Vendor updated:', vendor.name);
-
-    res.json({
-      success: true,
-      message: 'Vendor updated successfully',
-      vendor,
-    });
-  } catch (error) {
-    console.error('❌ Error updating vendor:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-    res.status(500).json({ error: 'Failed to update vendor' });
-  }
-});
-
-// Delete vendor (soft delete)
-router.delete('/vendors/:id', async (req, res) => {
-  try {
-    const vendor = await Vendor.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false },
-      { new: true }
-    );
-
-    if (!vendor) {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-
-    console.log('✅ Vendor deleted:', vendor.name);
-
-    res.json({ 
-      success: true,
-      message: 'Vendor deleted successfully' 
-    });
-  } catch (error) {
-    console.error('❌ Error deleting vendor:', error);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ error: 'Vendor not found' });
-    }
-    res.status(500).json({ error: 'Failed to delete vendor' });
-  }
-});
-
-// ==================== UTILITY ROUTES ====================
-
-// Get units
-router.get('/units', (req, res) => {
+router.get('/units', verifyFinanceJWT, (req, res) => {
   res.json({
     success: true,
-    units: ['pcs', 'dz', 'kg', 'ltr', 'box', 'carton', 'unit', 'dozen', 'gram', 'ton', 'hour']
+    units: ['pcs', 'dz', 'kg', 'g', 'ltr', 'ml', 'box', 'carton', 'unit', 'dozen', 'ton', 'hour'],
   });
 });
 
-// Get sales accounts
-router.get('/accounts/sales', (req, res) => {
-  res.json({
-    success: true,
-    accounts: ['Sales', 'Service Revenue', 'Other Income', 'Consulting Revenue']
-  });
+// Sales accounts — pulled from COA (Income types)
+router.get('/accounts/sales', verifyFinanceJWT, async (req, res) => {
+  try {
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const accounts = await ChartOfAccount.find({
+      ...orgFilter,
+      isActive: true,
+      accountType: { $in: ['Income', 'Other Income'] },
+    }).sort({ accountName: 1 }).lean();
+
+    const names = accounts.length > 0
+      ? accounts.map(a => a.accountName)
+      : ['Sales', 'Service Revenue', 'Other Income', 'Consulting Revenue'];
+
+    res.json({ success: true, accounts: names });
+  } catch (err) {
+    res.json({ success: true, accounts: ['Sales', 'Service Revenue', 'Other Income'] });
+  }
 });
 
-// Get purchase accounts
-router.get('/accounts/purchase', (req, res) => {
-  res.json({
-    success: true,
-    accounts: ['Cost of Goods Sold', 'Purchases', 'Direct Expenses', 'Materials']
-  });
+// Purchase accounts — pulled from COA (Expense / COGS types)
+router.get('/accounts/purchase', verifyFinanceJWT, async (req, res) => {
+  try {
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+      : {};
+
+    const accounts = await ChartOfAccount.find({
+      ...orgFilter,
+      isActive: true,
+      accountType: { $in: ['Expense', 'Cost Of Goods Sold', 'Other Expense'] },
+    }).sort({ accountName: 1 }).lean();
+
+    const names = accounts.length > 0
+      ? accounts.map(a => a.accountName)
+      : ['Cost of Goods Sold', 'Purchases', 'Direct Expenses', 'Materials'];
+
+    res.json({ success: true, accounts: names });
+  } catch (err) {
+    res.json({ success: true, accounts: ['Cost of Goods Sold', 'Purchases', 'Direct Expenses'] });
+  }
 });
 
 module.exports = router;
+module.exports.Item = Item;

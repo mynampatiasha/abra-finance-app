@@ -178,6 +178,9 @@ router.post('/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
+    if (user.status === 'deleted') {
+      return res.status(403).json({ success: false, message: 'This account has been deleted and cannot be accessed.' });
+    }
     if (user.status !== 'active') {
       return res.status(403).json({ success: false, message: 'Account inactive. Contact your admin.' });
     }
@@ -660,6 +663,7 @@ router.get('/org-profile', verifyFinanceJWT, async (req, res) => {
         qrCodePath:          org.qrCodePath          || '',
         otherPaymentOptions: org.otherPaymentOptions || '',
         documents:           org.documents           || [],
+        invoiceNote:         org.invoiceNote         || '',
       },
     });
   } catch (err) {
@@ -693,6 +697,7 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
     if (bankName             !== undefined) updateFields.bankName             = bankName.trim();
     if (upiId                !== undefined) updateFields.upiId                = upiId.trim();
     if (otherPaymentOptions  !== undefined) updateFields.otherPaymentOptions  = otherPaymentOptions.trim();
+    if (req.body.invoiceNote !== undefined) updateFields.invoiceNote          = req.body.invoiceNote.trim();
     await db.collection('organizations').updateOne({ orgId }, { $set: updateFields });
     const updated = await db.collection('organizations').findOne({ orgId });
     return res.json({
@@ -717,6 +722,7 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
         qrCodePath:          updated.qrCodePath          || '',
         otherPaymentOptions: updated.otherPaymentOptions || '',
         documents:           updated.documents           || [],
+        invoiceNote:         updated.invoiceNote         || '',
       },
     });
   } catch (err) {
@@ -837,6 +843,41 @@ router.delete('/org-document/:docId', verifyFinanceJWT, async (req, res) => {
     );
     return res.json({ success: true, message: 'Document deleted' });
   } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── DELETE /api/finance/auth/delete-account ─────────────────────────────────
+// Permanently deactivates the user account.
+// Sets status = 'deleted' so login is blocked forever for this email.
+// ═══════════════════════════════════════════════════════════════════════════════
+router.delete('/delete-account', verifyFinanceJWT, async (req, res) => {
+  console.log('\n🗑️  DELETE ACCOUNT');
+  try {
+    const db  = req.db;
+    const uid = new ObjectId(req.user.userId);
+
+    const user = await db.collection('billing_users').findOne({ _id: uid });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    await db.collection('billing_users').updateOne(
+      { _id: uid },
+      {
+        $set: {
+          status:    'deleted',
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    console.log(`✅ Account deleted for userId: ${req.user.userId} | email: ${user.email}`);
+    return res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error('❌ delete-account error:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });

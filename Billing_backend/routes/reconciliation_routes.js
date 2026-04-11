@@ -1,0 +1,743 @@
+// ============================================================================
+// RECONCILIATION ROUTES — COMPLETE
+// ============================================================================
+// File: backend/routes/reconciliation_routes.js
+//
+// Mirrors Zoho Books reconciliation flow pin-to-pin:
+//
+//   Screen 1 → History list      GET  /:accountId/history
+//   Screen 2 → Initiate          POST /initiate
+//   Screen 3 → Transactions      GET  /:id/transactions
+//              Save progress      PUT  /:id/save-progress
+//              +Add Transaction   POST /:id/add-transaction
+//              Complete/Finalize  POST /:id/complete
+//   Undo                         POST /:id/undo
+//   Delete                       DELETE /:id
+//   Report                       GET  /:accountId/report
+// ============================================================================
+
+'use strict';
+
+const express    = require('express');
+const router     = express.Router();
+const mongoose   = require('mongoose');
+
+const { verifyFinanceJWT }                                          = require('../middleware/finance_jwt');
+const { postTransactionToCOA, ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
+const Reconciliation                                                = require('../models/Reconciliation');
+
+router.use(verifyFinanceJWT);
+
+// ── Re-use models already registered ─────────────────────────────────────────
+const ProviderTransaction = mongoose.models.ProviderTransaction
+  || mongoose.model('ProviderTransaction', new mongoose.Schema({}, { strict: false }), 'providertransactions');
+
+const PaymentAccount = mongoose.models.PaymentAccount
+  || mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function orgFilter(req) {
+  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+}
+
+// Recalculate clearedAmount from the cleared transaction IDs
+async function recalcCleared(rec) {
+  if (!rec.clearedTxnIds || rec.clearedTxnIds.length === 0) {
+    rec.clearedAmount = 0;
+  } else {
+    const txns = await ProviderTransaction.find({
+      _id: { $in: rec.clearedTxnIds },
+    }).lean();
+
+    let cleared = 0;
+    for (const t of txns) {
+      if (t.transactionType === 'CREDIT') {
+        cleared += t.amount || 0;
+      } else {
+        cleared -= t.amount || 0;
+      }
+    }
+    rec.clearedAmount = cleared;
+  }
+  rec.difference = (rec.closingBalance || 0) - rec.clearedAmount;
+  return rec;
+}
+
+// Get opening balance = closing balance of the previous RECONCILED reconciliation
+// If none exists → use PaymentAccount.openingBalance
+async function getOpeningBalance(accountId, beforeDate, orgId) {
+  const prev = await Reconciliation.findOne({
+    accountId,
+    status:  'RECONCILED',
+    endDate: { $lt: beforeDate },
+    ...(orgId ? { orgId } : {}),
+  }).sort({ endDate: -1 }).lean();
+
+  if (prev) return prev.closingBalance;
+
+  const pa = await PaymentAccount.findById(accountId).lean();
+  return pa?.openingBalance ?? pa?.currentBalance ?? 0;
+}
+
+async function nextJournalRef(orgId = null) {
+  const count = await AccountTransaction.countDocuments({ ...(orgId ? { orgId } : {}) });
+  const pad   = String(count + 1).padStart(5, '0');
+  return `REC-${new Date().getFullYear()}-${pad}`;
+}
+
+// ============================================================================
+// ROUTE 1 — GET /:accountId/history
+// Returns ALL reconciliations for an account (history list page)
+// ============================================================================
+router.get('/:accountId/history', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({ success: false, message: 'Invalid accountId' });
+    }
+
+    const recs = await Reconciliation.find({
+      accountId,
+      ...orgFilter(req),
+    }).sort({ endDate: -1 }).lean();
+
+    res.json({ success: true, count: recs.length, data: recs });
+  } catch (err) {
+    console.error('❌ reconciliation/history error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 2 — POST /initiate
+// Create a new reconciliation (Screen 2 — Initiate dialog)
+// Body: { accountId, startDate, endDate, closingBalance }
+// ============================================================================
+router.post('/initiate', async (req, res) => {
+  try {
+    const { accountId, startDate, endDate, closingBalance } = req.body;
+
+    if (!accountId || !startDate || !endDate || closingBalance === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'accountId, startDate, endDate and closingBalance are required',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({ success: false, message: 'Invalid accountId' });
+    }
+
+    const accountObjId = new mongoose.Types.ObjectId(accountId);
+    const orgId        = req.user?.orgId ? String(req.user.orgId) : null;
+
+    // Check no IN_PROGRESS reconciliation already exists for this account
+    const inProgress = await Reconciliation.findOne({
+      accountId: accountObjId,
+      status:    'IN_PROGRESS',
+      ...(orgId ? { orgId } : {}),
+    });
+    if (inProgress) {
+      return res.status(400).json({
+        success: false,
+        message: 'A reconciliation is already in progress for this account. Complete or delete it first.',
+        data: { reconciliationId: inProgress._id },
+      });
+    }
+
+    const start = new Date(startDate);
+    const end   = new Date(endDate);
+
+    // Auto-calculate opening balance
+    const openingBalance = await getOpeningBalance(
+      accountObjId,
+      start,
+      orgId,
+    );
+
+    const rec = new Reconciliation({
+      accountId:      accountObjId,
+      orgId,
+      startDate:      start,
+      endDate:        end,
+      openingBalance,
+      closingBalance: parseFloat(closingBalance),
+      clearedAmount:  0,
+      difference:     parseFloat(closingBalance),
+      status:         'IN_PROGRESS',
+      clearedTxnIds:  [],
+      addedTxnIds:    [],
+      createdBy:      req.user?.email || 'system',
+    });
+
+    await rec.save();
+
+    console.log(`✅ Reconciliation initiated: ${rec._id} for account ${accountId}`);
+
+    res.json({
+      success: true,
+      message: 'Reconciliation initiated',
+      data:    rec,
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/initiate error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 3 — GET /:id/transactions
+// Returns only CATEGORIZED + MATCHED + manually added transactions
+// for this reconciliation period (NOT uncategorized)
+// ============================================================================
+router.get('/:id/transactions', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) }).lean();
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    // Only show: CATEGORIZED, RECONCILED, and manually added transactions
+    // within the reconciliation date range for this account
+    const filter = {
+      accountId: mongoose.Types.ObjectId.isValid(rec.accountId)
+        ? new mongoose.Types.ObjectId(rec.accountId)
+        : rec.accountId.toString(),
+      transactionDate:      { $gte: rec.startDate, $lte: rec.endDate },
+      reconciliationStatus: { $in: ['CATEGORIZED', 'RECONCILED'] },
+      isExcluded:           { $ne: true },
+      ...orgFilter(req),
+    };
+
+    // Also include manually added transactions from this reconciliation
+    if (rec.addedTxnIds && rec.addedTxnIds.length > 0) {
+      delete filter.reconciliationStatus;
+      filter.$or = [
+        { reconciliationStatus: { $in: ['CATEGORIZED', 'RECONCILED'] } },
+        { _id: { $in: rec.addedTxnIds } },
+      ];
+    }
+
+    const txns = await ProviderTransaction.find(filter)
+      .sort({ transactionDate: 1, createdAt: 1 })
+      .lean();
+
+    // Mark which ones are already cleared
+    const clearedSet = new Set((rec.clearedTxnIds || []).map(id => id.toString()));
+    const addedSet   = new Set((rec.addedTxnIds   || []).map(id => id.toString()));
+
+    const enriched = txns.map(t => ({
+      ...t,
+      isCleared:       clearedSet.has(t._id.toString()),
+      isManuallyAdded: addedSet.has(t._id.toString()),
+    }));
+
+    res.json({
+      success:        true,
+      count:          enriched.length,
+      openingBalance: rec.openingBalance,
+      closingBalance: rec.closingBalance,
+      clearedAmount:  rec.clearedAmount,
+      difference:     rec.difference,
+      status:         rec.status,
+      data:           enriched,
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/transactions error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 4 — PUT /:id/save-progress
+// Save ticked checkboxes (auto-save as user ticks)
+// Body: { clearedTxnIds: [...], closingBalance?: number }
+// ============================================================================
+router.put('/:id/save-progress', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clearedTxnIds, closingBalance } = req.body;
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) });
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    if (rec.status === 'RECONCILED') {
+      return res.status(400).json({ success: false, message: 'Cannot modify a completed reconciliation' });
+    }
+
+    rec.clearedTxnIds = clearedTxnIds || [];
+    if (closingBalance !== undefined) rec.closingBalance = parseFloat(closingBalance);
+
+    await recalcCleared(rec);
+    await rec.save();
+
+    res.json({
+      success:       true,
+      message:       'Progress saved',
+      clearedAmount: rec.clearedAmount,
+      difference:    rec.difference,
+      closingBalance: rec.closingBalance,
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/save-progress error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 5 — POST /:id/add-transaction
+// +Add Transaction button inside reconciliation screen
+// Creates a new ProviderTransaction AND immediately marks it categorized
+// Body: { type: 'CREDIT'|'DEBIT', date, amount, category, coaAccountId, description, reference }
+// ============================================================================
+router.post('/:id/add-transaction', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      type,         // 'CREDIT' | 'DEBIT'
+      date,
+      amount,
+      coaAccountId, // COA account for the other side of journal entry
+      description,
+      reference,
+    } = req.body;
+
+    if (!type || !date || !amount || !coaAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'type, date, amount and coaAccountId are required',
+      });
+    }
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) });
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    if (rec.status === 'RECONCILED') {
+      return res.status(400).json({ success: false, message: 'Cannot add transaction to completed reconciliation' });
+    }
+
+    const txnDate    = new Date(date);
+    const txnAmount  = parseFloat(amount);
+    const journalRef = await nextJournalRef(req.user?.orgId);
+
+    // Resolve bank COA
+    const pa = await PaymentAccount.findById(rec.accountId).lean();
+    if (!pa) return res.status(404).json({ success: false, message: 'Bank account not found' });
+
+    const bankCOA = await ChartOfAccount.findOne({
+      accountName: pa.accountName,
+      ...orgFilter(req),
+    }).lean();
+    if (!bankCOA) return res.status(404).json({ success: false, message: 'Bank COA not found' });
+
+    const otherCOA = await ChartOfAccount.findById(coaAccountId).lean();
+    if (!otherCOA) return res.status(404).json({ success: false, message: 'COA account not found' });
+
+    const desc = `${description || otherCOA.accountName} | ${journalRef}`;
+
+    // ── DOUBLE ENTRY ─────────────────────────────────────────────────────────
+    if (type === 'CREDIT') {
+      // Money IN → Dr Bank / Cr Other (income/refund etc.)
+      await postTransactionToCOA({
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,
+        date: txnDate, description: desc,
+        referenceType: 'Journal', referenceNumber: journalRef,
+        debit: txnAmount, credit: 0,
+      });
+      await postTransactionToCOA({
+        accountId: otherCOA._id, orgId: req.user?.orgId || null,
+        date: txnDate, description: desc,
+        referenceType: 'Journal', referenceNumber: journalRef,
+        debit: 0, credit: txnAmount,
+      });
+      await PaymentAccount.findByIdAndUpdate(rec.accountId, { $inc: { currentBalance: txnAmount } });
+    } else {
+      // Money OUT → Dr Other (expense/charge) / Cr Bank
+      await postTransactionToCOA({
+        accountId: otherCOA._id, orgId: req.user?.orgId || null,
+        date: txnDate, description: desc,
+        referenceType: 'Journal', referenceNumber: journalRef,
+        debit: txnAmount, credit: 0,
+      });
+      await postTransactionToCOA({
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,
+        date: txnDate, description: desc,
+        referenceType: 'Journal', referenceNumber: journalRef,
+        debit: 0, credit: txnAmount,
+      });
+      await PaymentAccount.findByIdAndUpdate(rec.accountId, { $inc: { currentBalance: -txnAmount } });
+    }
+
+    // ── Create ProviderTransaction for this manually added entry ──────────────
+    const newTxn = await ProviderTransaction.create({
+      accountId:            rec.accountId,
+      orgId:                req.user?.orgId || null,
+      transactionDate:      txnDate,
+      amount:               txnAmount,
+      transactionType:      type,
+      description:          description || otherCOA.accountName,
+      referenceNumber:      reference || journalRef,
+      reconciliationStatus: 'CATEGORIZED',
+      journalRef,
+      categoryLabel:        otherCOA.accountName,
+      categorizedAt:        new Date(),
+      isManualEntry:        true,
+      importBatchId:        `REC-ADD-${Date.now()}`,
+      importedAt:           new Date(),
+      importedBy:           req.user?.email || 'system',
+      source:               'RECONCILIATION_ADD',
+    });
+
+    // ── Add to reconciliation's addedTxnIds AND clearedTxnIds ─────────────────
+    // Auto-tick it as cleared immediately
+    rec.addedTxnIds.push(newTxn._id);
+    if (!rec.clearedTxnIds.map(i => i.toString()).includes(newTxn._id.toString())) {
+      rec.clearedTxnIds.push(newTxn._id);
+    }
+    await recalcCleared(rec);
+    await rec.save();
+
+    console.log(`✅ Reconciliation +AddTransaction: ${journalRef} ₹${txnAmount} ${type}`);
+
+    res.json({
+      success:        true,
+      message:        'Transaction added and marked as cleared',
+      data:           newTxn,
+      clearedAmount:  rec.clearedAmount,
+      difference:     rec.difference,
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/add-transaction error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 6 — POST /:id/complete
+// Finalize reconciliation — only allowed when difference = 0
+// Marks all cleared transactions as RECONCILED
+// ============================================================================
+router.post('/:id/complete', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) });
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    if (rec.status === 'RECONCILED') {
+      return res.status(400).json({ success: false, message: 'Reconciliation already completed' });
+    }
+
+    // Recalc to be sure
+    await recalcCleared(rec);
+
+    // Enforce difference = 0
+    if (Math.abs(rec.difference) > 0.01) {
+      return res.status(400).json({
+        success:    false,
+        message:    `Cannot reconcile. Difference is ₹${rec.difference.toFixed(2)}. It must be ₹0.00`,
+        difference: rec.difference,
+      });
+    }
+
+    // Mark all cleared transactions as RECONCILED
+    if (rec.clearedTxnIds && rec.clearedTxnIds.length > 0) {
+      await ProviderTransaction.updateMany(
+        { _id: { $in: rec.clearedTxnIds } },
+        {
+          $set: {
+            reconciliationStatus: 'RECONCILED',
+            reconciledAt:         new Date(),
+            reconciledBy:         req.user?.email || 'system',
+          },
+        },
+      );
+    }
+
+    rec.status       = 'RECONCILED';
+    rec.reconciledAt = new Date();
+    await rec.save();
+
+    console.log(`✅ Reconciliation COMPLETE: ${rec._id} | Period: ${rec.startDate.toISOString().split('T')[0]} → ${rec.endDate.toISOString().split('T')[0]} | Closing: ₹${rec.closingBalance}`);
+
+    res.json({
+      success: true,
+      message: 'Reconciliation completed successfully',
+      data:    rec,
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/complete error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 7 — POST /:id/undo
+// Undo the most recent reconciliation
+// Reverts all RECONCILED transactions back to CATEGORIZED
+// ============================================================================
+router.post('/:id/undo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) });
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    if (rec.status !== 'RECONCILED') {
+      return res.status(400).json({ success: false, message: 'Only a completed reconciliation can be undone' });
+    }
+
+    // Check it is the most recent RECONCILED reconciliation for this account
+    const mostRecent = await Reconciliation.findOne({
+      accountId: rec.accountId,
+      status:    'RECONCILED',
+      ...orgFilter(req),
+    }).sort({ endDate: -1 }).lean();
+
+    if (!mostRecent || mostRecent._id.toString() !== id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only the most recent reconciliation can be undone. Delete all newer reconciliations first.',
+      });
+    }
+
+    // Revert all cleared transactions back to CATEGORIZED
+    if (rec.clearedTxnIds && rec.clearedTxnIds.length > 0) {
+      await ProviderTransaction.updateMany(
+        { _id: { $in: rec.clearedTxnIds } },
+        {
+          $set: {
+            reconciliationStatus: 'CATEGORIZED',
+            reconciledAt:         null,
+            reconciledBy:         null,
+          },
+        },
+      );
+    }
+
+    // Delete any transactions that were added via +Add Transaction
+    if (rec.addedTxnIds && rec.addedTxnIds.length > 0) {
+      // Reverse their COA entries
+      for (const txnId of rec.addedTxnIds) {
+        const txn = await ProviderTransaction.findById(txnId).lean();
+        if (!txn?.journalRef) continue;
+
+        const coaEntries = await AccountTransaction.find({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+        for (const entry of coaEntries) {
+          await ChartOfAccount.findByIdAndUpdate(entry.accountId, {
+            $inc: { closingBalance: -(entry.debit - entry.credit) },
+          });
+        }
+        await AccountTransaction.deleteMany({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+
+        // Reverse PaymentAccount balance
+        const balanceChange = txn.transactionType === 'CREDIT' ? -txn.amount : txn.amount;
+        await PaymentAccount.findByIdAndUpdate(rec.accountId, { $inc: { currentBalance: balanceChange } });
+      }
+      await ProviderTransaction.deleteMany({ _id: { $in: rec.addedTxnIds } });
+    }
+
+    // Reset reconciliation to IN_PROGRESS
+    rec.status       = 'IN_PROGRESS';
+    rec.reconciledAt = null;
+    rec.clearedTxnIds = [];
+    rec.addedTxnIds   = [];
+    rec.clearedAmount = 0;
+    rec.difference    = rec.closingBalance;
+    await rec.save();
+
+    console.log(`↩️  Reconciliation UNDONE: ${rec._id}`);
+
+    res.json({ success: true, message: 'Reconciliation undone. You can now re-reconcile.', data: rec });
+  } catch (err) {
+    console.error('❌ reconciliation/undo error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 8 — DELETE /:id
+// Delete a reconciliation record entirely
+// ============================================================================
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const rec = await Reconciliation.findOne({ _id: id, ...orgFilter(req) });
+    if (!rec) return res.status(404).json({ success: false, message: 'Reconciliation not found' });
+
+    // Revert all RECONCILED transactions back to CATEGORIZED
+    if (rec.clearedTxnIds && rec.clearedTxnIds.length > 0) {
+      await ProviderTransaction.updateMany(
+        {
+          _id:                  { $in: rec.clearedTxnIds },
+          reconciliationStatus: 'RECONCILED',
+        },
+        {
+          $set: {
+            reconciliationStatus: 'CATEGORIZED',
+            reconciledAt:         null,
+            reconciledBy:         null,
+          },
+        },
+      );
+    }
+
+    // Delete manually added transactions and reverse their COA entries
+    if (rec.addedTxnIds && rec.addedTxnIds.length > 0) {
+      for (const txnId of rec.addedTxnIds) {
+        const txn = await ProviderTransaction.findById(txnId).lean();
+        if (!txn?.journalRef) continue;
+        const coaEntries = await AccountTransaction.find({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+        for (const entry of coaEntries) {
+          await ChartOfAccount.findByIdAndUpdate(entry.accountId, {
+            $inc: { closingBalance: -(entry.debit - entry.credit) },
+          });
+        }
+        await AccountTransaction.deleteMany({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+        const balanceChange = txn.transactionType === 'CREDIT' ? -txn.amount : txn.amount;
+        await PaymentAccount.findByIdAndUpdate(rec.accountId, { $inc: { currentBalance: balanceChange } });
+      }
+      await ProviderTransaction.deleteMany({ _id: { $in: rec.addedTxnIds } });
+    }
+
+    await Reconciliation.findByIdAndDelete(id);
+
+    console.log(`🗑️  Reconciliation DELETED: ${id}`);
+
+    res.json({ success: true, message: 'Reconciliation deleted successfully' });
+  } catch (err) {
+    console.error('❌ reconciliation/delete error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 9 — GET /:accountId/report
+// Reconciliation Status Report — 3 sections:
+//   Section 1: Cleared transactions (in books AND on statement)
+//   Section 2: Unmatched statement lines (on statement but NOT in books)
+//   Section 3: Outstanding transactions (in books but NOT on statement)
+// ============================================================================
+router.get('/:accountId/report', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { startDate, endDate, reconciliationId } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({ success: false, message: 'Invalid accountId' });
+    }
+
+    // If a specific reconciliation is requested, use its date range
+    let start, end, rec;
+    if (reconciliationId) {
+      rec   = await Reconciliation.findOne({ _id: reconciliationId, ...orgFilter(req) }).lean();
+      start = rec?.startDate;
+      end   = rec?.endDate;
+    } else {
+      start = startDate ? new Date(startDate) : new Date(new Date().setDate(1)); // default: current month
+      end   = endDate   ? new Date(endDate)   : new Date();
+    }
+
+    const pa = await PaymentAccount.findById(accountId).lean();
+    if (!pa) return res.status(404).json({ success: false, message: 'Account not found' });
+
+    // ── Section 1: CLEARED (RECONCILED status transactions in date range) ─────
+    const clearedTxns = await ProviderTransaction.find({
+      accountId,
+      transactionDate:      { $gte: start, $lte: end },
+      reconciliationStatus: 'RECONCILED',
+      isExcluded:           { $ne: true },
+      ...orgFilter(req),
+    }).sort({ transactionDate: 1 }).lean();
+
+    // ── Section 2: UNMATCHED / UNCATEGORIZED (on bank statement but not categorized) ─
+    const unmatchedTxns = await ProviderTransaction.find({
+      accountId,
+      transactionDate:      { $gte: start, $lte: end },
+      reconciliationStatus: { $in: ['UNCATEGORIZED', 'UNMATCHED'] },
+      isExcluded:           { $ne: true },
+      ...orgFilter(req),
+    }).sort({ transactionDate: 1 }).lean();
+
+    // ── Section 3: OUTSTANDING (CATEGORIZED but not yet reconciled) ───────────
+    const outstandingTxns = await ProviderTransaction.find({
+      accountId,
+      transactionDate:      { $gte: start, $lte: end },
+      reconciliationStatus: 'CATEGORIZED',
+      isExcluded:           { $ne: true },
+      ...orgFilter(req),
+    }).sort({ transactionDate: 1 }).lean();
+
+    // ── Summary calculations ──────────────────────────────────────────────────
+    const sumTxns = (txns) => ({
+      totalCredits: txns.filter(t => t.transactionType === 'CREDIT').reduce((s, t) => s + t.amount, 0),
+      totalDebits:  txns.filter(t => t.transactionType === 'DEBIT').reduce((s, t) => s + t.amount, 0),
+      count:        txns.length,
+    });
+
+    const openingBalance = rec
+      ? rec.openingBalance
+      : await (async () => {
+          const prevRec = await Reconciliation.findOne({
+            accountId, status: 'RECONCILED',
+            endDate: { $lt: start },
+            ...orgFilter(req),
+          }).sort({ endDate: -1 }).lean();
+          return prevRec ? prevRec.closingBalance : pa.openingBalance;
+        })();
+
+    const clearedSummary     = sumTxns(clearedTxns);
+    const unmatchedSummary   = sumTxns(unmatchedTxns);
+    const outstandingSummary = sumTxns(outstandingTxns);
+
+    res.json({
+      success: true,
+      data: {
+        account: {
+          id:   pa._id,
+          name: pa.accountName,
+          type: pa.accountType,
+        },
+        period: {
+          startDate: start,
+          endDate:   end,
+        },
+        summary: {
+          openingBalance,
+          closingBalance:        rec?.closingBalance ?? pa.currentBalance,
+          totalClearedCredits:   clearedSummary.totalCredits,
+          totalClearedDebits:    clearedSummary.totalDebits,
+          totalUncategorized:    unmatchedSummary.count,
+          totalOutstanding:      outstandingSummary.count,
+          difference:            rec?.difference ?? 0,
+          reconciliationStatus:  rec?.status ?? 'N/A',
+        },
+        sections: {
+          cleared: {
+            label:        'Cleared Transactions (Matched & Reconciled)',
+            transactions: clearedTxns,
+            ...clearedSummary,
+          },
+          unmatched: {
+            label:        'Unmatched Statement Lines (Not Categorized)',
+            transactions: unmatchedTxns,
+            ...unmatchedSummary,
+          },
+          outstanding: {
+            label:        'Outstanding Transactions (Categorized, Not Reconciled)',
+            transactions: outstandingTxns,
+            ...outstandingSummary,
+          },
+        },
+      },
+    });
+  } catch (err) {
+    console.error('❌ reconciliation/report error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,2023 @@
+// ============================================================================
+// REPORTS BACKEND — COMPLETE (79 REPORTS)
+// ============================================================================
+// File: backend/routes/reports.js
+// Register in app.js:
+//   app.use('/api/finance/reports', require('./routes/reports'));
+//
+// Categories & counts:
+//   Business Overview    — 9
+//   Sales                — 4
+//   Receivables          — 8
+//   Payments Received    — 4
+//   Recurring Invoices   — 1
+//   Payables             — 9
+//   Purchases & Expenses — 8
+//   Taxes                — 3
+//   Banking              — 1
+//   Projects & Timesheet — 7
+//   Accountant           — 6
+//   Budgets              — 1
+//   Currency             — 2
+//   Activity             — 5
+//   Automation           — 2
+//   TOTAL                = 79
+// ============================================================================
+
+'use strict';
+
+const express  = require('express');
+const router   = express.Router();
+const mongoose = require('mongoose');
+const XLSX     = require('xlsx');
+const PDFDoc   = require('pdfkit');
+const path     = require('path');
+const fs       = require('fs');
+
+const { verifyFinanceJWT }                     = require('../middleware/finance_jwt');
+const { ChartOfAccount, AccountTransaction }   = require('./chart_of_accounts');
+
+// ── Lazy-load any collection without circular deps ───────────────────────────
+function col(name, collection) {
+  if (mongoose.models[name]) return mongoose.models[name];
+  return mongoose.model(name, new mongoose.Schema({}, { strict: false }), collection);
+}
+
+// ── All routes require JWT ───────────────────────────────────────────────────
+router.use(verifyFinanceJWT);
+
+// ── COA account type buckets ─────────────────────────────────────────────────
+const INCOME_TYPES    = ['Income', 'Other Income'];
+const EXPENSE_TYPES   = ['Expense', 'Cost Of Goods Sold', 'Other Expense'];
+const ASSET_TYPES     = ['Asset','Accounts Receivable','Other Current Asset','Fixed Asset','Cash','Stock','Other Asset'];
+const LIABILITY_TYPES = ['Liability','Accounts Payable','Other Current Liability','Non Current Liability','Other Liability'];
+const EQUITY_TYPES    = ['Equity'];
+
+const fmt = (n) => Math.round((n || 0) * 100) / 100;
+
+// ── India Financial Year helper ──────────────────────────────────────────────
+function getFY(d = new Date()) {
+  const m = d.getMonth(), y = d.getFullYear();
+  return m >= 3
+    ? { start: new Date(y, 3, 1), end: new Date(y + 1, 2, 31, 23, 59, 59) }
+    : { start: new Date(y - 1, 3, 1), end: new Date(y, 2, 31, 23, 59, 59) };
+}
+function getLastFY() {
+  const fy = getFY();
+  return { start: new Date(fy.start.getFullYear() - 1, 3, 1), end: new Date(fy.start.getFullYear(), 2, 31, 23, 59, 59) };
+}
+
+// ── Date range parser ────────────────────────────────────────────────────────
+function parseDateRange(q) {
+  const now = new Date();
+  if (q.period) {
+    switch (q.period) {
+      case 'this_month':   return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59) };
+      case 'last_month':   return { start: new Date(now.getFullYear(), now.getMonth() - 1, 1), end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59) };
+      case 'this_quarter': { const q2 = Math.floor(now.getMonth() / 3); return { start: new Date(now.getFullYear(), q2 * 3, 1), end: new Date(now.getFullYear(), q2 * 3 + 3, 0, 23, 59, 59) }; }
+      case 'this_fy':      return getFY();
+      case 'last_fy':      return getLastFY();
+    }
+  }
+  return {
+    start: q.fromDate ? new Date(q.fromDate) : getFY().start,
+    end:   q.toDate   ? new Date(new Date(q.toDate).setHours(23, 59, 59)) : now,
+  };
+}
+
+function orgScope(req) {
+  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+}
+
+// ============================================================================
+// ── SECTION 1: BUSINESS OVERVIEW (9 reports) ─────────────────────────────────
+// ============================================================================
+
+// 1.1  Profit & Loss
+router.get('/profit-loss', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, isActive: true, ...scope }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const txns = await AccountTransaction.aggregate([
+      { $match: { accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope } },
+      { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+    ]);
+    const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
+
+    let totalIncome = 0, totalCOGS = 0, totalOpEx = 0;
+    const income = [], cogs = [], opEx = [];
+
+    for (const acc of accounts) {
+      const t = tMap[acc._id.toString()] || { dr: 0, cr: 0 };
+      const net = INCOME_TYPES.includes(acc.accountType) ? fmt(t.cr - t.dr) : fmt(t.dr - t.cr);
+      const row = { accountName: acc.accountName, accountCode: acc.accountCode, amount: net };
+      if (INCOME_TYPES.includes(acc.accountType))          { income.push(row); totalIncome += net; }
+      else if (acc.accountType === 'Cost Of Goods Sold')   { cogs.push(row);   totalCOGS  += net; }
+      else                                                  { opEx.push(row);   totalOpEx  += net; }
+    }
+
+    const grossProfit = fmt(totalIncome - totalCOGS);
+    const netProfit   = fmt(grossProfit - totalOpEx);
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      income:             { items: income, total: fmt(totalIncome) },
+      costOfGoods:        { items: cogs,   total: fmt(totalCOGS) },
+      grossProfit,
+      operatingExpenses:  { items: opEx,   total: fmt(totalOpEx) },
+      netProfit,
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.2  Balance Sheet
+router.get('/balance-sheet', async (req, res) => {
+  try {
+    const { end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({ accountType: { $in: [...ASSET_TYPES, ...LIABILITY_TYPES, ...EQUITY_TYPES] }, isActive: true, ...scope }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const txns = await AccountTransaction.aggregate([
+      { $match: { accountId: { $in: ids }, date: { $lte: end }, ...scope } },
+      { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+    ]);
+    const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
+
+    let totA = 0, totL = 0, totE = 0;
+    const assets = [], liabs = [], equity = [];
+
+    for (const acc of accounts) {
+      const t = tMap[acc._id.toString()] || { dr: 0, cr: 0 };
+      const net = ASSET_TYPES.includes(acc.accountType) ? fmt(t.dr - t.cr) : fmt(t.cr - t.dr);
+      const row = { accountName: acc.accountName, accountCode: acc.accountCode, accountType: acc.accountType, amount: net };
+      if (ASSET_TYPES.includes(acc.accountType))     { assets.push(row); totA += net; }
+      else if (LIABILITY_TYPES.includes(acc.accountType)) { liabs.push(row);  totL += net; }
+      else                                            { equity.push(row); totE += net; }
+    }
+
+    res.json({ success: true, data: {
+      asOf: end,
+      assets:      { items: assets, total: fmt(totA) },
+      liabilities: { items: liabs,  total: fmt(totL) },
+      equity:      { items: equity, total: fmt(totE) },
+      totalLiabilitiesAndEquity: fmt(totL + totE),
+      balanced: Math.abs(totA - (totL + totE)) < 0.02,
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.3  Cash Flow Statement
+router.get('/cash-flow', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const cashAccs = await ChartOfAccount.find({ accountType: { $in: ['Cash', 'Asset', 'Accounts Receivable', 'Accounts Payable'] }, isActive: true, ...scope }).lean();
+    const ids = cashAccs.map(a => a._id);
+
+    const txns = await AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).lean();
+
+    const op  = txns.filter(t => ['Invoice','Bill','Payment','Expense'].includes(t.referenceType));
+    const inv = txns.filter(t => ['Journal'].includes(t.referenceType));
+
+    const opIn  = fmt(op.reduce((s, t)  => s + (t.debit  || 0), 0));
+    const opOut = fmt(op.reduce((s, t)  => s + (t.credit || 0), 0));
+    const invIn  = fmt(inv.reduce((s, t) => s + (t.debit  || 0), 0));
+    const invOut = fmt(inv.reduce((s, t) => s + (t.credit || 0), 0));
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      operating: { inflows: opIn, outflows: opOut, net: fmt(opIn - opOut),
+        items: op.slice(0, 200).map(t => ({ date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit) })) },
+      investing:  { inflows: invIn, outflows: invOut, net: fmt(invIn - invOut) },
+      netCashChange: fmt((opIn - opOut) + (invIn - invOut)),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.4  Horizontal P&L (current vs previous period)
+router.get('/profit-loss-horizontal', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const days = (end - start) / 86400000;
+    const prevEnd   = new Date(start - 1);
+    const prevStart = new Date(+start - days * 86400000);
+
+    const fetchPL = async (s, e) => {
+      const accs = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, ...scope }).lean();
+      const ids = accs.map(a => a._id);
+      const txns = await AccountTransaction.aggregate([
+        { $match: { accountId: { $in: ids }, date: { $gte: s, $lte: e }, ...scope } },
+        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+      ]);
+      const m = {}; txns.forEach(t => { m[t._id.toString()] = t; });
+      let inc = 0, exp = 0;
+      for (const a of accs) {
+        const t = m[a._id.toString()] || { dr: 0, cr: 0 };
+        if (INCOME_TYPES.includes(a.accountType)) inc += t.cr - t.dr; else exp += t.dr - t.cr;
+      }
+      return { income: fmt(inc), expenses: fmt(exp), netProfit: fmt(inc - exp) };
+    };
+
+    const [curr, prev] = await Promise.all([fetchPL(start, end), fetchPL(prevStart, prevEnd)]);
+    const chg = (c, p) => p !== 0 ? fmt(((c - p) / Math.abs(p)) * 100) : 0;
+
+    res.json({ success: true, data: {
+      current:  { period: { start, end }, ...curr },
+      previous: { period: { start: prevStart, end: prevEnd }, ...prev },
+      changes: {
+        income:    { absolute: fmt(curr.income    - prev.income),    percent: chg(curr.income,    prev.income) },
+        expenses:  { absolute: fmt(curr.expenses  - prev.expenses),  percent: chg(curr.expenses,  prev.expenses) },
+        netProfit: { absolute: fmt(curr.netProfit - prev.netProfit), percent: chg(curr.netProfit, prev.netProfit) },
+      },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.5  Horizontal Balance Sheet
+router.get('/balance-sheet-horizontal', async (req, res) => {
+  try {
+    const { end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const prevEnd = new Date(getFY(end).start - 1);
+
+    const fetchBS = async (e) => {
+      const accs = await ChartOfAccount.find({ accountType: { $in: [...ASSET_TYPES, ...LIABILITY_TYPES, ...EQUITY_TYPES] }, ...scope }).lean();
+      const ids = accs.map(a => a._id);
+      const txns = await AccountTransaction.aggregate([
+        { $match: { accountId: { $in: ids }, date: { $lte: e }, ...scope } },
+        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+      ]);
+      const m = {}; txns.forEach(t => { m[t._id.toString()] = t; });
+      let A = 0, L = 0, E = 0;
+      for (const a of accs) {
+        const t = m[a._id.toString()] || { dr: 0, cr: 0 };
+        const net = ASSET_TYPES.includes(a.accountType) ? t.dr - t.cr : t.cr - t.dr;
+        if (ASSET_TYPES.includes(a.accountType)) A += net;
+        else if (LIABILITY_TYPES.includes(a.accountType)) L += net;
+        else E += net;
+      }
+      return { assets: fmt(A), liabilities: fmt(L), equity: fmt(E) };
+    };
+
+    const [curr, prev] = await Promise.all([fetchBS(end), fetchBS(prevEnd)]);
+    res.json({ success: true, data: { current: { asOf: end, ...curr }, previous: { asOf: prevEnd, ...prev } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.6  Business Performance Ratios
+router.get('/performance-ratios', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const sumTxns = async (types, field, dateFilter) => {
+      const accs = await ChartOfAccount.find({ accountType: { $in: types }, ...scope }).lean();
+      const ids = accs.map(a => a._id);
+      const r = await AccountTransaction.aggregate([
+        { $match: { accountId: { $in: ids }, ...dateFilter, ...scope } },
+        { $group: { _id: null, total: { $sum: `$${field}` } } },
+      ]);
+      return r[0]?.total || 0;
+    };
+
+    const df = { date: { $gte: start, $lte: end } };
+    const de = { date: { $lte: end } };
+
+    const [rev, exp, ast, lia] = await Promise.all([
+      sumTxns(INCOME_TYPES,    'credit', df),
+      sumTxns(EXPENSE_TYPES,   'debit',  df),
+      sumTxns(ASSET_TYPES,     'debit',  de),
+      sumTxns(LIABILITY_TYPES, 'credit', de),
+    ]);
+
+    const gp = rev - exp, eq = ast - lia;
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      grossProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0,
+      netProfitMargin:   rev > 0 ? fmt((gp / rev) * 100) : 0,
+      returnOnAssets:    ast > 0 ? fmt((gp / ast) * 100) : 0,
+      returnOnEquity:    eq  > 0 ? fmt((gp / eq)  * 100) : 0,
+      debtToEquityRatio: eq  > 0 ? fmt(lia / eq)         : 0,
+      currentRatio:      lia > 0 ? fmt(ast / lia)         : 0,
+      totalRevenue: fmt(rev), totalExpenses: fmt(exp), netProfit: fmt(gp),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.7  Movement of Equity
+router.get('/movement-of-equity', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accs = await ChartOfAccount.find({ accountType: { $in: EQUITY_TYPES }, ...scope }).lean();
+    const ids = accs.map(a => a._id);
+
+    const [openTxns, periodTxns] = await Promise.all([
+      AccountTransaction.aggregate([
+        { $match: { accountId: { $in: ids }, date: { $lt: start }, ...scope } },
+        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+      ]),
+      AccountTransaction.aggregate([
+        { $match: { accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope } },
+        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+      ]),
+    ]);
+
+    const oMap = {}, pMap = {};
+    openTxns.forEach(t   => { oMap[t._id.toString()] = t; });
+    periodTxns.forEach(t => { pMap[t._id.toString()] = t; });
+
+    const rows = accs.map(a => {
+      const o = oMap[a._id.toString()] || { dr: 0, cr: 0 };
+      const p = pMap[a._id.toString()] || { dr: 0, cr: 0 };
+      const opening = fmt(o.cr - o.dr);
+      const change  = fmt(p.cr - p.dr);
+      return { accountName: a.accountName, opening, change, closing: fmt(opening + change) };
+    });
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      accounts: rows,
+      totals: { opening: fmt(rows.reduce((s, r) => s + r.opening, 0)), change: fmt(rows.reduce((s, r) => s + r.change, 0)), closing: fmt(rows.reduce((s, r) => s + r.closing, 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.8  Trial Balance
+router.get('/trial-balance', async (req, res) => {
+  try {
+    const { end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({ isActive: true, ...scope }).sort({ accountCode: 1 }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const txns = await AccountTransaction.aggregate([
+      { $match: { accountId: { $in: ids }, date: { $lte: end }, ...scope } },
+      { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+    ]);
+    const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
+
+    let grandDr = 0, grandCr = 0;
+    const rows = accounts.map(a => {
+      const t = tMap[a._id.toString()] || { dr: 0, cr: 0 };
+      const dr = fmt(t.dr), cr = fmt(t.cr);
+      grandDr += dr; grandCr += cr;
+      return { accountCode: a.accountCode, accountName: a.accountName, accountType: a.accountType, debit: dr, credit: cr, balance: fmt(dr - cr) };
+    }).filter(r => r.debit > 0 || r.credit > 0);
+
+    res.json({ success: true, data: {
+      asOf: end,
+      accounts: rows,
+      totals: { debit: fmt(grandDr), credit: fmt(grandCr) },
+      balanced: Math.abs(grandDr - grandCr) < 0.02,
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 1.9  Day Book
+router.get('/day-book', async (req, res) => {
+  try {
+    const date  = req.query.date ? new Date(req.query.date) : new Date();
+    const start = new Date(date); start.setHours(0, 0, 0, 0);
+    const end   = new Date(date); end.setHours(23, 59, 59, 999);
+    const scope = orgScope(req);
+
+    const txns = await AccountTransaction.find({ date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).limit(500).lean();
+    const accIds = [...new Set(txns.map(t => t.accountId?.toString()))].filter(Boolean);
+    const accs = await ChartOfAccount.find({ _id: { $in: accIds } }).lean();
+    const aMap = {}; accs.forEach(a => { aMap[a._id.toString()] = a; });
+
+    const enriched = txns.map(t => ({ ...t, accountName: aMap[t.accountId?.toString()]?.accountName || '', accountType: aMap[t.accountId?.toString()]?.accountType || '' }));
+
+    res.json({ success: true, data: {
+      date: start,
+      transactions: enriched,
+      totals: { debit: fmt(enriched.reduce((s, t) => s + (t.debit || 0), 0)), credit: fmt(enriched.reduce((s, t) => s + (t.credit || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 2: SALES (4 reports) ─────────────────────────────────────────────
+// ============================================================================
+
+// 2.1  Sales by Customer
+router.get('/sales-by-customer', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const rows = await Invoice.aggregate([
+      { $match: { invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT','CANCELLED'] }, ...scope } },
+      { $group: { _id: '$customerId', customerName: { $first: '$customerName' }, customerEmail: { $first: '$customerEmail' }, invoiceCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      customers: rows.map(r => ({ ...r, totalAmount: fmt(r.totalAmount), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })),
+      totals: { invoiceCount: rows.reduce((s, r) => s + r.invoiceCount, 0), totalAmount: fmt(rows.reduce((s, r) => s + r.totalAmount, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 2.2  Sales by Item
+router.get('/sales-by-item', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const rows = await Invoice.aggregate([
+      { $match: { invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT','CANCELLED'] }, ...scope } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.itemDetails', quantity: { $sum: '$items.quantity' }, totalAmount: { $sum: '$items.amount' }, invoiceCount: { $sum: 1 }, avgRate: { $avg: '$items.rate' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      items: rows.map(r => ({ itemName: r._id, quantity: fmt(r.quantity), totalAmount: fmt(r.totalAmount), invoiceCount: r.invoiceCount, avgRate: fmt(r.avgRate) })),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 2.3  Sales Summary
+router.get('/sales-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const [daily, byStatus] = await Promise.all([
+      Invoice.aggregate([
+        { $match: { invoiceDate: { $gte: start, $lte: end }, ...scope } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$invoiceDate' } }, invoiceCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalTax: { $sum: { $add: [{ $ifNull: ['$totalCGST', 0] }, { $ifNull: ['$totalSGST', 0] }, { $ifNull: ['$totalIGST', 0] }] } }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+        { $sort: { _id: 1 } },
+      ]),
+      Invoice.aggregate([
+        { $match: { invoiceDate: { $gte: start, $lte: end }, ...scope } },
+        { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$totalAmount' } } },
+      ]),
+    ]);
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      dailySummary: daily.map(r => ({ date: r._id, invoiceCount: r.invoiceCount, totalAmount: fmt(r.totalAmount), totalTax: fmt(r.totalTax), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })),
+      byStatus,
+      totals: { invoiceCount: daily.reduce((s, r) => s + r.invoiceCount, 0), totalAmount: fmt(daily.reduce((s, r) => s + r.totalAmount, 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 2.4  Sales by Salesperson
+router.get('/sales-by-salesperson', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const rows = await Invoice.aggregate([
+      { $match: { invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT','CANCELLED'] }, ...scope } },
+      { $group: { _id: { $ifNull: ['$salesperson', 'Unassigned'] }, invoiceCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      salespersons: rows.map(r => ({ salesperson: r._id, invoiceCount: r.invoiceCount, totalAmount: fmt(r.totalAmount), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 3: RECEIVABLES (8 reports) ───────────────────────────────────────
+// ============================================================================
+
+// 3.1  AR Aging Summary
+router.get('/ar-aging-summary', async (req, res) => {
+  try {
+    const today = new Date();
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const invoices = await Invoice.find({ status: { $in: ['UNPAID','PARTIALLY_PAID','OVERDUE','SENT'] }, amountDue: { $gt: 0 }, ...scope }).lean();
+
+    const buckets = { current: 0, '1_30': 0, '31_60': 0, '61_90': 0, '90plus': 0 };
+    const counts  = { current: 0, '1_30': 0, '31_60': 0, '61_90': 0, '90plus': 0 };
+
+    for (const inv of invoices) {
+      const days = Math.floor((today - new Date(inv.dueDate)) / 86400000);
+      const due  = inv.amountDue || 0;
+      if      (days <= 0)  { buckets.current += due; counts.current++; }
+      else if (days <= 30) { buckets['1_30']  += due; counts['1_30']++; }
+      else if (days <= 60) { buckets['31_60'] += due; counts['31_60']++; }
+      else if (days <= 90) { buckets['61_90'] += due; counts['61_90']++; }
+      else                 { buckets['90plus']+= due; counts['90plus']++; }
+    }
+
+    const total = Object.values(buckets).reduce((s, v) => s + v, 0);
+    res.json({ success: true, data: {
+      asOf: today,
+      buckets: [
+        { range: 'Current',       amount: fmt(buckets.current),  count: counts.current,  percent: total > 0 ? fmt((buckets.current  / total) * 100) : 0 },
+        { range: '1-30 days',     amount: fmt(buckets['1_30']),   count: counts['1_30'],   percent: total > 0 ? fmt((buckets['1_30']   / total) * 100) : 0 },
+        { range: '31-60 days',    amount: fmt(buckets['31_60']),  count: counts['31_60'],  percent: total > 0 ? fmt((buckets['31_60']  / total) * 100) : 0 },
+        { range: '61-90 days',    amount: fmt(buckets['61_90']),  count: counts['61_90'],  percent: total > 0 ? fmt((buckets['61_90']  / total) * 100) : 0 },
+        { range: 'Over 90 days',  amount: fmt(buckets['90plus']), count: counts['90plus'], percent: total > 0 ? fmt((buckets['90plus'] / total) * 100) : 0 },
+      ],
+      total: fmt(total),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.2  AR Aging Details
+router.get('/ar-aging-details', async (req, res) => {
+  try {
+    const today = new Date();
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const invoices = await Invoice.find({ status: { $in: ['UNPAID','PARTIALLY_PAID','OVERDUE','SENT'] }, amountDue: { $gt: 0 }, ...scope }).sort({ dueDate: 1 }).lean();
+
+    const rows = invoices.map(inv => {
+      const days = Math.floor((today - new Date(inv.dueDate)) / 86400000);
+      let bucket;
+      if      (days <= 0)  bucket = 'Current';
+      else if (days <= 30) bucket = '1-30 days';
+      else if (days <= 60) bucket = '31-60 days';
+      else if (days <= 90) bucket = '61-90 days';
+      else                 bucket = 'Over 90 days';
+      return { invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), daysOverdue: Math.max(0, days), bucket, status: inv.status };
+    });
+
+    res.json({ success: true, data: { asOf: today, invoices: rows, total: fmt(rows.reduce((s, r) => s + (r.amountDue || 0), 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.3  Customer Balance Summary
+router.get('/customer-balance', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const rows = await Invoice.aggregate([
+      { $match: { status: { $nin: ['DRAFT','CANCELLED'] }, ...scope } },
+      { $group: { _id: '$customerId', customerName: { $first: '$customerName' }, customerEmail: { $first: '$customerEmail' }, invoiceCount: { $sum: 1 }, totalInvoiced: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $sort: { totalDue: -1 } },
+    ]);
+
+    res.json({ success: true, data: {
+      customers: rows.map(r => ({ customerId: r._id, customerName: r.customerName, customerEmail: r.customerEmail, invoiceCount: r.invoiceCount, totalInvoiced: fmt(r.totalInvoiced), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })),
+      totals: { totalInvoiced: fmt(rows.reduce((s, r) => s + r.totalInvoiced, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.4  Invoice Details
+router.get('/invoice-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+    const query = { invoiceDate: { $gte: start, $lte: end }, ...scope };
+    if (req.query.status)     query.status     = req.query.status;
+    if (req.query.customerId) query.customerId = req.query.customerId;
+
+    const invoices = await Invoice.find(query).sort({ invoiceDate: -1 }).limit(500).lean();
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, subTotal: fmt(inv.subTotal), totalTax: fmt((inv.totalCGST || 0) + (inv.totalSGST || 0) + (inv.totalIGST || 0)), totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue) })),
+      totals: { count: invoices.length, totalAmount: fmt(invoices.reduce((s, i) => s + (i.totalAmount || 0), 0)), totalPaid: fmt(invoices.reduce((s, i) => s + (i.amountPaid || 0), 0)), totalDue: fmt(invoices.reduce((s, i) => s + (i.amountDue || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.5  Receivable Summary
+router.get('/receivable-summary', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+    const stats = await Invoice.aggregate([
+      { $match: scope },
+      { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$totalAmount' }, due: { $sum: '$amountDue' }, paid: { $sum: '$amountPaid' } } },
+    ]);
+    res.json({ success: true, data: { byStatus: stats.map(s => ({ status: s._id, count: s.count, amount: fmt(s.amount), due: fmt(s.due), paid: fmt(s.paid) })), totals: { totalInvoiced: fmt(stats.reduce((s, st) => s + st.amount, 0)), totalDue: fmt(stats.reduce((s, st) => s + st.due, 0)), totalPaid: fmt(stats.reduce((s, st) => s + st.paid, 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.6  Receivable Details
+router.get('/receivable-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const invoices = await Invoice.find({ invoiceDate: { $gte: start, $lte: end }, status: { $in: ['UNPAID','PARTIALLY_PAID','OVERDUE','SENT'] }, ...scope }).sort({ invoiceDate: -1 }).limit(500).lean();
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue) })),
+      totals: { total: fmt(invoices.reduce((s, i) => s + (i.amountDue || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.7  Credit Note Details
+router.get('/credit-note-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const CreditNote = col('CreditNote', 'creditnotes');
+    const notes = await CreditNote.find({ creditNoteDate: { $gte: start, $lte: end }, ...scope }).sort({ creditNoteDate: -1 }).lean();
+    res.json({ success: true, data: { period: { start, end }, creditNotes: notes.map(cn => ({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, creditNoteDate: cn.creditNoteDate, reason: cn.reason, status: cn.status, totalAmount: fmt(cn.totalAmount), creditBalance: fmt(cn.creditBalance) })), totals: { count: notes.length, totalAmount: fmt(notes.reduce((s, n) => s + (n.totalAmount || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 3.8  Refund History (Receivables)
+router.get('/refund-history-receivables', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const CreditNote = col('CreditNote', 'creditnotes');
+    const notes = await CreditNote.find({ 'refunds.0': { $exists: true }, ...scope }).lean();
+    const refunds = [];
+    for (const cn of notes) {
+      for (const r of (cn.refunds || [])) {
+        const rd = new Date(r.refundDate);
+        if (rd >= start && rd <= end) refunds.push({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, refundDate: rd, amount: fmt(r.amount), refundMethod: r.refundMethod, referenceNumber: r.referenceNumber });
+      }
+    }
+    res.json({ success: true, data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 4: PAYMENTS RECEIVED (4 reports) ─────────────────────────────────
+// ============================================================================
+
+// 4.1  Payments Received — reads from payments_received collection directly
+router.get('/payments-received', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    // Use the raw MongoDB driver to hit payments_received collection
+    // (same collection used by payments-received.js route)
+    const db = getDB(req);
+
+    const payments = await db.collection('payments_received')
+      .find({ ...scope, status: { $ne: 'void' } })
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .toArray();
+
+    // Filter by date range — handles all 3 date storage formats
+    const filtered = payments.filter(p => {
+      const raw = p.paymentDate;
+      if (!raw) return false;
+      let d;
+      if (raw instanceof Date) {
+        d = raw;
+      } else if (typeof raw === 'string') {
+        if (raw.includes('/')) {
+          // DD/MM/YYYY
+          const [day, month, year] = raw.split('/');
+          d = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+        } else {
+          d = new Date(raw);
+        }
+      } else {
+        d = new Date(raw);
+      }
+      if (isNaN(d)) return false;
+      return d >= start && d <= end;
+    });
+
+    const rows = filtered.map(p => ({
+      paymentNumber:  p.paymentNumber,
+      paymentDate:    p.paymentDate,
+      customerName:   p.customerName,
+      customerEmail:  p.customerEmail,
+      amount:         fmt(p.amountReceived || 0),
+      bankCharges:    fmt(p.bankCharges || 0),
+      netAmount:      fmt(p.netAmount || 0),
+      paymentMode:    p.paymentMode,
+      depositTo:      p.depositTo,
+      reference:      p.reference || '',
+      taxDeduction:   p.taxDeduction || '',
+      status:         p.status || 'paid',
+      hasProofs:      (p.paymentProofs || []).length > 0,
+      notes:          p.notes || '',
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        period: { start, end },
+        payments: rows,
+        totals: {
+          count:       rows.length,
+          total:       fmt(rows.reduce((s, r) => s + parseFloat(r.amount || 0), 0)),
+          bankCharges: fmt(rows.reduce((s, r) => s + parseFloat(r.bankCharges || 0), 0)),
+          netAmount:   fmt(rows.reduce((s, r) => s + parseFloat(r.netAmount || 0), 0)),
+        },
+      }
+    });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 4.2  Time to Get Paid
+router.get('/time-to-get-paid', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const invoices = await Invoice.find({
+      status: 'PAID',
+      'payments.0': { $exists: true },
+      invoiceDate: { $gte: start, $lte: end },
+      ...scope
+    }).lean();
+
+    const rows = invoices.map(inv => {
+      const firstPayment = inv.payments?.[0];
+      const days = firstPayment
+        ? Math.floor((new Date(firstPayment.paymentDate || firstPayment.recordedAt) - new Date(inv.invoiceDate)) / 86400000)
+        : null;
+      return {
+        invoiceNumber: inv.invoiceNumber,
+        customerName:  inv.customerName,
+        invoiceDate:   inv.invoiceDate,
+        paymentDate:   firstPayment?.paymentDate || firstPayment?.recordedAt,
+        daysToGetPaid: days,
+        totalAmount:   fmt(inv.totalAmount),
+      };
+    }).filter(r => r.daysToGetPaid !== null && r.daysToGetPaid >= 0);
+
+    const avgDays = rows.length > 0
+      ? fmt(rows.reduce((s, r) => s + r.daysToGetPaid, 0) / rows.length)
+      : 0;
+
+    res.json({ success: true, data: { period: { start, end }, invoices: rows, averageDaysToGetPaid: avgDays } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 4.3  Refund History
+router.get('/refund-history', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const CreditNote = col('CreditNote', 'creditnotes');
+    const notes = await CreditNote.find({ 'refunds.0': { $exists: true }, ...scope }).lean();
+    const refunds = [];
+    for (const cn of notes) {
+      for (const r of (cn.refunds || [])) {
+        const rd = new Date(r.refundDate);
+        if (rd >= start && rd <= end)
+          refunds.push({
+            creditNoteNumber: cn.creditNoteNumber,
+            customerName:     cn.customerName,
+            refundDate:       rd,
+            amount:           fmt(r.amount),
+            refundMethod:     r.refundMethod,
+          });
+      }
+    }
+    res.json({
+      success: true,
+      data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) }
+    });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 4.4  Recurring Invoice Details
+router.get('/recurring-invoice-details', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const RecurringBillProfile = col('RecurringBillProfile', 'recurringbillprofiles');
+    const profiles = await RecurringBillProfile.find(scope).sort({ createdAt: -1 }).lean();
+    res.json({
+      success: true,
+      data: {
+        profiles: profiles.map(p => ({
+          profileId:      p._id,
+          profileName:    p.profileName,
+          vendorName:     p.vendorName,
+          repeatEvery:    p.repeatEvery,
+          repeatUnit:     p.repeatUnit,
+          status:         p.status,
+          nextBillDate:   p.nextBillDate,
+          lastBillDate:   p.lastBillDate,
+          billsGenerated: p.generatedBills?.length || 0,
+        }))
+      }
+    });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 5: PAYABLES (9 reports) ──────────────────────────────────────────
+// ============================================================================
+
+// 5.1  AP Aging Summary
+router.get('/ap-aging-summary', async (req, res) => {
+  try {
+    const today = new Date();
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const bills = await Bill.find({ status: { $in: ['OPEN','OVERDUE','PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope }).lean();
+
+    const buckets = { current: 0, '1_30': 0, '31_60': 0, '61_90': 0, '90plus': 0 };
+    const counts  = { current: 0, '1_30': 0, '31_60': 0, '61_90': 0, '90plus': 0 };
+
+    for (const b of bills) {
+      const days = Math.floor((today - new Date(b.dueDate)) / 86400000);
+      const due  = b.amountDue || 0;
+      if      (days <= 0)  { buckets.current += due; counts.current++; }
+      else if (days <= 30) { buckets['1_30']  += due; counts['1_30']++; }
+      else if (days <= 60) { buckets['31_60'] += due; counts['31_60']++; }
+      else if (days <= 90) { buckets['61_90'] += due; counts['61_90']++; }
+      else                 { buckets['90plus']+= due; counts['90plus']++; }
+    }
+
+    const total = Object.values(buckets).reduce((s, v) => s + v, 0);
+    res.json({ success: true, data: {
+      asOf: today,
+      buckets: [
+        { range: 'Current',      amount: fmt(buckets.current),   count: counts.current,   percent: total > 0 ? fmt((buckets.current   / total) * 100) : 0 },
+        { range: '1-30 days',    amount: fmt(buckets['1_30']),    count: counts['1_30'],    percent: total > 0 ? fmt((buckets['1_30']    / total) * 100) : 0 },
+        { range: '31-60 days',   amount: fmt(buckets['31_60']),   count: counts['31_60'],   percent: total > 0 ? fmt((buckets['31_60']   / total) * 100) : 0 },
+        { range: '61-90 days',   amount: fmt(buckets['61_90']),   count: counts['61_90'],   percent: total > 0 ? fmt((buckets['61_90']   / total) * 100) : 0 },
+        { range: 'Over 90 days', amount: fmt(buckets['90plus']),  count: counts['90plus'],  percent: total > 0 ? fmt((buckets['90plus']  / total) * 100) : 0 },
+      ],
+      total: fmt(total),
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.2  AP Aging Details
+router.get('/ap-aging-details', async (req, res) => {
+  try {
+    const today = new Date();
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const bills = await Bill.find({ status: { $in: ['OPEN','OVERDUE','PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope }).sort({ dueDate: 1 }).lean();
+
+    const rows = bills.map(b => {
+      const days = Math.floor((today - new Date(b.dueDate)) / 86400000);
+      let bucket;
+      if      (days <= 0)  bucket = 'Current';
+      else if (days <= 30) bucket = '1-30 days';
+      else if (days <= 60) bucket = '31-60 days';
+      else if (days <= 90) bucket = '61-90 days';
+      else                 bucket = 'Over 90 days';
+      return { billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), daysOverdue: Math.max(0, days), bucket, status: b.status };
+    });
+
+    res.json({ success: true, data: { asOf: today, bills: rows, total: fmt(rows.reduce((s, r) => s + (r.amountDue || 0), 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.3  Vendor Balance Summary
+router.get('/vendor-balance', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const rows = await Bill.aggregate([
+      { $match: { status: { $ne: 'DRAFT' }, ...scope } },
+      { $group: { _id: '$vendorId', vendorName: { $first: '$vendorName' }, vendorEmail: { $first: '$vendorEmail' }, billCount: { $sum: 1 }, totalBilled: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $sort: { totalDue: -1 } },
+    ]);
+
+    res.json({ success: true, data: {
+      vendors: rows.map(r => ({ vendorId: r._id, vendorName: r.vendorName, vendorEmail: r.vendorEmail, billCount: r.billCount, totalBilled: fmt(r.totalBilled), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })),
+      totals: { totalBilled: fmt(rows.reduce((s, r) => s + r.totalBilled, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.4  Bill Details
+router.get('/bill-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+    const query = { billDate: { $gte: start, $lte: end }, ...scope };
+    if (req.query.status)   query.status   = req.query.status;
+    if (req.query.vendorId) query.vendorId = req.query.vendorId;
+
+    const bills = await Bill.find(query).sort({ billDate: -1 }).limit(500).lean();
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, status: b.status, subTotal: fmt(b.subTotal), totalTax: fmt((b.cgst || 0) + (b.sgst || 0)), tdsAmount: fmt(b.tdsAmount), totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue) })),
+      totals: { count: bills.length, totalAmount: fmt(bills.reduce((s, b) => s + (b.totalAmount || 0), 0)), totalPaid: fmt(bills.reduce((s, b) => s + (b.amountPaid || 0), 0)), totalDue: fmt(bills.reduce((s, b) => s + (b.amountDue || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.5  Vendor Credit Details
+router.get('/vendor-credit-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const VendorCredit = col('VendorCredit', 'vendorcredits');
+
+    const credits = await VendorCredit.find({ creditDate: { $gte: start, $lte: end }, ...scope }).sort({ creditDate: -1 }).lean();
+    res.json({ success: true, data: { period: { start, end }, vendorCredits: credits.map(vc => ({ creditNumber: vc.creditNumber, vendorName: vc.vendorName, creditDate: vc.creditDate, status: vc.status, reason: vc.reason, totalAmount: fmt(vc.totalAmount), appliedAmount: fmt(vc.appliedAmount), balanceAmount: fmt(vc.balanceAmount) })), total: fmt(credits.reduce((s, vc) => s + (vc.totalAmount || 0), 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.6  Payments Made
+router.get('/payments-made', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const PaymentMade = col('PaymentMade', 'paymentmades');
+
+    const payments = await PaymentMade.find({ paymentDate: { $gte: start, $lte: end }, ...scope }).sort({ paymentDate: -1 }).limit(500).lean();
+    res.json({ success: true, data: { period: { start, end }, payments: payments.map(p => ({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, paymentDate: p.paymentDate, paymentMode: p.paymentMode, amount: fmt(p.amount || p.totalAmount), status: p.status, referenceNumber: p.referenceNumber, billsApplied: (p.billsApplied || []).length })), total: fmt(payments.reduce((s, p) => s + (p.amount || p.totalAmount || 0), 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.7  Refund History (Payables)
+router.get('/refund-history-payables', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const PaymentMade = col('PaymentMade', 'paymentmades');
+    const payments = await PaymentMade.find({ 'refunds.0': { $exists: true }, ...scope }).lean();
+    const refunds = [];
+    for (const p of payments) {
+      for (const r of (p.refunds || [])) {
+        const rd = new Date(r.refundDate || r.refundedAt);
+        if (rd >= start && rd <= end) refunds.push({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, refundDate: rd, amount: fmt(r.amount), refundMode: r.refundMode, referenceNumber: r.referenceNumber });
+      }
+    }
+    res.json({ success: true, data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.8  Purchase Order Details
+router.get('/purchase-order-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const PO = col('PurchaseOrder', 'purchaseorders');
+
+    const pos = await PO.find({ purchaseOrderDate: { $gte: start, $lte: end }, ...scope }).sort({ purchaseOrderDate: -1 }).limit(500).lean();
+    res.json({ success: true, data: { period: { start, end }, purchaseOrders: pos.map(p => ({ purchaseOrderNumber: p.purchaseOrderNumber, vendorName: p.vendorName, purchaseOrderDate: p.purchaseOrderDate, expectedDeliveryDate: p.expectedDeliveryDate, status: p.status, subTotal: fmt(p.subTotal), totalAmount: fmt(p.totalAmount), receiveStatus: p.receiveStatus, billingStatus: p.billingStatus })), totals: { count: pos.length, totalAmount: fmt(pos.reduce((s, p) => s + (p.totalAmount || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 5.9  Purchase Orders by Vendor
+router.get('/purchase-orders-by-vendor', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const PO = col('PurchaseOrder', 'purchaseorders');
+
+    const rows = await PO.aggregate([
+      { $match: { purchaseOrderDate: { $gte: start, $lte: end }, ...scope } },
+      { $group: { _id: '$vendorId', vendorName: { $first: '$vendorName' }, poCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, vendors: rows.map(r => ({ vendorId: r._id, vendorName: r.vendorName, poCount: r.poCount, totalAmount: fmt(r.totalAmount) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ── Payable Summary ───────────────────────────────────────────────────────────
+router.get('/payable-summary', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+    const stats = await Bill.aggregate([
+      { $match: scope },
+      { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$totalAmount' }, due: { $sum: '$amountDue' }, paid: { $sum: '$amountPaid' } } },
+    ]);
+    res.json({ success: true, data: { byStatus: stats.map(s => ({ status: s._id, count: s.count, amount: fmt(s.amount), due: fmt(s.due), paid: fmt(s.paid) })), totals: { totalBilled: fmt(stats.reduce((s, st) => s + st.amount, 0)), totalDue: fmt(stats.reduce((s, st) => s + st.due, 0)), totalPaid: fmt(stats.reduce((s, st) => s + st.paid, 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ── Payable Details ───────────────────────────────────────────────────────────
+router.get('/payable-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+    const bills = await Bill.find({ billDate: { $gte: start, $lte: end }, status: { $in: ['OPEN','OVERDUE','PARTIALLY_PAID'] }, ...scope }).sort({ billDate: -1 }).limit(500).lean();
+    res.json({ success: true, data: { period: { start, end }, bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, billDate: b.billDate, dueDate: b.dueDate, status: b.status, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue) })), totals: { total: fmt(bills.reduce((s, b) => s + (b.amountDue || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 6: PURCHASES & EXPENSES (8 reports) ──────────────────────────────
+// ============================================================================
+
+// 6.1  Purchases by Vendor
+router.get('/purchases-by-vendor', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const rows = await Bill.aggregate([
+      { $match: { billDate: { $gte: start, $lte: end }, status: { $ne: 'DRAFT' }, ...scope } },
+      { $group: { _id: '$vendorId', vendorName: { $first: '$vendorName' }, billCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, vendors: rows.map(r => ({ vendorId: r._id, vendorName: r.vendorName, billCount: r.billCount, totalAmount: fmt(r.totalAmount), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })), totals: { totalAmount: fmt(rows.reduce((s, r) => s + r.totalAmount, 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.2  Purchases by Item
+router.get('/purchases-by-item', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const rows = await Bill.aggregate([
+      { $match: { billDate: { $gte: start, $lte: end }, status: { $ne: 'DRAFT' }, ...scope } },
+      { $unwind: '$items' },
+      { $group: { _id: { $ifNull: ['$items.itemDetails', '$items.account'] }, quantity: { $sum: '$items.quantity' }, totalAmount: { $sum: '$items.amount' }, billCount: { $sum: 1 }, avgRate: { $avg: '$items.rate' } } },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, items: rows.map(r => ({ itemName: r._id, quantity: fmt(r.quantity), totalAmount: fmt(r.totalAmount), billCount: r.billCount, avgRate: fmt(r.avgRate) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.3  Expense Details
+router.get('/expense-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const startStr = start.toISOString().split('T')[0];
+    const endStr   = end.toISOString().split('T')[0];
+    const query = { date: { $gte: startStr, $lte: endStr }, ...scope };
+    if (req.query.vendor)         query.vendor         = new RegExp(req.query.vendor, 'i');
+    if (req.query.expenseAccount) query.expenseAccount = req.query.expenseAccount;
+
+    const expenses = await Expense.find(query).sort({ date: -1 }).limit(500).lean();
+
+    res.json({ success: true, data: { period: { start, end }, expenses: expenses.map(e => ({ id: e._id, expenseNumber: e.expenseNumber, date: e.date, expenseAccount: e.expenseAccount, amount: fmt(e.amount), tax: fmt(e.tax), total: fmt(e.total), paidThrough: e.paidThrough, vendor: e.vendor, customerName: e.customerName, isBillable: e.isBillable, project: e.project, notes: e.notes })), totals: { count: expenses.length, totalAmount: fmt(expenses.reduce((s, e) => s + (e.total || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.4  Expenses by Category
+router.get('/expenses-by-category', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const rows = await Expense.aggregate([
+      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope } },
+      { $group: { _id: '$expenseAccount', count: { $sum: 1 }, totalAmount: { $sum: '$amount' }, totalTax: { $sum: '$tax' }, total: { $sum: '$total' } } },
+      { $sort: { total: -1 } },
+    ]);
+
+    const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+    res.json({ success: true, data: { period: { start, end }, categories: rows.map(r => ({ category: r._id, count: r.count, totalAmount: fmt(r.totalAmount), totalTax: fmt(r.totalTax), total: fmt(r.total), percent: grandTotal > 0 ? fmt((r.total / grandTotal) * 100) : 0 })), grandTotal: fmt(grandTotal) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.5  Expenses by Customer
+router.get('/expenses-by-customer', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const rows = await Expense.aggregate([
+      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, customerName: { $ne: null, $exists: true }, ...scope } },
+      { $group: { _id: '$customerName', count: { $sum: 1 }, total: { $sum: '$total' }, billableTotal: { $sum: { $cond: ['$isBillable', '$billableAmount', 0] } } } },
+      { $sort: { total: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ customerName: r._id, count: r.count, total: fmt(r.total), billableTotal: fmt(r.billableTotal) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.6  Expenses by Project
+router.get('/expenses-by-project', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const rows = await Expense.aggregate([
+      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, project: { $ne: null, $exists: true }, ...scope } },
+      { $group: { _id: '$project', count: { $sum: 1 }, total: { $sum: '$total' } } },
+      { $sort: { total: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, projects: rows.map(r => ({ project: r._id, count: r.count, total: fmt(r.total) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.7  Expenses by Employee
+router.get('/expenses-by-employee', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const rows = await Expense.aggregate([
+      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope } },
+      { $group: { _id: '$paidThrough', count: { $sum: 1 }, total: { $sum: '$total' } } },
+      { $sort: { total: -1 } },
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, employees: rows.map(r => ({ employee: r._id, count: r.count, total: fmt(r.total) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 6.8  Billable Expense Details
+router.get('/billable-expenses', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Expense = col('Expense', 'expenses');
+
+    const expenses = await Expense.find({ isBillable: true, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).sort({ date: -1 }).lean();
+    res.json({ success: true, data: { period: { start, end }, expenses: expenses.map(e => ({ date: e.date, expenseAccount: e.expenseAccount, total: fmt(e.total), billableAmount: fmt(e.billableAmount), customerName: e.customerName, project: e.project, isBilled: e.isBilled, vendor: e.vendor, notes: e.notes })), totals: { unbilled: fmt(expenses.filter(e => !e.isBilled).reduce((s, e) => s + (e.billableAmount || 0), 0)), billed: fmt(expenses.filter(e => e.isBilled).reduce((s, e) => s + (e.billableAmount || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 7: TAXES (3 reports) ─────────────────────────────────────────────
+// ============================================================================
+
+// 7.1  TDS Summary
+router.get('/tds-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const tdsAcc = await ChartOfAccount.findOne({ accountName: 'TDS Payable', isSystemAccount: true, ...scope }).lean();
+    if (!tdsAcc) return res.json({ success: true, data: { period: { start, end }, transactions: [], totals: { totalDeducted: 0, totalPaid: 0, balance: 0 }, message: 'TDS Payable account not seeded. Run /api/chart-of-accounts/seed first.' } });
+
+    const txns = await AccountTransaction.find({ accountId: tdsAcc._id, date: { $gte: start, $lte: end }, ...scope }).sort({ date: -1 }).lean();
+    res.json({ success: true, data: { period: { start, end }, transactions: txns.map(t => ({ date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit) })), totals: { totalDeducted: fmt(txns.reduce((s, t) => s + (t.credit || 0), 0)), totalPaid: fmt(txns.reduce((s, t) => s + (t.debit || 0), 0)), balance: fmt(txns.reduce((s, t) => s + ((t.credit || 0) - (t.debit || 0)), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 7.2  TDS Receivable Summary
+router.get('/tds-receivable', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const tdsAcc = await ChartOfAccount.findOne({ accountName: 'TDS Receivable', isSystemAccount: true, ...scope }).lean();
+    if (!tdsAcc) return res.json({ success: true, data: { period: { start, end }, transactions: [], totals: { totalTDSDeducted: 0 } } });
+
+    const txns = await AccountTransaction.find({ accountId: tdsAcc._id, date: { $gte: start, $lte: end }, ...scope }).sort({ date: -1 }).lean();
+    const Invoice = col('Invoice', 'invoices');
+    const stats = await Invoice.aggregate([{ $match: { invoiceDate: { $gte: start, $lte: end }, tdsAmount: { $gt: 0 }, ...scope } }, { $group: { _id: null, totalTDS: { $sum: '$tdsAmount' }, count: { $sum: 1 } } }]);
+
+    res.json({ success: true, data: { period: { start, end }, transactions: txns.map(t => ({ date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit) })), totals: { totalTDSDeducted: fmt(txns.reduce((s, t) => s + (t.debit || 0), 0)), invoiceCount: stats[0]?.count || 0, totalFromInvoices: fmt(stats[0]?.totalTDS || 0) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 7.3  TCS Payable Summary
+router.get('/tcs-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+    const Bill    = col('Bill', 'bills');
+
+    const [invTCS, billTCS] = await Promise.all([
+      Invoice.aggregate([{ $match: { invoiceDate: { $gte: start, $lte: end }, tcsAmount: { $gt: 0 }, ...scope } }, { $group: { _id: null, total: { $sum: '$tcsAmount' }, count: { $sum: 1 } } }]),
+      Bill.aggregate([{ $match: { billDate: { $gte: start, $lte: end }, tcsAmount: { $gt: 0 }, ...scope } }, { $group: { _id: null, total: { $sum: '$tcsAmount' }, count: { $sum: 1 } } }]),
+    ]);
+
+    res.json({ success: true, data: { period: { start, end }, tcsFromSales: fmt(invTCS[0]?.total || 0), tcsFromPurchases: fmt(billTCS[0]?.total || 0), salesCount: invTCS[0]?.count || 0, purchasesCount: billTCS[0]?.count || 0, netTCS: fmt((invTCS[0]?.total || 0) - (billTCS[0]?.total || 0)) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 8: BANKING (1 report) ────────────────────────────────────────────
+// ============================================================================
+
+// 8.1  Reconciliation Status
+router.get('/reconciliation-status', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Reconciliation = col('Reconciliation', 'reconciliations');
+    const PaymentAccount = col('PaymentAccount', 'paymentaccounts');
+
+    const recs = await Reconciliation.find(scope).sort({ createdAt: -1 }).limit(100).lean();
+    const accounts = await PaymentAccount.find(scope).lean();
+    const accMap = {}; accounts.forEach(a => { accMap[a._id.toString()] = a.accountName; });
+
+    res.json({ success: true, data: { reconciliations: recs.map(r => ({ id: r._id, accountId: r.accountId, accountName: accMap[r.accountId?.toString()] || '', startDate: r.startDate, endDate: r.endDate, openingBalance: fmt(r.openingBalance), closingBalance: fmt(r.closingBalance), clearedAmount: fmt(r.clearedAmount), difference: fmt(r.difference), status: r.status, reconciledAt: r.reconciledAt })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 9: PROJECTS & TIMESHEET (7 reports) ──────────────────────────────
+// ============================================================================
+
+// Projects use raw MongoDB via req.db — check availability
+function getDB(req) {
+  if (req.db) return req.db;
+  // fallback: get native connection
+  return mongoose.connection.db;
+}
+
+// 9.1  Timesheet Details
+router.get('/timesheet-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    const query = { date: { $gte: start, $lte: end }, ...scope };
+    if (req.query.projectId) query.projectId = req.query.projectId;
+    if (req.query.status)    query.status    = req.query.status;
+
+    const entries = await db.collection('timesheets').find(query).sort({ date: -1 }).limit(500).toArray();
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      entries: entries.map(e => ({ entryNumber: e.entryNumber, date: e.date, projectName: e.projectName, taskName: e.taskName, userName: e.userName, userEmail: e.userEmail, hours: e.hours, isBillable: e.isBillable, status: e.status, notes: e.notes })),
+      totals: { totalHours: fmt(entries.reduce((s, e) => s + (e.hours || 0), 0)), billableHours: fmt(entries.filter(e => e.isBillable).reduce((s, e) => s + (e.hours || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.2  Timesheet Profitability Summary
+router.get('/timesheet-profitability', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    const projects = await db.collection('projects').find(scope).toArray();
+    const rows = [];
+
+    for (const project of projects) {
+      const entries = await db.collection('timesheets').find({ orgId: scope.orgId, projectId: project._id.toString(), date: { $gte: start, $lte: end } }).toArray();
+      const totalHours    = entries.reduce((s, e) => s + (e.hours || 0), 0);
+      const billableHours = entries.filter(e => e.isBillable).reduce((s, e) => s + (e.hours || 0), 0);
+      const billedAmount  = project.totalBilledAmount || 0;
+      rows.push({ projectName: project.projectName, projectNumber: project.projectNumber, customerName: project.customerName, billingMethod: project.billingMethod, totalHours: fmt(totalHours), billableHours: fmt(billableHours), billedAmount: fmt(billedAmount), budgetAmount: fmt(project.budgetAmount || 0), variance: fmt((project.budgetAmount || 0) - billedAmount) });
+    }
+
+    res.json({ success: true, data: { period: { start, end }, projects: rows } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.3  Project Summary
+router.get('/project-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    const projects = await db.collection('projects').find({ ...scope, ...(req.query.status ? { status: req.query.status } : {}) }).sort({ createdAt: -1 }).toArray();
+
+    res.json({ success: true, data: {
+      period: { start, end },
+      projects: projects.map(p => ({ projectNumber: p.projectNumber, projectName: p.projectName, customerName: p.customerName, billingMethod: p.billingMethod, status: p.status, startDate: p.startDate, endDate: p.endDate, totalLoggedHours: fmt(p.totalLoggedHours || 0), totalBilledAmount: fmt(p.totalBilledAmount || 0), budgetAmount: fmt(p.budgetAmount || 0) })),
+      totals: { totalProjects: projects.length, activeProjects: projects.filter(p => p.status === 'Active').length, totalBilledAmount: fmt(projects.reduce((s, p) => s + (p.totalBilledAmount || 0), 0)) },
+    }});
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.4  Project Details
+router.get('/project-details', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    const projectId = req.query.projectId;
+    if (!projectId) return res.status(400).json({ success: false, message: 'projectId is required' });
+
+    const project = await db.collection('projects').findOne({ _id: new mongoose.Types.ObjectId(projectId), ...scope });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const entries = await db.collection('timesheets').find({ projectId, ...scope }).sort({ date: -1 }).toArray();
+
+    res.json({ success: true, data: { project, timesheets: entries, totals: { totalHours: fmt(entries.reduce((s, e) => s + (e.hours || 0), 0)), billableHours: fmt(entries.filter(e => e.isBillable).reduce((s, e) => s + (e.hours || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.5  Projects Cost Summary
+router.get('/projects-cost-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+    const Expense = col('Expense', 'expenses');
+
+    const projects = await db.collection('projects').find(scope).toArray();
+    const rows = [];
+
+    for (const project of projects) {
+      const expenses = await Expense.find({ project: project.projectName, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).lean();
+      const totalExpenses = expenses.reduce((s, e) => s + (e.total || 0), 0);
+      rows.push({ projectName: project.projectName, customerName: project.customerName, budgetAmount: fmt(project.budgetAmount || 0), actualCost: fmt(totalExpenses), variance: fmt((project.budgetAmount || 0) - totalExpenses), utilizationPercent: project.budgetAmount > 0 ? fmt((totalExpenses / project.budgetAmount) * 100) : 0 });
+    }
+
+    res.json({ success: true, data: { period: { start, end }, projects: rows } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.6  Projects Revenue Summary
+router.get('/projects-revenue-summary', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    const projects = await db.collection('projects').find(scope).toArray();
+    const rows = [];
+
+    for (const project of projects) {
+      const invoices = await Invoice.find({ projectId: project._id.toString(), invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT','CANCELLED'] }, ...scope }).lean();
+      const totalRevenue = invoices.reduce((s, i) => s + (i.totalAmount || 0), 0);
+      rows.push({ projectName: project.projectName, customerName: project.customerName, billingMethod: project.billingMethod, totalBilledAmount: fmt(project.totalBilledAmount || 0), totalInvoiced: fmt(totalRevenue), invoiceCount: invoices.length });
+    }
+
+    res.json({ success: true, data: { period: { start, end }, projects: rows } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 9.7  Projects Performance Summary
+router.get('/projects-performance', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+    const Expense = col('Expense', 'expenses');
+    const Invoice = col('Invoice', 'invoices');
+
+    const projects = await db.collection('projects').find(scope).toArray();
+    const rows = [];
+
+    for (const project of projects) {
+      const [entries, expenses, invoices] = await Promise.all([
+        db.collection('timesheets').find({ projectId: project._id.toString(), ...scope }).toArray(),
+        Expense.find({ project: project.projectName, ...scope }).lean(),
+        Invoice.find({ projectId: project._id.toString(), status: { $nin: ['DRAFT','CANCELLED'] }, ...scope }).lean(),
+      ]);
+
+      const totalHours   = entries.reduce((s, e) => s + (e.hours || 0), 0);
+      const totalCost    = expenses.reduce((s, e) => s + (e.total || 0), 0);
+      const totalRevenue = invoices.reduce((s, i) => s + (i.totalAmount || 0), 0);
+      const profit       = totalRevenue - totalCost;
+
+      rows.push({ projectName: project.projectName, customerName: project.customerName, status: project.status, totalHours: fmt(totalHours), totalCost: fmt(totalCost), totalRevenue: fmt(totalRevenue), profit: fmt(profit), profitMargin: totalRevenue > 0 ? fmt((profit / totalRevenue) * 100) : 0 });
+    }
+
+    res.json({ success: true, data: { period: { start, end }, projects: rows } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 10: ACCOUNTANT (6 reports) ───────────────────────────────────────
+// ============================================================================
+
+// 10.1  General Ledger
+router.get('/general-ledger', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    let accQuery = { isActive: true, ...scope };
+    if (req.query.accountId)   accQuery._id         = req.query.accountId;
+    if (req.query.accountType) accQuery.accountType = req.query.accountType;
+
+    const accounts = await ChartOfAccount.find(accQuery).sort({ accountCode: 1 }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const txns = await AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ accountId: 1, date: 1 }).lean();
+
+    const grouped = {};
+    accounts.forEach(a => { grouped[a._id.toString()] = { account: a, transactions: [] }; });
+    txns.forEach(t => { const k = t.accountId.toString(); if (grouped[k]) grouped[k].transactions.push(t); });
+
+    const result = Object.values(grouped).filter(g => g.transactions.length > 0).map(g => {
+      let balance = 0;
+      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance) }; });
+      return { accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closing: fmt(balance) } };
+    });
+
+    res.json({ success: true, data: { period: { start, end }, accounts: result } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 10.2  Detailed General Ledger (with opening balances)
+router.get('/general-ledger-detailed', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({ isActive: true, ...scope }).sort({ accountCode: 1 }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const [openTxns, periodTxns] = await Promise.all([
+      AccountTransaction.aggregate([{ $match: { accountId: { $in: ids }, date: { $lt: start }, ...scope } }, { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } }]),
+      AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ accountId: 1, date: 1 }).lean(),
+    ]);
+
+    const openMap = {}; openTxns.forEach(t => { openMap[t._id.toString()] = fmt(t.dr - t.cr); });
+    const grouped = {}; accounts.forEach(a => { grouped[a._id.toString()] = { account: a, transactions: [] }; });
+    periodTxns.forEach(t => { const k = t.accountId.toString(); if (grouped[k]) grouped[k].transactions.push(t); });
+
+    const result = Object.values(grouped).filter(g => g.transactions.length > 0 || openMap[g.account._id.toString()]).map(g => {
+      const opening = openMap[g.account._id.toString()] || 0;
+      let balance = opening;
+      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance) }; });
+      return { accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, openingBalance: fmt(opening), transactions: rows, closingBalance: fmt(balance) };
+    });
+
+    res.json({ success: true, data: { period: { start, end }, accounts: result } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 10.3  Account Transactions (single account)
+router.get('/account-transactions', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).json({ success: false, message: 'accountId is required' });
+
+    const account = await ChartOfAccount.findOne({ _id: accountId, ...scope }).lean();
+    if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
+
+    const txns = await AccountTransaction.find({ accountId, date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).lean();
+
+    let balance = 0;
+    const rows = txns.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance) }; });
+
+    res.json({ success: true, data: { account: { id: account._id, name: account.accountName, code: account.accountCode, type: account.accountType }, period: { start, end }, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closingBalance: fmt(balance) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 10.4  Account Type Summary
+router.get('/account-type-summary', async (req, res) => {
+  try {
+    const { end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({ isActive: true, ...scope }).lean();
+    const ids = accounts.map(a => a._id);
+
+    const txns = await AccountTransaction.aggregate([{ $match: { accountId: { $in: ids }, date: { $lte: end }, ...scope } }, { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } }]);
+    const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
+
+    const typeMap = {};
+    for (const acc of accounts) {
+      const t = tMap[acc._id.toString()] || { dr: 0, cr: 0 };
+      if (!typeMap[acc.accountType]) typeMap[acc.accountType] = { accountType: acc.accountType, count: 0, totalDebit: 0, totalCredit: 0 };
+      typeMap[acc.accountType].count++;
+      typeMap[acc.accountType].totalDebit  += t.dr;
+      typeMap[acc.accountType].totalCredit += t.cr;
+    }
+
+    res.json({ success: true, data: { asOf: end, accountTypes: Object.values(typeMap).map(t => ({ ...t, totalDebit: fmt(t.totalDebit), totalCredit: fmt(t.totalCredit), netBalance: fmt(t.totalDebit - t.totalCredit) })) } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 10.5  Journal Report
+router.get('/journal-report', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const ManualJournal = col('ManualJournal', 'manualjournals');
+
+    const journals = await ManualJournal.find({ date: { $gte: start, $lte: end }, status: 'Published', ...scope }).sort({ date: -1 }).lean();
+    res.json({ success: true, data: { period: { start, end }, journals: journals.map(j => ({ journalNumber: j.journalNumber, date: j.date, notes: j.notes, referenceNumber: j.referenceNumber, totalDebit: fmt(j.totalDebit), totalCredit: fmt(j.totalCredit), lineItems: (j.lineItems || []).map(l => ({ accountName: l.accountName, description: l.description, debit: fmt(l.debit), credit: fmt(l.credit) })) })), totals: { count: journals.length, totalDebit: fmt(journals.reduce((s, j) => s + (j.totalDebit || 0), 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 10.6  Activity Logs & Audit Trail
+router.get('/activity-logs', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const Invoice     = col('Invoice',     'invoices');
+    const Bill        = col('Bill',        'bills');
+    const PaymentMade = col('PaymentMade', 'paymentmades');
+    const Expense     = col('Expense',     'expenses');
+
+    const [invoices, bills, payments, expenses] = await Promise.all([
+      Invoice.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('invoiceNumber customerName totalAmount status createdAt createdBy').limit(200).lean(),
+      Bill.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('billNumber vendorName totalAmount status createdAt createdBy').limit(200).lean(),
+      PaymentMade.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('paymentNumber vendorName amount status createdAt createdBy').limit(200).lean(),
+      Expense.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('expenseAccount total paidThrough createdAt').limit(200).lean(),
+    ]);
+
+    const logs = [
+      ...invoices.map(i => ({ type: 'Invoice',     ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.createdAt, by: i.createdBy })),
+      ...bills.map(b =>    ({ type: 'Bill',         ref: b.billNumber,    name: b.vendorName,   amount: fmt(b.totalAmount), status: b.status, date: b.createdAt, by: b.createdBy })),
+      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName,   amount: fmt(p.amount),     status: p.status, date: p.createdAt, by: p.createdBy })),
+      ...expenses.map(e => ({ type: 'Expense',      ref: e._id,           name: e.expenseAccount, amount: fmt(e.total),   status: 'Recorded', date: e.createdAt, by: 'system' })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({ success: true, data: { period: { start, end }, logs, count: logs.length } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 11: BUDGETS (1 report) ───────────────────────────────────────────
+// ============================================================================
+
+// 11.1  Budget vs Actuals
+router.get('/budget-vs-actuals', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    // If a budgets collection exists, use it; otherwise compare expenses vs COA budgetAmount
+    let budgets = [];
+    try { budgets = await db.collection('budgets').find(scope).toArray(); } catch (_) {}
+
+    // Fallback: use project budgetAmounts
+    if (budgets.length === 0) {
+      const projects = await db.collection('projects').find({ ...scope, budgetAmount: { $gt: 0 } }).toArray();
+      const Expense  = col('Expense', 'expenses');
+
+      const rows = [];
+      for (const p of projects) {
+        const expenses = await Expense.find({ project: p.projectName, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).lean();
+        const actuals = expenses.reduce((s, e) => s + (e.total || 0), 0);
+        rows.push({ name: p.projectName, budgeted: fmt(p.budgetAmount || 0), actuals: fmt(actuals), variance: fmt((p.budgetAmount || 0) - actuals), variancePercent: p.budgetAmount > 0 ? fmt(((p.budgetAmount - actuals) / p.budgetAmount) * 100) : 0 });
+      }
+      return res.json({ success: true, data: { period: { start, end }, source: 'projects', rows } });
+    }
+
+    res.json({ success: true, data: { period: { start, end }, source: 'budgets', rows: budgets } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 12: CURRENCY (2 reports) ─────────────────────────────────────────
+// ============================================================================
+
+// 12.1  Realized Gain or Loss
+router.get('/realized-gain-loss', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const bills = await Bill.find({ billDate: { $gte: start, $lte: end }, currency: { $ne: 'INR' }, amountPaid: { $gt: 0 }, ...scope }).lean();
+
+    const rows = bills.map(b => {
+      const originalAmount = b.totalAmount;
+      const baseCurrencyAmount = b.baseCurrencyAmount || b.totalAmount;
+      const gainLoss = fmt(baseCurrencyAmount - originalAmount);
+      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, originalAmount: fmt(originalAmount), exchangeRate: fmt(b.exchangeRate || 1), baseCurrencyAmount: fmt(baseCurrencyAmount), gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss' };
+    });
+
+    res.json({ success: true, data: { period: { start, end }, transactions: rows, totals: { totalGain: fmt(rows.filter(r => r.gainLoss > 0).reduce((s, r) => s + r.gainLoss, 0)), totalLoss: fmt(rows.filter(r => r.gainLoss < 0).reduce((s, r) => s + Math.abs(r.gainLoss), 0)), netGainLoss: fmt(rows.reduce((s, r) => s + r.gainLoss, 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 12.2  Unrealized Gain or Loss
+router.get('/unrealized-gain-loss', async (req, res) => {
+  try {
+    const scope = orgScope(req);
+    const Bill = col('Bill', 'bills');
+
+    const openBills = await Bill.find({ status: { $in: ['OPEN','OVERDUE','PARTIALLY_PAID'] }, currency: { $ne: 'INR' }, ...scope }).lean();
+
+    const rows = openBills.map(b => {
+      const originalAmount = b.amountDue;
+      const currentRate    = b.exchangeRate || 1;
+      const currentValue   = fmt(originalAmount * currentRate);
+      const gainLoss       = fmt(currentValue - originalAmount);
+      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, amountDue: fmt(originalAmount), currentExchangeRate: fmt(currentRate), currentValue, unrealizedGainLoss: gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss' };
+    });
+
+    res.json({ success: true, data: { asOf: new Date(), transactions: rows, totals: { totalUnrealizedGain: fmt(rows.filter(r => r.unrealizedGainLoss > 0).reduce((s, r) => s + r.unrealizedGainLoss, 0)), totalUnrealizedLoss: fmt(rows.filter(r => r.unrealizedGainLoss < 0).reduce((s, r) => s + Math.abs(r.unrealizedGainLoss), 0)), net: fmt(rows.reduce((s, r) => s + r.unrealizedGainLoss, 0)) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 13: ACTIVITY (5 reports) ─────────────────────────────────────────
+// ============================================================================
+
+// 13.1  System Mails
+router.get('/system-mails', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+    const Bill    = col('Bill',    'bills');
+
+    const [invoices, bills] = await Promise.all([
+      Invoice.find({ 'emailsSent.0': { $exists: true }, ...scope }).select('invoiceNumber customerName emailsSent totalAmount').lean(),
+      Bill.find({ 'emailsSent.0': { $exists: true }, ...scope }).select('billNumber vendorName emailsSent totalAmount').lean(),
+    ]);
+
+    const mails = [];
+    for (const inv of invoices) {
+      for (const e of (inv.emailsSent || [])) {
+        const d = new Date(e.sentAt);
+        if (d >= start && d <= end) mails.push({ documentType: 'Invoice', documentNumber: inv.invoiceNumber, contactName: inv.customerName, sentTo: e.sentTo, sentAt: d, emailType: e.emailType, amount: fmt(inv.totalAmount) });
+      }
+    }
+    for (const b of bills) {
+      for (const e of (b.emailsSent || [])) {
+        const d = new Date(e.sentAt || e.createdAt);
+        if (d >= start && d <= end) mails.push({ documentType: 'Bill', documentNumber: b.billNumber, contactName: b.vendorName, sentTo: e.sentTo, sentAt: d, emailType: e.emailType, amount: fmt(b.totalAmount) });
+      }
+    }
+    mails.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+
+    res.json({ success: true, data: { period: { start, end }, mails, count: mails.length } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 13.2  Activity Logs (alias — already defined as 10.6 — exposed under activity category)
+router.get('/audit-trail', async (req, res) => {
+  const { start, end } = parseDateRange(req.query);
+  const scope = orgScope(req);
+  const Invoice     = col('Invoice',     'invoices');
+  const Bill        = col('Bill',        'bills');
+  const PaymentMade = col('PaymentMade', 'paymentmades');
+  const Expense     = col('Expense',     'expenses');
+  const ManualJournal = col('ManualJournal', 'manualjournals');
+  try {
+    const [invoices, bills, payments, expenses, journals] = await Promise.all([
+      Invoice.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('invoiceNumber customerName totalAmount status updatedAt updatedBy').limit(200).lean(),
+      Bill.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('billNumber vendorName totalAmount status updatedAt updatedBy').limit(200).lean(),
+      PaymentMade.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('paymentNumber vendorName amount status updatedAt updatedBy').limit(200).lean(),
+      Expense.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('expenseAccount total updatedAt').limit(200).lean(),
+      ManualJournal.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('journalNumber notes totalDebit status updatedAt updatedBy').limit(200).lean(),
+    ]);
+
+    const logs = [
+      ...invoices.map(i => ({ type: 'Invoice',     ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.updatedAt, by: i.updatedBy || i.createdBy })),
+      ...bills.map(b =>    ({ type: 'Bill',         ref: b.billNumber,    name: b.vendorName,   amount: fmt(b.totalAmount), status: b.status, date: b.updatedAt, by: b.updatedBy || b.createdBy })),
+      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName,   amount: fmt(p.amount),     status: p.status, date: p.updatedAt, by: p.updatedBy || p.createdBy })),
+      ...expenses.map(e => ({ type: 'Expense',      ref: e._id,           name: e.expenseAccount, amount: fmt(e.total),   status: 'Recorded', date: e.updatedAt, by: 'system' })),
+      ...journals.map(j => ({ type: 'Journal',      ref: j.journalNumber, name: j.notes,        amount: fmt(j.totalDebit), status: j.status, date: j.updatedAt, by: j.updatedBy })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({ success: true, data: { period: { start, end }, logs, count: logs.length } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 13.3  Exception Report
+router.get('/exception-report', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice  = col('Invoice', 'invoices');
+    const Bill     = col('Bill',    'bills');
+    const Expense  = col('Expense', 'expenses');
+
+    const exceptions = [];
+
+    // Large invoices (> 1,00,000)
+    const largeInvoices = await Invoice.find({ invoiceDate: { $gte: start, $lte: end }, totalAmount: { $gt: 100000 }, ...scope }).select('invoiceNumber customerName totalAmount status invoiceDate').lean();
+    largeInvoices.forEach(i => exceptions.push({ type: 'Large Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), date: i.invoiceDate, reason: 'Invoice amount > ₹1,00,000', severity: 'Medium' }));
+
+    // Overdue invoices (> 90 days)
+    const overdueInvoices = await Invoice.find({ status: 'OVERDUE', dueDate: { $lt: new Date(new Date() - 90 * 86400000) }, ...scope }).select('invoiceNumber customerName amountDue dueDate').lean();
+    overdueInvoices.forEach(i => exceptions.push({ type: 'Severely Overdue Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.amountDue), date: i.dueDate, reason: 'Invoice overdue by more than 90 days', severity: 'High' }));
+
+    // Zero amount expenses
+    const zeroExpenses = await Expense.find({ total: 0, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).select('expenseAccount date paidThrough').lean();
+    zeroExpenses.forEach(e => exceptions.push({ type: 'Zero Amount Expense', ref: e._id, name: e.expenseAccount, amount: 0, date: e.date, reason: 'Expense recorded with zero amount', severity: 'Low' }));
+
+    exceptions.sort((a, b) => (a.severity === 'High' ? -1 : b.severity === 'High' ? 1 : 0));
+
+    res.json({ success: true, data: { period: { start, end }, exceptions, count: exceptions.length, bySeverity: { High: exceptions.filter(e => e.severity === 'High').length, Medium: exceptions.filter(e => e.severity === 'Medium').length, Low: exceptions.filter(e => e.severity === 'Low').length } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 13.4  Portal Activities (customer portal access)
+router.get('/portal-activities', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const Invoice = col('Invoice', 'invoices');
+
+    // Pull from emailsSent with type 'invoice' as proxy for portal activity
+    const invoices = await Invoice.find({ 'emailsSent.0': { $exists: true }, ...scope }).select('invoiceNumber customerName emailsSent').lean();
+    const activities = [];
+    for (const inv of invoices) {
+      for (const e of (inv.emailsSent || [])) {
+        const d = new Date(e.sentAt);
+        if (d >= start && d <= end) activities.push({ documentType: 'Invoice', documentNumber: inv.invoiceNumber, customerName: inv.customerName, activityType: e.emailType, date: d, user: e.sentTo });
+      }
+    }
+    activities.sort((a, b) => new Date(b.date) - new Date(a.date));
+    res.json({ success: true, data: { period: { start, end }, activities, count: activities.length } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 13.5  Customer Reviews (placeholder — no reviews collection)
+router.get('/customer-reviews', async (req, res) => {
+  try {
+    res.json({ success: true, data: { reviews: [], message: 'Customer reviews module not yet enabled. Add a reviews collection to your backend to populate this report.' } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── SECTION 14: AUTOMATION (2 reports) ───────────────────────────────────────
+// ============================================================================
+
+// 14.1  API Usage
+router.get('/api-usage', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    let logs = [];
+    try { logs = await db.collection('api_logs').find({ ...scope, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }).limit(200).toArray(); } catch (_) {}
+
+    res.json({ success: true, data: { period: { start, end }, logs, count: logs.length, message: logs.length === 0 ? 'API logging not yet enabled. Add api_logs collection to populate this report.' : undefined } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// 14.2  Workflow Execution Logs
+router.get('/workflow-logs', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const db = getDB(req);
+
+    let logs = [];
+    try { logs = await db.collection('workflow_logs').find({ ...scope, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }).limit(200).toArray(); } catch (_) {}
+
+    res.json({ success: true, data: { period: { start, end }, logs, count: logs.length, message: logs.length === 0 ? 'Workflow logging not yet enabled.' : undefined } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ============================================================================
+// ── META — returns all 79 reports list ───────────────────────────────────────
+// ============================================================================
+
+router.get('/meta', (req, res) => {
+  res.json({ success: true, data: [
+    { category: 'Business Overview', reports: [
+      { key: 'profit-loss',              name: 'Profit and Loss' },
+      { key: 'profit-loss-horizontal',   name: 'Horizontal Profit and Loss' },
+      { key: 'balance-sheet',            name: 'Balance Sheet' },
+      { key: 'balance-sheet-horizontal', name: 'Horizontal Balance Sheet' },
+      { key: 'cash-flow',                name: 'Cash Flow Statement' },
+      { key: 'movement-of-equity',       name: 'Movement of Equity' },
+      { key: 'performance-ratios',       name: 'Business Performance Ratios' },
+      { key: 'trial-balance',            name: 'Trial Balance' },
+      { key: 'day-book',                 name: 'Day Book' },
+    ]},
+    { category: 'Sales', reports: [
+      { key: 'sales-by-customer',        name: 'Sales by Customer' },
+      { key: 'sales-by-item',            name: 'Sales by Item' },
+      { key: 'sales-by-salesperson',     name: 'Sales by Sales Person' },
+      { key: 'sales-summary',            name: 'Sales Summary' },
+    ]},
+    { category: 'Receivables', reports: [
+      { key: 'ar-aging-summary',         name: 'AR Aging Summary' },
+      { key: 'ar-aging-details',         name: 'AR Aging Details' },
+      { key: 'invoice-details',          name: 'Invoice Details' },
+      { key: 'customer-balance',         name: 'Customer Balance Summary' },
+      { key: 'receivable-summary',       name: 'Receivable Summary' },
+      { key: 'receivable-details',       name: 'Receivable Details' },
+      { key: 'credit-note-details',      name: 'Credit Note Details' },
+      { key: 'refund-history-receivables', name: 'Refund History' },
+    ]},
+    { category: 'Payments Received', reports: [
+      { key: 'payments-received',        name: 'Payments Received' },
+      { key: 'time-to-get-paid',         name: 'Time to Get Paid' },
+      { key: 'refund-history',           name: 'Refund History' },
+      { key: 'recurring-invoice-details',name: 'Recurring Invoice Details' },
+    ]},
+    { category: 'Payables', reports: [
+      { key: 'vendor-balance',           name: 'Vendor Balance Summary' },
+      { key: 'ap-aging-summary',         name: 'AP Aging Summary' },
+      { key: 'ap-aging-details',         name: 'AP Aging Details' },
+      { key: 'bill-details',             name: 'Bill Details' },
+      { key: 'vendor-credit-details',    name: 'Vendor Credit Details' },
+      { key: 'payments-made',            name: 'Payments Made' },
+      { key: 'refund-history-payables',  name: 'Refund History' },
+      { key: 'purchase-order-details',   name: 'Purchase Order Details' },
+      { key: 'purchase-orders-by-vendor',name: 'Purchase Orders by Vendor' },
+      { key: 'payable-summary',          name: 'Payable Summary' },
+      { key: 'payable-details',          name: 'Payable Details' },
+    ]},
+    { category: 'Purchases and Expenses', reports: [
+      { key: 'purchases-by-vendor',      name: 'Purchases by Vendor' },
+      { key: 'purchases-by-item',        name: 'Purchases by Item' },
+      { key: 'expense-details',          name: 'Expense Details' },
+      { key: 'expenses-by-category',     name: 'Expenses by Category' },
+      { key: 'expenses-by-customer',     name: 'Expenses by Customer' },
+      { key: 'expenses-by-project',      name: 'Expenses by Project' },
+      { key: 'expenses-by-employee',     name: 'Expenses by Employee' },
+      { key: 'billable-expenses',        name: 'Billable Expense Details' },
+    ]},
+    { category: 'Taxes', reports: [
+      { key: 'tds-summary',              name: 'TDS Summary' },
+      { key: 'tds-receivable',           name: 'TDS Receivable Summary' },
+      { key: 'tcs-summary',              name: 'TCS Payable Summary' },
+    ]},
+    { category: 'Banking', reports: [
+      { key: 'reconciliation-status',    name: 'Reconciliation Status' },
+    ]},
+    { category: 'Projects and Timesheet', reports: [
+      { key: 'timesheet-details',        name: 'Timesheet Details' },
+      { key: 'timesheet-profitability',  name: 'Timesheet Profitability Summary' },
+      { key: 'project-summary',          name: 'Project Summary' },
+      { key: 'project-details',          name: 'Project Details' },
+      { key: 'projects-cost-summary',    name: 'Projects Cost Summary' },
+      { key: 'projects-revenue-summary', name: 'Projects Revenue Summary' },
+      { key: 'projects-performance',     name: 'Projects Performance Summary' },
+    ]},
+    { category: 'Accountant', reports: [
+      { key: 'account-transactions',     name: 'Account Transactions' },
+      { key: 'account-type-summary',     name: 'Account Type Summary' },
+      { key: 'general-ledger',           name: 'General Ledger' },
+      { key: 'general-ledger-detailed',  name: 'Detailed General Ledger' },
+      { key: 'journal-report',           name: 'Journal Report' },
+      { key: 'activity-logs',            name: 'Activity Logs & Audit Trail' },
+    ]},
+    { category: 'Budgets', reports: [
+      { key: 'budget-vs-actuals',        name: 'Budget Vs Actuals' },
+    ]},
+    { category: 'Currency', reports: [
+      { key: 'realized-gain-loss',       name: 'Realized Gain or Loss' },
+      { key: 'unrealized-gain-loss',     name: 'Unrealized Gain or Loss' },
+    ]},
+    { category: 'Activity', reports: [
+      { key: 'system-mails',             name: 'System Mails' },
+      { key: 'audit-trail',              name: 'Activity Logs & Audit Trail' },
+      { key: 'exception-report',         name: 'Exception Report' },
+      { key: 'portal-activities',        name: 'Portal Activities' },
+      { key: 'customer-reviews',         name: 'Customer Reviews' },
+    ]},
+    { category: 'Automation', reports: [
+      { key: 'api-usage',                name: 'API Usage' },
+      { key: 'workflow-logs',            name: 'Workflow Execution Logs' },
+    ]},
+  ]});
+});
+
+// ============================================================================
+// ── EXPORT: PDF (server-side, for reports that need backend rendering) ────────
+// ============================================================================
+
+router.post('/export/pdf', async (req, res) => {
+  try {
+    const { reportName, reportData, companyName, period, headers: customHeaders } = req.body;
+    if (!reportData || !Array.isArray(reportData) || reportData.length === 0) {
+      return res.status(400).json({ success: false, message: 'No data to export' });
+    }
+
+    const uploadsDir = path.join(__dirname, '..', 'uploads', 'report-exports');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const filename = `${(reportName || 'report').replace(/\s+/g, '-')}-${Date.now()}.pdf`;
+    const filepath = path.join(uploadsDir, filename);
+
+    const doc  = new PDFDoc({ size: 'A4', margin: 36, bufferPages: true });
+    const stream = fs.createWriteStream(filepath);
+    doc.pipe(stream);
+
+    const pageW = 522; // 595 - 36*2
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    doc.rect(0, 0, 595, 72).fill('#0f1e3d');
+    doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold').text(companyName || 'Finance Report', 40, 18, { width: pageW });
+    doc.fontSize(11).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text(reportName || 'Report', 40, 42, { width: pageW });
+
+    if (period) {
+      try {
+        const s = period.start ? new Date(period.start).toLocaleDateString('en-IN') : '';
+        const e = period.end   ? new Date(period.end).toLocaleDateString('en-IN')   : '';
+        if (s || e) doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').text(`${s} – ${e}`, 40, 58, { width: pageW });
+      } catch (_) {}
+    }
+
+    // ── Table ────────────────────────────────────────────────────────────────
+    const headers = customHeaders || Object.keys(reportData[0] || {});
+    const colW    = Math.min(140, Math.floor(pageW / headers.length));
+    let y = 88;
+
+    // Table header
+    doc.rect(36, y, pageW, 22).fill('#1e3a8a');
+    doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
+    headers.forEach((h, i) => {
+      const label = h.replace(/([A-Z])/g, ' $1').trim().replace(/^./, s => s.toUpperCase());
+      doc.text(label.toUpperCase(), 40 + i * colW, y + 7, { width: colW - 4, ellipsis: true });
+    });
+    y += 22;
+
+    // Rows
+    reportData.forEach((row, ri) => {
+      if (y > 760) { doc.addPage(); y = 40; }
+      doc.rect(36, y, pageW, 20).fill(ri % 2 === 0 ? '#ffffff' : '#f7f9fc');
+      doc.fontSize(8).fillColor('#374151').font('Helvetica');
+      headers.forEach((h, i) => {
+        const val = row[h] !== undefined && row[h] !== null ? String(row[h]) : '-';
+        doc.text(val, 40 + i * colW, y + 6, { width: colW - 4, ellipsis: true });
+      });
+      y += 20;
+    });
+
+    // Footer
+    const pages = doc.bufferedPageRange();
+    for (let i = 0; i < pages.count; i++) {
+      doc.switchToPage(i);
+      doc.moveTo(36, 780).lineTo(559, 780).lineWidth(1).strokeColor('#dde4ef').stroke();
+      doc.fontSize(7).fillColor('#94a3b8').text(
+        `Generated ${new Date().toLocaleString('en-IN')} · Page ${i + 1} of ${pages.count}`,
+        36, 784, { width: pageW, align: 'center' }
+      );
+    }
+
+    doc.end();
+    stream.on('finish', () => res.download(filepath, filename, () => { try { fs.unlinkSync(filepath); } catch (_) {} }));
+    stream.on('error', (err) => res.status(500).json({ success: false, message: err.message }));
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ── EXPORT: Excel (real .xlsx via XLSX library) ───────────────────────────────
+router.post('/export/excel', async (req, res) => {
+  try {
+    const { reportName, reportData, companyName, period, headers: customHeaders } = req.body;
+    if (!reportData || !Array.isArray(reportData) || reportData.length === 0) {
+      return res.status(400).json({ success: false, message: 'No data to export' });
+    }
+
+    const wb = XLSX.utils.book_new();
+    const headers = customHeaders || Object.keys(reportData[0] || {});
+
+    let periodLabel = '';
+    if (period) {
+      try {
+        const s = period.start ? new Date(period.start).toLocaleDateString('en-IN') : '';
+        const e = period.end   ? new Date(period.end).toLocaleDateString('en-IN')   : '';
+        if (s || e) periodLabel = `${s} – ${e}`;
+      } catch (_) {}
+    }
+
+    const wsData = [
+      [companyName || 'Finance Report'],
+      [reportName  || 'Report'],
+      ...(periodLabel ? [[`Period: ${periodLabel}`]] : []),
+      [],
+      headers.map(h => h.replace(/([A-Z])/g, ' $1').trim().replace(/^./, s => s.toUpperCase())),
+      ...reportData.map(row => headers.map(h => {
+        const v = row[h];
+        if (v === undefined || v === null) return '';
+        const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[₹,]/g, ''));
+        return isNaN(n) ? String(v) : n;
+      })),
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Style title rows
+    ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
+
+    XLSX.utils.book_append_sheet(wb, ws, (reportName || 'Report').slice(0, 31));
+
+    const buffer   = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `${(reportName || 'report').replace(/\s+/g, '-')}-${Date.now()}.xlsx`;
+
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+module.exports = router;

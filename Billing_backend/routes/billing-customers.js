@@ -1,14 +1,8 @@
 ﻿// ============================================================================
-// BILLING CUSTOMERS - COMPLETE BACKEND
+// BILLING CUSTOMERS - COMPLETE BACKEND (ZOHO BOOKS STYLE)
 // ============================================================================
 // File: routes/billing-customers.js
 // Collection: billing-customers
-// 
-// This file contains:
-// - Mongoose Schema & Model
-// - Controllers (CRUD operations)
-// - Routes with file upload support
-// - All customer types: Individual, Organization, Vendor, Others
 // ============================================================================
 
 const express = require('express');
@@ -18,29 +12,21 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const emailService = require('../services/email_service');
 
 // ============================================================================
 // FILE UPLOAD CONFIGURATION
 // ============================================================================
 
-// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads/billing-customers');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('✅ Created uploads directory:', uploadsDir);
 }
 
-// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const category = req.body.category || 'Other Documents';
     const categoryPath = path.join(uploadsDir, category.replace(/[^a-z0-9]/gi, '_').toLowerCase());
-    
-    if (!fs.existsSync(categoryPath)) {
-      fs.mkdirSync(categoryPath, { recursive: true });
-    }
-    
+    if (!fs.existsSync(categoryPath)) fs.mkdirSync(categoryPath, { recursive: true });
     cb(null, categoryPath);
   },
   filename: function (req, file, cb) {
@@ -49,1053 +35,924 @@ const storage = multer.diskStorage({
   }
 });
 
-const fileFilter = (req, file, cb) => {
-  // Accept all file types
-  cb(null, true);
-};
-
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit per file
-  }
+  storage,
+  fileFilter: (req, file, cb) => cb(null, true),
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 // ============================================================================
-// MONGOOSE SCHEMA
+// ALL 28 INDIAN STATES + 8 UTs
+// ============================================================================
+const INDIAN_STATES = [
+  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh',
+  'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
+  'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat',
+  'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand',
+  'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh',
+  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+  'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim',
+  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal'
+];
+
+// ============================================================================
+// SUB-SCHEMAS
 // ============================================================================
 
+const addressSchema = new mongoose.Schema({
+  attention: { type: String, trim: true },
+  street:    { type: String, trim: true },
+  street2:   { type: String, trim: true },
+  city:      { type: String, trim: true },
+  state:     { type: String, trim: true },
+  zip:       { type: String, trim: true },
+  country:   { type: String, trim: true, default: 'India' },
+  phone:     { type: String, trim: true },
+  fax:       { type: String, trim: true },
+}, { _id: false });
+
 const contactPersonSchema = new mongoose.Schema({
-  contactType: {
-    type: String,
-    enum: ['Primary Contact', 'Billing Contact', 'Operations Contact', 'Accounts Contact', 'Emergency Contact'],
-    required: true
-  },
-  fullName: { type: String, required: true, trim: true },
-  email: { 
-    type: String, 
-    required: true, 
-    trim: true,
-    lowercase: true,
-    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Invalid email format']
-  },
-  phoneNumber: { 
-    type: String, 
-    required: true,
-    match: [/^[+]?[0-9]{10,15}$/, 'Invalid phone number']
-  },
+  salutation:  { type: String, enum: ['Mr.', 'Mrs.', 'Ms.', 'Miss.', 'Dr.', ''], default: '' },
+  firstName:   { type: String, trim: true },
+  lastName:    { type: String, trim: true },
+  email:       { type: String, trim: true, lowercase: true },
+  workPhone:   { type: String, trim: true },
+  mobile:      { type: String, trim: true },
   designation: { type: String, trim: true },
-  department: { type: String, trim: true },
-  isPrimary: { type: Boolean, default: false }
+  department:  { type: String, trim: true },
+  isPrimary:   { type: Boolean, default: false },
+  portalAccess:{ type: Boolean, default: false },
 }, { _id: true });
 
-const customFieldSchema = new mongoose.Schema({
-  fieldName: { type: String, required: true, trim: true },
-  fieldType: {
-    type: String,
-    enum: ['Text', 'Number', 'Date', 'Dropdown', 'Checkbox', 'Email', 'Phone'],
-    required: true
-  },
-  fieldValue: { type: String, trim: true },
-  isMandatory: { type: Boolean, default: false }
+const commentSchema = new mongoose.Schema({
+  text:      { type: String, required: true, trim: true },
+  createdBy: { type: String, default: 'system' },
+  createdAt: { type: Date, default: Date.now },
 }, { _id: true });
 
 const uploadedDocumentSchema = new mongoose.Schema({
-  category: {
-    type: String,
-    enum: ['KYC Documents', 'Company Documents', 'Contracts & Agreements', 'Insurance Documents', 'Vehicle Documents', 'Other Documents'],
-    required: true
-  },
-  fileName: { type: String, required: true },
+  category:     { type: String, enum: ['KYC Documents', 'Company Documents', 'Contracts & Agreements', 'Insurance Documents', 'Vehicle Documents', 'Other Documents'], required: true },
+  fileName:     { type: String, required: true },
   originalName: { type: String, required: true },
-  filePath: { type: String, required: true },
-  fileSize: { type: Number, required: true },
-  fileExtension: { type: String },
-  uploadedAt: { type: Date, default: Date.now },
-  uploadedBy: { type: String }
+  filePath:     { type: String, required: true },
+  fileSize:     { type: Number, required: true },
+  fileExtension:{ type: String },
+  uploadedAt:   { type: Date, default: Date.now },
+  uploadedBy:   { type: String },
 }, { _id: true });
 
+const customFieldSchema = new mongoose.Schema({
+  fieldName:  { type: String, required: true, trim: true },
+  fieldType:  { type: String, enum: ['Text', 'Number', 'Date', 'Dropdown', 'Checkbox', 'Email', 'Phone'], required: true },
+  fieldValue: { type: String, trim: true },
+  isMandatory:{ type: Boolean, default: false },
+}, { _id: true });
+
+// ============================================================================
+// MAIN SCHEMA
+// ============================================================================
+
 const billingCustomerSchema = new mongoose.Schema({
-  // ============================================================================
-  // SECTION 1: BASIC INFORMATION
-  // ============================================================================
-  customerId: { 
-    type: String, 
-    required: true, 
-    unique: true,
-    index: true 
-  },
+
+  // ── Identity ──────────────────────────────────────────────────────────────
+  customerId: { type: String, unique: true, index: true },
+
+  // ── Basic ─────────────────────────────────────────────────────────────────
   customerType: {
     type: String,
     required: true,
-    enum: ['Individual', 'Organization', 'Vendor', 'Others'],
-    index: true
+    enum: ['Individual', 'Business'],   // Zoho: Individual / Business
+    default: 'Individual',
+    index: true,
   },
+  salutation:          { type: String, enum: ['Mr.', 'Mrs.', 'Ms.', 'Miss.', 'Dr.', ''], default: '' },
+  firstName:           { type: String, trim: true },
+  lastName:            { type: String, trim: true },
   customerDisplayName: { type: String, required: true, trim: true, index: true },
-  primaryContactPerson: { type: String, trim: true },
-  primaryEmail: {
-    type: String,
-    required: true,
-    trim: true,
-    lowercase: true,
-    index: true,
-    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Invalid email format']
-  },
-  primaryPhone: {
-    type: String,
-    required: true,
-    index: true,
-    match: [/^[+]?[0-9]{10,15}$/, 'Invalid phone number']
-  },
-  alternatePhone: { 
-    type: String,
-    match: [/^[+]?[0-9]{10,15}$/, 'Invalid phone number']
-  },
-  addressLine1: { type: String, required: true, trim: true },
-  addressLine2: { type: String, trim: true },
-  city: { type: String, required: true, trim: true, index: true },
-  state: { type: String, required: true, trim: true },
-  postalCode: { type: String, trim: true },
-  country: { type: String, required: true, default: 'India' },
+  companyName:         { type: String, trim: true },
 
-  // ============================================================================
-  // SECTION 2: COMPANY DETAILS
-  // ============================================================================
-  companyRegistration: { type: String, trim: true },
-  panNumber: { 
-    type: String, 
-    trim: true,
-    uppercase: true,
-    match: [/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, 'Invalid PAN format']
-  },
-  gstNumber: { 
-    type: String, 
-    trim: true,
-    uppercase: true,
-    index: true,
-    match: [/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'Invalid GST format']
-  },
-  tanNumber: { 
-    type: String, 
-    trim: true,
-    uppercase: true 
-  },
-  industryType: {
-    type: String,
-    enum: ['IT & Software', 'Manufacturing', 'Retail', 'Healthcare', 'Education', 'Finance', 'Real Estate', 'Transportation', 'Hospitality', 'Other', null]
-  },
-  employeeStrength: { type: Number, min: 0 },
-  annualContractValue: { type: Number, min: 0 },
+  // ── Contact ───────────────────────────────────────────────────────────────
+  primaryEmail:  { type: String, required: true, trim: true, lowercase: true, index: true },
+  primaryPhone:  { type: String, required: true, index: true },
+  workPhone:     { type: String, trim: true },
+  mobile:        { type: String, trim: true },
+  fax:           { type: String, trim: true },
+  website:       { type: String, trim: true },
+  facebook:      { type: String, trim: true },
+  twitter:       { type: String, trim: true },
 
-  // ============================================================================
-  // SECTION 3: CONTACT PERSONS
-  // ============================================================================
+  // ── Address ───────────────────────────────────────────────────────────────
+  billingAddress:  { type: addressSchema, default: () => ({}) },
+  shippingAddress: { type: addressSchema, default: () => ({}) },
+
+  // ── Tax Info (Zoho style) ─────────────────────────────────────────────────
+  gstNumber: {
+    type: String, trim: true, uppercase: true, index: true,
+    match: [/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$|^$/, 'Invalid GST format'],
+  },
+  gstRegistrationType: {
+    type: String,
+    enum: [
+      'Registered Business - Regular',
+      'Registered Business - Composition',
+      'Unregistered Business',
+      'Consumer',
+      'Overseas',
+      'Special Economic Zone',
+      'Deemed Export',
+      '',
+    ],
+    default: '',
+  },
+  placeOfSupply: { type: String, enum: [...INDIAN_STATES, ''], default: '' },
+  panNumber: {
+    type: String, trim: true, uppercase: true,
+    match: [/^[A-Z]{5}[0-9]{4}[A-Z]{1}$|^$/, 'Invalid PAN format'],
+  },
+  taxPreference:  { type: String, enum: ['Taxable', 'Tax Exempt', ''], default: 'Taxable' },
+  exemptionReason:{ type: String, trim: true },
+
+  // ── Financials ────────────────────────────────────────────────────────────
+  defaultCurrency: { type: String, default: 'INR' },
+  openingBalance:  { type: Number, default: 0 },
+  paymentTerms: {
+    type: String,
+    enum: ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60', 'NET 90', 'Custom', ''],
+    default: 'Due on Receipt',
+  },
+  creditLimit:   { type: Number, min: 0, default: 0 },
+
+  // ── Portal ────────────────────────────────────────────────────────────────
+  portalLanguage: { type: String, default: 'English' },
+  portalEnabled:  { type: Boolean, default: false },
+
+  // ── Contact Persons ───────────────────────────────────────────────────────
   contactPersons: [contactPersonSchema],
 
-  // ============================================================================
-  // SECTION 4: CATEGORIZATION & SEGMENTATION
-  // ============================================================================
+  // ── Remarks / Comments ────────────────────────────────────────────────────
+  remarks:  { type: String, trim: true },
+  comments: [commentSchema],
+
+  // ── Categorization (kept from your original) ──────────────────────────────
   customerStatus: {
     type: String,
     required: true,
     enum: ['Active', 'Inactive', 'Blocked', 'Lead', 'Closed'],
     default: 'Active',
-    index: true
+    index: true,
   },
   reasonForBlocking: { type: String, trim: true },
-  customerTier: {
-    type: String,
-    enum: ['Gold', 'Silver', 'Bronze', 'Platinum', null],
-    index: true
-  },
-  salesTerritory: { 
-    type: String, 
-    required: true,
-    index: true 
-  },
-  tags: [{
-    type: String,
-    enum: ['VIP', 'Regular', 'Seasonal', 'Corporate', 'Government', 'High-Value', 'Low-Priority']
-  }],
+  customerTier: { type: String, enum: ['Gold', 'Silver', 'Bronze', 'Platinum', ''], default: '' },
+  salesTerritory: { type: String, default: '', index: true },
+  tags: [{ type: String }],
 
-  // ============================================================================
-  // SECTION 5: RATE CARD & PRICING
-  // ============================================================================
-  rateCard: { type: String },
-  contractType: {
-    type: String,
-    enum: ['Fixed Monthly', 'Quarterly', 'Per-trip', 'Pay-as-you-go', null]
-  },
-  contractStartDate: { type: Date },
-  contractEndDate: { type: Date },
-  autoRenewal: { type: Boolean, default: false },
-  renewalNoticePeriod: { type: Number, min: 0 }, // in days
+  // ── Rate Card / Contract ─────────────────────────────────────────────────
+  rateCard:             { type: String },
+  contractType:         { type: String },
+  contractStartDate:    { type: Date },
+  contractEndDate:      { type: Date },
+  autoRenewal:          { type: Boolean, default: false },
+  renewalNoticePeriod:  { type: Number, min: 0 },
 
-  // Vendor-specific rate card fields
-  vendorCommissionType: {
-    type: String,
-    enum: ['Percentage', 'Fixed Amount per Trip', 'Revenue Share', null]
-  },
-  commissionRate: { type: Number, min: 0, max: 100 }, // percentage
-  fixedAmountPerTrip: { type: Number, min: 0 },
-  revenueShare: { type: Number, min: 0, max: 100 }, // percentage
-  minimumGuarantee: { type: Number, min: 0 },
-  paymentCycle: {
-    type: String,
-    enum: ['Daily', 'Weekly', 'Bi-weekly', 'Monthly', 'Quarterly', null]
-  },
-  vehicleTypesProvided: [{
-    type: String,
-    enum: ['Sedan', 'SUV', 'Hatchback', 'Bus', 'Mini Van', 'Tempo Traveller', 'Luxury Car']
-  }],
-  numberOfVehiclesProvided: { type: Number, min: 0 },
-
-  // ============================================================================
-  // SECTION 6: PAYMENT TERMS & CREDIT
-  // ============================================================================
-  paymentTerms: {
-    type: String,
-    required: true,
-    enum: ['Immediate/COD', '7 days', '15 days', '30 days', '45 days', '60 days', 'NET 90'],
-    default: 'Immediate/COD'
-  },
-  preferredPaymentMethod: {
-    type: String,
-    enum: ['Cash', 'UPI', 'Bank Transfer', 'Credit Card', 'Cheque', 'Online Payment Gateway', null]
-  },
-  creditLimit: { type: Number, min: 0, default: 0 },
-  securityDeposit: { type: Number, min: 0 },
-  securityDepositStatus: {
-    type: String,
-    enum: ['Received', 'Pending', 'Refunded', null]
-  },
-  blockBookingIfCreditExceeded: { type: Boolean, default: false },
+  // ── Payment / Billing ─────────────────────────────────────────────────────
+  preferredPaymentMethod: { type: String },
+  securityDeposit:        { type: Number, min: 0 },
+  securityDepositStatus:  { type: String, enum: ['Received', 'Pending', 'Refunded', ''], default: '' },
   billingFrequency: {
     type: String,
-    required: true,
-    enum: ['Per-trip', 'Weekly', 'Bi-weekly', 'Monthly', 'Quarterly'],
-    default: 'Per-trip'
+    enum: ['Per-trip', 'Weekly', 'Bi-weekly', 'Monthly', 'Quarterly', ''],
+    default: 'Per-trip',
   },
+  billingEmail:        { type: String, trim: true, lowercase: true },
+  poNumberRequired:    { type: Boolean, default: false },
+  invoiceDeliveryMethods: [{ type: String }],
+  invoiceLanguage:     { type: String, default: 'English' },
 
-  // ============================================================================
-  // SECTION 7: BILLING PREFERENCES
-  // ============================================================================
-  billingEmail: { 
-    type: String,
-    trim: true,
-    lowercase: true,
-    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Invalid email format']
-  },
-  billingAddress: { type: String, trim: true },
-  sameAsPrimaryAddress: { type: Boolean, default: true },
-  poNumberRequired: { type: Boolean, default: false },
-  invoiceDeliveryMethods: [{
-    type: String,
-    enum: ['Email', 'WhatsApp', 'SMS', 'Portal Download', 'Postal Mail']
-  }],
-  invoiceLanguage: {
-    type: String,
-    enum: ['English', 'Hindi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam'],
-    default: 'English'
-  },
-  taxRegistrationType: {
-    type: String,
-    enum: ['Registered', 'Unregistered', 'Composition', null]
-  },
+  // ── Vendor fields ─────────────────────────────────────────────────────────
+  vendorCommissionType:      { type: String },
+  commissionRate:            { type: Number },
+  fixedAmountPerTrip:        { type: Number },
+  revenueShare:              { type: Number },
+  minimumGuarantee:          { type: Number },
+  paymentCycle:              { type: String },
+  vehicleTypesProvided:      [{ type: String }],
+  numberOfVehiclesProvided:  { type: Number },
+  vendorVehiclesAvailable:   { type: Number },
+  vendorVehicleTypes:        [{ type: String }],
+  vendorAgreementStart:      { type: Date },
+  vendorAgreementEnd:        { type: Date },
+  vendorPerformanceRating:   { type: Number, min: 0, max: 5, default: 0 },
+  insuranceValidUntil:       { type: Date },
 
-  // ============================================================================
-  // SECTION 8: VENDOR-SPECIFIC DETAILS
-  // ============================================================================
-  vendorVehiclesAvailable: { type: Number, min: 0 },
-  vendorVehicleTypes: [{
-    type: String,
-    enum: ['Sedan', 'SUV', 'Hatchback', 'Bus', 'Mini Van', 'Tempo Traveller', 'Luxury Car']
-  }],
-  vendorAgreementStart: { type: Date },
-  vendorAgreementEnd: { type: Date },
-  vendorPerformanceRating: { type: Number, min: 0, max: 5, default: 0 },
-  insuranceValidUntil: { type: Date },
-  
-  // Bank Details
-  bankName: { type: String, trim: true },
-  bankAccountNumber: { type: String, trim: true },
-  ifscCode: { 
-    type: String, 
-    trim: true,
-    uppercase: true 
-  },
-  accountHolderName: { type: String, trim: true },
-  branchName: { type: String, trim: true },
-  upiId: { type: String, trim: true },
+  // ── Bank Details ──────────────────────────────────────────────────────────
+  bankName:           { type: String, trim: true },
+  bankAccountNumber:  { type: String, trim: true },
+  ifscCode:           { type: String, trim: true, uppercase: true },
+  accountHolderName:  { type: String, trim: true },
+  branchName:         { type: String, trim: true },
+  upiId:              { type: String, trim: true },
 
-  // ============================================================================
-  // SECTION 9: DOCUMENT UPLOADS
-  // ============================================================================
+  // ── Documents / Custom Fields ─────────────────────────────────────────────
   uploadedDocuments: [uploadedDocumentSchema],
+  customFields:      [customFieldSchema],
 
-  // ============================================================================
-  // SECTION 10: ADDITIONAL INFORMATION
-  // ============================================================================
-  internalNotes: { type: String, trim: true },
+  // ── Internal Notes ────────────────────────────────────────────────────────
+  internalNotes:        { type: String, trim: true },
   customerInstructions: { type: String, trim: true },
-  specialRequirements: { type: String, trim: true },
-  customFields: [customFieldSchema],
+  specialRequirements:  { type: String, trim: true },
 
-  // ============================================================================
-  // SECTION 11: AUDIT & TRACKING
-  // ============================================================================
-  orgId: { type: String, index: true, default: null },
-  createdBy: { type: String, required: true },
-  createdDate: { type: Date, default: Date.now },
-  lastModifiedBy: { type: String },
-  lastModifiedDate: { type: Date },
-  lastTransactionDate: { type: Date },
-  totalRevenueGenerated: { type: Number, default: 0, min: 0 },
-  totalTripsCompleted: { type: Number, default: 0, min: 0 },
+  // ── Stats (denormalized for speed) ────────────────────────────────────────
+  totalRevenueGenerated:  { type: Number, default: 0 },
+  totalTripsCompleted:    { type: Number, default: 0 },
+  lastTransactionDate:    { type: Date },
 
-  // ============================================================================
-  // PASSWORD RESET TOKENS
-  // ============================================================================
-  passwordResetToken: { type: String },
-  passwordResetExpires: { type: Date },
+  // ── Org / Audit ───────────────────────────────────────────────────────────
+  orgId:           { type: String, index: true, default: null },
+  createdBy:       { type: String, required: true },
+  createdDate:     { type: Date, default: Date.now },
+  lastModifiedBy:  { type: String },
+  lastModifiedDate:{ type: Date },
 
-  // ============================================================================
-  // METADATA
-  // ============================================================================
-  isDeleted: { type: Boolean, default: false },
-  deletedAt: { type: Date },
-  deletedBy: { type: String }
+  // ── Soft delete ───────────────────────────────────────────────────────────
+  isDeleted:  { type: Boolean, default: false },
+  deletedAt:  { type: Date },
+  deletedBy:  { type: String },
 
-}, {
-  timestamps: true,
-  collection: 'billing-customers'
-});
+  // ── Legacy flat address fields (kept for backward compat) ─────────────────
+  addressLine1: { type: String },
+  addressLine2: { type: String },
+  city:         { type: String },
+  state:        { type: String },
+  postalCode:   { type: String },
+  country:      { type: String, default: 'India' },
+  primaryContactPerson: { type: String },
+  alternatePhone:       { type: String },
+  annualContractValue:  { type: Number },
+  employeeStrength:     { type: Number },
+  industryType:         { type: String },
+  companyRegistration:  { type: String },
+  tanNumber:            { type: String },
+  taxRegistrationType:  { type: String },   // old field — kept
+  sameAsPrimaryAddress: { type: Boolean, default: true },
+  blockBookingIfCreditExceeded: { type: Boolean, default: false },
 
-// ============================================================================
-// INDEXES FOR PERFORMANCE
-// ============================================================================
+}, { timestamps: true, collection: 'billing-customers' });
+
+// ── Indexes ───────────────────────────────────────────────────────────────────
 billingCustomerSchema.index({ customerType: 1, customerStatus: 1 });
 billingCustomerSchema.index({ salesTerritory: 1, customerStatus: 1 });
-billingCustomerSchema.index({ customerTier: 1, customerStatus: 1 });
 billingCustomerSchema.index({ createdDate: -1 });
 billingCustomerSchema.index({ gstNumber: 1 }, { sparse: true });
-billingCustomerSchema.index({ tags: 1 });
 
-// ============================================================================
-// VIRTUAL FIELDS
-// ============================================================================
-billingCustomerSchema.virtual('displayType').get(function() {
-  return this.customerType;
-});
-
-billingCustomerSchema.virtual('isActive').get(function() {
+// ── Virtuals ──────────────────────────────────────────────────────────────────
+billingCustomerSchema.virtual('isActive').get(function () {
   return this.customerStatus === 'Active';
 });
-
-billingCustomerSchema.virtual('hasDocuments').get(function() {
-  return this.uploadedDocuments && this.uploadedDocuments.length > 0;
+billingCustomerSchema.virtual('fullName').get(function () {
+  return [this.salutation, this.firstName, this.lastName].filter(Boolean).join(' ');
 });
 
-// ============================================================================
-// METHODS
-// ============================================================================
-billingCustomerSchema.methods.toSafeObject = function() {
+// ── Pre-save ──────────────────────────────────────────────────────────────────
+billingCustomerSchema.pre('save', async function () {
+  if (!this.customerId) {
+    const ts = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+    this.customerId = `CUST-${ts}`;
+  }
+  if (!this.billingEmail && this.primaryEmail) {
+    this.billingEmail = this.primaryEmail;
+  }
+  // Sync legacy flat fields from billingAddress if present
+  if (this.billingAddress && this.billingAddress.street) {
+    this.addressLine1 = this.billingAddress.street;
+    this.city         = this.billingAddress.city;
+    this.state        = this.billingAddress.state;
+    this.postalCode   = this.billingAddress.zip;
+    this.country      = this.billingAddress.country || 'India';
+  }
+});
+
+billingCustomerSchema.methods.toSafeObject = function () {
   const obj = this.toObject({ virtuals: true });
   delete obj.__v;
   return obj;
 };
 
-// ============================================================================
-// STATIC METHODS
-// ============================================================================
-billingCustomerSchema.statics.findByType = function(customerType) {
-  return this.find({ customerType, isDeleted: false }).sort({ createdDate: -1 });
-};
-
-billingCustomerSchema.statics.findActive = function() {
-  return this.find({ customerStatus: 'Active', isDeleted: false }).sort({ createdDate: -1 });
-};
-
-billingCustomerSchema.statics.findByTerritory = function(territory) {
-  return this.find({ salesTerritory: territory, isDeleted: false }).sort({ createdDate: -1 });
-};
-
-billingCustomerSchema.statics.findByTier = function(tier) {
-  return this.find({ customerTier: tier, isDeleted: false }).sort({ createdDate: -1 });
-};
-
-// ============================================================================
-// PRE-SAVE MIDDLEWARE
-// ============================================================================
-billingCustomerSchema.pre('save', async function() {
-  if (!this.customerId) {
-    const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
-    this.customerId = `CUST-${timestamp}`;
-  }
-  if (!this.billingEmail && this.primaryEmail) {
-    this.billingEmail = this.primaryEmail;
-  }
-  if (this.sameAsPrimaryAddress) {
-    this.billingAddress = `${this.addressLine1 || ''} ${this.city || ''} ${this.state || ''}`.trim();
-  }
-});
-
-
-// Delete cached model first, then recreate
-if (mongoose.models.BillingCustomer) {
-  delete mongoose.models.BillingCustomer;
-}
+if (mongoose.models.BillingCustomer) delete mongoose.models.BillingCustomer;
 const BillingCustomer = mongoose.model('BillingCustomer', billingCustomerSchema);
+
 // ============================================================================
-// CREATE MODEL (SAFE - CHECK IF ALREADY EXISTS)
+// HELPER — get Invoice model safely
 // ============================================================================
-// const BillingCustomer = mongoose.models.BillingCustomer || mongoose.model('BillingCustomer', billingCustomerSchema);
+function getInvoiceModel() {
+  return mongoose.models.Invoice
+    || mongoose.model('Invoice', new mongoose.Schema({}, { strict: false }), 'invoices');
+}
 
 // ============================================================================
 // CONTROLLERS
 // ============================================================================
 
-/**
- * @desc    Get all billing customers with filters
- * @route   GET /api/billing-customers
- * @access  Private
- */
+// GET /  — list with filters
 const getAllCustomers = async (req, res) => {
   try {
-    console.log('\n📋 GET ALL BILLING CUSTOMERS');
-    console.log('─'.repeat(80));
-
     const {
-      customerType,
-      customerStatus,
-      salesTerritory,
-      customerTier,
-      search,
-      page = 1,
-      limit = 50,
-      sortBy = 'createdDate',
-      sortOrder = 'desc',
-      skipStats = 'false'
+      customerType, customerStatus, salesTerritory, customerTier,
+      search, page = 1, limit = 50,
+      sortBy = 'createdDate', sortOrder = 'desc',
+      skipStats = 'false',
     } = req.query;
 
-    // Build query
     const query = { isDeleted: false };
     if (req.user?.orgId) query.orgId = req.user.orgId;
-
-    if (customerType) query.customerType = customerType;
+    if (customerType)   query.customerType   = customerType;
     if (customerStatus) query.customerStatus = customerStatus;
     if (salesTerritory) query.salesTerritory = salesTerritory;
-    if (customerTier) query.customerTier = customerTier;
-
-    // Search functionality
+    if (customerTier)   query.customerTier   = customerTier;
     if (search) {
       query.$or = [
         { customerDisplayName: { $regex: search, $options: 'i' } },
-        { customerId: { $regex: search, $options: 'i' } },
-        { primaryEmail: { $regex: search, $options: 'i' } },
-        { primaryPhone: { $regex: search, $options: 'i' } },
-        { gstNumber: { $regex: search, $options: 'i' } }
+        { customerId:          { $regex: search, $options: 'i' } },
+        { primaryEmail:        { $regex: search, $options: 'i' } },
+        { primaryPhone:        { $regex: search, $options: 'i' } },
+        { companyName:         { $regex: search, $options: 'i' } },
+        { gstNumber:           { $regex: search, $options: 'i' } },
       ];
     }
 
-    console.log('   Query:', JSON.stringify(query));
-
-    // Execute query with pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
     const [customers, totalCount] = await Promise.all([
-      BillingCustomer.find(query)
-        .sort(sort)
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      BillingCustomer.countDocuments(query)
+      BillingCustomer.find(query).sort(sort).skip(skip).limit(parseInt(limit)).lean(),
+      BillingCustomer.countDocuments(query),
     ]);
 
-    console.log(`   ✅ Found ${customers.length} customers (Total: ${totalCount})`);
+    const Invoice = getInvoiceModel();
+    let receivablesMap = {};
+    try {
+      const customerIds = customers.map(c => c._id?.toString());
+      const receivablesAgg = await Invoice.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
+            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          },
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            outstandingReceivables: { $sum: '$amountDue' },
+          },
+        },
+      ]);
+      receivablesAgg.forEach(r => { receivablesMap[r._id] = r.outstandingReceivables; });
+    } catch (e) {
+      // Invoice collection may not exist yet — safe to ignore
+    }
 
-    // Calculate statistics (skip when caller just needs the list)
-    let statistics = { totalCustomers: 0, activeCustomers: 0, inactiveCustomers: 0, blockedCustomers: 0, totalRevenue: 0, totalTrips: 0 };
+    const customersWithReceivables = customers.map(c => ({
+      ...c,
+      outstandingReceivables: receivablesMap[c._id?.toString()] || 0,
+      unusedCredits: 0,
+    }));
+
+    let statistics = { totalCustomers: 0, activeCustomers: 0, inactiveCustomers: 0, blockedCustomers: 0 };
     if (skipStats !== 'true') {
       const stats = await BillingCustomer.aggregate([
-        { $match: { isDeleted: false } },
+        { $match: { isDeleted: false, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) } },
         {
           $group: {
             _id: null,
-            totalCustomers: { $sum: 1 },
-            activeCustomers: { $sum: { $cond: [{ $eq: ['$customerStatus', 'Active'] }, 1, 0] } },
+            totalCustomers:    { $sum: 1 },
+            activeCustomers:   { $sum: { $cond: [{ $eq: ['$customerStatus', 'Active'] },   1, 0] } },
             inactiveCustomers: { $sum: { $cond: [{ $eq: ['$customerStatus', 'Inactive'] }, 1, 0] } },
-            blockedCustomers: { $sum: { $cond: [{ $eq: ['$customerStatus', 'Blocked'] }, 1, 0] } },
-            totalRevenue: { $sum: '$totalRevenueGenerated' },
-            totalTrips: { $sum: '$totalTripsCompleted' }
-          }
-        }
+            blockedCustomers:  { $sum: { $cond: [{ $eq: ['$customerStatus', 'Blocked'] },  1, 0] } },
+          },
+        },
       ]);
-      statistics = stats[0] || statistics;
+      if (stats[0]) statistics = stats[0];
     }
 
     res.json({
       success: true,
-      message: 'Billing customers retrieved successfully',
       data: {
-        customers,
+        customers: customersWithReceivables,
         pagination: {
           currentPage: parseInt(page),
-          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          totalPages:  Math.ceil(totalCount / parseInt(limit)),
           totalCount,
-          pageSize: parseInt(limit),
-          hasMore: skip + customers.length < totalCount
+          pageSize:    parseInt(limit),
+          hasMore:     skip + customers.length < totalCount,
         },
-        statistics
-      }
+        statistics,
+      },
     });
-
   } catch (error) {
-    console.error('❌ GET ALL CUSTOMERS FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve billing customers',
-      message: error.message
-    });
+    console.error('❌ getAllCustomers:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Get single billing customer by ID
- * @route   GET /api/billing-customers/:id
- * @access  Private
- */
+// GET /:id
 const getCustomerById = async (req, res) => {
   try {
-    console.log('\n🔍 GET BILLING CUSTOMER BY ID');
-    console.log('─'.repeat(80));
-    console.log('   ID:', req.params.id);
-
-    const customer = await BillingCustomer.findOne({
-      _id: req.params.id,
-      isDeleted: false
-    }).lean();
-
-    if (!customer) {
-      console.log('   ❌ Customer not found');
-      return res.status(404).json({
-        success: false,
-        error: 'Customer not found',
-        message: 'No billing customer found with this ID'
-      });
-    }
-
-    console.log('   ✅ Customer found:', customer.customerDisplayName);
-
-    res.json({
-      success: true,
-      message: 'Billing customer retrieved successfully',
-      data: customer
-    });
-
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    res.json({ success: true, data: customer });
   } catch (error) {
-    console.error('❌ GET CUSTOMER BY ID FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve billing customer',
-      message: error.message
-    });
+    console.error('❌ getCustomerById:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Create new billing customer
- * @route   POST /api/billing-customers
- * @access  Private
- */
-const createCustomer = async (req, res) => {
+// GET /:id/overview  — receivables + income chart data
+const getCustomerOverview = async (req, res) => {
   try {
-    console.log('\n➕ CREATE BILLING CUSTOMER');
-    console.log('─'.repeat(80));
-    console.log('   Data:', JSON.stringify(req.body, null, 2));
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    const customerData = {
-      ...req.body,
-      orgId: req.user?.orgId || null,
-      createdBy: req.user?.email || req.user?.name || 'System',
-      createdDate: new Date()
-    };
+    const Invoice = getInvoiceModel();
+    let outstandingReceivables = 0;
+    let unusedCredits = 0;
+    let monthlyIncome = [];
 
-    const customer = new BillingCustomer(customerData);
-    await customer.save();
+    if (Invoice) {
+      // Outstanding receivables
+      const receivablesAgg = await Invoice.aggregate([
+        {
+          $match: {
+            customerId: customer._id?.toString() || customer.customerId,
+            status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
+            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$amountDue' } } },
+      ]);
+      outstandingReceivables = receivablesAgg[0]?.total || 0;
 
-    console.log('   ✅ Customer created:', customer.customerId);
+      // Monthly income — last 6 months
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+      sixMonthsAgo.setDate(1);
+      sixMonthsAgo.setHours(0, 0, 0, 0);
 
-    // Send welcome email
-    if (customer.primaryEmail) {
-      try {
-        console.log('\n📧 Sending welcome email to customer...');
+      const incomeAgg = await Invoice.aggregate([
+        {
+          $match: {
+            customerId: customer._id?.toString() || customer.customerId,
+            invoiceDate: { $gte: sixMonthsAgo },
+            status: { $nin: ['CANCELLED', 'VOID'] },
+            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          },
+        },
+        {
+          $group: {
+            _id: { year: { $year: '$invoiceDate' }, month: { $month: '$invoiceDate' } },
+            total: { $sum: '$totalAmount' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+      ]);
 
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        const resetTokenExpiry = new Date(Date.now() + 3600000);
-
-        // Use findByIdAndUpdate to avoid triggering pre-save again
-        await BillingCustomer.findByIdAndUpdate(customer._id, {
-          passwordResetToken: resetToken,
-          passwordResetExpires: resetTokenExpiry,
+      // Build all 6 month slots
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const found = incomeAgg.find(a => a._id.year === d.getFullYear() && a._id.month === d.getMonth() + 1);
+        monthlyIncome.push({
+          month: monthNames[d.getMonth()],
+          year:  d.getFullYear(),
+          total: found?.total || 0,
+          count: found?.count || 0,
         });
-
-        const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(customer.primaryEmail)}`;
-
-        await emailService.sendCustomerApprovalEmail({
-          email: customer.primaryEmail,
-          name: customer.customerDisplayName || customer.primaryContactPerson || 'Customer',
-          companyName: customer.customerType === 'Organization' ? customer.customerDisplayName : null,
-          passwordResetLink: resetLink
-        });
-
-        console.log('   ✅ Welcome email sent to:', customer.primaryEmail);
-      } catch (emailError) {
-        console.error('   ⚠️ Failed to send welcome email:', emailError.message);
       }
     }
 
-    res.status(201).json({
+    res.json({
       success: true,
-      message: 'Billing customer created successfully',
-      data: customer.toSafeObject()
+      data: {
+        customer,
+        receivables: {
+          currency: customer.defaultCurrency || 'INR',
+          outstandingReceivables,
+          unusedCredits,
+        },
+        monthlyIncome,
+      },
     });
-
   } catch (error) {
-    console.error('❌ CREATE CUSTOMER FAILED:', error);
-
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        message: errors.join(', '),
-        details: errors
-      });
-    }
-
-    if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        error: 'Duplicate entry',
-        message: 'A customer with this ID or email already exists'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create billing customer',
-      message: error.message
-    });
+    console.error('❌ getCustomerOverview:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Update billing customer
- * @route   PUT /api/billing-customers/:id
- * @access  Private
- */
-const updateCustomer = async (req, res) => {
+// GET /:id/transactions
+const getCustomerTransactions = async (req, res) => {
   try {
-    console.log('\n✏️  UPDATE BILLING CUSTOMER');
-    console.log('─'.repeat(80));
-    console.log('   ID:', req.params.id);
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    // Find customer
-    const customer = await BillingCustomer.findOne({
-      _id: req.params.id,
-      isDeleted: false
-    });
+    const Invoice = getInvoiceModel();
+    let transactions = [];
 
-    if (!customer) {
-      console.log('   ❌ Customer not found');
-      return res.status(404).json({
-        success: false,
-        error: 'Customer not found',
-        message: 'No billing customer found with this ID'
-      });
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      }).sort({ invoiceDate: -1 }).lean();
+
+      // Invoices
+      transactions = invoices.map(inv => ({
+        type:     'Invoice',
+        id:       inv._id,
+        number:   inv.invoiceNumber,
+        date:     inv.invoiceDate,
+        dueDate:  inv.dueDate,
+        status:   inv.status,
+        amount:   inv.totalAmount,
+        balance:  inv.amountDue,
+      }));
+
+      // Payments from each invoice
+      for (const inv of invoices) {
+        for (const p of (inv.payments || [])) {
+          transactions.push({
+            type:   'Payment',
+            id:     p.paymentId,
+            number: inv.invoiceNumber,
+            date:   p.paymentDate || p.recordedAt,
+            status: 'PAID',
+            amount: p.amount,
+            balance: 0,
+            method: p.paymentMethod,
+          });
+        }
+      }
+
+      // Sort by date desc
+      transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
     }
 
-    // Update fields
-    Object.assign(customer, req.body);
-    customer.lastModifiedBy = req.user?.email || req.user?.name || 'System';
-    customer.lastModifiedDate = new Date();
+    res.json({ success: true, data: transactions });
+  } catch (error) {
+    console.error('❌ getCustomerTransactions:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
-    await customer.save();
+// GET /:id/mails
+const getCustomerMails = async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    console.log('   ✅ Customer updated:', customer.customerId);
+    const Invoice = getInvoiceModel();
+    let mails = [];
+
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        'emailsSent.0': { $exists: true },
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      }).lean();
+
+      for (const inv of invoices) {
+        for (const email of (inv.emailsSent || [])) {
+          mails.push({
+            invoiceNumber: inv.invoiceNumber,
+            invoiceId:     inv._id,
+            sentTo:        email.sentTo,
+            sentAt:        email.sentAt,
+            emailType:     email.emailType || 'invoice',
+            subject:       `Invoice ${inv.invoiceNumber} — ₹${inv.totalAmount?.toFixed(2)}`,
+            amount:        inv.totalAmount,
+          });
+        }
+      }
+      mails.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    }
+
+    res.json({ success: true, data: mails });
+  } catch (error) {
+    console.error('❌ getCustomerMails:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// GET /:id/statement
+const getCustomerStatement = async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const { fromDate, toDate } = req.query;
+    const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    const to   = toDate   ? new Date(toDate)   : new Date();
+    to.setHours(23, 59, 59, 999);
+
+    const Invoice = getInvoiceModel();
+    let entries = [];
+    let openingBalance = customer.openingBalance || 0;
+
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        invoiceDate: { $gte: from, $lte: to },
+        status: { $nin: ['CANCELLED', 'VOID'] },
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      }).sort({ invoiceDate: 1 }).lean();
+
+      for (const inv of invoices) {
+        entries.push({
+          date:        inv.invoiceDate,
+          type:        'Invoice',
+          number:      inv.invoiceNumber,
+          details:     inv.subject || inv.orderNumber || '',
+          invoices:    inv.totalAmount,
+          payments:    null,
+          balance:     null,
+        });
+        for (const p of (inv.payments || [])) {
+          if (p.paymentDate >= from && p.paymentDate <= to) {
+            entries.push({
+              date:    p.paymentDate || p.recordedAt,
+              type:    'Payment',
+              number:  inv.invoiceNumber,
+              details: p.paymentMethod,
+              invoices: null,
+              payments: p.amount,
+              balance: null,
+            });
+          }
+        }
+      }
+
+      entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Running balance
+      let runningBalance = openingBalance;
+      entries = entries.map(e => {
+        if (e.invoices) runningBalance += e.invoices;
+        if (e.payments) runningBalance -= e.payments;
+        return { ...e, balance: runningBalance };
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Billing customer updated successfully',
-      data: customer.toSafeObject()
+      data: {
+        customer: { name: customer.customerDisplayName, email: customer.primaryEmail },
+        openingBalance,
+        entries,
+        closingBalance: entries.length > 0 ? entries[entries.length - 1].balance : openingBalance,
+        fromDate: from,
+        toDate:   to,
+      },
     });
-
   } catch (error) {
-    console.error('❌ UPDATE CUSTOMER FAILED:', error);
-
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        message: errors.join(', '),
-        details: errors
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update billing customer',
-      message: error.message
-    });
+    console.error('❌ getCustomerStatement:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Delete billing customer (soft delete)
- * @route   DELETE /api/billing-customers/:id
- * @access  Private
- */
+// POST /:id/comments
+const addComment = async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text?.trim()) return res.status(400).json({ success: false, error: 'Comment text required' });
+
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const comment = { text: text.trim(), createdBy: req.user?.email || 'system', createdAt: new Date() };
+    customer.comments.push(comment);
+    await customer.save();
+
+    res.json({ success: true, data: customer.comments[customer.comments.length - 1] });
+  } catch (error) {
+    console.error('❌ addComment:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// DELETE /:id/comments/:commentId
+const deleteComment = async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    customer.comments = customer.comments.filter(c => c._id.toString() !== req.params.commentId);
+    await customer.save();
+    res.json({ success: true, message: 'Comment deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// POST /  — create
+const createCustomer = async (req, res) => {
+  try {
+    const customerData = {
+      ...req.body,
+      orgId:     req.user?.orgId || null,
+      createdBy: req.user?.email || req.user?.name || 'System',
+      createdDate: new Date(),
+    };
+    const customer = new BillingCustomer(customerData);
+    await customer.save();
+    console.log('✅ Customer created:', customer.customerId);
+    res.status(201).json({ success: true, message: 'Customer created successfully', data: customer.toSafeObject() });
+  } catch (error) {
+    console.error('❌ createCustomer:', error);
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, error: 'Validation failed', message: errors.join(', ') });
+    }
+    if (error.code === 11000) return res.status(409).json({ success: false, error: 'Duplicate entry', message: 'A customer with this ID already exists' });
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// PUT /:id
+const updateCustomer = async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    Object.assign(customer, req.body);
+    customer.lastModifiedBy   = req.user?.email || req.user?.name || 'System';
+    customer.lastModifiedDate = new Date();
+    await customer.save();
+    res.json({ success: true, message: 'Customer updated successfully', data: customer.toSafeObject() });
+  } catch (error) {
+    console.error('❌ updateCustomer:', error);
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, error: 'Validation failed', message: errors.join(', ') });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// DELETE /:id  — soft delete
 const deleteCustomer = async (req, res) => {
   try {
-    console.log('\n🗑️  DELETE BILLING CUSTOMER');
-    console.log('─'.repeat(80));
-    console.log('   ID:', req.params.id);
-
-    const customer = await BillingCustomer.findOne({
-      _id: req.params.id,
-      isDeleted: false
-    });
-
-    if (!customer) {
-      console.log('   ❌ Customer not found');
-      return res.status(404).json({
-        success: false,
-        error: 'Customer not found',
-        message: 'No billing customer found with this ID'
-      });
-    }
-
-    // Soft delete
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
     customer.isDeleted = true;
     customer.deletedAt = new Date();
     customer.deletedBy = req.user?.email || req.user?.name || 'System';
     await customer.save();
-
-    console.log('   ✅ Customer deleted:', customer.customerId);
-
-    res.json({
-      success: true,
-      message: 'Billing customer deleted successfully',
-      data: { customerId: customer.customerId }
-    });
-
+    res.json({ success: true, message: 'Customer deleted successfully' });
   } catch (error) {
-    console.error('❌ DELETE CUSTOMER FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete billing customer',
-      message: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Upload documents for billing customer
- * @route   POST /api/billing-customers/:id/upload-documents
- * @access  Private
- */
+// POST /:id/upload-documents
 const uploadDocuments = async (req, res) => {
   try {
-    console.log('\n📤 UPLOAD DOCUMENTS');
-    console.log('─'.repeat(80));
-    console.log('   Customer ID:', req.params.id);
-    console.log('   Category:', req.body.category);
-    console.log('   Files:', req.files?.length || 0);
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ success: false, error: 'No files uploaded' });
 
-    const customer = await BillingCustomer.findOne({
-      _id: req.params.id,
-      isDeleted: false
-    });
-
-    if (!customer) {
-      return res.status(404).json({
-        success: false,
-        error: 'Customer not found'
-      });
-    }
-
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No files uploaded'
-      });
-    }
-
-    // Add uploaded files to customer documents
-    const uploadedDocs = req.files.map(file => ({
-      category: req.body.category || 'Other Documents',
-      fileName: file.filename,
+    const docs = req.files.map(file => ({
+      category:     req.body.category || 'Other Documents',
+      fileName:     file.filename,
       originalName: file.originalname,
-      filePath: file.path,
-      fileSize: file.size,
+      filePath:     file.path,
+      fileSize:     file.size,
       fileExtension: path.extname(file.originalname),
-      uploadedAt: new Date(),
-      uploadedBy: req.user?.email || 'System'
+      uploadedAt:   new Date(),
+      uploadedBy:   req.user?.email || 'System',
     }));
-
-    customer.uploadedDocuments.push(...uploadedDocs);
-    customer.lastModifiedBy = req.user?.email || 'System';
+    customer.uploadedDocuments.push(...docs);
+    customer.lastModifiedBy   = req.user?.email || 'System';
     customer.lastModifiedDate = new Date();
-
     await customer.save();
-
-    console.log(`   ✅ Uploaded ${uploadedDocs.length} documents`);
-
-    res.json({
-      success: true,
-      message: 'Documents uploaded successfully',
-      data: {
-        uploadedCount: uploadedDocs.length,
-        documents: uploadedDocs
-      }
-    });
-
+    res.json({ success: true, message: 'Documents uploaded', data: { uploadedCount: docs.length, documents: docs } });
   } catch (error) {
-    console.error('❌ UPLOAD DOCUMENTS FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to upload documents',
-      message: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-/**
- * @desc    Get customers by type
- * @route   GET /api/billing-customers/type/:customerType
- * @access  Private
- */
-const getCustomersByType = async (req, res) => {
-  try {
-    console.log('\n📊 GET CUSTOMERS BY TYPE');
-    console.log('─'.repeat(80));
-    console.log('   Type:', req.params.customerType);
-
-    const customers = await BillingCustomer.findByType(req.params.customerType);
-
-    console.log(`   ✅ Found ${customers.length} customers`);
-
-    res.json({
-      success: true,
-      message: `${req.params.customerType} customers retrieved successfully`,
-      data: {
-        customerType: req.params.customerType,
-        count: customers.length,
-        customers
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ GET CUSTOMERS BY TYPE FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve customers',
-      message: error.message
-    });
-  }
-};
-
-/**
- * @desc    Get customer statistics
- * @route   GET /api/billing-customers/statistics/overview
- * @access  Private
- */
+// GET /statistics/overview
 const getStatistics = async (req, res) => {
   try {
-    console.log('\n📊 GET CUSTOMER STATISTICS');
-    console.log('─'.repeat(80));
+    const match = { isDeleted: false };
+    if (req.user?.orgId) match.orgId = req.user.orgId;
 
     const stats = await BillingCustomer.aggregate([
-      { $match: { isDeleted: false } },
+      { $match: match },
       {
         $facet: {
-          byType: [
-            { $group: { _id: '$customerType', count: { $sum: 1 } } }
-          ],
-          byStatus: [
-            { $group: { _id: '$customerStatus', count: { $sum: 1 } } }
-          ],
-          byTier: [
-            { $group: { _id: '$customerTier', count: { $sum: 1 } } }
-          ],
-          byTerritory: [
-            { $group: { _id: '$salesTerritory', count: { $sum: 1 } } }
-          ],
-          revenue: [
-            {
-              $group: {
-                _id: null,
-                totalRevenue: { $sum: '$totalRevenueGenerated' },
-                totalTrips: { $sum: '$totalTripsCompleted' },
-                avgRevenue: { $avg: '$totalRevenueGenerated' }
-              }
-            }
-          ]
-        }
-      }
+          byType:      [{ $group: { _id: '$customerType',   count: { $sum: 1 } } }],
+          byStatus:    [{ $group: { _id: '$customerStatus', count: { $sum: 1 } } }],
+          byTier:      [{ $group: { _id: '$customerTier',   count: { $sum: 1 } } }],
+          byTerritory: [{ $group: { _id: '$salesTerritory', count: { $sum: 1 } } }],
+          revenue: [{
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: '$totalRevenueGenerated' },
+              totalTrips:   { $sum: '$totalTripsCompleted' },
+              avgRevenue:   { $avg: '$totalRevenueGenerated' },
+            },
+          }],
+        },
+      },
     ]);
+    res.json({ success: true, data: stats[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
-    console.log('   ✅ Statistics calculated');
+// Bulk import
+const bulkImportCustomers = async (req, res) => {
+  try {
+    const { customers } = req.body;
+    if (!customers || !Array.isArray(customers) || customers.length === 0)
+      return res.status(400).json({ success: false, error: 'No customers data provided' });
+
+    let successCount = 0, failedCount = 0;
+    const errors = [];
+
+    for (let i = 0; i < customers.length; i++) {
+      try {
+        const data = { ...customers[i] };
+        if (!data.customerId) {
+          const ts = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+          data.customerId = `CUST-${ts}-${i}`;
+        }
+        data.createdBy  = req.user?.email || 'System';
+        data.createdDate = new Date();
+        data.orgId      = req.user?.orgId || null;
+
+        // Strip invalid optional regex fields
+        ['panNumber', 'gstNumber', 'tanNumber'].forEach(f => {
+          if (data[f] === '' || data[f] == null) delete data[f];
+        });
+
+        await new BillingCustomer(data).save();
+        successCount++;
+      } catch (e) {
+        failedCount++;
+        errors.push(`Row ${i + 1}: ${e.message}`);
+      }
+    }
 
     res.json({
       success: true,
-      message: 'Customer statistics retrieved successfully',
-      data: stats[0]
+      message: `Import complete. ${successCount} succeeded, ${failedCount} failed.`,
+      data: { totalProcessed: customers.length, successCount, failedCount, errors: errors.length ? errors : undefined },
     });
-
   } catch (error) {
-    console.error('❌ GET STATISTICS FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve statistics',
-      message: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// GET /indian-states  — for dropdowns
+router.get('/indian-states', (req, res) => {
+  res.json({ success: true, data: INDIAN_STATES });
+});
 
 // ============================================================================
 // ROUTES
 // ============================================================================
 
-// Statistics
 router.get('/statistics/overview', getStatistics);
+router.get('/type/:customerType',  async (req, res) => {
+  try {
+    const customers = await BillingCustomer.find({ customerType: req.params.customerType, isDeleted: false }).sort({ createdDate: -1 }).lean();
+    res.json({ success: true, data: { customerType: req.params.customerType, count: customers.length, customers } });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+router.post('/bulk-import', bulkImportCustomers);
 
-// Get by type
-router.get('/type/:customerType', getCustomersByType);
-
-// CRUD operations
-router.get('/', getAllCustomers);
-router.get('/:id', getCustomerById);
-router.post('/', createCustomer);
-router.put('/:id', updateCustomer);
+// Customer CRUD
+router.get('/',     getAllCustomers);
+router.get('/:id',  getCustomerById);
+router.post('/',    createCustomer);
+router.put('/:id',  updateCustomer);
 router.delete('/:id', deleteCustomer);
+
+// Detail sub-routes
+router.get('/:id/overview',     getCustomerOverview);
+router.get('/:id/transactions', getCustomerTransactions);
+router.get('/:id/mails',        getCustomerMails);
+router.get('/:id/statement',    getCustomerStatement);
+router.post('/:id/comments',    addComment);
+router.delete('/:id/comments/:commentId', deleteComment);
 
 // Document upload
 router.post('/:id/upload-documents', upload.array('documents', 10), uploadDocuments);
 
-// ============================================================================
-// EXPORT
-// ============================================================================
-
-const bulkImportCustomers = async (req, res) => {
-  try {
-    console.log('\n📤 BULK IMPORT CUSTOMERS');
-    console.log('─'.repeat(80));
-
-    const { customers } = req.body;
-
-    if (!customers || !Array.isArray(customers) || customers.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No customers data provided',
-      });
-    }
-
-    console.log(`   Processing ${customers.length} customers...`);
-
-    let successCount = 0;
-    let failedCount  = 0;
-    const errors = [];
-
-    for (let i = 0; i < customers.length; i++) {
-      try {
-        const customerData = { ...customers[i] };
-
-        // Generate customer ID
-        if (!customerData.customerId) {
-          const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
-          customerData.customerId = `CUST-${timestamp}-${i}`;
-        }
-
-        customerData.createdBy   = req.user?.email || req.user?.name || 'System';
-        customerData.createdDate = new Date();
-
-        // Strip empty strings from regex-validated optional fields
-        const optionalRegexFields = [
-          'panNumber', 'gstNumber', 'tanNumber', 'companyRegistration',
-          'alternatePhone', 'postalCode', 'addressLine2', 'primaryContactPerson',
-          'billingEmail', 'upiId', 'ifscCode', 'bankAccountNumber',
-          'bankName', 'accountHolderName', 'branchName'
-        ];
-        for (const field of optionalRegexFields) {
-          if (customerData[field] === '' || customerData[field] === null || customerData[field] === undefined) {
-            delete customerData[field];
-          }
-        }
-
-        // Strip invalid enum values
-        const validIndustryTypes = [
-          'IT & Software', 'Manufacturing', 'Retail', 'Healthcare',
-          'Education', 'Finance', 'Real Estate', 'Transportation', 'Hospitality', 'Other'
-        ];
-        if (customerData.industryType && !validIndustryTypes.includes(customerData.industryType)) {
-          delete customerData.industryType;
-        }
-
-        const validTiers = ['Gold', 'Silver', 'Bronze', 'Platinum'];
-        if (customerData.customerTier && !validTiers.includes(customerData.customerTier)) {
-          delete customerData.customerTier;
-        }
-
-        // Save customer
-        const customer = new BillingCustomer({ ...customerData, orgId: req.user?.orgId || null });
-        await customer.save();
-
-        successCount++;
-        console.log(`   ✅ Customer ${i + 1}/${customers.length}: ${customerData.customerDisplayName}`);
-
-      } catch (error) {
-        failedCount++;
-        errors.push(`Row ${i + 1}: ${error.message}`);
-        console.log(`   ❌ Customer ${i + 1}/${customers.length}: ${error.message}`);
-      }
-    }
-
-    console.log(`   📊 Import Summary: Success=${successCount} Failed=${failedCount}`);
-
-    res.json({
-      success: true,
-      message: 'Bulk import completed',
-      data: {
-        totalProcessed: customers.length,
-        successCount,
-        failedCount,
-        emailsSent: 0,
-        emailsFailed: 0,
-        errors: errors.length > 0 ? errors : undefined,
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ BULK IMPORT FAILED:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Bulk import failed',
-      message: error.message
-    });
-  }
-};
-
-// Add route
-router.post('/bulk-import', bulkImportCustomers);
-
 module.exports = router;
+module.exports.BillingCustomer = BillingCustomer;
+module.exports.INDIAN_STATES   = INDIAN_STATES;
 
-console.log('✅ Billing Customers module loaded successfully');
-console.log('   Collection: billing-customers');
-console.log('   Customer Types: Individual, Organization, Vendor, Others');
-console.log('   Features: CRUD, File Upload, Statistics, Search, Filtering');
+console.log('✅ Billing Customers module loaded (Zoho Books style)');      

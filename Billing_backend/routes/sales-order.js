@@ -133,7 +133,7 @@ const salesOrderSchema = new mongoose.Schema({
   salesOrderNumber: {
     type: String,
     required: true,
-    unique: true,
+
     trim: true,
   },
   referenceNumber: {
@@ -250,6 +250,20 @@ const salesOrderSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  // Zoho-style GST fields
+  isInterState:  { type: Boolean, default: false },
+  totalCGST:     { type: Number, default: 0 },
+  totalSGST:     { type: Number, default: 0 },
+  totalIGST:     { type: Number, default: 0 },
+  placeOfSupply: { type: String, default: '' },
+  billingAddress: {
+    street: String, city: String, state: String,
+    pincode: String, country: { type: String, default: 'India' },
+  },
+  shippingAddress: {
+    street: String, city: String, state: String,
+    pincode: String, country: { type: String, default: 'India' },
+  },
   totalAmount: {
     type: Number,
     required: true,
@@ -337,7 +351,7 @@ const salesOrderSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-salesOrderSchema.index({ orgId: 1, salesOrderNumber: 1 });
+salesOrderSchema.index({ orgId: 1, salesOrderNumber: 1 }, { unique: true });
 salesOrderSchema.index({ orgId: 1, customerId: 1 });
 salesOrderSchema.index({ orgId: 1, status: 1 });
 salesOrderSchema.index({ orgId: 1, salesOrderDate: -1 });
@@ -463,26 +477,7 @@ const calculateSalesOrderTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18
 
 // Generate PDF for sales order
 const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
-  // Fetch org details
-  let orgName  = 'Your Company';
-  let orgGST   = '';
-  let orgAddr  = '';
-  let orgEmail = '';
-  let orgPhone = '';
-  try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const orgData = await OrgModel.findOne({ orgId }).lean();
-    if (orgData) {
-      orgName  = orgData.orgName    || orgName;
-      orgGST   = orgData.gstNumber  || '';
-      orgAddr  = orgData.address    || '';
-      orgEmail = orgData.email      || '';
-      orgPhone = orgData.phone      || '';
-    }
-  } catch (_) {}
-
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     try {
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'sales-orders');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -490,113 +485,243 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
       const filename = `sales-order-${salesOrder.salesOrderNumber}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      const doc    = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+      let orgName  = 'Your Company';
+      let orgGST   = '';
+      let orgAddr  = '';
+      let orgEmail = '';
+      let orgPhone = '';
+      let orgData  = null;
+      try {
+        const OrgModel = mongoose.models.Organization ||
+          mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
+        orgData = await OrgModel.findOne({ orgId }).lean();
+        if (orgData) {
+          orgName  = orgData.orgName   || orgName;
+          orgGST   = orgData.gstNumber || '';
+          orgAddr  = orgData.address   || '';
+          orgEmail = orgData.email     || '';
+          orgPhone = orgData.phone     || '';
+        }
+      } catch (_) {}
+
+      const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
 
-      const pageW    = 515;
+      const pageW = 515;
+
+      // ── HEADER — plain white background like invoices.js ─────────────────
       const logoPath = getLogoPath(orgId);
-
-      // ── Header bar ──────────────────────────────────────────────────────
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
-
       let logoLoaded = false;
+      const textX = logoPath ? 126 : 50;
+      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY  = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH = 55;
+      const logoY = logoCenterY - (logoH / 2);
+
       if (logoPath) {
         try {
-          doc.image(logoPath, 44, 35, { width: 75, height: 60, fit: [75, 60] });
+          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
           logoLoaded = true;
-        } catch (e) { console.warn('Logo load failed:', e.message); }
+        } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
       }
 
-      const textX = logoLoaded ? 126 : 50;
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold')
-         .text(orgName.toUpperCase(), textX, 40, { width: 200 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
-         .text('BILLING & FINANCE', textX, 56, { width: 200 });
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+      doc.fontSize(7).fillColor('#000000');
+      let contactY = textStartY + 26;
+      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
 
-      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let cY = 68;
-      contactLines.forEach(line => { doc.text(line, textX, cY, { width: 240 }); cY += 9; });
-
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold')
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('SALES ORDER', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold')
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
          .text(salesOrder.salesOrderNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica')
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(salesOrder.salesOrderDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`,
                380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold')
-         .text(`Status: ${salesOrder.status}`, 380, 92, { width: 170, align: 'right' });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+         .text(`${(salesOrder.status || 'DRAFT')}`, 380, 92, { width: 170, align: 'right' });
 
-      // ── Meta boxes ──────────────────────────────────────────────────────
-      const metaY    = 132;
-      const metaBoxW = pageW / 2;
-      const metas    = [
-        { label: 'Bill To', val: salesOrder.customerName || 'N/A',
-          sub: [salesOrder.customerEmail, salesOrder.customerPhone].filter(Boolean).join(' | ') },
-        { label: 'Order Details', val: `Ref: ${salesOrder.referenceNumber || 'N/A'}`,
-          sub: `Terms: ${salesOrder.paymentTerms || 'Net 30'}${salesOrder.expectedShipmentDate ? ' | Ship: ' + new Date(salesOrder.expectedShipmentDate).toLocaleDateString('en-IN') : ''}` },
-      ];
-      metas.forEach((m, i) => {
-        const bx = 40 + i * metaBoxW;
-        doc.rect(bx, metaY, metaBoxW, 46).fillAndStroke('#f7f9fc', '#dde4ef');
-        doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
-           .text(m.label.toUpperCase(), bx + 8, metaY + 7, { width: metaBoxW - 16, characterSpacing: 0.8 });
-        doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-           .text(m.val, bx + 8, metaY + 18, { width: metaBoxW - 16, ellipsis: true });
+      // ── META GRID — 3 columns: Bill To | Ship To | SO Details ─────────────
+      const metaY = 132;
+      const colW  = pageW / 3;
+      const metaH = 90;
+
+      const billingStr = [
+        salesOrder.billingAddress?.street,
+        salesOrder.billingAddress?.city,
+        salesOrder.billingAddress?.state,
+        salesOrder.billingAddress?.pincode,
+      ].filter(Boolean).join(', ');
+
+      // Col 1: Bill To
+      const billX = 40;
+      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(salesOrder.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      if (billingStr) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(m.sub, bx + 8, metaY + 30, { width: metaBoxW - 16, ellipsis: true });
-      });
+           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+      }
+      if (salesOrder.customerEmail) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(salesOrder.customerEmail, billX + 8, metaY + 60, { width: colW - 16, ellipsis: true });
+      }
 
-      // ── Items table ──────────────────────────────────────────────────────
-      const tableTop = metaY + 58;
-      doc.rect(40, tableTop, pageW, 22).fill('#0f1e3d');
-      doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
-      doc.text('#',           48,  tableTop + 7, { width: 20 });
-      doc.text('DESCRIPTION', 72,  tableTop + 7, { width: 200 });
-      doc.text('QTY',         275, tableTop + 7, { width: 60,  align: 'center' });
-      doc.text('RATE',        340, tableTop + 7, { width: 80,  align: 'right' });
-      doc.text('AMOUNT',      420, tableTop + 7, { width: 90,  align: 'right' });
+      // Col 2: Ship To
+      const shipX = 40 + colW;
+      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('SHIP TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      if (billingStr) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(billingStr, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      } else {
+        doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
+           .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
+      }
+      if (salesOrder.deliveryMethod) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(`Via: ${salesOrder.deliveryMethod}`, shipX + 8, metaY + 60, { width: colW - 16 });
+      }
 
-      let rowY = tableTop + 22;
-      salesOrder.items.forEach((item, idx) => {
-        const rowH = 24;
-        doc.rect(40, rowY, pageW, rowH).fill(idx % 2 === 0 ? '#ffffff' : '#f7f9fc');
-        doc.rect(40, rowY, pageW, rowH).lineWidth(1.5).strokeColor('#000000').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold')
-           .text(String(idx + 1), 48, rowY + 8, { width: 20 });
-        doc.font('Helvetica')
-           .text(item.itemDetails || 'N/A', 72, rowY + 8, { width: 200, ellipsis: true });
-        doc.text(String(item.quantity || 0), 275, rowY + 8, { width: 60, align: 'center' });
-        doc.text(`Rs.${(item.rate || 0).toFixed(2)}`, 340, rowY + 8, { width: 80, align: 'right' });
+      // Col 3: SO Details
+      const detX = 40 + colW * 2;
+      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('SALES ORDER DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`SO #: ${salesOrder.salesOrderNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(`Terms: ${salesOrder.paymentTerms || 'Net 30'}`, detX + 8, metaY + 29, { width: colW - 16 });
+      if (salesOrder.expectedShipmentDate) {
+        doc.text(`Ship By: ${new Date(salesOrder.expectedShipmentDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`,
+                 detX + 8, metaY + 39, { width: colW - 16 });
+      }
+      if (salesOrder.referenceNumber) {
+        doc.text(`Ref: ${salesOrder.referenceNumber}`, detX + 8, metaY + 49, { width: colW - 16, ellipsis: true });
+      }
+
+      let tableStartY = metaY + metaH + 12;
+
+      // ── ITEMS TABLE — same columns as invoices.js ─────────────────────────
+      const isInterState = salesOrder.isInterState || false;
+
+      const cols = {
+        num:     { x: 40,  w: 16  },
+        desc:    { x: 56,  w: 90  },
+        hsn:     { x: 146, w: 44  },
+        unit:    { x: 190, w: 24  },
+        qty:     { x: 214, w: 24  },
+        rate:    { x: 238, w: 36  },
+        disc:    { x: 274, w: 26  },
+        taxable: { x: 300, w: 38  },
+        gst:     { x: 338, w: 24  },
+        tax1:    { x: 362, w: 46  },
+        tax2:    { x: 408, w: 46  },
+        amount:  { x: 454, w: 61  },
+      };
+
+      doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+      doc.text('#',        cols.num.x  + 2, tableStartY + 7, { width: cols.num.w });
+      doc.text('ITEM',     cols.desc.x + 2, tableStartY + 7, { width: cols.desc.w });
+      doc.text('HSN/SAC',  cols.hsn.x  + 2, tableStartY + 7, { width: cols.hsn.w });
+      doc.text('UNIT',     cols.unit.x + 2, tableStartY + 7, { width: cols.unit.w });
+      doc.text('QTY',      cols.qty.x  + 2, tableStartY + 7, { width: cols.qty.w,     align: 'center' });
+      doc.text('RATE',     cols.rate.x + 2, tableStartY + 7, { width: cols.rate.w,    align: 'right' });
+      doc.text('DISC',     cols.disc.x + 2, tableStartY + 7, { width: cols.disc.w,    align: 'right' });
+      doc.text('TAXABLE',  cols.taxable.x+2,tableStartY + 7, { width: cols.taxable.w, align: 'right' });
+      doc.text('GST%',     cols.gst.x  + 2, tableStartY + 7, { width: cols.gst.w,     align: 'center' });
+      if (isInterState) {
+        doc.text('IGST',   cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
+      } else {
+        doc.text('CGST',   cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w, align: 'right' });
+        doc.text('SGST',   cols.tax2.x + 2, tableStartY + 7, { width: cols.tax2.w, align: 'right' });
+      }
+      doc.text('AMOUNT',   cols.amount.x+2, tableStartY + 7, { width: cols.amount.w,  align: 'right' });
+
+      let rowY = tableStartY + 20;
+      (salesOrder.items || []).forEach((item, idx) => {
+        const descText  = item.itemDetails || 'N/A';
+        const descWidth = cols.desc.w - 4;
+        const vPad      = 8;
+        doc.font('Helvetica').fontSize(7);
+        const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
+        const rowH  = Math.max(20, descH + vPad * 2);
+
+        const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+        doc.rect(40, rowY, 515, rowH).fill(fill);
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+        const hsnSac  = item.hsnCode || item.sacCode || '';
+        const discStr = item.discount > 0
+          ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
+          : '—';
+
+        const gstRate  = item.itemGstRate || 0;
+        const taxable  = item.taxableAmount || item.amount || 0;
+        const cgstAmt  = isInterState ? 0 : Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
+        const sgstAmt  = cgstAmt;
+        const igstAmt  = isInterState ? Math.round(taxable * gstRate / 100 * 100) / 100 : 0;
+        const totalAmt = item.amount || (taxable + cgstAmt + sgstAmt + igstAmt);
+
+        const cellY = rowY + vPad;
+        doc.fontSize(7).fillColor('#000000');
+        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
+        doc.font('Helvetica').text(descText, cols.desc.x + 2, cellY, { width: descWidth, lineGap: 1 });
+        doc.text(hsnSac,                              cols.hsn.x  + 2, cellY, { width: cols.hsn.w - 2,  ellipsis: true });
+        doc.text(item.unit || 'Nos',                  cols.unit.x + 2, cellY, { width: cols.unit.w });
+        doc.text(String(item.quantity || 0),          cols.qty.x  + 2, cellY, { width: cols.qty.w,     align: 'center' });
+        doc.text(`${(item.rate || 0).toFixed(2)}`,    cols.rate.x + 2, cellY, { width: cols.rate.w,    align: 'right' });
+        doc.text(discStr,                             cols.disc.x + 2, cellY, { width: cols.disc.w,    align: 'right' });
+        doc.text(`${taxable.toFixed(2)}`,             cols.taxable.x+2, cellY, { width: cols.taxable.w, align: 'right' });
+        doc.text(`${gstRate}%`,                       cols.gst.x  + 2, cellY, { width: cols.gst.w,     align: 'center' });
+        if (isInterState) {
+          doc.text(`${igstAmt.toFixed(2)}`,           cols.tax1.x + 2, cellY, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
+        } else {
+          doc.text(`${cgstAmt.toFixed(2)}`,           cols.tax1.x + 2, cellY, { width: cols.tax1.w, align: 'right' });
+          doc.text(`${sgstAmt.toFixed(2)}`,           cols.tax2.x + 2, cellY, { width: cols.tax2.w, align: 'right' });
+        }
         doc.font('Helvetica-Bold')
-           .text(`Rs.${(item.amount || 0).toFixed(2)}`, 420, rowY + 8, { width: 90, align: 'right' });
+           .text(`${totalAmt.toFixed(2)}`,            cols.amount.x+2, cellY, { width: cols.amount.w, align: 'right' });
         rowY += rowH;
       });
 
-      // ── Totals ──────────────────────────────────────────────────────────
-      const totalsX = 355;
-      const totalsW = 200;
+      // ── TOTALS ────────────────────────────────────────────────────────────
+      const totalsX = 315;
+      const totalsW = 240;
+      let totalsY   = rowY + 12;
       const labelX  = totalsX;
       const amountX = totalsX + totalsW;
-      let totalsY   = rowY + 16;
 
       const tRow = (label, amount, bold = false) => {
         doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica')
-           .text(label, labelX, totalsY, { width: 120 });
+           .text(label, labelX, totalsY, { width: 140 });
         doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
-           .text(amount, labelX + 120, totalsY, { width: 80, align: 'right' });
+           .text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
         doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11)
            .lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
         totalsY += 14;
       };
 
       tRow('Subtotal:', `Rs. ${(salesOrder.subTotal || 0).toFixed(2)}`);
-      if (salesOrder.cgst > 0)      tRow(`CGST (${salesOrder.gstRate / 2}%):`, `Rs. ${salesOrder.cgst.toFixed(2)}`);
-      if (salesOrder.sgst > 0)      tRow(`SGST (${salesOrder.gstRate / 2}%):`, `Rs. ${salesOrder.sgst.toFixed(2)}`);
-      if (salesOrder.tdsAmount > 0) tRow('TDS Deducted:',                      `- Rs. ${salesOrder.tdsAmount.toFixed(2)}`);
-      if (salesOrder.tcsAmount > 0) tRow('TCS Collected:',                     `Rs. ${salesOrder.tcsAmount.toFixed(2)}`);
+      if ((salesOrder.totalCGST || salesOrder.cgst || 0) > 0)
+        tRow('CGST:', `Rs. ${(salesOrder.totalCGST || salesOrder.cgst || 0).toFixed(2)}`);
+      if ((salesOrder.totalSGST || salesOrder.sgst || 0) > 0)
+        tRow('SGST:', `Rs. ${(salesOrder.totalSGST || salesOrder.sgst || 0).toFixed(2)}`);
+      if ((salesOrder.totalIGST || salesOrder.igst || 0) > 0)
+        tRow('IGST:', `Rs. ${(salesOrder.totalIGST || salesOrder.igst || 0).toFixed(2)}`);
+      if ((salesOrder.tdsAmount || 0) > 0)
+        tRow('TDS Deducted:', `- Rs. ${salesOrder.tdsAmount.toFixed(2)}`);
+      if ((salesOrder.tcsAmount || 0) > 0)
+        tRow('TCS Collected:', `Rs. ${salesOrder.tcsAmount.toFixed(2)}`);
 
       totalsY += 4;
       doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
@@ -614,31 +739,44 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
          .text(`In Words: ${numberToWords(Math.round(salesOrder.totalAmount || 0))} Only`,
                48, wordsY + 5, { width: pageW - 16 });
 
-      // ── Notes ────────────────────────────────────────────────────────────
+      // Notes
+      let notesY = wordsY + 28;
       if (salesOrder.customerNotes) {
-        const nY = wordsY + 28;
         doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
-           .text('NOTES', 40, nY, { characterSpacing: 0.8 });
-        doc.moveTo(40, nY + 9).lineTo(555, nY + 9)
+           .text('NOTES', 40, notesY, { characterSpacing: 0.8 });
+        doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9)
            .lineWidth(0.5).strokeColor('#dde4ef').stroke();
         doc.fontSize(8).fillColor('#000000').font('Helvetica')
-           .text(salesOrder.customerNotes, 40, nY + 14, { width: pageW });
+           .text(salesOrder.customerNotes, 40, notesY + 14, { width: pageW });
+        notesY += 40;
       }
 
-      // ── Terms ─────────────────────────────────────────────────────────────
+      // Terms
       if (salesOrder.termsAndConditions) {
-        const tcY = 660;
+        const tcY = notesY + 6;
         doc.rect(40, tcY, pageW, 14).fill('#f9f9f9').stroke();
         doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
            .text('TERMS & CONDITIONS', 48, tcY + 3, { characterSpacing: 0.8 });
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
            .text(salesOrder.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
+        notesY = tcY + 30;
       }
 
-      // ── Footer ────────────────────────────────────────────────────────────
+      // Authorized Signatory
+      const signSectionY = notesY + 10;
+      const signBoxW     = 220;
+      const authBoxX     = 555 - signBoxW;
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      doc.moveTo(authBoxX, signSectionY + 30)
+         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+         .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+
+      // Footer
       const footY = 760;
-      doc.moveTo(40, footY).lineTo(555, footY)
-         .lineWidth(1.5).strokeColor('#dde4ef').stroke();
+      doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
          .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${salesOrder.salesOrderNumber}`,
                40, footY + 6, { width: pageW / 2 });
@@ -646,13 +784,14 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
                40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
-
       stream.on('finish', () => {
+        console.log(`✅ Sales Order PDF generated: ${filename}`);
         resolve({ filename, filepath, relativePath: `/uploads/sales-orders/${filename}` });
       });
       stream.on('error', reject);
 
     } catch (error) {
+      console.error('❌ Sales Order PDF error:', error);
       reject(error);
     }
   });
@@ -1411,6 +1550,45 @@ router.post('/:id/send', [
   }
 });
 
+// PATCH /api/sales-orders/:id/mark-as-sent - Mark as sent without sending email
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const salesOrder = await SalesOrder.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    if (!salesOrder) return res.status(404).json({ success: false, message: 'Sales order not found' });
+    if (salesOrder.status === 'DRAFT') salesOrder.status = 'OPEN';
+    salesOrder.emailsSent.push({ sentTo: salesOrder.customerEmail || '', sentAt: new Date(), emailType: 'sales_order' });
+    await salesOrder.save();
+    res.json({ success: true, message: 'Sales order marked as sent', data: salesOrder });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to mark as sent', error: error.message });
+  }
+});
+
+// GET /api/sales-orders/:id/pdf - Preview/download sales order PDF (used by document_preview_buttons)
+router.get('/:id/pdf', async (req, res) => {
+  if (!req.user && req.query.token) {
+    try {
+      const jwt = require('jsonwebtoken');
+      req.user  = jwt.verify(req.query.token, process.env.FINANCE_JWT_SECRET || process.env.JWT_SECRET);
+    } catch (e) { return res.status(401).json({ success: false, message: 'Invalid token' }); }
+  }
+  try {
+    const salesOrder = await SalesOrder.findOne({
+      _id: req.params.id,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    });
+    if (!salesOrder) return res.status(404).json({ success: false, message: 'Sales order not found' });
+    const pdfInfo = await generateSalesOrderPDF(salesOrder, req.user?.orgId);
+    salesOrder.pdfPath        = pdfInfo.filepath;
+    salesOrder.pdfGeneratedAt = new Date();
+    await salesOrder.save();
+    res.download(pdfInfo.filepath, `${salesOrder.salesOrderNumber}.pdf`);
+  } catch (error) {
+    console.error('Error generating sales order PDF:', error);
+    res.status(500).json({ success: false, message: 'Failed to generate PDF', error: error.message });
+  }
+});
+
 // GET /api/sales-orders/:id/download - Download PDF
 router.get('/:id/download', [
   param('id').isMongoId().withMessage('Invalid sales order ID'),
@@ -1509,11 +1687,11 @@ router.post('/:id/convert-to-invoice', [
       });
     }
 
+    const orgId = req.user?.orgId || null;
     const Invoice = mongoose.model('Invoice');
 
-    // Generate invoice number
     const { generateNumber } = require('../utils/numberGenerator');
-    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId || null);
+    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId);
 
     const invoiceDate = new Date();
     const dueDate = new Date(invoiceDate);
@@ -1526,8 +1704,6 @@ router.post('/:id/convert-to-invoice', [
       case 'Net 60': dueDate.setDate(dueDate.getDate() + 60); break;
       default: dueDate.setDate(dueDate.getDate() + 30);
     }
-
-    const orgId = req.user?.orgId;
 
     // ✅ Convert customerId safely to string to avoid ObjectId cast error
     const customerId = salesOrder.customerId

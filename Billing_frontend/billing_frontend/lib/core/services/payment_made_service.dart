@@ -417,7 +417,18 @@ class PaymentMadeService {
         jsonDecode(response.body)['data']);
   }
 
-// ── Vendor Phone (live lookup from DB) ────────────────────────────────────
+  // ── Mark as Sent ─────────────────────────────────────────────────────────
+
+  static Future<void> markPaymentAsSent(String id) async {
+    final headers = await _getHeaders();
+    final response = await http.patch(
+      Uri.parse('$_endpoint/$id/mark-sent'),
+      headers: headers,
+    );
+    _checkStatus(response);
+  }
+
+  // ── Vendor Phone (live lookup from DB) ────────────────────────────────────
 static Future<String> getVendorPhone(String paymentId) async {
   final headers = await _getHeaders();
   final response = await http.get(

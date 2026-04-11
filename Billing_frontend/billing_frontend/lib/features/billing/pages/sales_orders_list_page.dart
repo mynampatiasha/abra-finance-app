@@ -323,6 +323,35 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
     }
   }
 
+  // ── mark as sent ──────────────────────────────────────────────────────────
+
+  Future<void> _markSalesOrderAsSent(SalesOrder so) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this sales order as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await SalesOrderService.markAsSent(so.id);
+      _showSuccess('Sales order marked as sent');
+      _loadAll();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
+  }
+
   // ── raise ticket ──────────────────────────────────────────────────────────
 
   void _raiseTicket([SalesOrder? so]) {
@@ -977,6 +1006,8 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
                 _menuItem('send',  Icons.send_outlined,          _blue,   'Send'),
               _menuItem('pdf',     Icons.download_outlined,      _green,  'Download PDF'),
               if (so.status == 'DRAFT' || so.status == 'OPEN')
+                _menuItem('markSent', Icons.mark_email_read_outlined, _navy, 'Mark as Sent'),
+              if (so.status == 'DRAFT' || so.status == 'OPEN')
                 _menuItem('confirm', Icons.check_circle_outline, _green,  'Confirm Order'),
               if (['CONFIRMED','OPEN','PACKED','SHIPPED'].contains(so.status))
                 _menuItem('convert', Icons.receipt_long_outlined, _green, 'Convert to Invoice'),
@@ -989,6 +1020,7 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
                 case 'edit':    _openEdit(so.id);        break;
                 case 'send':    _send(so);               break;
                 case 'pdf':     _downloadPDF(so);        break;
+                case 'markSent': _markSalesOrderAsSent(so); break;
                 case 'confirm': _confirm(so);            break;
                 case 'convert': _convertToInvoice(so);  break;
                 case 'ticket':  _raiseTicket(so);        break;

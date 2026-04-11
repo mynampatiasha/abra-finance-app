@@ -46,6 +46,9 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
   String? _selectedCustomerName;
   String? _selectedCustomerEmail;
   String? _selectedCustomerPhone;
+  String _customerGSTIN       = '';
+  String _customerPAN         = '';
+  String _gstRegistrationType = '';
   DateTime _salesOrderDate = DateTime.now();
   DateTime? _expectedShipmentDate;
   String _paymentTerms = 'Net 30';
@@ -221,8 +224,11 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
       'customerId': _selectedCustomerId,
       'customerName': _selectedCustomerName,
       'customerEmail': _selectedCustomerEmail,
-      'customerPhone': _selectedCustomerPhone ?? '',
-      'referenceNumber': _referenceNumberController.text.trim(),
+      'customerPhone':        _selectedCustomerPhone ?? '',
+      'customerGSTIN':        _customerGSTIN,
+      'customerPAN':          _customerPAN,
+      'gstRegistrationType':  _gstRegistrationType,
+      'referenceNumber':      _referenceNumberController.text.trim(),
       'salesOrderDate': _salesOrderDate.toIso8601String(),
       'expectedShipmentDate': _expectedShipmentDate?.toIso8601String(),
       'paymentTerms': _paymentTerms,
@@ -237,6 +243,48 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
       'gstRate': _enableGST ? _gstRate : 0,
       'status': status,
     };
+  }
+
+  Future<void> _markAsSent() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedCustomerId == null) { _showErrorSnackbar('Please select a customer'); return; }
+    if (!_validateItems()) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this sales order as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = _buildSalesOrderData('OPEN');
+      SalesOrder so;
+      if (widget.salesOrderId != null) {
+        so = await SalesOrderService.updateSalesOrder(widget.salesOrderId!, data);
+      } else {
+        so = await SalesOrderService.createSalesOrder(data);
+      }
+      await SalesOrderService.markAsSent(so.id);
+      _showSuccessSnackbar('Sales order marked as sent');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showErrorSnackbar('Failed to mark as sent: $e');
+    } finally {
+      setState(() => _isSaving = false);
+    }
   }
 
   Future<void> _saveAsDraft() async {
@@ -330,13 +378,24 @@ Widget build(BuildContext context) {
 
   return Scaffold(
     backgroundColor: Colors.grey[100],
-    appBar: AppBar(
-      title: Text(
-        widget.salesOrderId != null ? 'Edit Sales Order' : 'New Sales Order',
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-      ),
-      backgroundColor: const Color(0xFF1e3a8a),
-      foregroundColor: Colors.white,
+    appBar: PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_navyDark, _navyMid, _navyLight],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+        ),
+        child: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          foregroundColor: Colors.white,
+          title: Text(
+            widget.salesOrderId != null ? 'Edit Sales Order' : 'New Sales Order',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
       actions: [
         IconButton(
           tooltip: 'View PDF',
@@ -354,6 +413,16 @@ Widget build(BuildContext context) {
           label: const Text('Save as Draft', style: TextStyle(color: Colors.white70, fontSize: 13)),
         ),
         const SizedBox(width: 6),
+        OutlinedButton.icon(
+          onPressed: _isSaving ? null : _markAsSent,
+          icon: const Icon(Icons.mark_email_read_outlined, size: 16, color: Colors.white70),
+          label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: Colors.white38),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          ),
+        ),
+        const SizedBox(width: 6),
         Padding(
           padding: const EdgeInsets.only(right: 12),
           child: ElevatedButton.icon(
@@ -367,7 +436,9 @@ Widget build(BuildContext context) {
             ),
           ),
         ),
-      ],
+        ],
+        ),
+      ),
     ),
     body: _isLoading
         ? const Center(child: CircularProgressIndicator())
@@ -435,62 +506,59 @@ Widget build(BuildContext context) {
 }
 
   Widget _buildCustomerSection() {
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Customer Information',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1e3a8a)),
-        ),
-        const SizedBox(height: 12),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(10),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(gradient: const LinearGradient(colors: [_navyDark, _navyLight]), borderRadius: BorderRadius.circular(6)),
+            child: const Icon(Icons.person_outline, color: Colors.white, size: 18)),
+          const SizedBox(width: 10),
+          const Text('Customer Information', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+        ]),
+        const SizedBox(height: 16),
         InkWell(
-          onTap: () => _showCustomerSelector(),
+          onTap: _showCustomerSelector,
           child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.person_outline, color: Color(0xFF1e3a8a), size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _selectedCustomerName ?? 'Select Customer *',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: _selectedCustomerName != null ? const Color(0xFF2C3E50) : Colors.grey[600],
-                      fontWeight: _selectedCustomerName != null ? FontWeight.w500 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down, color: Colors.grey),
-              ],
-            ),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              const Icon(Icons.person_outline, color: _navyAccent), const SizedBox(width: 12),
+              Expanded(child: Text(_selectedCustomerName ?? 'Select Customer *',
+                  style: TextStyle(fontSize: 15,
+                      color: _selectedCustomerName != null ? _navyDark : Colors.grey[600],
+                      fontWeight: _selectedCustomerName != null ? FontWeight.w600 : FontWeight.normal))),
+              const Icon(Icons.arrow_drop_down, color: Colors.grey),
+            ]),
           ),
         ),
         if (_selectedCustomerEmail != null) ...[
           const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.email_outlined, size: 16, color: Colors.grey),
-              const SizedBox(width: 6),
-              Text(_selectedCustomerEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
-            ],
-          ),
+          Row(children: [const Icon(Icons.email_outlined, size: 16, color: Colors.grey), const SizedBox(width: 6),
+            Text(_selectedCustomerEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13))]),
         ],
-      ],
-    ),
-  );
-}
+        if (_customerGSTIN.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            const Icon(Icons.business, size: 16, color: Colors.grey), const SizedBox(width: 6),
+            Text('GSTIN: $_customerGSTIN', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+            if (_customerPAN.isNotEmpty) ...[const SizedBox(width: 16),
+              Text('PAN: $_customerPAN', style: TextStyle(color: Colors.grey[700], fontSize: 13))],
+          ]),
+        ],
+        if (_gstRegistrationType.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: _navyAccent.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
+            child: Text(_gstRegistrationType, style: TextStyle(fontSize: 12, color: _navyMid, fontWeight: FontWeight.w500))),
+        ],
+      ]),
+    );
+  }
 
   Widget _buildSalesOrderDetailsSection() {
   return Container(
@@ -1230,10 +1298,13 @@ Widget _buildInfoPair(String label, String value) {
                                         subtitle: Text(customer.customerEmail),
                                         onTap: () {
                                           setState(() {
-                                            _selectedCustomerId = customer.id;
-                                            _selectedCustomerName = customer.customerName;
+                                            _selectedCustomerId    = customer.id;
+                                            _selectedCustomerName  = customer.customerName;
                                             _selectedCustomerEmail = customer.customerEmail;
                                             _selectedCustomerPhone = customer.customerPhone;
+                                            _customerGSTIN         = customer.gstNumber;
+                                            _customerPAN           = customer.panNumber;
+                                            _gstRegistrationType   = customer.gstRegistrationType;
                                           });
                                           Navigator.pop(context);
                                         },

@@ -1,8 +1,7 @@
 // ============================================================================
-// NEW PROJECT SCREEN — Time Tracking Module
+// NEW PROJECT SCREEN — UPDATED (Task deadline + status + completion + staff)
 // ============================================================================
 // File: lib/screens/billing/pages/new_project.dart
-// UI Pattern: new_credit_note.dart (AppBar + left content + right sidebar)
 // ============================================================================
 
 import 'package:flutter/material.dart';
@@ -13,9 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/project_service.dart';
 import '../../../../core/services/billing_customers_service.dart';
 import '../../../../app/config/api_config.dart';
-import '../../billing/pages/projects_list_page.dart' show _navy;
 
-// ignore colours already defined in projects_list_page
 const Color _npNavy   = Color(0xFF1e3a8a);
 const Color _npGreen  = Color(0xFF27AE60);
 const Color _npBlue   = Color(0xFF2980B9);
@@ -34,16 +31,14 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false, _isSaving = false;
 
-  // ── controllers ────────────────────────────────────────────────────────────
-  final _projectNameCtrl      = TextEditingController();
-  final _descriptionCtrl      = TextEditingController();
-  final _fixedAmountCtrl      = TextEditingController();
-  final _hourlyRateCtrl       = TextEditingController();
-  final _budgetAmountCtrl     = TextEditingController();
-  final _notesCtrl            = TextEditingController();
-  final _termsCtrl            = TextEditingController();
+  final _projectNameCtrl  = TextEditingController();
+  final _descriptionCtrl  = TextEditingController();
+  final _fixedAmountCtrl  = TextEditingController();
+  final _hourlyRateCtrl   = TextEditingController();
+  final _budgetAmountCtrl = TextEditingController();
+  final _notesCtrl        = TextEditingController();
+  final _termsCtrl        = TextEditingController();
 
-  // ── form state ─────────────────────────────────────────────────────────────
   String? _selectedCustomerId, _selectedCustomerName, _selectedCustomerEmail, _selectedCustomerPhone;
   String _billingMethod = 'Fixed Cost';
   String _budgetType    = 'Cost';
@@ -52,10 +47,7 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   DateTime _startDate   = DateTime.now();
   DateTime? _endDate;
 
-  // ── tasks ──────────────────────────────────────────────────────────────────
-  List<_TaskRow> _tasks = [];
-
-  // ── staff ──────────────────────────────────────────────────────────────────
+  List<_TaskRow>  _tasks = [];
   List<_StaffRow> _staff = [];
   List<Map<String, dynamic>> _availableStaff = [];
   bool _loadingStaff = false;
@@ -64,6 +56,7 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   final List<String> _budgetTypes    = ['Cost', 'Revenue', 'Hours'];
   final List<String> _statusOptions  = ['Active', 'Inactive', 'Completed', 'On Hold'];
   final List<String> _currencies     = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
+  final List<String> _taskStatuses   = ['Open', 'In Progress', 'Completed'];
 
   @override
   void initState() {
@@ -83,43 +76,14 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   Future<void> _loadStaff() async {
     setState(() => _loadingStaff = true);
     try {
-      // Fetch billing users — same endpoint as ERP users management
-      final prefs = await _getPrefs();
-      final token = prefs['token'] ?? '';
-      final url   = '${_getBaseUrl()}/api/finance/users';
-      final resp  = await _httpGet(url, token);
-      if (resp['success'] == true) {
-        setState(() {
-          _availableStaff = List<Map<String, dynamic>>.from(resp['data'] ?? []);
-          _loadingStaff   = false;
-        });
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+      final res   = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/finance/users'), headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'});
+      final body  = json.decode(res.body) as Map<String, dynamic>;
+      if (body['success'] == true) {
+        setState(() { _availableStaff = List<Map<String, dynamic>>.from(body['data'] ?? []); _loadingStaff = false; });
       } else { setState(() => _loadingStaff = false); }
     } catch (_) { setState(() => _loadingStaff = false); }
-  }
-
-  Future<Map<String, dynamic>> _getPrefs() async {
-    final prefs = await _sharedPrefs();
-    return {
-      'token': prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '',
-    };
-  }
-
-  // ignore: unused_element
-  dynamic _sharedPrefs() async {
-    return await SharedPreferences.getInstance();
-  }
-
-  Future<dynamic> _loadSharedPreferences() async {
-    return SharedPreferences.getInstance();
-  }
-
-  String _getBaseUrl() {
-    return ApiConfig.baseUrl;
-  }
-
-  Future<Map<String, dynamic>> _httpGet(String url, String token) async {
-    final res = await http.get(Uri.parse(url), headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'});
-    return json.decode(res.body) as Map<String, dynamic>;
   }
 
   Future<void> _loadProject() async {
@@ -127,8 +91,8 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     try {
       final project = await ProjectService.getProject(widget.projectId!);
       setState(() {
-        _selectedCustomerId   = project.customerId;
-        _selectedCustomerName = project.customerName;
+        _selectedCustomerId    = project.customerId;
+        _selectedCustomerName  = project.customerName;
         _selectedCustomerEmail = project.customerEmail;
         _selectedCustomerPhone = project.customerPhone;
         _projectNameCtrl.text  = project.projectName;
@@ -143,8 +107,14 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
         _endDate               = project.endDate;
         _status                = project.status;
         _notesCtrl.text        = project.notes;
-        _termsCtrl.text        = project.notes;
-        _tasks = project.tasks.map((t) => _TaskRow(taskId: t.taskId, taskName: t.taskName, hourlyRate: t.hourlyRate, estimatedHours: t.estimatedHours)).toList();
+        _tasks = project.tasks.map((t) => _TaskRow(
+          taskId: t.taskId, taskName: t.taskName, hourlyRate: t.hourlyRate,
+          estimatedHours: t.estimatedHours, taskStatus: t.status,
+          completionPercent: (t as dynamic).completionPercent?.toDouble() ?? 0,
+          deadline: (t as dynamic).deadline,
+          assignedStaffId: (t as dynamic).assignedStaffId ?? '',
+          assignedStaffName: (t as dynamic).assignedStaffName ?? '',
+        )).toList();
         _staff = project.staff.map((s) => _StaffRow(userId: s.userId, name: s.name, email: s.email, role: s.role, hourlyRate: s.hourlyRate)).toList();
         _isLoading = false;
       });
@@ -154,78 +124,57 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     }
   }
 
-  // ── calculated summary ─────────────────────────────────────────────────────
   double get _estimatedAmount {
     switch (_billingMethod) {
       case 'Fixed Cost': return double.tryParse(_fixedAmountCtrl.text) ?? 0;
-      case 'Based on Project Hours': {
-        final rate = double.tryParse(_hourlyRateCtrl.text) ?? 0;
-        final hrs  = _tasks.fold(0.0, (s, t) => s + t.estimatedHours);
-        return rate * hrs;
-      }
-      case 'Based on Task Hours':
-        return _tasks.fold(0.0, (s, t) => s + t.hourlyRate * t.estimatedHours);
-      case 'Based on Staff Hours':
-        return _staff.fold(0.0, (s, m) => s + m.hourlyRate * 40); // 40 hrs/week estimate
+      case 'Based on Project Hours': return (double.tryParse(_hourlyRateCtrl.text) ?? 0) * _tasks.fold(0.0, (s, t) => s + t.estimatedHours);
+      case 'Based on Task Hours':   return _tasks.fold(0.0, (s, t) => s + t.hourlyRate * t.estimatedHours);
+      case 'Based on Staff Hours':  return _staff.fold(0.0, (s, m) => s + m.hourlyRate * 40);
       default: return 0;
     }
   }
 
   double get _estimatedHours => _tasks.fold(0.0, (s, t) => s + t.estimatedHours);
 
-  // ── save ───────────────────────────────────────────────────────────────────
   Future<void> _save(String status) async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedCustomerId == null) { _showError('Please select a customer'); return; }
-    if (_projectNameCtrl.text.trim().isEmpty) { _showError('Project name is required'); return; }
-
     setState(() => _isSaving = true);
     try {
       final data = {
-        'projectName':       _projectNameCtrl.text.trim(),
-        'customerId':        _selectedCustomerId,
-        'customerName':      _selectedCustomerName,
-        'customerEmail':     _selectedCustomerEmail ?? '',
-        'customerPhone':     _selectedCustomerPhone ?? '',
-        'description':       _descriptionCtrl.text.trim(),
-        'billingMethod':     _billingMethod,
-        'fixedAmount':       double.tryParse(_fixedAmountCtrl.text)  ?? 0,
-        'hourlyRate':        double.tryParse(_hourlyRateCtrl.text)   ?? 0,
-        'budgetType':        _budgetType,
-        'budgetAmount':      double.tryParse(_budgetAmountCtrl.text) ?? 0,
-        'currency':          _currency,
-        'startDate':         _startDate.toIso8601String(),
-        'endDate':           _endDate?.toIso8601String(),
-        'status':            status,
-        'notes':             _notesCtrl.text.trim(),
+        'projectName':        _projectNameCtrl.text.trim(),
+        'customerId':         _selectedCustomerId,
+        'customerName':       _selectedCustomerName,
+        'customerEmail':      _selectedCustomerEmail ?? '',
+        'customerPhone':      _selectedCustomerPhone ?? '',
+        'description':        _descriptionCtrl.text.trim(),
+        'billingMethod':      _billingMethod,
+        'fixedAmount':        double.tryParse(_fixedAmountCtrl.text)  ?? 0,
+        'hourlyRate':         double.tryParse(_hourlyRateCtrl.text)   ?? 0,
+        'budgetType':         _budgetType,
+        'budgetAmount':       double.tryParse(_budgetAmountCtrl.text) ?? 0,
+        'currency':           _currency,
+        'startDate':          _startDate.toIso8601String(),
+        'endDate':            _endDate?.toIso8601String(),
+        'status':             status,
+        'notes':              _notesCtrl.text.trim(),
         'termsAndConditions': _termsCtrl.text.trim(),
         'tasks': _tasks.where((t) => t.taskName.isNotEmpty).map((t) => t.toJson()).toList(),
         'staff': _staff.where((s) => s.userId.isNotEmpty).map((s) => s.toJson()).toList(),
       };
-
       if (widget.projectId != null) {
         await ProjectService.updateProject(widget.projectId!, data);
       } else {
         await ProjectService.createProject(data);
       }
-
       _showSuccess(widget.projectId != null ? 'Project updated!' : 'Project created!');
       if (mounted) Navigator.pop(context, true);
     } catch (e) { _showError(e.toString()); }
     finally    { setState(() => _isSaving = false); }
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _npRed, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
-  }
-
-  void _showSuccess(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _npGreen, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
-  }
-
-  // ==========================================================================
-  // BUILD
-  // ==========================================================================
+  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _npRed, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
+  void _showSuccess(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _npGreen, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
 
   @override
   Widget build(BuildContext context) {
@@ -233,8 +182,7 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: Text(widget.projectId != null ? 'Edit Project' : 'New Project', style: const TextStyle(fontSize: 16)),
-        backgroundColor: const Color(0xFF1e3a8a),
-        foregroundColor: Colors.white,
+        backgroundColor: _npNavy, foregroundColor: Colors.white,
         actions: [
           TextButton.icon(onPressed: _isSaving ? null : () => _save('Inactive'), icon: const Icon(Icons.save_outlined, color: Colors.white70, size: 18), label: const Text('Save as Draft', style: TextStyle(color: Colors.white70, fontSize: 13))),
           const SizedBox(width: 6),
@@ -279,7 +227,6 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     );
   }
 
-  // ── customer section ───────────────────────────────────────────────────────
   Widget _buildCustomerSection() {
     return _card('Customer Information', Icons.person_outline, _npBlue, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       InkWell(onTap: _showCustomerSelector, child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(8)),
@@ -293,11 +240,9 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     ]));
   }
 
-  // ── project details ────────────────────────────────────────────────────────
   Widget _buildProjectDetailsSection() {
     return _card('Project Details', Icons.folder_outlined, _npNavy, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TextFormField(controller: _projectNameCtrl, decoration: _dec('Project Name *', Icons.folder_outlined),
-          validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+      TextFormField(controller: _projectNameCtrl, decoration: _dec('Project Name *', Icons.folder_outlined), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
       const SizedBox(height: 14),
       TextFormField(controller: _descriptionCtrl, decoration: _dec('Description', Icons.notes_outlined), maxLines: 3),
       const SizedBox(height: 14),
@@ -324,36 +269,26 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
       ]),
       const SizedBox(height: 14),
       Row(children: [
-        Expanded(child: DropdownButtonFormField<String>(value: _status, decoration: _dec('Status', Icons.info_outline),
-            items: _statusOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) { if (v != null) setState(() => _status = v); })),
+        Expanded(child: DropdownButtonFormField<String>(value: _status, decoration: _dec('Status', Icons.info_outline), items: _statusOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) { if (v != null) setState(() => _status = v); })),
         const SizedBox(width: 12),
-        Expanded(child: DropdownButtonFormField<String>(value: _currency, decoration: _dec('Currency', Icons.currency_rupee_outlined),
-            items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) { if (v != null) setState(() => _currency = v); })),
+        Expanded(child: DropdownButtonFormField<String>(value: _currency, decoration: _dec('Currency', Icons.currency_rupee_outlined), items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) { if (v != null) setState(() => _currency = v); })),
       ]),
     ]));
   }
 
-  // ── billing method section (sidebar) ──────────────────────────────────────
   Widget _buildBillingMethodSection() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Billing Method', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
       const SizedBox(height: 12),
       ..._billingMethods.map((method) {
         final isSelected = _billingMethod == method;
-        final descriptions = {
-          'Fixed Cost':              'One flat fee for the entire project',
-          'Based on Project Hours':  'Total hours × one project rate',
-          'Based on Task Hours':     'Hours × per-task rate',
-          'Based on Staff Hours':    'Hours × per-staff member rate',
-        };
+        final descriptions = { 'Fixed Cost': 'One flat fee', 'Based on Project Hours': 'Total hours × one rate', 'Based on Task Hours': 'Hours × per-task rate', 'Based on Staff Hours': 'Hours × per-staff rate' };
         return GestureDetector(onTap: () => setState(() => _billingMethod = method),
           child: AnimatedContainer(duration: const Duration(milliseconds: 200),
             margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: isSelected ? _npNavy.withOpacity(0.07) : Colors.white, borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: isSelected ? _npNavy : Colors.grey[300]!, width: isSelected ? 2 : 1)),
+            decoration: BoxDecoration(color: isSelected ? _npNavy.withOpacity(0.07) : Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: isSelected ? _npNavy : Colors.grey[300]!, width: isSelected ? 2 : 1)),
             child: Row(children: [
-              Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: isSelected ? _npNavy : Colors.grey[400]!, width: 2), color: isSelected ? _npNavy : Colors.white),
-                  child: isSelected ? const Icon(Icons.check, size: 12, color: Colors.white) : null),
+              Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: isSelected ? _npNavy : Colors.grey[400]!, width: 2), color: isSelected ? _npNavy : Colors.white), child: isSelected ? const Icon(Icons.check, size: 12, color: Colors.white) : null),
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(method, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? _npNavy : const Color(0xFF2C3E50))),
@@ -361,35 +296,22 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
               ])),
             ])));
       }).toList(),
-      if (_billingMethod == 'Fixed Cost') ...[
-        const SizedBox(height: 12),
-        TextFormField(controller: _fixedAmountCtrl, decoration: _dec('Fixed Amount (₹) *', Icons.currency_rupee_outlined),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            validator: (v) => _billingMethod == 'Fixed Cost' && (v == null || v.isEmpty) ? 'Required for Fixed Cost' : null),
-      ],
-      if (_billingMethod == 'Based on Project Hours') ...[
-        const SizedBox(height: 12),
-        TextFormField(controller: _hourlyRateCtrl, decoration: _dec('Project Hourly Rate (₹/hr) *', Icons.access_time_outlined),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            validator: (v) => _billingMethod == 'Based on Project Hours' && (v == null || v.isEmpty) ? 'Required' : null),
-      ],
+      if (_billingMethod == 'Fixed Cost') ...[const SizedBox(height: 12), TextFormField(controller: _fixedAmountCtrl, decoration: _dec('Fixed Amount (₹) *', Icons.currency_rupee_outlined), keyboardType: const TextInputType.numberWithOptions(decimal: true), validator: (v) => _billingMethod == 'Fixed Cost' && (v == null || v.isEmpty) ? 'Required' : null)],
+      if (_billingMethod == 'Based on Project Hours') ...[const SizedBox(height: 12), TextFormField(controller: _hourlyRateCtrl, decoration: _dec('Hourly Rate (₹/hr) *', Icons.access_time_outlined), keyboardType: const TextInputType.numberWithOptions(decimal: true))],
     ]);
   }
 
-  // ── budget section (sidebar) ───────────────────────────────────────────────
   Widget _buildBudgetSection() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Budget', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
       const SizedBox(height: 12),
-      DropdownButtonFormField<String>(value: _budgetType, decoration: _dec('Budget Type', Icons.account_balance_wallet_outlined),
-          items: _budgetTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), onChanged: (v) { if (v != null) setState(() => _budgetType = v); }),
+      DropdownButtonFormField<String>(value: _budgetType, decoration: _dec('Budget Type', Icons.account_balance_wallet_outlined), items: _budgetTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), onChanged: (v) { if (v != null) setState(() => _budgetType = v); }),
       const SizedBox(height: 12),
-      TextFormField(controller: _budgetAmountCtrl, decoration: _dec('Budget Amount', Icons.attach_money_outlined),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+      TextFormField(controller: _budgetAmountCtrl, decoration: _dec('Budget Amount', Icons.attach_money_outlined), keyboardType: const TextInputType.numberWithOptions(decimal: true)),
     ]);
   }
 
-  // ── tasks section ──────────────────────────────────────────────────────────
+  // ── TASKS SECTION — UPDATED ────────────────────────────────────────────────
   Widget _buildTasksSection() {
     return _card('Tasks', Icons.task_outlined, _npBlue, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -397,32 +319,75 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
         ElevatedButton.icon(onPressed: () => setState(() => _tasks.add(_TaskRow())), icon: const Icon(Icons.add, size: 16), label: const Text('Add Task'),
             style: ElevatedButton.styleFrom(backgroundColor: _npBlue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), minimumSize: Size.zero)),
       ]),
-      if (_tasks.isEmpty) ...[const SizedBox(height: 16), Center(child: Text('No tasks added. Click "Add Task" to add tasks.', style: TextStyle(color: Colors.grey[500], fontSize: 13)))]
+      if (_tasks.isEmpty) ...[const SizedBox(height: 16), Center(child: Text('No tasks added yet.', style: TextStyle(color: Colors.grey[500], fontSize: 13)))]
       else ...[const SizedBox(height: 12), ..._tasks.asMap().entries.map((e) => _buildTaskRow(e.key, e.value)).toList()],
     ]));
   }
 
   Widget _buildTaskRow(int index, _TaskRow task) {
-    return Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+    return Container(margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: const Color(0xFFF7F9FC), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
-      child: Column(children: [
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Row 1: Name + delete
         Row(children: [
-          Expanded(flex: 3, child: TextFormField(initialValue: task.taskName, decoration: InputDecoration(labelText: 'Task Name', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))), onChanged: (v) => task.taskName = v)),
+          Expanded(child: TextFormField(initialValue: task.taskName, decoration: InputDecoration(labelText: 'Task Name', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))), onChanged: (v) => task.taskName = v)),
+          const SizedBox(width: 8),
+          IconButton(icon: const Icon(Icons.delete_outline, color: _npRed, size: 20), onPressed: () => setState(() => _tasks.removeAt(index)), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+        ]),
+        const SizedBox(height: 8),
+        // Row 2: Hours + Rate (conditional) + Status
+        Row(children: [
+          Expanded(child: TextFormField(initialValue: task.estimatedHours > 0 ? task.estimatedHours.toStringAsFixed(1) : '', decoration: InputDecoration(labelText: 'Est. Hrs', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) { task.estimatedHours = double.tryParse(v) ?? 0; setState(() {}); })),
           const SizedBox(width: 8),
           if (_billingMethod == 'Based on Task Hours') ...[
-            SizedBox(width: 110, child: TextFormField(initialValue: task.hourlyRate > 0 ? task.hourlyRate.toStringAsFixed(2) : '', decoration: InputDecoration(labelText: '₹/hr', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+            Expanded(child: TextFormField(initialValue: task.hourlyRate > 0 ? task.hourlyRate.toStringAsFixed(2) : '', decoration: InputDecoration(labelText: '₹/hr', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) { task.hourlyRate = double.tryParse(v) ?? 0; setState(() {}); })),
             const SizedBox(width: 8),
           ],
-          SizedBox(width: 100, child: TextFormField(initialValue: task.estimatedHours > 0 ? task.estimatedHours.toStringAsFixed(1) : '', decoration: InputDecoration(labelText: 'Est. Hrs', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) { task.estimatedHours = double.tryParse(v) ?? 0; setState(() {}); })),
-          const SizedBox(width: 4),
-          IconButton(icon: const Icon(Icons.delete_outline, color: _npRed, size: 20), onPressed: () => setState(() => _tasks.removeAt(index)), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+          Expanded(child: DropdownButtonFormField<String>(value: task.taskStatus, decoration: InputDecoration(labelText: 'Status', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+              items: _taskStatuses.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13)))).toList(), onChanged: (v) { if (v != null) setState(() => task.taskStatus = v); })),
+        ]),
+        const SizedBox(height: 8),
+        // Row 3: Assign Staff + Deadline
+        Row(children: [
+          Expanded(child: _loadingStaff
+              ? const SizedBox(height: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+              : DropdownButtonFormField<String>(
+                  value: task.assignedStaffId.isNotEmpty ? task.assignedStaffId : null,
+                  decoration: InputDecoration(labelText: 'Assign Staff', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                  items: [const DropdownMenuItem(value: null, child: Text('Unassigned', style: TextStyle(fontSize: 13))), ..._availableStaff.map((u) => DropdownMenuItem<String>(value: u['_id']?.toString() ?? '', child: Text(u['name']?.toString() ?? 'Unknown', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))))],
+                  onChanged: (v) {
+                    setState(() {
+                      task.assignedStaffId = v ?? '';
+                      if (v != null && v.isNotEmpty) {
+                        final user = _availableStaff.firstWhere((u) => u['_id']?.toString() == v, orElse: () => {});
+                        task.assignedStaffName = user['name']?.toString() ?? '';
+                      } else { task.assignedStaffName = ''; }
+                    });
+                  })),
+          const SizedBox(width: 8),
+          Expanded(child: InkWell(onTap: () async {
+            final d = await showDatePicker(context: context, initialDate: task.deadline ?? DateTime.now().add(const Duration(days: 7)), firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime(2035));
+            if (d != null) setState(() => task.deadline = d);
+          }, child: Container(height: 40, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), decoration: BoxDecoration(border: Border.all(color: Colors.grey[400]!), borderRadius: BorderRadius.circular(8)),
+              child: Row(children: [const Icon(Icons.calendar_today, size: 14, color: _npNavy), const SizedBox(width: 6), Expanded(child: Text(task.deadline != null ? DateFormat('dd MMM yy').format(task.deadline!) : 'Deadline', style: TextStyle(fontSize: 12, color: task.deadline != null ? const Color(0xFF2C3E50) : Colors.grey[500])))])))),
+        ]),
+        const SizedBox(height: 8),
+        // Completion slider
+        Row(children: [
+          const Text('Completion:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+          Expanded(child: Slider(
+            value: task.completionPercent.clamp(0.0, 100.0),
+            min: 0, max: 100, divisions: 20,
+            activeColor: task.completionPercent >= 100 ? _npGreen : _npBlue,
+            onChanged: (v) => setState(() => task.completionPercent = v),
+          )),
+          Container(width: 42, alignment: Alignment.center, child: Text('${task.completionPercent.toInt()}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _npNavy))),
         ]),
       ]));
   }
 
-  // ── staff section ──────────────────────────────────────────────────────────
   Widget _buildStaffSection() {
     return _card('Staff Assignments', Icons.people_outline, _npPurple, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -430,7 +395,7 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
         ElevatedButton.icon(onPressed: () => setState(() => _staff.add(_StaffRow())), icon: const Icon(Icons.person_add, size: 16), label: const Text('Add Staff'),
             style: ElevatedButton.styleFrom(backgroundColor: _npPurple, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), minimumSize: Size.zero)),
       ]),
-      if (_staff.isEmpty) ...[const SizedBox(height: 16), Center(child: Text('No staff assigned. Click "Add Staff" to assign team members.', style: TextStyle(color: Colors.grey[500], fontSize: 13)))]
+      if (_staff.isEmpty) ...[const SizedBox(height: 16), Center(child: Text('No staff assigned.', style: TextStyle(color: Colors.grey[500], fontSize: 13)))]
       else ...[const SizedBox(height: 12), ..._staff.asMap().entries.map((e) => _buildStaffRow(e.key, e.value)).toList()],
     ]));
   }
@@ -443,24 +408,17 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
             ? const SizedBox(height: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
             : DropdownButtonFormField<String>(
                 value: staffRow.userId.isNotEmpty ? staffRow.userId : null,
-                decoration: InputDecoration(labelText: 'Select Staff Member', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                decoration: InputDecoration(labelText: 'Staff Member', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
                 items: _availableStaff.map((u) => DropdownMenuItem<String>(value: u['_id']?.toString() ?? '', child: Text(u['name']?.toString() ?? 'Unknown', overflow: TextOverflow.ellipsis))).toList(),
                 onChanged: (v) {
                   if (v != null) {
                     final user = _availableStaff.firstWhere((u) => u['_id']?.toString() == v, orElse: () => {});
-                    setState(() {
-                      staffRow.userId = v;
-                      staffRow.name   = user['name']?.toString()  ?? '';
-                      staffRow.email  = user['email']?.toString() ?? '';
-                      final orgs = user['organizations'] as List? ?? [];
-                      staffRow.role = orgs.isNotEmpty ? (orgs.first['role']?.toString() ?? 'staff') : 'staff';
-                    });
+                    setState(() { staffRow.userId = v; staffRow.name = user['name']?.toString() ?? ''; staffRow.email = user['email']?.toString() ?? ''; final orgs = user['organizations'] as List? ?? []; staffRow.role = orgs.isNotEmpty ? (orgs.first['role']?.toString() ?? 'staff') : 'staff'; });
                   }
-                },
-              )),
+                })),
         const SizedBox(width: 8),
         if (_billingMethod == 'Based on Staff Hours') ...[
-          SizedBox(width: 110, child: TextFormField(initialValue: staffRow.hourlyRate > 0 ? staffRow.hourlyRate.toStringAsFixed(2) : '', decoration: InputDecoration(labelText: '₹/hr', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+          SizedBox(width: 100, child: TextFormField(initialValue: staffRow.hourlyRate > 0 ? staffRow.hourlyRate.toStringAsFixed(2) : '', decoration: InputDecoration(labelText: '₹/hr', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
               keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (v) { staffRow.hourlyRate = double.tryParse(v) ?? 0; setState(() {}); })),
           const SizedBox(width: 8),
         ],
@@ -468,7 +426,6 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
       ]));
   }
 
-  // ── notes section ──────────────────────────────────────────────────────────
   Widget _buildNotesSection() {
     return _card('Additional Information', Icons.notes_outlined, Colors.grey, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextFormField(controller: _notesCtrl, decoration: _dec('Notes / Instructions', Icons.notes_outlined), maxLines: 3),
@@ -477,7 +434,6 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     ]));
   }
 
-  // ── summary section (sidebar) ──────────────────────────────────────────────
   Widget _buildSummarySection() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Project Summary', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
@@ -505,7 +461,6 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     ]);
   }
 
-  // ── shared ─────────────────────────────────────────────────────────────────
   Widget _card(String title, IconData icon, Color color, Widget child) {
     return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -523,46 +478,25 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
   );
 
-  // ── customer selector ──────────────────────────────────────────────────────
   Future<void> _showCustomerSelector() async {
     final TextEditingController searchCtrl = TextEditingController();
-    List<dynamic> customers = [];
-    List<dynamic> filtered  = [];
-    bool isLoading = true;
-
+    List<dynamic> customers = []; List<dynamic> filtered = []; bool isLoading = true;
     showDialog(context: context, builder: (context) => StatefulBuilder(builder: (context, setD) {
       if (isLoading && customers.isEmpty) {
-        BillingCustomersService.getAllCustomers(limit: 200, skipStats: true).then((r) {
-          setD(() {
-            customers = List<dynamic>.from(r['data']?['customers'] ?? []);
-            filtered  = customers;
-            isLoading = false;
-          });
-        }).catchError((e) => setD(() => isLoading = false));
+        BillingCustomersService.getAllCustomers(limit: 200, skipStats: true).then((r) { setD(() { customers = r.customers; filtered = customers; isLoading = false; }); }).catchError((e) => setD(() => isLoading = false));
       }
       return AlertDialog(
         title: const Text('Select Customer'),
         content: SizedBox(width: 500, height: 400, child: Column(children: [
           TextField(controller: searchCtrl, decoration: InputDecoration(hintText: 'Search customers…', prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-              onChanged: (v) => setD(() { filtered = v.isEmpty ? customers : customers.where((c) => (c['customerDisplayName'] ?? '').toLowerCase().contains(v.toLowerCase())).toList(); })),
+              onChanged: (v) => setD(() { filtered = v.isEmpty ? customers : customers.where((c) => (c as dynamic).customerDisplayName.toLowerCase().contains(v.toLowerCase())).toList(); })),
           const SizedBox(height: 12),
           Expanded(child: isLoading ? const Center(child: CircularProgressIndicator()) : filtered.isEmpty ? const Center(child: Text('No customers found'))
               : ListView.builder(itemCount: filtered.length, itemBuilder: (_, i) {
-                  final c = filtered[i];
-                  return ListTile(
-                    leading: CircleAvatar(backgroundColor: _npBlue, child: Text((c['customerDisplayName'] ?? 'C')[0].toUpperCase(), style: const TextStyle(color: Colors.white))),
-                    title: Text(c['customerDisplayName'] ?? ''),
-                    subtitle: Text(c['primaryEmail'] ?? ''),
-                    onTap: () {
-                      setState(() {
-                        _selectedCustomerId    = c['_id']?.toString() ?? c['id']?.toString() ?? '';
-                        _selectedCustomerName  = c['customerDisplayName']?.toString() ?? '';
-                        _selectedCustomerEmail = c['primaryEmail']?.toString() ?? '';
-                        _selectedCustomerPhone = c['primaryPhone']?.toString() ?? '';
-                      });
-                      Navigator.pop(context);
-                    },
-                  );
+                  final c = filtered[i] as BillingCustomer;
+                  return ListTile(leading: CircleAvatar(backgroundColor: _npBlue, child: Text(c.customerDisplayName.isNotEmpty ? c.customerDisplayName[0].toUpperCase() : 'C', style: const TextStyle(color: Colors.white))),
+                    title: Text(c.customerDisplayName), subtitle: Text(c.primaryEmail),
+                    onTap: () { setState(() { _selectedCustomerId = c.id; _selectedCustomerName = c.customerDisplayName; _selectedCustomerEmail = c.primaryEmail; _selectedCustomerPhone = c.primaryPhone; }); Navigator.pop(context); });
                 })),
         ])),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
@@ -571,29 +505,41 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   }
 }
 
-// =============================================================================
-// TASK / STAFF ROW MODELS
-// =============================================================================
+// ── Models ─────────────────────────────────────────────────────────────────────
 
 class _TaskRow {
   String taskId;
   String taskName;
   double hourlyRate;
   double estimatedHours;
+  String taskStatus;
+  double completionPercent;
+  DateTime? deadline;
+  String assignedStaffId;
+  String assignedStaffName;
 
-  _TaskRow({this.taskId = '', this.taskName = '', this.hourlyRate = 0, this.estimatedHours = 0});
+  _TaskRow({
+    this.taskId = '', this.taskName = '', this.hourlyRate = 0,
+    this.estimatedHours = 0, this.taskStatus = 'Open',
+    this.completionPercent = 0, this.deadline,
+    this.assignedStaffId = '', this.assignedStaffName = '',
+  });
 
-  Map<String, dynamic> toJson() => {'taskId': taskId.isNotEmpty ? taskId : 'TASK-${DateTime.now().millisecondsSinceEpoch}', 'taskName': taskName, 'hourlyRate': hourlyRate, 'estimatedHours': estimatedHours};
+  Map<String, dynamic> toJson() => {
+    'taskId':            taskId.isNotEmpty ? taskId : 'TASK-${DateTime.now().millisecondsSinceEpoch}',
+    'taskName':          taskName,
+    'hourlyRate':        hourlyRate,
+    'estimatedHours':    estimatedHours,
+    'status':            taskStatus,
+    'completionPercent': completionPercent,
+    'deadline':          deadline?.toIso8601String(),
+    'assignedStaffId':   assignedStaffId,
+    'assignedStaffName': assignedStaffName,
+  };
 }
 
 class _StaffRow {
-  String userId;
-  String name;
-  String email;
-  String role;
-  double hourlyRate;
-
+  String userId; String name; String email; String role; double hourlyRate;
   _StaffRow({this.userId = '', this.name = '', this.email = '', this.role = 'staff', this.hourlyRate = 0});
-
   Map<String, dynamic> toJson() => {'userId': userId, 'name': name, 'email': email, 'role': role, 'hourlyRate': hourlyRate};
 }

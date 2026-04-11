@@ -31,6 +31,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/services/delivery_challan_service.dart' as challan_svc;
 import '../../../../core/services/invoice_service.dart';
 import '../widgets/document_preview_buttons.dart';
+import 'new_customer.dart';
 
 // Navy gradient colors — exact match to new_payment_made.dart
 const Color _navyDark   = Color(0xFF0D1B3E);
@@ -296,6 +297,54 @@ class _NewDeliveryChallanScreenState
     }
   }
 
+  Future<void> _markAsSent() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedCustomerId == null) {
+      _showErrorSnackbar('Please select a customer'); return;
+    }
+    if (!_validateItems()) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this challan as Sent anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = _buildChallanData('OPEN');
+      challan_svc.DeliveryChallan challan;
+      if (widget.challanId != null) {
+        challan = await challan_svc.DeliveryChallanService
+            .updateDeliveryChallan(widget.challanId!, data);
+      } else {
+        challan = await challan_svc.DeliveryChallanService.createDeliveryChallan(data);
+      }
+      await challan_svc.DeliveryChallanService.markChallanAsSent(challan.id);
+      _showSuccessSnackbar('Challan marked as sent');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showErrorSnackbar(e.toString());
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _saveAndSend() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedCustomerId == null) {
@@ -439,11 +488,11 @@ class _NewDeliveryChallanScreenState
                                         _selectedCustomerEmail = c.customerEmail;
                                         _selectedCustomerPhone = c.customerPhone;
                                         _deliveryAddress = challan_svc.Address(
-                                          street:  c.addressLine1,
-                                          city:    c.city,
-                                          state:   c.state,
-                                          pincode: c.postalCode,
-                                          country: c.country ?? 'India',
+                                          street:  c.billingAddress.street,
+                                          city:    c.billingAddress.city,
+                                          state:   c.billingAddress.state,
+                                          pincode: c.billingAddress.zip,
+                                          country: c.billingAddress.country.isNotEmpty ? c.billingAddress.country : 'India',
                                         );
                                       });
                                       Navigator.pop(ctx);
@@ -454,6 +503,22 @@ class _NewDeliveryChallanScreenState
               ),
             ])),
             actions: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NewCustomerPage()),
+                  );
+                  if (result == true) _showCustomerSelector();
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add New Customer'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navyAccent,
+                  side: const BorderSide(color: _navyAccent),
+                ),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancel'),
@@ -609,6 +674,18 @@ class _NewDeliveryChallanScreenState
                 color: Colors.white70, size: 18),
             label: const Text('Dispatch',
                 style: TextStyle(color: Colors.white70)),
+          ),
+          const SizedBox(width: 8),
+
+          // Mark as Sent
+          OutlinedButton.icon(
+            onPressed: _isSaving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+            label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white38),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
           ),
           const SizedBox(width: 8),
 

@@ -1,5 +1,0 @@
-package com.example.billing_frontend
-
-import io.flutter.embedding.android.FlutterActivity
-
-class MainActivity : FlutterActivity()

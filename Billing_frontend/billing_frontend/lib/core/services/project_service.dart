@@ -149,6 +149,28 @@ class ProjectService {
     return decoded;
   }
 
+  // ── Dashboard ──────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> getDashboard(String id) async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}$_base/$id/dashboard'),
+      headers: await _headers(),
+    );
+    final decoded = _decode(res);
+    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to load dashboard');
+    return decoded['data'] as Map<String, dynamic>;
+  }
+
+  // ── Clone ──────────────────────────────────────────────────────────────────
+  static Future<Project> cloneProject(String id) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}$_base/$id/clone'),
+      headers: await _headers(),
+    );
+    final decoded = _decode(res);
+    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to clone project');
+    return Project.fromJson(decoded['data'] ?? {});
+  }
+
   // ── Export All ─────────────────────────────────────────────────────────────
   static Future<List<Project>> getAllForExport({String? status, String? billingMethod}) async {
     final q = <String, String>{
@@ -246,26 +268,42 @@ class ProjectTask {
   final double estimatedHours;
   final String description;
   final String status;
+  final double completionPercent;
+  final DateTime? deadline;
+  final String assignedStaffId;
+  final String assignedStaffName;
 
   ProjectTask({
     required this.taskId, required this.taskName,
     required this.hourlyRate, required this.estimatedHours,
     required this.description, required this.status,
+    this.completionPercent = 0,
+    this.deadline,
+    this.assignedStaffId = '',
+    this.assignedStaffName = '',
   });
 
   factory ProjectTask.fromJson(Map<String, dynamic> j) => ProjectTask(
-    taskId:         j['taskId']?.toString()     ?? '',
-    taskName:       j['taskName']?.toString()   ?? '',
-    hourlyRate:     (j['hourlyRate']     ?? 0).toDouble(),
-    estimatedHours: (j['estimatedHours'] ?? 0).toDouble(),
-    description:    j['description']?.toString() ?? '',
-    status:         j['status']?.toString()     ?? 'Active',
+    taskId:            j['taskId']?.toString()         ?? '',
+    taskName:          j['taskName']?.toString()       ?? '',
+    hourlyRate:        (j['hourlyRate']     ?? 0).toDouble(),
+    estimatedHours:    (j['estimatedHours'] ?? 0).toDouble(),
+    description:       j['description']?.toString()   ?? '',
+    status:            j['status']?.toString()         ?? 'Active',
+    completionPercent: (j['completionPercent'] ?? 0).toDouble(),
+    deadline:          j['deadline'] != null ? DateTime.tryParse(j['deadline'].toString()) : null,
+    assignedStaffId:   j['assignedStaffId']?.toString()   ?? '',
+    assignedStaffName: j['assignedStaffName']?.toString() ?? '',
   );
 
   Map<String, dynamic> toJson() => {
     'taskId': taskId, 'taskName': taskName,
     'hourlyRate': hourlyRate, 'estimatedHours': estimatedHours,
     'description': description, 'status': status,
+    'completionPercent': completionPercent,
+    'deadline': deadline?.toIso8601String(),
+    'assignedStaffId': assignedStaffId,
+    'assignedStaffName': assignedStaffName,
   };
 }
 

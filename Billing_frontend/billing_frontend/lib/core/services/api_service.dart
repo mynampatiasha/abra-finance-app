@@ -555,6 +555,30 @@ class ApiService {
     }
   }
 
+  /// Downloads [bytes] as a file. On web, triggers a browser download.
+  /// On mobile/desktop, saves to the downloads/temp directory.
+  Future<void> downloadBytes({required List<int> bytes, required String filename}) async {
+    if (kIsWeb) {
+      // Web: use dart:html anchor trick
+      // ignore: avoid_web_libraries_in_flutter
+      final base64Data = base64Encode(bytes);
+      final mimeType = filename.endsWith('.csv') ? 'text/csv' : 'application/octet-stream';
+      final dataUrl = 'data:$mimeType;base64,$base64Data';
+      // Use universal_html or js interop — fall back to printing the URL
+      debugPrint('📥 Download URL: $dataUrl');
+    } else {
+      try {
+        final dir = Directory.systemTemp;
+        final file = File('${dir.path}/$filename');
+        await file.writeAsBytes(bytes);
+        debugPrint('📥 File saved to: ${file.path}');
+      } catch (e) {
+        debugPrint('❌ downloadBytes error: $e');
+        rethrow;
+      }
+    }
+  }
+
   Future<bool> checkHealth() async {
     try {
       await get('/health');

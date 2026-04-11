@@ -469,6 +469,22 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
+    // Cascade-delete the matching COA account that was auto-created on bank creation
+    try {
+      const { ChartOfAccount } = require('./chart_of_accounts');
+      const deleted = await ChartOfAccount.findOneAndDelete({
+        accountName: deletedAccount.accountName,
+        accountSubType: deletedAccount.accountType,
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      });
+      if (deleted) {
+        console.log(`✅ COA account deleted: ${deletedAccount.accountName}`);
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA cascade-delete error:', coaErr.message);
+      // Non-critical — bank account is already deleted
+    }
+
     res.status(200).json({
       success: true,
       message: 'Account deleted successfully',

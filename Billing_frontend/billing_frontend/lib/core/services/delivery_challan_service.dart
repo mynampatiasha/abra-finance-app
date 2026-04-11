@@ -717,4 +717,25 @@ class DeliveryChallanService {
       throw Exception('Network error: ${e.toString()}');
     }
   }
+
+  // ============================================================================
+  // MARK AS SENT
+  // ============================================================================
+
+  static Future<DeliveryChallan> markChallanAsSent(String id) async {
+    try {
+      final uri = Uri.parse('$_baseUrl$_endpoint/$id/mark-as-sent');
+      final response = await http.patch(uri, headers: await _getHeaders());
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return DeliveryChallan.fromJson(data['data']);
+      } else {
+        final error = json.decode(response.body);
+        throw Exception(error['error'] ?? 'Failed to mark challan as sent');
+      }
+    } catch (e) {
+      throw Exception('Network error: ${e.toString()}');
+    }
+  }
 }

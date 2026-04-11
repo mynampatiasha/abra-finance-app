@@ -135,7 +135,7 @@ const accountTransactionSchema = new mongoose.Schema({
   },
   referenceType: {
     type: String,
-    enum: ['Invoice', 'Bill', 'Payment', 'Journal', 'Expense', 'Credit Note', 'Vendor Credit', 'Opening Balance'],
+    enum: ['Invoice', 'Bill', 'Payment', 'Journal', 'Expense', 'Credit Note', 'Vendor Credit', 'Opening Balance', 'VendorCredit', 'PaymentMade'],
     required: true,
   },
   referenceId: {
@@ -235,7 +235,7 @@ async function seedSystemAccounts(orgId = null) {
 }
 
 // Seed on module load
-// seedSystemAccounts().catch(console.error);
+ seedSystemAccounts().catch(console.error);
 
 // ============================================================================
 // MIDDLEWARE — authenticate (reuse from your project)
@@ -262,7 +262,9 @@ router.post('/seed', authenticate, async (req, res) => {
 // ── GET /stats ────────────────────────────────────────────────────────────────
 router.get('/stats', authenticate, async (req, res) => {
   try {
-const orgFilter = { orgId: req.user?.orgId };
+const orgFilter = req.user?.orgId
+  ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
+  : {};
 const [total, active, inactive, byType] = await Promise.all([
   ChartOfAccount.countDocuments(orgFilter),
   ChartOfAccount.countDocuments({ ...orgFilter, isActive: true }),
@@ -291,7 +293,9 @@ router.get('/', authenticate, async (req, res) => {
     const { accountType, isActive, search, page = 1, limit = 200 } = req.query;
 
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) {
+      query.$or = [{ orgId: req.user.orgId }, { orgId: null }];
+    }
     if (accountType && accountType !== 'All') {
       // Support broad category matching
       const broadMap = {
@@ -311,11 +315,18 @@ router.get('/', authenticate, async (req, res) => {
       query.isActive = isActive === 'true';
     }
     if (search && search.trim()) {
-      query.$or = [
+      const searchOr = [
         { accountName: { $regex: search.trim(), $options: 'i' } },
         { accountCode: { $regex: search.trim(), $options: 'i' } },
         { accountType: { $regex: search.trim(), $options: 'i' } },
       ];
+      // Merge with existing $or (orgId filter) using $and
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchOr }];
+        delete query.$or;
+      } else {
+        query.$or = searchOr;
+      }
     }
 
     const skip  = (parseInt(page) - 1) * parseInt(limit);
@@ -330,7 +341,7 @@ router.get('/', authenticate, async (req, res) => {
     // Attach transaction count per account
     const ids = accounts.map(a => a._id);
     const txnCounts = await AccountTransaction.aggregate([
-      { $match: { accountId: { $in: ids }, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) } },
+      { $match: { accountId: { $in: ids }, ...(req.user?.orgId ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] } : {}) } },
       { $group: { _id: '$accountId', count: { $sum: 1 } } },
     ]);
     const txnMap = {};
@@ -364,12 +375,12 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     // Verify account belongs to this org before returning its transactions
     const account = await ChartOfAccount.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...(req.user?.orgId ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] } : {}),
     }).lean();
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
 
     const query = { accountId: req.params.id };
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.$or = [{ orgId: req.user.orgId }, { orgId: null }];
     if (fromDate || toDate) {
       query.date = {};
       if (fromDate) query.date.$gte = new Date(fromDate);
@@ -377,11 +388,19 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     }
 
     const txns = await AccountTransaction.find(query)
-      .sort({ date: -1 })
+      .sort({ date: 1 })   // ← sort ASCENDING to calculate running balance
       .limit(500)
       .lean();
 
-    res.json({ success: true, data: txns.map(t => ({ ...t, id: t._id })) });
+    // Recalculate running balance from scratch
+    let runningBalance = 0;
+    const txnsWithBalance = txns.map(t => {
+      runningBalance += (t.debit || 0) - (t.credit || 0);
+      return { ...t, id: t._id, balance: runningBalance };
+    });
+
+    // Return in reverse order (latest first) for display
+    res.json({ success: true, data: txnsWithBalance.reverse() });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -391,7 +410,7 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...(req.user?.orgId ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] } : {}),
     }).lean();
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
 
@@ -400,6 +419,55 @@ router.get('/:id', authenticate, async (req, res) => {
       ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
     });
     res.json({ success: true, data: { ...account, id: account._id, transactionCount: txnCount } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── POST /:id/opening-balance ─────────────────────────────────────────────────
+router.post('/:id/opening-balance', authenticate, async (req, res) => {
+  try {
+    const { amount, balanceType, date } = req.body;
+    const orgId = req.user?.orgId || null;
+
+    const account = await ChartOfAccount.findOne({
+      _id: req.params.id,
+      ...(orgId ? { $or: [{ orgId }, { orgId: null }] } : {}),
+    });
+    if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
+
+    // Update closing balance on account
+    account.closingBalance = Math.abs(amount);
+    account.balanceType    = balanceType || 'Dr';
+    account.updatedBy      = req.user?.email || 'system';
+    await account.save();
+
+    // ✅ DELETE old opening balance transaction if exists (for re-save)
+    await AccountTransaction.deleteOne({
+      accountId: account._id,
+      referenceType: 'Opening Balance',
+      ...(orgId ? { orgId } : {}),
+    });
+
+    // ✅ CREATE new AccountTransaction record
+    const debit  = balanceType === 'Dr' ? Number(amount) : 0;
+    const credit = balanceType === 'Cr' ? Number(amount) : 0;
+
+    await AccountTransaction.create({
+      accountId:       account._id,
+      orgId,
+      date:            date ? new Date(date) : new Date(),
+      description:     'Opening Balance',
+      referenceType:   'Opening Balance',
+      referenceId:     null,
+      referenceNumber: 'OB-001',
+      debit,
+      credit,
+      balance:         debit - credit,
+    });
+
+    console.log(`✅ Opening Balance posted: ${account.accountName} ${balanceType} ₹${amount}`);
+    res.json({ success: true, message: 'Opening balance saved successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

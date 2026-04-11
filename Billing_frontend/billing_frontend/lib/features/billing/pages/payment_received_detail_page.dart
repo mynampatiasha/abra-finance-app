@@ -4,11 +4,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/payment_service.dart';
+import 'new_payment_page.dart';
 
 const Color _navyDark   = Color(0xFF0D1B3E);
 const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
+const Color _orange     = Color(0xFFF59E0B);
 
 class PaymentReceivedDetailPage extends StatefulWidget {
   final Map<String, dynamic> payment;
@@ -22,6 +24,7 @@ class _PaymentReceivedDetailPageState extends State<PaymentReceivedDetailPage> {
   late Map<String, dynamic> _payment;
   List<PaymentProof> _proofs = [];
   bool _loadingProofs = false;
+  bool _marking = false;
 
   @override
   void initState() {
@@ -30,8 +33,44 @@ class _PaymentReceivedDetailPageState extends State<PaymentReceivedDetailPage> {
     _loadProofs();
   }
 
-  Future<void> _loadProofs() async {
-    final id = _payment['id']?.toString() ?? _payment['_id']?.toString() ?? '';
+  Future<void> _markAsSent() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this payment as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _marking = true);
+    try {
+      final id = _payment['id']?.toString() ?? _payment['_id']?.toString() ?? '';
+      await PaymentService.markPaymentAsSent(id);
+      setState(() => _payment = {..._payment, 'status': 'sent'});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment marked as sent'), backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating));
+    } finally {
+      setState(() => _marking = false);
+    }
+  }
+
+  Future<void> _loadProofs() async {    final id = _payment['id']?.toString() ?? _payment['_id']?.toString() ?? '';
     if (id.isEmpty) return;
     setState(() => _loadingProofs = true);
     try {
@@ -73,6 +112,32 @@ class _PaymentReceivedDetailPageState extends State<PaymentReceivedDetailPage> {
           title: Text(_str('paymentNumber', 'Payment Detail'),
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, color: Colors.white),
+              tooltip: 'Edit Payment',
+              onPressed: () async {
+                final id = _payment['_id']?.toString() ?? _payment['id']?.toString() ?? '';
+                if (id.isEmpty) return;
+                final updated = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => NewPaymentPage(paymentId: id),
+                  ),
+                );
+                if (updated == true && mounted) {
+                  // Reload payment data
+                  try {
+                    final fresh = await PaymentService.getPayment(id);
+                    setState(() => _payment = fresh['data'] ?? fresh);
+                  } catch (_) {}
+                }
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.mark_email_read_outlined, color: Colors.white),
+              tooltip: 'Mark as Sent',
+              onPressed: _marking ? null : _markAsSent,
+            ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white),
               onPressed: _loadProofs, tooltip: 'Refresh',
@@ -309,6 +374,25 @@ class _PaymentReceivedDetailPageState extends State<PaymentReceivedDetailPage> {
       ),
 
       const SizedBox(height: 16),
+
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _marking ? null : _markAsSent,
+          icon: _marking
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.mark_email_read_outlined, size: 18),
+          label: const Text('Mark as Sent'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _orange,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      ),
+      const SizedBox(height: 10),
 
       SizedBox(
         width: double.infinity,

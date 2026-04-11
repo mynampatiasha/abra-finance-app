@@ -79,6 +79,7 @@ app.use('/api/finance/sales-orders',  verifyFinanceJWT, require('./routes/sales-
 app.use('/api/finance/customers',     verifyFinanceJWT, require('./routes/billing-customers'));
 app.use('/api/finance/credit-notes',  verifyFinanceJWT, require('./routes/credit-notes'));
 app.use('/api/finance/delivery-challans', verifyFinanceJWT, require('./routes/delivery_challans'));
+app.use('/api/finance/eway-bills',        verifyFinanceJWT, require('./routes/eway_bill_routes'));
 app.use('/api/finance/payments-received', verifyFinanceJWT, require('./routes/payments_received'));
 
 // Purchases
@@ -97,12 +98,17 @@ app.use('/api/finance/chart-of-accounts',    verifyFinanceJWT, require('./routes
 app.use('/api/finance/manual-journals',      verifyFinanceJWT, require('./routes/manual_journal'));
 app.use('/api/finance/currency-adjustments', verifyFinanceJWT, require('./routes/currency_adjustments'));
 app.use('/api/finance/budgets',           verifyFinanceJWT, require('./routes/budgets'));
-app.use('/api/finance/reconciliation',    verifyFinanceJWT, require('./routes/reconciliation_billing'));
+app.use('/api/finance/fixed-assets',      verifyFinanceJWT, require('./routes/fixed_assets'));
+app.use('/api/finance/reconciliation',    require('./routes/reconciliation_routes'));
+// app.use('/api/finance/reconciliation-v1', verifyFinanceJWT, require('./routes/reconciliation_billing'));
 
 // Items & Banking
 app.use('/api/finance/items',         verifyFinanceJWT, require('./routes/new_item_billing'));
+app.use('/api/finance/banking/transactions', verifyFinanceJWT, require('./routes/bank_transactions'));
 app.use('/api/finance/banking',       verifyFinanceJWT, require('./routes/add_bank'));
-app.use('/api/finance/accounts', verifyFinanceJWT, require('./routes/add_bank')); 
+app.use('/api/finance/accounts', verifyFinanceJWT, require('./routes/add_bank'));
+app.use('/api/finance/transaction-rules', verifyFinanceJWT, require('./routes/transaction_rules'));
+
 
 // Rate Cards
 app.use('/api/finance/rate-cards',    verifyFinanceJWT, require('./routes/rate_cards'));
@@ -113,7 +119,7 @@ app.use('/api/finance/create-rate-card', verifyFinanceJWT, require('./routes/cre
 // Time Tracking
 app.use('/api/finance/projects',      verifyFinanceJWT, require('./routes/projects'));
 app.use('/api/finance/timesheets',    verifyFinanceJWT, require('./routes/timesheets'));
-
+app.use('/api/finance/timers', verifyFinanceJWT, require('./routes/timers'));
 // Reports
 app.use('/api/finance/reports',       verifyFinanceJWT, require('./routes/reports'));
 
@@ -122,6 +128,16 @@ app.use('/api/finance/billing',       verifyFinanceJWT, require('./routes/billin
 
 // TMS — Ticket Management System (org-scoped)
 app.use('/api/finance/tickets',       verifyFinanceJWT, require('./routes/tms'));
+
+// Payment Gateway (Razorpay — run: npm install razorpay when going live)
+// Webhook must be PUBLIC — Razorpay cannot send JWT
+app.use(
+  '/api/finance/payment-gateway/webhook',
+  express.raw({ type: 'application/json' }),
+  require('./routes/payment_gateway_routes')
+);
+// All other gateway routes — JWT protected
+app.use('/api/finance/payment-gateway', verifyFinanceJWT, require('./routes/payment_gateway_routes'));
 
 // Vendors (admin only)
 app.use('/api/finance/vendor-management', verifyFinanceJWT, requireOwnerOrAdmin, require('./routes/vendors.routes'));

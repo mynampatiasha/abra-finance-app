@@ -17,6 +17,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../../core/finance_secure_storage.dart';
 import '../../../data/services/finance_auth_service.dart';
 import '../../finance_welcome_screen.dart';
+import 'account_deleted_screen.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
 
@@ -91,6 +92,7 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
   final _whatsappCtrl   = TextEditingController();
   final _orgEmailCtrl   = TextEditingController();
   final _addressCtrl    = TextEditingController();
+  final _invoiceNoteCtrl = TextEditingController();
   bool _savingOrgProfile  = false;
   bool _loadingOrgProfile = false;
 
@@ -110,6 +112,27 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
   List<Map<String, dynamic>> _orgDocuments = [];
   bool _uploadingDoc = false;
 
+  // ── Payment Gateway state ─────────────────────────────────────────────────────
+  String  _gatewayType          = 'razorpay';
+  bool    _gatewayConnected     = false;
+  bool    _gatewayLoading       = false;
+  bool    _gatewayTesting       = false;
+  bool    _gatewaySaving        = false;
+  bool    _gatewaySecretVisible = false;
+  bool    _gatewayTestSuccess   = false;
+  String? _gatewayTestResult;
+  // Account details shown after connect
+  String  _gatewayAccountName   = '';
+  String  _gatewayAccountEmail  = '';
+  String  _gatewayAccountId     = '';
+  String  _gatewayBusinessType  = '';
+  String  _gatewayProfileStatus = '';
+  String  _gatewayKeyId         = '';
+  String  _gatewayConnectedAt   = '';
+  // Controllers
+  final   _gatewayKeyIdCtrl     = TextEditingController();
+  final   _gatewaySecretCtrl    = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -118,6 +141,7 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
     _phoneCtrl = TextEditingController();
     _loadSession();
     _loadOrgProfile();
+    _loadGatewayStatus();
   }
 
   @override
@@ -128,11 +152,14 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
     _currPwCtrl.dispose();
     _newPwCtrl.dispose();
     _confirmPwCtrl.dispose();
+    _gatewayKeyIdCtrl.dispose();
+    _gatewaySecretCtrl.dispose();
     _gstCtrl.dispose();
     _orgPhoneCtrl.dispose();
     _whatsappCtrl.dispose();
     _orgEmailCtrl.dispose();
     _addressCtrl.dispose();
+    _invoiceNoteCtrl.dispose();
     super.dispose();
   }
 
@@ -179,6 +206,7 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
             _whatsappCtrl.text = d['whatsappNumber']?.toString() ?? '';
             _orgEmailCtrl.text = d['email']?.toString()          ?? '';
             _addressCtrl.text  = d['address']?.toString()        ?? '';
+            _invoiceNoteCtrl.text = d['invoiceNote']?.toString() ?? '';
             _bankHolderCtrl.text = d['bankAccountHolder']?.toString()   ?? '';
             _bankNumberCtrl.text = d['bankAccountNumber']?.toString()   ?? '';
             _bankIfscCtrl.text   = d['bankIfscCode']?.toString()        ?? '';
@@ -199,6 +227,192 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
     }
   }
 
+  Future<void> _loadGatewayStatus() async {
+    setState(() => _gatewayLoading = true);
+    try {
+      final res = await FinanceAuthService.get(
+        '/api/finance/payment-gateway/gateway/status',
+      );
+      if (res['success'] == true && mounted) {
+        final d = res['data'] as Map<String, dynamic>? ?? {};
+        setState(() {
+          _gatewayConnected     = d['configured'] == true;
+          _gatewayType          = d['gateway']?.toString()         ?? 'razorpay';
+          _gatewayAccountName   = d['accountName']?.toString()     ?? '';
+          _gatewayAccountEmail  = d['accountEmail']?.toString()    ?? '';
+          _gatewayAccountId     = d['accountId']?.toString()       ?? '';
+          _gatewayBusinessType  = d['businessType']?.toString()    ?? '';
+          _gatewayProfileStatus = d['profileStatus']?.toString()   ?? '';
+          _gatewayKeyId         = d['keyId']?.toString()           ?? '';
+          _gatewayConnectedAt   = d['connectedAt']?.toString()     ?? '';
+          if (_gatewayConnected) {
+            _gatewayKeyIdCtrl.text = _gatewayKeyId;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ _loadGatewayStatus error: $e');
+    } finally {
+      if (mounted) setState(() => _gatewayLoading = false);
+    }
+  }
+
+  Future<void> _testGatewayConnection() async {
+    if (_gatewayKeyIdCtrl.text.trim().isEmpty ||
+        _gatewaySecretCtrl.text.trim().isEmpty) {
+      setState(() {
+        _gatewayTestSuccess = false;
+        _gatewayTestResult  = 'Enter both Key ID and Key Secret before testing.';
+      });
+      return;
+    }
+    setState(() {
+      _gatewayTesting    = true;
+      _gatewayTestResult = null;
+    });
+    try {
+      final res = await FinanceAuthService.post(
+        '/api/finance/payment-gateway/gateway/test',
+        {
+          'gateway':   _gatewayType,
+          'keyId':     _gatewayKeyIdCtrl.text.trim(),
+          'keySecret': _gatewaySecretCtrl.text.trim(),
+        },
+      );
+      if (!mounted) return;
+      if (res['success'] == true && res['data']?['valid'] == true) {
+        final d = res['data'] as Map<String, dynamic>;
+        setState(() {
+          _gatewayTestSuccess   = true;
+          _gatewayAccountName   = d['accountName']?.toString()    ?? '';
+          _gatewayAccountEmail  = d['accountEmail']?.toString()   ?? '';
+          _gatewayAccountId     = d['accountId']?.toString()      ?? '';
+          _gatewayBusinessType  = d['businessType']?.toString()   ?? '';
+          _gatewayProfileStatus = d['profileStatus']?.toString()  ?? '';
+          _gatewayTestResult    = 'Connection successful! Account verified.';
+        });
+      } else {
+        setState(() {
+          _gatewayTestSuccess = false;
+          _gatewayTestResult  = res['message']?.toString() ??
+              'Invalid credentials. Please check your Key ID and Key Secret.';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _gatewayTestSuccess = false;
+        _gatewayTestResult  = 'Connection failed: $e';
+      });
+    } finally {
+      if (mounted) setState(() => _gatewayTesting = false);
+    }
+  }
+
+  Future<void> _saveGateway() async {
+    if (_gatewayKeyIdCtrl.text.trim().isEmpty ||
+        _gatewaySecretCtrl.text.trim().isEmpty) {
+      _showError('Enter both Key ID and Key Secret.');
+      return;
+    }
+    setState(() => _gatewaySaving = true);
+    try {
+      final res = await FinanceAuthService.post(
+        '/api/finance/payment-gateway/gateway/save',
+        {
+          'gateway':       _gatewayType,
+          'keyId':         _gatewayKeyIdCtrl.text.trim(),
+          'keySecret':     _gatewaySecretCtrl.text.trim(),
+          'accountName':   _gatewayAccountName,
+          'accountEmail':  _gatewayAccountEmail,
+          'accountId':     _gatewayAccountId,
+          'businessType':  _gatewayBusinessType,
+          'profileStatus': _gatewayProfileStatus,
+        },
+      );
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() {
+          _gatewayConnected  = true;
+          _gatewayKeyId      = _gatewayKeyIdCtrl.text.trim();
+          _gatewaySecretCtrl.clear();
+          _gatewayTestResult = null;
+        });
+        _showSuccess('Payment gateway connected successfully ✓');
+      } else {
+        _showError(res['message']?.toString() ?? 'Failed to save gateway.');
+      }
+    } catch (e) {
+      _showError('Error saving gateway: $e');
+    } finally {
+      if (mounted) setState(() => _gatewaySaving = false);
+    }
+  }
+
+  Future<void> _disconnectGateway() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Row(children: [
+          Icon(Icons.link_off, color: _red),
+          SizedBox(width: 10),
+          Text('Disconnect Gateway'),
+        ]),
+        content: const Text(
+          'Your payment gateway will be disconnected. '
+          'Existing payment links will stop working. '
+          'Are you sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _red,
+              foregroundColor: _white,
+            ),
+            child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    setState(() => _gatewaySaving = true);
+    try {
+      final res = await FinanceAuthService.delete(
+        '/api/finance/payment-gateway/gateway/disconnect',
+      );
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() {
+          _gatewayConnected     = false;
+          _gatewayAccountName   = '';
+          _gatewayAccountEmail  = '';
+          _gatewayAccountId     = '';
+          _gatewayBusinessType  = '';
+          _gatewayProfileStatus = '';
+          _gatewayKeyId         = '';
+          _gatewayConnectedAt   = '';
+          _gatewayKeyIdCtrl.clear();
+          _gatewaySecretCtrl.clear();
+          _gatewayTestResult    = null;
+          _gatewayTestSuccess   = false;
+        });
+        _showSuccess('Gateway disconnected.');
+      } else {
+        _showError(res['message']?.toString() ?? 'Failed to disconnect.');
+      }
+    } catch (e) {
+      _showError('Error: $e');
+    } finally {
+      if (mounted) setState(() => _gatewaySaving = false);
+    }
+  }
+
   Future<void> _saveOrgProfile() async {
     setState(() => _savingOrgProfile = true);
     try {
@@ -208,6 +422,7 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
         'whatsappNumber': _whatsappCtrl.text.trim(),
         'email':          _orgEmailCtrl.text.trim(),
         'address':        _addressCtrl.text.trim(),
+        'invoiceNote':    _invoiceNoteCtrl.text.trim(),
       });
       if (res['success'] == true) {
         _showSuccess('Organisation details saved successfully');
@@ -787,6 +1002,7 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
   // Row 3 → Banking Details      | My Organisations
   //                              | Create Org (below My Orgs, same column)
   Widget _buildDesktopLayout() {
+    return LayoutBuilder(builder: (context, constraints) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -822,10 +1038,8 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Left — Banking Details (takes full height naturally)
               Expanded(child: _sectionBanking()),
               const SizedBox(width: 20),
-              // Right — My Organisations stacked with Create Org below
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -840,11 +1054,26 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
               ),
             ],
           ),
+          const SizedBox(height: 20),
 
+          // ── Row 4: Payment Gateway — half width, centered ───────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: (constraints.maxWidth - 48) / 2,
+                child: _sectionPaymentGateway(),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+          _sectionDeleteAccount(),
           const SizedBox(height: 30),
         ],
       ),
     );
+    });
   }
 
   Widget _buildTabletLayout() {
@@ -872,6 +1101,10 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
             Expanded(child: _sectionCreateOrg()),
           ],
         ]),
+        const SizedBox(height: 14),
+        _sectionPaymentGateway(),
+        const SizedBox(height: 14),
+        _sectionDeleteAccount(),
       ]),
     );
   }
@@ -895,6 +1128,10 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
           const SizedBox(height: 14),
           _sectionCreateOrg(),
         ],
+        const SizedBox(height: 14),
+        _sectionPaymentGateway(),
+        const SizedBox(height: 14),
+        _sectionDeleteAccount(),
         const SizedBox(height: 30),
       ]),
     );
@@ -1038,6 +1275,50 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
               ),
             ],
           ],
+
+          // ── Invoice Note ─────────────────────────────────────────────────────
+          const SizedBox(height: 20),
+          const Text('Invoice Note',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _invoiceNoteCtrl,
+            maxLines: 3,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'e.g. Thank you for your business. Payment due within 30 days.',
+              hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+              filled: true,
+              fillColor: _pageBg,
+              contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _blue, width: 1.5)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('This note will appear on every invoice PDF after the payment details.',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _savingOrgProfile ? null : _saveOrgProfile,
+              icon: _savingOrgProfile
+                  ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _white))
+                  : const Icon(Icons.save_outlined, size: 17),
+              label: Text(_savingOrgProfile ? 'Saving...' : 'Save Note',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navy,
+                foregroundColor: _white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1458,6 +1739,391 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
   }
 
   // ── Shared widgets ────────────────────────────────────────────────────────────
+  Widget _sectionPaymentGateway() {
+    final isRazorpay = _gatewayType == 'razorpay';
+
+    return _sectionCard(
+      icon:      Icons.payment_outlined,
+      iconColor: _blue,
+      title:     'Payment Gateway',
+      subtitle:  _gatewayConnected
+          ? '${isRazorpay ? 'Razorpay' : 'Stripe'} Connected ✓'
+          : 'Not connected',
+      child: _gatewayLoading
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(color: _blue),
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Connected account details card ──────────────────────────
+                if (_gatewayConnected) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFBBF7D0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.check_circle,
+                              color: Color(0xFF059669), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${isRazorpay ? 'Razorpay' : 'Stripe'} Connected',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF065F46),
+                              fontSize: 15,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: _gatewaySaving ? null : _disconnectGateway,
+                            child: const Text('Disconnect',
+                                style: TextStyle(
+                                    color: _red,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                        ]),
+                        const Divider(height: 16),
+                        if (_gatewayAccountName.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.business_outlined, 'Account Name',
+                              _gatewayAccountName),
+                        if (_gatewayAccountEmail.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.email_outlined, 'Email',
+                              _gatewayAccountEmail),
+                        if (_gatewayAccountId.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.fingerprint_outlined, 'Account ID',
+                              _gatewayAccountId),
+                        if (_gatewayBusinessType.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.store_outlined, 'Business Type',
+                              _gatewayBusinessType),
+                        if (_gatewayProfileStatus.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.verified_outlined, 'Status',
+                              _gatewayProfileStatus),
+                        if (_gatewayKeyId.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.vpn_key_outlined, 'Key ID',
+                              _gatewayKeyId),
+                        if (_gatewayConnectedAt.isNotEmpty)
+                          _gatewayDetailRow(
+                              Icons.calendar_today_outlined, 'Connected On',
+                              _gatewayConnectedAt),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const _SectionLabel('Update Credentials'),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Gateway selector ────────────────────────────────────────
+                if (!_gatewayConnected) ...[
+                  const _SectionLabel('Select Payment Gateway'),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    _gatewayOption('razorpay', 'Razorpay',
+                        'Recommended for India', Icons.payment),
+                    const SizedBox(width: 10),
+                    _gatewayOption('stripe', 'Stripe',
+                        'Global payments', Icons.credit_card),
+                  ]),
+                  const SizedBox(height: 20),
+                ],
+
+                // ── Info hint ───────────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.info_outline,
+                        color: Color(0xFFD97706), size: 15),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isRazorpay
+                            ? 'Get your Key ID & Secret from Razorpay Dashboard → Settings → API Keys. '
+'Your Merchant ID and registered email are shown in Settings → Profile.'
+                            : 'Get your keys from Stripe Dashboard → Developers → API Keys',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF92400E)),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 14),
+
+                // ── Key ID field ─────────────────────────────────────────────
+                _field(
+                  _gatewayKeyIdCtrl,
+                  isRazorpay
+                      ? 'Key ID  (rzp_live_...)'
+                      : 'Publishable Key  (pk_live_...)',
+                  Icons.vpn_key_outlined,
+                ),
+                const SizedBox(height: 12),
+
+                // ── Key Secret field ─────────────────────────────────────────
+                TextField(
+                  controller: _gatewaySecretCtrl,
+                  obscureText: !_gatewaySecretVisible,
+                  style: const TextStyle(fontSize: 15, color: _textPrimary),
+                  decoration: InputDecoration(
+                    labelText: isRazorpay
+                        ? 'Key Secret'
+                        : 'Secret Key  (sk_live_...)',
+                    labelStyle:
+                        const TextStyle(fontSize: 14, color: _textSecondary),
+                    prefixIcon:
+                        const Icon(Icons.lock_outline, size: 18, color: _navy),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _gatewaySecretVisible
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 18,
+                        color: Colors.grey[400],
+                      ),
+                      onPressed: () => setState(
+                          () => _gatewaySecretVisible = !_gatewaySecretVisible),
+                    ),
+                    filled: true,
+                    fillColor: _pageBg,
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 13, horizontal: 14),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFDDE3EE))),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: Color(0xFFDDE3EE))),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: _blue, width: 1.5)),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Row(children: [
+                  Icon(Icons.security_outlined,
+                      size: 13, color: Color(0xFF64748B)),
+                  SizedBox(width: 4),
+                  Text(
+                    'Your Key Secret is AES-256 encrypted and never stored in plain text.',
+                    style:
+                        TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  ),
+                ]),
+
+                // ── Test result box ──────────────────────────────────────────
+                if (_gatewayTestResult != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _gatewayTestSuccess
+                          ? const Color(0xFFECFDF5)
+                          : const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _gatewayTestSuccess
+                            ? const Color(0xFFBBF7D0)
+                            : const Color(0xFFFECACA),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Icon(
+                            _gatewayTestSuccess
+                                ? Icons.check_circle_outline
+                                : Icons.error_outline,
+                            color: _gatewayTestSuccess
+                                ? const Color(0xFF059669)
+                                : const Color(0xFFDC2626),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _gatewayTestResult!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _gatewayTestSuccess
+                                    ? const Color(0xFF065F46)
+                                    : const Color(0xFF991B1B),
+                              ),
+                            ),
+                          ),
+                        ]),
+                        if (_gatewayTestSuccess) ...[
+                          const Divider(height: 16),
+                          if (_gatewayAccountName.isNotEmpty)
+                            _gatewayDetailRow(Icons.business_outlined,
+                                'Account Name', _gatewayAccountName),
+                          if (_gatewayAccountEmail.isNotEmpty)
+                            _gatewayDetailRow(Icons.email_outlined,
+                                'Email', _gatewayAccountEmail),
+                          if (_gatewayAccountId.isNotEmpty)
+                            _gatewayDetailRow(Icons.fingerprint_outlined,
+                                'Account ID', _gatewayAccountId),
+                          if (_gatewayBusinessType.isNotEmpty)
+                            _gatewayDetailRow(Icons.store_outlined,
+                                'Business Type', _gatewayBusinessType),
+                          if (_gatewayProfileStatus.isNotEmpty)
+                            _gatewayDetailRow(Icons.verified_outlined,
+                                'Status', _gatewayProfileStatus),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 20),
+
+                // ── Action buttons ───────────────────────────────────────────
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _gatewayTesting ? null : _testGatewayConnection,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        side: const BorderSide(color: _blue),
+                      ),
+                      child: _gatewayTesting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: _blue))
+                          : const Text('Test Connection',
+                              style: TextStyle(
+                                  color: _blue,
+                                  fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _gatewaySaving ? null : _saveGateway,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _navy,
+                        foregroundColor: _white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: _gatewaySaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: _white))
+                          : Text(
+                              _gatewayConnected
+                                  ? 'Update & Save'
+                                  : 'Save & Connect',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15)),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
+    );
+  }
+
+  Widget _gatewayOption(
+      String value, String name, String subtitle, IconData icon) {
+    final selected = _gatewayType == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _gatewayType = value),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFEFF6FF) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? _blue : Colors.grey[200]!,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Column(children: [
+            Icon(icon,
+                color: selected ? _blue : Colors.grey[400], size: 26),
+            const SizedBox(height: 6),
+            Text(name,
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: selected ? _blue : _navyDark,
+                    fontSize: 14)),
+            Text(subtitle,
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                textAlign: TextAlign.center),
+            if (selected) ...[
+              const SizedBox(height: 4),
+              const Icon(Icons.check_circle, color: _blue, size: 16),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _gatewayDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Icon(icon, size: 15, color: const Color(0xFF059669)),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 110,
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 13, color: Color(0xFF065F46))),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF064E3B)),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ── Shared widgets ────────────────────────────────────────────────────────────
   Widget _sectionCard({
     required IconData icon,
     required Color    iconColor,
@@ -1824,7 +2490,208 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
         style: const TextStyle(fontSize: 15, color: _textPrimary),
         decoration: _fieldDecoration(label, icon),
       );
+
+  // ── Delete Account ────────────────────────────────────────────────────────────
+  Future<void> _deleteAccount() async {
+    // Step 1: first confirmation
+    final confirm1 = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: _red),
+          SizedBox(width: 10),
+          Text('Delete Account'),
+        ]),
+        content: const Text(
+          'This will permanently delete your account. '
+          'You will lose access to all your data and will not be able to log in with this email again.\n\n'
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: _white),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirm1 != true || !mounted) return;
+
+    // Step 2: final confirmation
+    final confirm2 = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Row(children: [
+          Icon(Icons.delete_forever_rounded, color: _red),
+          SizedBox(width: 10),
+          Text('Are you absolutely sure?'),
+        ]),
+        content: RichText(
+          text: TextSpan(
+            style: const TextStyle(fontSize: 14, color: _textPrimary, height: 1.5),
+            children: [
+              const TextSpan(text: 'You are about to permanently delete the account for\n'),
+              TextSpan(
+                text: _email,
+                style: const TextStyle(fontWeight: FontWeight.bold, color: _red),
+              ),
+              const TextSpan(text: '\n\nThis cannot be recovered.'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: _white),
+            child: const Text('Yes, Delete My Account'),
+          ),
+        ],
+      ),
+    );
+    if (confirm2 != true || !mounted) return;
+
+    // Call API
+    final res = await FinanceAuthService.delete('/api/finance/auth/delete-account');
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      await FinanceSecureStorage.clearSession();
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => AccountDeletedScreen()),
+        (_) => false,
+      );
+    } else {
+      _showError(res['message'] ?? 'Failed to delete account. Please try again.');
+    }
+  }
+
+  // ── Section: Delete Account ───────────────────────────────────────────────────
+  Widget _sectionDeleteAccount() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _red.withOpacity(0.25)),
+        boxShadow: [
+          BoxShadow(color: _red.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: _red.withOpacity(0.04),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(14),
+                topRight: Radius.circular(14),
+              ),
+              border: Border(bottom: BorderSide(color: _red.withOpacity(0.12))),
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _red.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.delete_forever_rounded, color: _red, size: 18),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Delete Account',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _red)),
+                  Text('Permanent and irreversible',
+                      style: TextStyle(fontSize: 13, color: _textSecondary)),
+                ]),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _red.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _red.withOpacity(0.2)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: _red, size: 16),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Deleting your account is permanent. Your login will be blocked immediately '
+                          'and all access to this account will be revoked. There is no way to recover it.',
+                          style: TextStyle(fontSize: 13, color: _red, height: 1.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _deleteAccount,
+                    icon: const Icon(Icons.delete_forever_rounded, size: 18, color: _red),
+                    label: const Text('Delete My Account',
+                        style: TextStyle(fontWeight: FontWeight.w700, color: _red, fontSize: 15)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _red,
+                      side: const BorderSide(color: _red, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 // ════════════════════════════════════════════════════════════════════════════
 // END OF CHUNK 2 — END OF FILE
 // ════════════════════════════════════════════════════════════════════════════
+
+// ── _SectionLabel helper widget ───────────────────────────────────────────────
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        color: _navyDark,
+        letterSpacing: 0.3,
+      ),
+    );
+  }
+}

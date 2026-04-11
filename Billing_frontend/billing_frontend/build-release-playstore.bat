@@ -3,20 +3,27 @@ echo ========================================
 echo  Abra Finance Suite - Play Store Build
 echo ========================================
 
-:: Set your keystore credentials here before running
-set KEY_ALIAS=abrafinance
-set KEY_PASSWORD=AbraFinance
-set STORE_FILE=keystore/abrafinance.jks
-set STORE_PASSWORD=AbraFinance
+echo Step 1: Switching to PRODUCTION URL...
+powershell -Command "(Get-Content .env) -replace '^FINANCE_API_BASE_URL=http://localhost:3002', '# FINANCE_API_BASE_URL=http://localhost:3002' | Set-Content .env"
+powershell -Command "(Get-Content .env) -replace '^# FINANCE_API_BASE_URL=https://finance.abragroup.in', 'FINANCE_API_BASE_URL=https://finance.abragroup.in' | Set-Content .env"
+echo   -> FINANCE_API_BASE_URL set to https://finance.abragroup.in
 
-echo Cleaning previous build...
+echo Step 2: Cleaning previous build...
 call flutter clean
 
-echo Getting dependencies...
+echo Step 3: Getting dependencies...
 call flutter pub get
 
-echo Building release AAB for Play Store...
+echo Step 4: Generating app icons from abra_finance_logo.jpg...
+call dart run flutter_launcher_icons
+
+echo Step 5: Building release AAB for Play Store...
 call flutter build appbundle --release
+
+echo Step 6: Restoring LOCAL development URL...
+powershell -Command "(Get-Content .env) -replace '^FINANCE_API_BASE_URL=https://finance.abragroup.in', '# FINANCE_API_BASE_URL=https://finance.abragroup.in' | Set-Content .env"
+powershell -Command "(Get-Content .env) -replace '^# FINANCE_API_BASE_URL=http://localhost:3002', 'FINANCE_API_BASE_URL=http://localhost:3002' | Set-Content .env"
+echo   -> FINANCE_API_BASE_URL restored to localhost:3002
 
 echo.
 echo ========================================

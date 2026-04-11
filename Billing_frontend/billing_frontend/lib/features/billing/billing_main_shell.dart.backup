@@ -1,0 +1,1359 @@
+import 'package:flutter/material.dart';
+import '../../core/finance_secure_storage.dart';
+import '../../app/config/api_config.dart';
+import '../finance_welcome_screen.dart';
+import 'pages/home_billing.dart';
+import 'pages/items_billing.dart';
+import 'pages/invoices_list_page.dart';
+import 'pages/payments_received_page.dart';
+import 'pages/customers_list_page.dart';
+import 'pages/recurring_invoices_list_page.dart';
+import 'pages/new_recurring_invoice.dart';
+import 'pages/banking_page.dart';
+import 'pages/new_expenses.dart';
+import 'pages/expenses_list_page.dart';
+import 'pages/fixed_assets_list_page.dart';
+import 'pages/vendors_list_page.dart';
+import 'pages/quotes_list_page.dart';
+import 'pages/sales_orders_list_page.dart';
+import 'pages/recurring_expenses_list_page.dart';
+import 'pages/delivery_challans_list_page.dart';
+import 'pages/credit_notes_list_page.dart';
+import 'pages/purchase_orders_list_page.dart';
+import 'pages/bill_list_page.dart';
+import 'pages/recurring_bills_list_page.dart';
+import 'pages/payment_made_list_page.dart';
+import 'pages/vendor_credits_list_page.dart';
+import 'pages/eway_bill_list_page.dart';
+import 'pages/payment_links_page.dart';
+import 'pages/manual_journals_list_page.dart';
+import 'rate_card_list.dart';
+import 'pages/chart_of_accounts_list_page.dart';
+import 'pages/budgets_list_page.dart';
+import '../erp/erp_users_management_screen.dart';
+import '../../data/services/finance_auth_service.dart';
+import '../../core/services/api_service.dart';
+import 'pages/finance_profile_page.dart';
+import 'pages/currency_adjustments_list_page.dart';
+import 'pages/projects_list_page.dart';
+import 'pages/timesheets_list_page.dart';
+import 'pages/reports_list_page.dart';
+
+// TMS Screens
+import '../TMS/raise_ticket.dart';
+import '../TMS/my_tickets.dart';
+import '../TMS/all_tickets.dart';
+import '../TMS/closed_tickets.dart';
+
+// ─── COLORS ───────────────────────────────────────────────────────────────────
+const _kNavyDark   = Color(0xFF0F172A);
+const _kNavy       = Color(0xFF1E3A5F);
+const _kBlueAccent = Color(0xFF2563EB);
+const _kWhite      = Color(0xFFFFFFFF);
+const _kPageBg     = Color(0xFFF8FAFC);
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ─── PERMISSION → SIDEBAR ROUTE MAP ──────────────────────────────────────────
+const Map<String, List<String>> _kPermissionRouteMap = {
+  // Items
+  'items':              ['items'],
+  // Sales sub-items
+  'invoices':           ['sales/invoices'],
+  'credit_notes':       ['sales/credit_notes'],
+  'payments_received':  ['sales/payments_received'],
+  'quotes':             ['sales/quotes'],
+  'sales_orders':       ['sales/orders'],
+  'delivery_challans':  ['sales/delivery_challans'],
+  'customers':          ['sales/customers'],
+  'recurring_invoices': ['sales/recurring_invoices'],
+  // Purchases sub-items
+  'expenses':           ['purchases/expenses'],
+  'assets':             ['purchases/assets'],
+  'bills':              ['purchases/bills'],
+  'purchase_orders':    ['purchases/orders'],
+  'vendor_credits':     ['purchases/vendor_credits'],
+  'eway_bills':         ['purchases/eway_bills'],
+  'payment_links':      ['purchases/payment_links'],
+  'payments_made':      ['purchases/payments_made'],
+  'vendors':            ['purchases/vendors'],
+  'recurring_expenses': ['purchases/recurring_expenses'],
+  'recurring_bills':    ['purchases/recurring_bills'],
+  // Accountant
+  'manual_journals':        ['accountant/manual_journals'],
+  'currency_adjustments':   ['accountant/currency_adjustments'],
+  'chart_of_accounts':      ['accountant/chart_of_accounts'],
+  'budgets':                ['accountant/budgets'],
+  // Top-level
+  'banking':            ['banking'],
+  'reports':            ['reports'],
+  'rate_cards':         ['rate_cards'],
+  'role_access_control':['role_access_control'],
+  // Time Tracking
+  'projects':           ['time_tracking/projects'],
+  'timesheets':         ['time_tracking/timesheet'],
+  // TMS — permission controlled (NOT always visible)
+  'raise_ticket':       ['tms/raise_ticket'],
+  'my_tickets':         ['tms/my_tickets'],
+  'all_tickets':        ['tms/all_tickets'],
+  'closed_tickets':     ['tms/closed_tickets'],
+};
+// ──────────────────────────────────────────────────────────────────────────────
+
+class BillingMainShell extends StatefulWidget {
+  const BillingMainShell({Key? key}) : super(key: key);
+
+  @override
+  State<BillingMainShell> createState() => _BillingMainShellState();
+}
+
+class _BillingMainShellState extends State<BillingMainShell> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  // ── CHANGED: use route string instead of index ───────────────────────────
+  String _currentRoute      = 'home';
+  String _currentPageTitle  = 'Dashboard';
+  bool   _isSidebarExpanded = true;
+
+  // ── Session data ─────────────────────────────────────────────────────────
+  String                      _userRole      = '';
+  String                      _name          = '';
+  String                      _orgId         = '';
+  String                      _orgName       = '';
+  String?                     _orgLogoUrl;
+  Map<String, dynamic>        _permissions   = {};
+  List<Map<String, dynamic>>  _organizations = [];
+  bool                        _sessionLoaded = false;
+
+  // Track which sections are expanded
+  final Map<String, bool> _expandedSections = {
+    'tms':           false,
+    'accountant':    false,
+    'time_tracking': false,
+    'purchases':     false,
+    'sales':         false,
+  };
+
+  // ── FULL menu definition (all items) ────────────────────────────────────
+  final List<NavigationItem> _allMenuItems = [
+    NavigationItem(
+      icon: Icons.dashboard_outlined,
+      selectedIcon: Icons.dashboard,
+      label: 'Dashboard',
+      route: 'home',
+    ),
+    NavigationItem(
+      icon: Icons.confirmation_number_outlined,
+      selectedIcon: Icons.confirmation_number,
+      label: 'TMS',
+      route: 'tms',
+      isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Raise a Ticket',  route: 'tms/raise_ticket',  icon: Icons.add_circle_outline),
+        SubNavigationItem(label: 'My Tickets',       route: 'tms/my_tickets',    icon: Icons.assignment_outlined),
+        SubNavigationItem(label: 'All Tickets',      route: 'tms/all_tickets',   icon: Icons.list_alt_outlined),
+        SubNavigationItem(label: 'Closed Tickets',   route: 'tms/closed_tickets',icon: Icons.archive_outlined),
+      ],
+    ),
+    NavigationItem(
+      icon: Icons.inventory_2_outlined,
+      selectedIcon: Icons.inventory_2,
+      label: 'Items',
+      route: 'items',
+    ),
+    NavigationItem(
+      icon: Icons.shopping_cart_outlined,
+      selectedIcon: Icons.shopping_cart,
+      label: 'Sales',
+      route: 'sales',
+      isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Customers',           route: 'sales/customers',         icon: Icons.people_outline),
+        SubNavigationItem(label: 'Invoices',            route: 'sales/invoices',          icon: Icons.receipt_long_outlined),
+        SubNavigationItem(label: 'Recurring Invoices',  route: 'sales/recurring_invoices',icon: Icons.repeat_outlined),
+        SubNavigationItem(label: 'Payments Received',   route: 'sales/payments_received', icon: Icons.payment_outlined),
+        SubNavigationItem(label: 'Credit Notes',        route: 'sales/credit_notes',      icon: Icons.note_outlined),
+        SubNavigationItem(label: 'Quotes',              route: 'sales/quotes',            icon: Icons.request_quote_outlined),
+        SubNavigationItem(label: 'Sales Orders',        route: 'sales/orders',            icon: Icons.shopping_bag_outlined),
+        SubNavigationItem(label: 'Delivery Challans',   route: 'sales/delivery_challans', icon: Icons.local_shipping_outlined),
+      ],
+    ),
+    NavigationItem(
+      icon: Icons.shopping_bag_outlined,
+      selectedIcon: Icons.shopping_bag,
+      label: 'Purchases',
+      route: 'purchases',
+      isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Vendors',             route: 'purchases/vendors',           icon: Icons.store_outlined),
+        SubNavigationItem(label: 'Expenses',            route: 'purchases/expenses',          icon: Icons.money_off_outlined),
+        SubNavigationItem(label: 'Fixed Assets',        route: 'purchases/assets',            icon: Icons.business_center_outlined),
+        SubNavigationItem(label: 'Recurring Expenses',  route: 'purchases/recurring_expenses',icon: Icons.repeat_outlined),
+        SubNavigationItem(label: 'Purchase Orders',     route: 'purchases/orders',            icon: Icons.shopping_cart_outlined),
+        SubNavigationItem(label: 'Bills',               route: 'purchases/bills',             icon: Icons.description_outlined),
+        SubNavigationItem(label: 'Recurring Bills',     route: 'purchases/recurring_bills',   icon: Icons.repeat_outlined),
+        SubNavigationItem(label: 'Payments Made',       route: 'purchases/payments_made',     icon: Icons.payment_outlined),
+        SubNavigationItem(label: 'Vendor Credits',      route: 'purchases/vendor_credits',    icon: Icons.credit_card_outlined),
+        SubNavigationItem(label: 'E-Way Bills',         route: 'purchases/eway_bills',         icon: Icons.receipt_outlined),
+        SubNavigationItem(label: 'Payment Links',        route: 'purchases/payment_links',       icon: Icons.link_outlined),
+      ],
+    ),
+    NavigationItem(
+      icon: Icons.access_time_outlined,
+      selectedIcon: Icons.access_time,
+      label: 'Time Tracking',
+      route: 'time_tracking',
+      isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Projects',  route: 'time_tracking/projects',  icon: Icons.folder_outlined),
+        SubNavigationItem(label: 'Timesheet', route: 'time_tracking/timesheet', icon: Icons.schedule_outlined),
+      ],
+    ),
+    NavigationItem(
+      icon: Icons.credit_card_outlined,
+      selectedIcon: Icons.credit_card,
+      label: 'Rate Cards',
+      route: 'rate_cards',
+    ),
+    NavigationItem(
+      icon: Icons.account_balance_outlined,
+      selectedIcon: Icons.account_balance,
+      label: 'Banking',
+      route: 'banking',
+    ),
+    NavigationItem(
+      icon: Icons.person_outline,
+      selectedIcon: Icons.person,
+      label: 'Accountant',
+      route: 'accountant',
+      isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Manual Journals',      route: 'accountant/manual_journals',      icon: Icons.book_outlined),
+        SubNavigationItem(label: 'Currency Adjustments', route: 'accountant/currency_adjustments', icon: Icons.currency_exchange_outlined),
+        SubNavigationItem(label: 'Chart of Accounts',    route: 'accountant/chart_of_accounts',    icon: Icons.account_tree_outlined),
+        SubNavigationItem(label: 'Budgets',              route: 'accountant/budgets',              icon: Icons.account_balance_wallet_outlined),
+      ],
+    ),
+    NavigationItem(
+      icon: Icons.bar_chart_outlined,
+      selectedIcon: Icons.bar_chart,
+      label: 'Reports',
+      route: 'reports',
+    ),
+    NavigationItem(
+      icon: Icons.admin_panel_settings_outlined,
+      selectedIcon: Icons.admin_panel_settings,
+      label: 'Role Access Control',
+      route: 'role_access_control',
+    ),
+    NavigationItem(
+      icon: Icons.person_pin_outlined,
+      selectedIcon: Icons.person_pin,
+      label: 'My Profile',
+      route: 'my_profile',
+    ),
+  ];
+
+  // ── Filtered menu items ──────────────────────────────────────────────────
+  List<NavigationItem> get _visibleMenuItems {
+    final isAdmin = _userRole == 'owner' || _userRole == 'admin';
+    if (isAdmin) return _allMenuItems;
+
+    return _allMenuItems
+        .map((item) {
+          // Dashboard — always show
+          if (item.route == 'home') return item;
+
+          // My Profile — always visible to all users
+          if (item.route == 'my_profile') return item;
+
+          // Non-expandable top-level items — check permission
+          if (!item.isExpandable) {
+            if (_canAccessRoute(item.route)) return item;
+            return null;
+          }
+
+          // Expandable sections — filter sub-items by permission
+          // TMS is NO LONGER bypassed — it goes through the same filter
+          final visibleSubs = (item.subItems ?? [])
+              .where((sub) => _canAccessRoute(sub.route))
+              .toList();
+
+          if (visibleSubs.isEmpty) return null;
+
+          return NavigationItem(
+            icon:         item.icon,
+            selectedIcon: item.selectedIcon,
+            label:        item.label,
+            route:        item.route,
+            isExpandable: item.isExpandable,
+            subItems:     visibleSubs,
+          );
+        })
+        .whereType<NavigationItem>()
+        .toList();
+  }
+
+  /// Returns true if the user has can_access:true for the given sidebar route.
+  bool _canAccessRoute(String route) {
+    for (final entry in _kPermissionRouteMap.entries) {
+      if (entry.value.contains(route)) {
+        final perm = _permissions[entry.key];
+        if (perm is Map) {
+          final ca = perm['can_access'];
+          if (ca == true || ca == 1 || ca == 'true') return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSession();
+  }
+
+  // ── Load session ──────────────────────────────────────────────────────────
+  Future<void> _loadSession() async {
+    final role       = await FinanceSecureStorage.getRole()       ?? '';
+    final name       = await FinanceSecureStorage.getName()       ?? '';
+    final orgId      = await FinanceSecureStorage.getOrgId()      ?? '';
+    final orgName    = await FinanceSecureStorage.getOrgName()    ?? '';
+    final orgLogoUrl = await FinanceSecureStorage.getOrgLogoUrl();
+    final perms      = await FinanceSecureStorage.getPermissions();
+    final orgs       = await FinanceSecureStorage.getOrganizations();
+
+    if (mounted) {
+      setState(() {
+        _userRole      = role;
+        _name          = name;
+        _orgId         = orgId;
+        _orgName       = orgName;
+        _orgLogoUrl    = orgLogoUrl;
+        _permissions   = perms;
+        _organizations = orgs;
+        _sessionLoaded = true;
+      });
+      debugPrint('✅ BillingMainShell session loaded');
+      debugPrint('   role: $_userRole');
+      debugPrint('   orgId: $_orgId  orgName: $_orgName');
+      debugPrint('   orgLogoUrl: ${_orgLogoUrl ?? 'none'}');
+      debugPrint('   permissions: ${_permissions.keys.toList()}');
+      debugPrint('   organizations count: ${_organizations.length}');
+    }
+  }
+
+  // ── Org switcher ──────────────────────────────────────────────────────────
+  void _showOrgSwitcher(BuildContext context) {
+    if (_organizations.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You only belong to one organization.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.5),
+      barrierDismissible: true,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: _OrgSwitcherCard(
+          organizations:   _organizations,
+          currentOrgId:    _orgId,
+          onOrgSelected:   _switchOrg,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchOrg(String orgId, String orgName) async {
+    if (orgId == _orgId) {
+      Navigator.pop(context);
+      return;
+    }
+
+    Navigator.pop(context);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.4),
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Color(0xFF2563EB)),
+                const SizedBox(height: 16),
+                Text(
+                  'Switching to $orgName...',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF1E3A5F),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final result = await FinanceAuthService.selectOrg(orgId);
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        ApiService().clearTokenCache();
+
+        if (mounted) {
+          setState(() {
+            _currentRoute     = 'loading';
+            _currentPageTitle = 'Dashboard';
+            _expandedSections.updateAll((key, _) => false);
+            _orgId         = orgId;
+            _orgName       = orgName;
+            _orgLogoUrl    = null;
+            _permissions   = {};
+          });
+        }
+
+        await _loadSession();
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        if (mounted) Navigator.pop(context);
+
+        if (mounted) {
+          setState(() {
+            _currentRoute     = 'home';
+            _currentPageTitle = 'Dashboard';
+          });
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 16),
+                const SizedBox(width: 8),
+                Text('Switched to $orgName'),
+              ]),
+              backgroundColor: const Color(0xFF2563EB),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (mounted) Navigator.pop(context);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Failed to switch organisation'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error switching organisation: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    }
+  }
+
+  // ── CHANGED: Route-based page content ────────────────────────────────────
+  // No more index-based switching — we use _currentRoute string
+  // This fixes the "My Profile shows Sales page" bug completely
+  Widget _getSelectedPage() {
+    // Loading state during org switch
+    if (_currentRoute == 'loading') {
+      return Container(
+        color: _kPageBg,
+        child: const Center(
+          child: CircularProgressIndicator(color: Color(0xFF2563EB)),
+        ),
+      );
+    }
+
+    switch (_currentRoute) {
+      case 'home':
+        return HomeBilling(key: ValueKey('home_$_orgId'));
+      default:
+        // All other routes are pushed as full pages via Navigator.push
+        // We always show Dashboard as the "base" page underneath
+        return HomeBilling(key: ValueKey('home_$_orgId'));
+    }
+  }
+
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const FinanceProfilePage()),
+    ).then((_) {
+      if (mounted) {
+        setState(() {
+          _currentRoute     = 'home';
+          _currentPageTitle = 'Dashboard';
+        });
+        _loadSession();
+      }
+    });
+  }
+
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Row(children: [
+          Icon(Icons.logout, color: Color(0xFF1E3A5F)),
+          SizedBox(width: 10),
+          Text('Sign Out'),
+        ]),
+        content: const Text('Are you sure you want to sign out of the Abra Finance ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E3A5F),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    await FinanceSecureStorage.clearSession();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const FinanceWelcomeScreen()),
+      (route) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_sessionLoaded) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF2563EB)),
+        ),
+      );
+    }
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile    = screenWidth < 1024;
+
+    return Scaffold(
+      key: _scaffoldKey,
+      drawer: isMobile ? _buildDrawer() : null,
+      body: Row(
+        children: [
+          if (!isMobile)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: _isSidebarExpanded ? 240 : 70,
+              child: _buildSidebarContent(isDrawer: false),
+            ),
+          Expanded(
+            child: Column(
+              children: [
+                _buildTopBar(isMobile),
+                Expanded(
+                  child: Container(
+                    color: _kPageBg,
+                    child: _getSelectedPage(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Top bar ───────────────────────────────────────────────────────────────
+  Widget _buildTopBar(bool isMobile) {
+    return Container(
+      height: 60,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [_kNavyDark, _kNavy],
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          if (isMobile)
+            IconButton(
+              icon: const Icon(Icons.menu, color: _kWhite),
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              tooltip: 'Open Menu',
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _currentPageTitle,
+              style: const TextStyle(
+                color: _kWhite,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (_orgName.isNotEmpty)
+            GestureDetector(
+              onTap: () => _showOrgSwitcher(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.business, color: _kWhite, size: 14),
+                    const SizedBox(width: 5),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 120),
+                      child: Text(
+                        _orgName,
+                        style: const TextStyle(
+                          color: _kWhite,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_organizations.length > 1) ...[
+                      const SizedBox(width: 3),
+                      const Icon(Icons.swap_horiz, color: _kWhite, size: 14),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _openProfile,
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: _kBlueAccent,
+              child: Text(
+                _name.isNotEmpty ? _name[0].toUpperCase() : 'U',
+                style: const TextStyle(
+                    color: _kWhite, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.logout, color: _kWhite),
+            onPressed: _logout,
+            tooltip: 'Sign Out',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Sidebar content ───────────────────────────────────────────────────────
+  Widget _buildSidebarContent({required bool isDrawer}) {
+    final showFull = isDrawer || _isSidebarExpanded;
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_kNavyDark, _kNavy],
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _kBlueAccent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.account_balance_wallet,
+                        color: _kWhite,
+                        size: 20,
+                      ),
+                    ),
+                    if (showFull) ...[
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Abra Finance',
+                          style: TextStyle(
+                            color: _kWhite,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (showFull && _orgName.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: () => _showOrgSwitcher(context),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white.withOpacity(0.15)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.business, color: _kWhite, size: 14),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _orgName,
+                                  style: const TextStyle(
+                                    color: _kWhite,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  _userRole.toUpperCase(),
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.55),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_organizations.length > 1)
+                            const Icon(Icons.unfold_more, color: _kWhite, size: 14),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: _buildMenuWidgets(showFull: showFull, isDrawer: isDrawer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Build menu widgets ────────────────────────────────────────────────────
+  List<Widget> _buildMenuWidgets({required bool showFull, required bool isDrawer}) {
+    final items   = _visibleMenuItems;
+    final widgets = <Widget>[];
+
+    for (final item in items) {
+      // CHANGED: isSelected now compares route string, not index
+      final isSelected = _currentRoute == item.route;
+      final isExpanded = _expandedSections[item.route] ?? false;
+
+      widgets.add(
+        _SidebarItem(
+          item:       item,
+          isSelected: isSelected,
+          isExpanded: isExpanded,
+          showFull:   showFull,
+          onTap: () {
+            if (item.isExpandable) {
+              setState(() {
+                _expandedSections[item.route] = !isExpanded;
+              });
+            } else {
+              // Handle non-expandable top-level items
+              if (isDrawer) Navigator.pop(context);
+              _handleTopLevelNavigation(item.route, item.label);
+            }
+          },
+        ),
+      );
+
+      // Sub-items
+      if (item.isExpandable && isExpanded && showFull) {
+        for (final sub in item.subItems ?? []) {
+          widgets.add(
+            _SubSidebarItem(
+              subItem:    sub,
+              isSelected: _currentRoute == sub.route,
+              onTap: () {
+                setState(() => _currentPageTitle = sub.label);
+                if (isDrawer) Navigator.pop(context);
+                _navigateToSubPage(sub.route, sub.label);
+              },
+            ),
+          );
+        }
+      }
+    }
+    return widgets;
+  }
+
+  // ── Handle top-level navigation (non-expandable items) ───────────────────
+  void _handleTopLevelNavigation(String route, String label) {
+    switch (route) {
+      case 'home':
+        setState(() {
+          _currentRoute     = 'home';
+          _currentPageTitle = 'Dashboard';
+        });
+        break;
+      case 'my_profile':
+        // FIXED: My Profile now correctly navigates to profile page
+        _openProfile();
+        break;
+      default:
+        // All other top-level items push a full page
+        _navigateToSubPage(route, label);
+    }
+  }
+
+  // ── Sub-page navigation ───────────────────────────────────────────────────
+  void _navigateToSubPage(String route, String label) {
+    void push(Widget page) {
+      setState(() => _currentRoute = route);
+      Navigator.push(context, MaterialPageRoute(builder: (_) => page))
+          .then((_) {
+        if (mounted) {
+          setState(() {
+            _currentRoute     = 'home';
+            _currentPageTitle = 'Dashboard';
+          });
+        }
+      });
+    }
+
+    switch (route) {
+      // TMS
+      case 'tms/raise_ticket':
+        push(const RaiseTicketScreen());
+        break;
+      case 'tms/my_tickets':
+        push(const MyTicketsScreen());
+        break;
+      case 'tms/all_tickets':
+        push(const AllTicketsScreen());
+        break;
+      case 'tms/closed_tickets':
+        push(const ClosedTicketsScreen());
+        break;
+      // Items
+      case 'items':
+        push(const ItemsBilling());
+        break;
+      // Sales
+      case 'sales/customers':
+        push(const CustomersListPage());
+        break;
+      case 'sales/invoices':
+        push(const InvoicesListPage());
+        break;
+      case 'sales/recurring_invoices':
+        push(const RecurringInvoicesListPage());
+        break;
+      case 'sales/payments_received':
+        push(const PaymentsReceivedPage());
+        break;
+      case 'sales/credit_notes':
+        push(const CreditNotesListPage());
+        break;
+      case 'sales/quotes':
+        push(const QuotesListPage());
+        break;
+      case 'sales/orders':
+        push(const SalesOrdersListPage());
+        break;
+      case 'sales/delivery_challans':
+        push(const DeliveryChallansListPage());
+        break;
+      // Purchases
+      case 'purchases/vendors':
+        push(const VendorsListPage());
+        break;
+      case 'purchases/expenses':
+        push(const ExpensesListPage());
+        break;
+      case 'purchases/assets':
+        FinanceSecureStorage.getToken().then((token) {
+          push(FixedAssetsListPage(
+            baseUrl: ApiConfig.baseUrl,
+            token:   token ?? '',
+          ));
+        });
+        break;
+      case 'purchases/recurring_expenses':
+        push(const RecurringExpensesListPage());
+        break;
+      case 'purchases/orders':
+        push(const PurchaseOrdersListPage());
+        break;
+      case 'purchases/bills':
+        push(const BillListPage());
+        break;
+      case 'purchases/recurring_bills':
+        push(RecurringBillsListPage());
+        break;
+      case 'purchases/payments_made':
+        push(const PaymentMadeListPage());
+        break;
+      case 'purchases/vendor_credits':
+        push(const VendorCreditsListPage());
+        break;
+      case 'purchases/eway_bills':
+        push(const EWayBillListPage());
+        break;
+      case 'purchases/payment_links':
+        push(const PaymentLinksListPage());
+        break;
+      // Time Tracking
+      case 'time_tracking/projects':
+        push(const ProjectsListPage());
+        break;
+      case 'time_tracking/timesheet':
+        push(const TimesheetsListPage());
+        break;
+      // Rate Cards
+      case 'rate_cards':
+        push(RateCardListScreen());
+        break;
+      // Banking
+      case 'banking':
+        push(BankingDashboardPage());
+        break;
+      // Accountant
+      case 'accountant/manual_journals':
+        push(const ManualJournalsListPage());
+        break;
+      case 'accountant/currency_adjustments':
+        push(const CurrencyAdjustmentsListPage());
+        break;
+      case 'accountant/chart_of_accounts':
+        push(const ChartOfAccountsListPage());
+        break;
+      case 'accountant/budgets':
+        push(const BudgetsListPage());
+        break;
+      // Reports
+      case 'reports':
+        push(const ReportsListPage());
+        break;
+      // Role Access Control
+      case 'role_access_control':
+        push(const FinanceERPUsersScreen());
+        break;
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$label — Coming Soon'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: _kBlueAccent,
+          ),
+        );
+    }
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(child: _buildSidebarContent(isDrawer: true));
+  }
+}
+
+// ─── ORG SWITCHER CARD ────────────────────────────────────────────────────────
+class _OrgSwitcherCard extends StatelessWidget {
+  final List<Map<String, dynamic>> organizations;
+  final String currentOrgId;
+  final Future<void> Function(String orgId, String orgName) onOrgSelected;
+
+  const _OrgSwitcherCard({
+    required this.organizations,
+    required this.currentOrgId,
+    required this.onOrgSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 420),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 40,
+            offset: const Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Switch Organisation',
+                          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                      SizedBox(height: 2),
+                      Text('Select the organisation to work in',
+                          style: TextStyle(color: Colors.white60, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: organizations.map((org) {
+                  final orgId     = org['orgId']?.toString()   ?? '';
+                  final orgName   = org['orgName']?.toString() ?? '';
+                  final role      = org['role']?.toString()    ?? '';
+                  final isCurrent = orgId == currentOrgId;
+
+                  return GestureDetector(
+                    onTap: () => onOrgSelected(orgId, orgName),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isCurrent
+                            ? const Color(0xFF2563EB).withOpacity(0.06)
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                          width: isCurrent ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 46, height: 46,
+                            decoration: BoxDecoration(
+                              color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Text(
+                                orgName.isNotEmpty ? orgName[0].toUpperCase() : 'O',
+                                style: TextStyle(
+                                  color: isCurrent ? Colors.white : const Color(0xFF64748B),
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(orgName,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFF0F172A),
+                                    )),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isCurrent
+                                        ? const Color(0xFF2563EB).withOpacity(0.1)
+                                        : const Color(0xFFE2E8F0),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(role.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                                        letterSpacing: 0.5,
+                                      )),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isCurrent)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2563EB).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB), size: 14),
+                                  SizedBox(width: 4),
+                                  Text('Active',
+                                      style: TextStyle(
+                                          color: Color(0xFF2563EB),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            )
+                          else
+                            const Icon(Icons.chevron_right_rounded, color: Color(0xFFCBD5E1), size: 20),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── SIDEBAR ITEM ─────────────────────────────────────────────────────────────
+class _SidebarItem extends StatelessWidget {
+  final NavigationItem item;
+  final bool           isSelected;
+  final bool           isExpanded;
+  final bool           showFull;
+  final VoidCallback   onTap;
+
+  const _SidebarItem({
+    required this.item,
+    required this.isSelected,
+    required this.isExpanded,
+    required this.showFull,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+        decoration: BoxDecoration(
+          color: isSelected ? _kBlueAccent : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? item.selectedIcon : item.icon,
+              color: _kWhite,
+              size: 22,
+            ),
+            if (showFull) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  item.label,
+                  style: TextStyle(
+                    color: _kWhite,
+                    fontSize: 15,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
+              ),
+              if (item.isExpandable)
+                Icon(
+                  isExpanded ? Icons.expand_less : Icons.expand_more,
+                  color: _kWhite,
+                  size: 18,
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── SUB SIDEBAR ITEM ─────────────────────────────────────────────────────────
+class _SubSidebarItem extends StatelessWidget {
+  final SubNavigationItem subItem;
+  final bool              isSelected;
+  final VoidCallback      onTap;
+
+  const _SubSidebarItem({
+    required this.subItem,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(left: 22, right: 10, top: 1, bottom: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          // Highlight selected sub-item
+          color: isSelected ? Colors.white.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            if (subItem.icon != null)
+              Icon(subItem.icon, color: _kWhite, size: 17)
+            else
+              Container(
+                width: 5, height: 5,
+                decoration: const BoxDecoration(color: _kWhite, shape: BoxShape.circle),
+              ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                subItem.label,
+                style: TextStyle(
+                  color: _kWhite,
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── DATA MODELS ──────────────────────────────────────────────────────────────
+class NavigationItem {
+  final IconData                 icon;
+  final IconData                 selectedIcon;
+  final String                   label;
+  final String                   route;
+  final bool                     isExpandable;
+  final List<SubNavigationItem>? subItems;
+
+  NavigationItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.route,
+    this.isExpandable = false,
+    this.subItems,
+  });
+}
+
+class SubNavigationItem {
+  final String    label;
+  final String    route;
+  final IconData? icon;
+
+  SubNavigationItem({
+    required this.label,
+    required this.route,
+    this.icon,
+  });
+}

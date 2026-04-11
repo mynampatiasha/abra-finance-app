@@ -1,0 +1,366 @@
+// ============================================================================
+// TRANSACTION RULES ENGINE
+// ============================================================================
+// File: backend/routes/transaction_rules.js
+//
+// Rules run automatically on EVERY import batch BEFORE anything hits
+// the uncategorized queue. Matching transactions get fully categorized
+// and COA entries are posted immediately.
+//
+// Rule Structure:
+//   conditions: [{ field, operator, value }]  (AND logic between conditions)
+//   action:     { type, coaAccountId, coaAccountName, vendorName,
+//                 customerName, toAccountId, autoApprove }
+//
+// Fields:       description | amount | transactionType | referenceNumber | location
+// Operators:    contains | not_contains | equals | greater_than | less_than | starts_with
+// Types:        expense | deposit | transfer | exclude
+// ============================================================================
+
+'use strict';
+
+const express  = require('express');
+const router   = express.Router();
+const mongoose = require('mongoose');
+
+const { verifyFinanceJWT }    = require('../middleware/finance_jwt');
+const { postTransactionToCOA, ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
+
+router.use(verifyFinanceJWT);
+
+// ============================================================================
+// SCHEMA
+// ============================================================================
+
+const TransactionRuleSchema = new mongoose.Schema({
+  orgId:       { type: String, index: true, default: null },
+  accountId:   { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount', index: true, default: null },
+  // null accountId = applies to ALL accounts in org
+
+  name:        { type: String, required: true, trim: true },
+  description: { type: String, default: '' },
+  isActive:    { type: Boolean, default: true, index: true },
+  priority:    { type: Number, default: 0 },
+  // Lower number = higher priority (runs first)
+
+  conditions: [{
+    field:    { type: String, enum: ['description', 'amount', 'transactionType', 'referenceNumber', 'location', 'merchantName'], required: true },
+    operator: { type: String, enum: ['contains', 'not_contains', 'equals', 'not_equals', 'greater_than', 'less_than', 'starts_with', 'ends_with'], required: true },
+    value:    { type: String, required: true },
+  }],
+
+  action: {
+    type:           { type: String, enum: ['expense', 'deposit', 'transfer', 'exclude'], required: true },
+    coaAccountId:   { type: mongoose.Schema.Types.ObjectId, ref: 'ChartOfAccount', default: null },
+    coaAccountName: { type: String, default: null },
+    vendorName:     { type: String, default: null },
+    customerName:   { type: String, default: null },
+    toAccountId:    { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount', default: null },
+    autoApprove:    { type: Boolean, default: true },
+    notes:          { type: String, default: null },
+  },
+
+  // Stats
+  matchCount:  { type: Number, default: 0 },
+  lastMatchAt: { type: Date, default: null },
+
+  createdBy:   { type: String, default: 'system' },
+  updatedBy:   { type: String, default: 'system' },
+}, { timestamps: true });
+
+TransactionRuleSchema.index({ orgId: 1, isActive: 1, priority: 1 });
+
+const TransactionRule = mongoose.models.TransactionRule
+  || mongoose.model('TransactionRule', TransactionRuleSchema);
+
+// ============================================================================
+// CONDITION EVALUATOR
+// ============================================================================
+
+function evaluateCondition(txn, condition) {
+  const { field, operator, value } = condition;
+  let fieldValue = txn[field];
+
+  if (fieldValue === null || fieldValue === undefined) return false;
+  fieldValue = fieldValue.toString().toLowerCase().trim();
+  const compareValue = value.toString().toLowerCase().trim();
+
+  switch (operator) {
+    case 'contains':      return fieldValue.includes(compareValue);
+    case 'not_contains':  return !fieldValue.includes(compareValue);
+    case 'equals':        return fieldValue === compareValue;
+    case 'not_equals':    return fieldValue !== compareValue;
+    case 'starts_with':   return fieldValue.startsWith(compareValue);
+    case 'ends_with':     return fieldValue.endsWith(compareValue);
+    case 'greater_than':  return parseFloat(fieldValue) > parseFloat(compareValue);
+    case 'less_than':     return parseFloat(fieldValue) < parseFloat(compareValue);
+    default:              return false;
+  }
+}
+
+function matchesRule(txn, rule) {
+  if (!rule.conditions || rule.conditions.length === 0) return false;
+  // ALL conditions must match (AND logic)
+  return rule.conditions.every(cond => evaluateCondition(txn, cond));
+}
+
+// ============================================================================
+// APPLY RULES TO A BATCH OF TRANSACTIONS
+// Called from reconciliation_billing.js after import
+// Returns { autoApplied, pending }
+// ============================================================================
+
+async function applyRulesToBatch(transactions, accountId, orgId = null) {
+  const results = { autoApplied: 0, pending: 0, errors: [] };
+
+  if (!transactions || transactions.length === 0) return results;
+
+  // Load active rules for this account (account-specific + org-wide)
+  const rules = await TransactionRule.find({
+    isActive: true,
+    $or: [
+      { accountId: accountId },
+      { accountId: null, orgId },
+    ],
+  }).sort({ priority: 1 }).lean();
+
+  if (rules.length === 0) return results;
+
+  const ProviderTransaction = mongoose.models.ProviderTransaction
+    || mongoose.model('ProviderTransaction', new mongoose.Schema({}, { strict: false }), 'providertransactions');
+  const Expense = mongoose.models.Expense
+    || mongoose.model('Expense', new mongoose.Schema({}, { strict: false }), 'expenses');
+  const PaymentAccount = mongoose.models.PaymentAccount
+    || mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+
+  for (const txn of transactions) {
+    let matched = false;
+
+    for (const rule of rules) {
+      if (!matchesRule(txn, rule)) continue;
+
+      try {
+        const action = rule.action;
+
+        if (!action.autoApprove) {
+          // Flag for user review but suggest the rule
+          await ProviderTransaction.findByIdAndUpdate(txn._id, {
+            $set: {
+              suggestedRuleId:    rule._id,
+              suggestedRuleName:  rule.name,
+              suggestedAction:    action,
+              reconciliationStatus: 'RULE_SUGGESTED',
+            },
+          });
+          results.pending++;
+          matched = true;
+          break;
+        }
+
+        // Auto-approve: post to COA immediately
+        const journalRef = `BNK-${new Date().getFullYear()}-RULE-${Date.now().toString().slice(-5)}`;
+
+        const pa     = await PaymentAccount.findById(accountId).lean();
+        const bankCOA = await ChartOfAccount.findOne({ accountName: pa?.accountName, ...(orgId ? { orgId } : {}) }).lean();
+
+        if (!bankCOA) {
+          results.errors.push(`No COA for account ${accountId}`);
+          continue;
+        }
+
+        if (action.type === 'expense' && action.coaAccountId) {
+          const expCOA = await ChartOfAccount.findById(action.coaAccountId).lean();
+          if (!expCOA) continue;
+
+          await postTransactionToCOA({ accountId: expCOA._id, orgId, date: txn.transactionDate, description: `${expCOA.accountName}${action.vendorName ? ' - ' + action.vendorName : ''} [Rule: ${rule.name}] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
+          await postTransactionToCOA({ accountId: bankCOA._id, orgId, date: txn.transactionDate, description: `${expCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
+
+          await Expense.create({ orgId, expenseNumber: journalRef, date: new Date(txn.transactionDate).toISOString().split('T')[0], expenseAccount: expCOA.accountName, expenseAccountId: expCOA._id, paidThrough: bankCOA.accountName, paidThroughAccountId: bankCOA._id, vendor: action.vendorName || null, amount: txn.amount, total: txn.amount, notes: action.notes || `Auto-categorized by rule: ${rule.name}`, providerTransactionId: txn._id, journalRef, ruleId: rule._id, createdBy: 'rule-engine' });
+          await PaymentAccount.findByIdAndUpdate(accountId, { $inc: { currentBalance: -txn.amount } });
+
+        } else if (action.type === 'deposit' && action.coaAccountId) {
+          const incCOA = await ChartOfAccount.findById(action.coaAccountId).lean();
+          if (!incCOA) continue;
+
+          await postTransactionToCOA({ accountId: bankCOA._id, orgId, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
+          await postTransactionToCOA({ accountId: incCOA._id, orgId, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
+          await PaymentAccount.findByIdAndUpdate(accountId, { $inc: { currentBalance: txn.amount } });
+
+        } else if (action.type === 'exclude') {
+          await ProviderTransaction.findByIdAndUpdate(txn._id, {
+            $set: { isExcluded: true, excludedAt: new Date(), excludedReason: `Rule: ${rule.name}`, reconciliationStatus: 'EXCLUDED' },
+          });
+          results.autoApplied++;
+          matched = true;
+          break;
+        }
+
+        // Mark as categorized
+        await ProviderTransaction.findByIdAndUpdate(txn._id, {
+          $set: {
+            reconciliationStatus: 'CATEGORIZED',
+            categorizedAt:   new Date(),
+            categorizedBy:   `rule:${rule._id}`,
+            journalRef,
+            categoryLabel:   action.coaAccountName || 'Auto-categorized',
+            appliedRuleId:   rule._id,
+            appliedRuleName: rule.name,
+          },
+        });
+
+        // Update rule stats
+        await TransactionRule.findByIdAndUpdate(rule._id, {
+          $inc: { matchCount: 1 },
+          $set: { lastMatchAt: new Date() },
+        });
+
+        results.autoApplied++;
+        matched = true;
+        break; // Only first matching rule applies
+
+      } catch (ruleErr) {
+        console.error(`❌ Rule ${rule.name} error on txn ${txn._id}:`, ruleErr.message);
+        results.errors.push(`${rule.name}: ${ruleErr.message}`);
+      }
+    }
+
+    if (!matched) {
+      // No rule matched — stays UNMATCHED for manual categorization
+    }
+  }
+
+  console.log(`📋 Rules applied: ${results.autoApplied} auto-categorized, ${results.pending} pending, ${results.errors.length} errors`);
+  return results;
+}
+
+// ============================================================================
+// REST API ROUTES
+// ============================================================================
+
+// GET /  — list all rules for this org/account
+router.get('/', async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    const filter = { ...( req.user?.orgId ? { orgId: req.user.orgId } : {}) };
+    if (accountId) filter.accountId = accountId;
+
+    const rules = await TransactionRule.find(filter).sort({ priority: 1, createdAt: -1 }).lean();
+    res.json({ success: true, count: rules.length, data: rules });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /  — create rule
+router.post('/', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.name || !data.conditions?.length || !data.action?.type) {
+      return res.status(400).json({ success: false, message: 'name, conditions, and action.type are required' });
+    }
+
+    // Validate COA account exists if provided
+    if (data.action.coaAccountId) {
+      const coa = await ChartOfAccount.findById(data.action.coaAccountId).lean();
+      if (!coa) return res.status(400).json({ success: false, message: 'COA account not found' });
+      data.action.coaAccountName = coa.accountName;
+    }
+
+    const rule = await TransactionRule.create({
+      ...data,
+      orgId:     req.user?.orgId || null,
+      createdBy: req.user?.email || 'system',
+    });
+
+    console.log(`✅ Transaction rule created: ${rule.name}`);
+    res.status(201).json({ success: true, message: 'Rule created', data: rule });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /:id  — update rule
+router.put('/:id', async (req, res) => {
+  try {
+    const rule = await TransactionRule.findOne({
+      _id: req.params.id,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    });
+    if (!rule) return res.status(404).json({ success: false, message: 'Rule not found' });
+
+    const allowed = ['name','description','isActive','priority','conditions','action'];
+    allowed.forEach(k => { if (req.body[k] !== undefined) rule[k] = req.body[k]; });
+
+    if (req.body.action?.coaAccountId) {
+      const coa = await ChartOfAccount.findById(req.body.action.coaAccountId).lean();
+      if (coa) rule.action.coaAccountName = coa.accountName;
+    }
+
+    rule.updatedBy = req.user?.email || 'system';
+    await rule.save();
+
+    res.json({ success: true, message: 'Rule updated', data: rule });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /:id
+router.delete('/:id', async (req, res) => {
+  try {
+    await TransactionRule.findOneAndDelete({
+      _id: req.params.id,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    });
+    res.json({ success: true, message: 'Rule deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH /:id/toggle — activate / deactivate
+router.patch('/:id/toggle', async (req, res) => {
+  try {
+    const rule = await TransactionRule.findOne({
+      _id: req.params.id,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    });
+    if (!rule) return res.status(404).json({ success: false, message: 'Rule not found' });
+    rule.isActive = !rule.isActive;
+    await rule.save();
+    res.json({ success: true, message: `Rule ${rule.isActive ? 'activated' : 'deactivated'}`, data: rule });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /reorder — update priorities
+router.post('/reorder', async (req, res) => {
+  try {
+    const { orderedIds } = req.body; // array of rule IDs in priority order
+    for (let i = 0; i < orderedIds.length; i++) {
+      await TransactionRule.findByIdAndUpdate(orderedIds[i], { priority: i });
+    }
+    res.json({ success: true, message: 'Rules reordered' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /test — test a rule against sample transaction data
+router.post('/test', async (req, res) => {
+  try {
+    const { rule, transactions } = req.body;
+    const results = transactions.map(txn => ({
+      txn,
+      matches: matchesRule(txn, rule),
+    }));
+    res.json({ success: true, data: results });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+module.exports = router;
+module.exports.applyRulesToBatch = applyRulesToBatch;
+module.exports.TransactionRule   = TransactionRule;

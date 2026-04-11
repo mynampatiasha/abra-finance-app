@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // CREDIT NOTES SYSTEM - COMPLETE WITH MODEL
 // ============================================================================
 // File: backend/routes/credit-notes.js
@@ -38,9 +38,9 @@ const creditNoteSchema = new mongoose.Schema({
   creditNoteNumber: {
     type: String,
     required: true,
-    unique: true,
     index: true
   },
+  
   
   // Customer Information
   customerId: {
@@ -246,6 +246,10 @@ const creditNoteSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  providerTransactionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
   }
 }, {
   timestamps: true
@@ -412,106 +416,271 @@ async function generateCreditNotePDF(creditNote, orgId) {
       doc.pipe(stream);
       const pageW = 515;
 
-      // Header
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
+      // ── Header (plain white background, like invoices.js) ──────────────────────
       const logoPath = getLogoPath(orgId);
       let logoLoaded = false;
-      if (logoPath) { try { doc.image(logoPath, 44, 35, { width: 75, height: 60, fit: [75, 60] }); logoLoaded = true; } catch (e) {} }
-      const textX = logoLoaded ? 126 : 50;
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold').text(orgName.toUpperCase(), textX, 40, { width: 200 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('BILLING & FINANCE', textX, 56, { width: 200, characterSpacing: 1 });
+
+      const textX = logoPath ? 126 : 50;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let cY = 68; contactLines.forEach(l => { doc.text(l, textX, cY, { width: 240 }); cY += 9; });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold').text('CREDIT NOTE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold').text(creditNote.creditNoteNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica').text(`Date: ${new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold').text(`${(creditNote.status || 'DRAFT').replace(/_/g,' ')}`, 380, 92, { width: 170, align: 'right' });
 
-      // Meta boxes
-      const metaY = 132, metaBoxW = pageW / 2;
-      const metas = [
-        { label: 'Credit To', val: creditNote.customerName || 'N/A', sub: [creditNote.billingAddress?.street, creditNote.billingAddress?.city, creditNote.customerEmail, creditNote.customerPhone].filter(Boolean).join(' | ') },
-        { label: 'Credit Note Details', val: `Ref: ${creditNote.invoiceNumber || creditNote.referenceNumber || 'N/A'}`, sub: `Reason: ${creditNote.reason || 'N/A'}` },
-      ];
-      metas.forEach((m, i) => {
-        const bx = 40 + i * metaBoxW;
-        doc.rect(bx, metaY, metaBoxW, 46).fillAndStroke('#f7f9fc', '#dde4ef');
-        doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text(m.label.toUpperCase(), bx + 8, metaY + 7, { width: metaBoxW - 16, characterSpacing: 0.8 });
-        doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(m.val, bx + 8, metaY + 18, { width: metaBoxW - 16, ellipsis: true });
-        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(m.sub, bx + 8, metaY + 30, { width: metaBoxW - 16, ellipsis: true });
-      });
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH = 55;
+      const logoY = logoCenterY - (logoH / 2);
 
-      // Items table
-      const tableY = metaY + 58;
-      doc.rect(40, tableY, pageW, 22).fill('#0f1e3d');
-      doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
-      doc.text('#', 48, tableY + 7, { width: 20 }); doc.text('DESCRIPTION', 72, tableY + 7, { width: 200 });
-      doc.text('QTY', 275, tableY + 7, { width: 60, align: 'center' }); doc.text('RATE', 340, tableY + 7, { width: 80, align: 'right' }); doc.text('AMOUNT', 420, tableY + 7, { width: 90, align: 'right' });
-      let rowY = tableY + 22;
-      creditNote.items.forEach((item, idx) => {
-        const rowH = 24;
-        doc.rect(40, rowY, pageW, rowH).fill(idx % 2 === 0 ? '#ffffff' : '#f7f9fc');
-        doc.rect(40, rowY, pageW, rowH).lineWidth(1.5).strokeColor('#000000').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold').text(String(idx + 1), 48, rowY + 8, { width: 20 });
-        doc.font('Helvetica').text(item.itemDetails || 'N/A', 72, rowY + 8, { width: 200, ellipsis: true });
-        doc.text(String(item.quantity || 0), 275, rowY + 8, { width: 60, align: 'center' });
-        doc.text(`Rs.${(item.rate || 0).toFixed(2)}`, 340, rowY + 8, { width: 80, align: 'right' });
-        doc.font('Helvetica-Bold').text(`Rs.${(item.amount || 0).toFixed(2)}`, 420, rowY + 8, { width: 90, align: 'right' });
+      if (logoPath) {
+        try {
+          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          logoLoaded = true;
+        } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+      }
+
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+
+      doc.fontSize(7).fillColor('#000000');
+      let contactY = textStartY + 26;
+      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+         .text('CREDIT NOTE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+         .text(creditNote.creditNoteNumber, 380, 52, { width: 170, align: 'right' });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`Date: ${new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+         .text(`${(creditNote.status || 'DRAFT').replace(/_/g,' ')}`, 380, 92, { width: 170, align: 'right' });
+
+      // 3-column meta grid (like invoices.js)
+      const metaY = 132;
+      const colW  = pageW / 3;
+      const metaH = 90;
+
+      const billingStr = [
+        creditNote.billingAddress?.street,
+        creditNote.billingAddress?.city,
+        creditNote.billingAddress?.state,
+        creditNote.billingAddress?.pincode,
+      ].filter(Boolean).join(', ');
+
+      // Col 1: Bill To
+      const billX = 40;
+      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(creditNote.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      if (billingStr) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+      }
+      if (creditNote.customerEmail) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(creditNote.customerEmail, billX + 8, metaY + 60, { width: colW - 16, ellipsis: true });
+      }
+
+      // Col 2: Ship To (same as bill to for credit notes)
+      const shipX = 40 + colW;
+      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('SHIP TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      if (billingStr) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(billingStr, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      } else {
+        doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
+           .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
+      }
+
+      // Col 3: Credit Note Details
+      const detX = 40 + colW * 2;
+      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('CREDIT NOTE DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`CN #: ${creditNote.creditNoteNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(`Date: ${new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`, detX + 8, metaY + 29, { width: colW - 16 });
+      if (creditNote.invoiceNumber) {
+        doc.text(`Invoice Ref: ${creditNote.invoiceNumber}`, detX + 8, metaY + 39, { width: colW - 16 });
+      }
+      doc.text(`Reason: ${creditNote.reason || 'N/A'}`, detX + 8, metaY + 49, { width: colW - 16, ellipsis: true });
+
+      let tableStartY = metaY + metaH + 12;
+
+      // Items table — invoice-style columns
+      const isInterState = false; // Credit notes default to intra-state (CGST+SGST)
+
+      const cols = {
+        num:     { x: 40,  w: 16  },
+        desc:    { x: 56,  w: 90  },
+        hsn:     { x: 146, w: 44  },
+        unit:    { x: 190, w: 24  },
+        qty:     { x: 214, w: 24  },
+        rate:    { x: 238, w: 36  },
+        disc:    { x: 274, w: 26  },
+        taxable: { x: 300, w: 38  },
+        gst:     { x: 338, w: 24  },
+        tax1:    { x: 362, w: 46  },
+        tax2:    { x: 408, w: 46  },
+        amount:  { x: 454, w: 61  },
+      };
+
+      doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+      doc.text('#',       cols.num.x  + 2, tableStartY + 7, { width: cols.num.w });
+      doc.text('ITEM',    cols.desc.x + 2, tableStartY + 7, { width: cols.desc.w });
+      doc.text('HSN/SAC', cols.hsn.x  + 2, tableStartY + 7, { width: cols.hsn.w });
+      doc.text('UNIT',    cols.unit.x + 2, tableStartY + 7, { width: cols.unit.w });
+      doc.text('QTY',     cols.qty.x  + 2, tableStartY + 7, { width: cols.qty.w,     align: 'center' });
+      doc.text('RATE',    cols.rate.x + 2, tableStartY + 7, { width: cols.rate.w,    align: 'right' });
+      doc.text('DISC',    cols.disc.x + 2, tableStartY + 7, { width: cols.disc.w,    align: 'right' });
+      doc.text('TAXABLE', cols.taxable.x+2,tableStartY + 7, { width: cols.taxable.w, align: 'right' });
+      doc.text('GST%',    cols.gst.x  + 2, tableStartY + 7, { width: cols.gst.w,     align: 'center' });
+      doc.text('CGST',    cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w,    align: 'right' });
+      doc.text('SGST',    cols.tax2.x + 2, tableStartY + 7, { width: cols.tax2.w,    align: 'right' });
+      doc.text('AMOUNT',  cols.amount.x+2, tableStartY + 7, { width: cols.amount.w,  align: 'right' });
+
+      let rowY = tableStartY + 20;
+
+      (creditNote.items || []).forEach((item, idx) => {
+        const descText  = item.itemDetails || 'N/A';
+        const descWidth = cols.desc.w - 4;
+        const vPad      = 8;
+        doc.font('Helvetica').fontSize(7);
+        const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
+        const rowH  = Math.max(20, descH + vPad * 2);
+
+        const fill  = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+        doc.rect(40, rowY, 515, rowH).fill(fill);
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+        const hsnSac  = item.hsnCode || item.sacCode || '';
+        const discStr = item.discount > 0
+          ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
+          : '—';
+
+        const gstRate  = item.gstRate || 18;
+        const taxable  = item.amount || 0;
+        const cgstAmt  = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
+        const sgstAmt  = cgstAmt;
+        const totalAmt = taxable + cgstAmt + sgstAmt;
+
+        const cellY = rowY + vPad;
+        doc.fontSize(7).fillColor('#000000');
+        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
+        doc.font('Helvetica').text(descText, cols.desc.x + 2, cellY, { width: descWidth, lineGap: 1 });
+        doc.text(hsnSac,                           cols.hsn.x  + 2, cellY, { width: cols.hsn.w - 2,  ellipsis: true });
+        doc.text(item.unit || 'Nos',               cols.unit.x + 2, cellY, { width: cols.unit.w });
+        doc.text(String(item.quantity || 0),       cols.qty.x  + 2, cellY, { width: cols.qty.w,     align: 'center' });
+        doc.text(`${(item.rate || 0).toFixed(2)}`, cols.rate.x + 2, cellY, { width: cols.rate.w,    align: 'right' });
+        doc.text(discStr,                          cols.disc.x + 2, cellY, { width: cols.disc.w,    align: 'right' });
+        doc.text(`${taxable.toFixed(2)}`,          cols.taxable.x+2, cellY, { width: cols.taxable.w, align: 'right' });
+        doc.text(`${gstRate}%`,                    cols.gst.x  + 2, cellY, { width: cols.gst.w,     align: 'center' });
+        doc.text(`${cgstAmt.toFixed(2)}`,          cols.tax1.x + 2, cellY, { width: cols.tax1.w,    align: 'right' });
+        doc.text(`${sgstAmt.toFixed(2)}`,          cols.tax2.x + 2, cellY, { width: cols.tax2.w,    align: 'right' });
+        doc.font('Helvetica-Bold')
+           .text(`${totalAmt.toFixed(2)}`,         cols.amount.x+2, cellY, { width: cols.amount.w,  align: 'right' });
         rowY += rowH;
       });
 
       // Totals
-      const totalsX = 355, totalsW = 200, labelX = totalsX, amountX = totalsX + totalsW;
-      let totalsY = rowY + 16;
+      const totalsX = 315;
+      const totalsW = 240;
+      let totalsY   = rowY + 12;
+      const labelX  = totalsX;
+      const amountX = totalsX + totalsW;
+
       const tRow = (label, amount, bold = false) => {
-        doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, labelX, totalsY, { width: 120 });
-        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(amount, labelX + 120, totalsY, { width: 80, align: 'right' });
-        doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11).lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
+        doc.fontSize(8)
+           .fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(label, labelX, totalsY, { width: 140 });
+        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
+        doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11)
+           .lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
         totalsY += 14;
       };
+
       tRow('Subtotal:', `Rs. ${(creditNote.subTotal || 0).toFixed(2)}`);
       if (creditNote.cgst > 0) tRow(`CGST (${creditNote.gstRate / 2}%):`, `Rs. ${creditNote.cgst.toFixed(2)}`);
       if (creditNote.sgst > 0) tRow(`SGST (${creditNote.gstRate / 2}%):`, `Rs. ${creditNote.sgst.toFixed(2)}`);
-      if (creditNote.igst > 0) tRow(`IGST (${creditNote.gstRate}%):`, `Rs. ${creditNote.igst.toFixed(2)}`);
+      if (creditNote.igst > 0) tRow(`IGST (${creditNote.gstRate}%):`,     `Rs. ${creditNote.igst.toFixed(2)}`);
       if (creditNote.tdsAmount > 0) tRow('TDS Deducted:', `- Rs. ${creditNote.tdsAmount.toFixed(2)}`);
+
       totalsY += 4;
       doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('Credit Amount', labelX + 6, totalsY + 7);
-      doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold').text(`Rs. ${(creditNote.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
+      doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
+         .text('Credit Amount', labelX + 6, totalsY + 7);
+      doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
+         .text(`Rs. ${(creditNote.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
       totalsY += 32;
-      if ((creditNote.creditUsed || 0) > 0) tRow('Credit Used:', `Rs. ${creditNote.creditUsed.toFixed(2)}`);
-      if ((creditNote.creditBalance || 0) > 0) tRow('Available Balance:', `Rs. ${creditNote.creditBalance.toFixed(2)}`, true);
+
+      if ((creditNote.creditUsed || 0) > 0)
+        tRow('Credit Used:',       `Rs. ${creditNote.creditUsed.toFixed(2)}`);
+      if ((creditNote.creditBalance || 0) > 0)
+        tRow('Available Balance:', `Rs. ${creditNote.creditBalance.toFixed(2)}`, true);
 
       // Amount in words
       const wordsY = totalsY + 8;
       doc.rect(40, wordsY, pageW, 18).fill('#f0fdf4');
-      doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold').text(`In Words: ${numberToWords(Math.round(creditNote.totalAmount || 0))} Only`, 48, wordsY + 5, { width: pageW - 16 });
+      doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold')
+         .text(`In Words: ${numberToWords(Math.round(creditNote.totalAmount || 0))} Only`,
+               48, wordsY + 5, { width: pageW - 16 });
 
       // Notes
+      let notesY = wordsY + 28;
       if (creditNote.customerNotes || creditNote.reasonDescription) {
-        const nY = wordsY + 28;
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold').text('NOTES', 40, nY, { characterSpacing: 0.8 });
-        doc.moveTo(40, nY + 9).lineTo(555, nY + 9).lineWidth(0.5).strokeColor('#dde4ef').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica').text(creditNote.reasonDescription || creditNote.customerNotes, 40, nY + 14, { width: pageW });
+        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+           .text('NOTES', 40, notesY, { characterSpacing: 0.8 });
+        doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9)
+           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        doc.fontSize(8).fillColor('#000000').font('Helvetica')
+           .text(creditNote.reasonDescription || creditNote.customerNotes, 40, notesY + 14, { width: pageW });
+        notesY += 40;
       }
 
-      // T&C
+      // Terms & Conditions
       if (creditNote.termsAndConditions) {
-        const tcY = 660;
+        const tcY = notesY + 6;
         doc.rect(40, tcY, pageW, 14).fill('#f9f9f9').stroke();
-        doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold').text('TERMS & CONDITIONS', 48, tcY + 3, { characterSpacing: 0.8 });
-        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(creditNote.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
+        doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
+           .text('TERMS & CONDITIONS', 48, tcY + 3, { characterSpacing: 0.8 });
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(creditNote.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
+        notesY = tcY + 30;
       }
+
+      // ── AUTHORIZED SIGNATORY ─────────────────────────────────────────────
+      const signSectionY = notesY + 10;
+      const signBoxW     = 220;
+      const authBoxX     = 555 - signBoxW;
+
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      doc.moveTo(authBoxX, signSectionY + 30)
+         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+         .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica').text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${creditNote.creditNoteNumber}`, 40, footY + 6, { width: pageW / 2 });
-      doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
+         .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${creditNote.creditNoteNumber}`,
+               40, footY + 6, { width: pageW / 2 });
+      doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
+               40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
-      stream.on('finish', () => { console.log(`✅ Credit Note PDF generated: ${filename}`); resolve({ filename, filepath, relativePath: `/uploads/credit-notes/${filename}` }); });
+      stream.on('finish', () => {
+        console.log(`✅ Credit Note PDF generated: ${filename}`);
+        resolve({ filename, filepath, relativePath: `/uploads/credit-notes/${filename}` });
+      });
       stream.on('error', reject);
     } catch (error) { console.error('❌ PDF generation error:', error); reject(error); }
   });
@@ -776,6 +945,9 @@ router.post('/', async (req, res) => {
     
     creditNoteData.createdBy = req.user?.email || req.user?.uid || 'system';
     creditNoteData.orgId = req.user?.orgId || null;
+    if (creditNoteData.providerTransactionId && typeof creditNoteData.providerTransactionId === 'string' && mongoose.Types.ObjectId.isValid(creditNoteData.providerTransactionId)) {
+      creditNoteData.providerTransactionId = new mongoose.Types.ObjectId(creditNoteData.providerTransactionId);
+    }
     const creditNote = new CreditNote(creditNoteData);
     await creditNote.save();
     
@@ -958,6 +1130,25 @@ router.post('/:id/send', async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending credit note:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// MARK AS SENT (no email)
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const creditNote = await CreditNote.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    if (!creditNote) return res.status(404).json({ success: false, error: 'Credit note not found' });
+    if (['VOID', 'CANCELLED'].includes(creditNote.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark a ${creditNote.status} credit note as sent` });
+    }
+    creditNote.status    = creditNote.status === 'DRAFT' ? 'OPEN' : creditNote.status;
+    creditNote.updatedBy = req.user?.email || req.user?.uid || 'system';
+    await creditNote.save();
+    console.log(`✅ Credit note marked as sent (no email): ${creditNote.creditNoteNumber}`);
+    res.json({ success: true, message: 'Credit note marked as sent', data: creditNote });
+  } catch (error) {
+    console.error('Error marking credit note as sent:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1338,33 +1529,102 @@ router.get('/:id/email-preview', async (req, res) => {
   }
 });
 
-// DELETE credit note (only drafts)
+// DELETE credit note — allowed for any status, fully reverses COA + invoice balances
 router.delete('/:id', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
       orgId: req.user?.orgId
     });
-    
+
     if (!creditNote) {
       return res.status(404).json({ success: false, error: 'Credit note not found' });
     }
-    
-    if (creditNote.status !== 'DRAFT') {
-      return res.status(400).json({
-        success: false,
-        error: 'Only draft credit notes can be deleted'
-      });
+
+    // ── STEP 1: REVERSE INVOICE APPLICATIONS ────────────────────────────────
+    // Walk every creditApplication and roll back the invoice's amountPaid/amountDue/status
+    try {
+      if (creditNote.creditApplications && creditNote.creditApplications.length > 0) {
+        for (const app of creditNote.creditApplications) {
+          if (!app.invoiceId) continue;
+          const invoice = await Invoice.findById(app.invoiceId);
+          if (!invoice) continue;
+
+          const reversedAmountPaid = Math.max(0, (invoice.amountPaid || 0) - app.amount);
+          const reversedAmountDue  = invoice.totalAmount - reversedAmountPaid;
+
+          let newStatus = invoice.status;
+          if (reversedAmountPaid <= 0) {
+            newStatus = 'SENT';
+          } else if (reversedAmountPaid > 0 && reversedAmountDue > 0) {
+            newStatus = 'PARTIALLY_PAID';
+          }
+
+          await Invoice.findByIdAndUpdate(invoice._id, {
+            $pull:  { payments: { referenceNumber: creditNote.creditNoteNumber } },
+            $set:   { amountPaid: reversedAmountPaid, amountDue: reversedAmountDue, status: newStatus, updatedAt: new Date() }
+          });
+
+          console.log(`✅ Invoice ${invoice.invoiceNumber} rolled back — amountPaid: ${reversedAmountPaid}, status: ${newStatus}`);
+        }
+      }
+    } catch (invoiceReverseErr) {
+      console.error('⚠️ Invoice rollback error (credit note delete):', invoiceReverseErr.message);
     }
-    
+    // ── END INVOICE REVERSAL ─────────────────────────────────────────────────
+
+    // ── STEP 2: REVERSE COA ENTRIES ──────────────────────────────────────────
+    // Reverse the 3 entries posted at creation:
+    //   Creation posted: Dr Sales, Cr AR, Dr Tax Payable
+    //   Reversal posts:  Cr Sales, Dr AR, Cr Tax Payable
+    try {
+      const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+      const currentOrgId = req.user?.orgId || null;
+      const txnDate      = new Date(creditNote.creditNoteDate);
+      const desc         = `REVERSAL - Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`;
+
+      const [salesId, arId] = await Promise.all([
+        ChartOfAccount.findOne({ accountName: 'Sales', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
+        ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
+      ]);
+
+      // Cr Sales (reverses the Dr posted at creation)
+      if (salesId) await postTransactionToCOA({
+        accountId: salesId, orgId: currentOrgId, date: txnDate, description: desc,
+        referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+        debit: 0, credit: creditNote.subTotal,
+      });
+
+      // Dr Accounts Receivable (reverses the Cr posted at creation)
+      if (arId) await postTransactionToCOA({
+        accountId: arId, orgId: currentOrgId, date: txnDate, description: desc,
+        referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+        debit: creditNote.totalAmount, credit: 0,
+      });
+
+      // Cr Tax Payable (reverses the Dr posted at creation, if GST existed)
+      if ((creditNote.cgst || 0) + (creditNote.sgst || 0) > 0) {
+        const taxId = await ChartOfAccount.findOne({ accountName: 'Tax Payable', isSystemAccount: true, orgId: currentOrgId })
+          .select('_id').lean().then(a => a?._id);
+        if (taxId) await postTransactionToCOA({
+          accountId: taxId, orgId: currentOrgId, date: txnDate, description: desc,
+          referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+          debit: 0, credit: (creditNote.cgst || 0) + (creditNote.sgst || 0),
+        });
+      }
+
+      console.log(`✅ COA reversed for deleted credit note: ${creditNote.creditNoteNumber}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA reversal error (credit note delete):', coaErr.message);
+    }
+    // ── END COA REVERSAL ─────────────────────────────────────────────────────
+
+    // ── STEP 3: DELETE ───────────────────────────────────────────────────────
     await creditNote.deleteOne();
-    
+
     console.log(`✅ Credit Note deleted: ${creditNote.creditNoteNumber}`);
-    
-    res.json({
-      success: true,
-      message: 'Credit note deleted successfully'
-    });
+
+    res.json({ success: true, message: 'Credit note deleted successfully' });
   } catch (error) {
     console.error('Error deleting credit note:', error);
     res.status(500).json({ success: false, error: error.message });

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // PAYMENTS RECEIVED ROUTES - ZOHO BOOKS EXACT WORKFLOW
 // ============================================================================
 // File: backend/routes/payments-received.js
@@ -9,7 +9,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { MongoClient, ObjectId } = require('mongodb');
+const { ObjectId } = require('mongodb');
 const { verifyFinanceJWT: verifyToken } = require('../middleware/finance_jwt');
 const { uploadPaymentProofs } = require('../middleware/upload');
 const path = require('path');
@@ -23,10 +23,21 @@ async function getSystemAccountId(name, orgId = null) {
   try {
     const acc = await ChartOfAccount.findOne({
       accountName: name,
-      isSystemAccount: true,
-      orgId: orgId
+      $or: [
+        { isSystemAccount: true },
+        { isSystemAccount: { $exists: false } }
+      ],
+      ...(orgId ? { orgId } : {})
     }).select('_id').lean();
-    return acc ? acc._id : null;
+
+    if (!acc) {
+      // Fallback: try without orgId filter
+      const fallback = await ChartOfAccount.findOne({
+        accountName: name,
+      }).select('_id').lean();
+      return fallback ? fallback._id : null;
+    }
+    return acc._id;
   } catch (e) {
     console.error(`COA lookup error for "${name}":`, e.message);
     return null;
@@ -45,16 +56,16 @@ try {
   nodemailer = null;
 }
 
-// MongoDB connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/abra_fleet';
-let db;
+// Use shared Finance DB connection
+const { getFinanceDb } = require('../config/database');
 
-MongoClient.connect(MONGODB_URI)
-  .then(client => {
-    console.log('✅ Connected to MongoDB for Payments Received');
-    db = client.db();
-  })
-  .catch(error => console.error('❌ MongoDB connection error:', error));
+// Lazy db accessor — resolves to the shared Finance DB on first use
+const dbProxy = new Proxy({}, {
+  get(_, prop) {
+    return getFinanceDb()[prop];
+  }
+});
+const db = dbProxy;
 
 // ============================================================================
 // EMAIL SERVICE FOR PAYMENT RECEIPTS
@@ -628,7 +639,8 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       notes = '',
       sendThankYouNote = false,
       invoicePayments = {},
-      status = 'paid'
+      status = 'paid',
+      providerTransactionId = null
     } = paymentData;
 
     // Auto-generate paymentNumber if not provided
@@ -710,6 +722,13 @@ if (existingPayment) {
       paymentNumber,
       paymentMode,
       depositTo,
+      depositedToAccountId: ['Cash', 'Cheque'].includes(paymentMode)
+        ? null        // undeposited — shows in Record Deposit dialog
+        : depositTo,  // already in bank — won't show in Record Deposit
+      depositedAt: ['Cash', 'Cheque'].includes(paymentMode)
+        ? null
+        : new Date(),
+      isUndeposited: ['Cash', 'Cheque'].includes(paymentMode),
       reference,
       taxDeduction,
       notes,
@@ -725,6 +744,7 @@ if (existingPayment) {
       amountRefunded: 0,
       amountInExcess: netAmount - totalInvoicePayments,
       orgId: req.user?.orgId || null,
+      providerTransactionId: providerTransactionId ? (ObjectId.isValid(providerTransactionId) ? new ObjectId(providerTransactionId) : providerTransactionId) : null,
       // Payment proofs
       paymentProofs,
       
@@ -818,115 +838,168 @@ if (existingPayment) {
       let balanceCredited = false;
       const creditAmount = parseFloat(amountReceived);
 
-      // Try as ObjectId first
-// Try as ObjectId first
-      if (ObjectId.isValid(depositAccountId)) {
-        const updateResult = await PaymentAccount.findOneAndUpdate(
-          { _id: new ObjectId(depositAccountId) },
-          {
-            $inc: { currentBalance: creditAmount },
-            $set: { updatedAt: new Date() }
-          },
-          { returnDocument: 'after' }
-        );
- if (updateResult) {
-          balanceCredited = true;
-          const newBal = updateResult.currentBalance ?? updateResult.value?.currentBalance ?? 'updated';
-          console.log(`✅ Balance credited to account ID ${depositAccountId}: +₹${creditAmount} → new balance: ₹${newBal}`);
-        }
-      }
+      // Only credit bank balance immediately for non-cash/cheque payments
+      // Cash/Cheque goes to Undeposited Funds first
+      const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
 
-      // If ObjectId lookup failed, try by account name
-      if (!balanceCredited) {
-        const updateResult = await PaymentAccount.findOneAndUpdate(
-          { accountName: depositAccountId },
-          {
-            $inc: { currentBalance: creditAmount },
-            $set: { updatedAt: new Date() }
-          },
-          { returnDocument: 'after' }
-        );
-        if (updateResult) {
+      if (creditImmediately) {
+        if (ObjectId.isValid(depositAccountId)) {
+          await PaymentAccount.findOneAndUpdate(
+            { _id: new ObjectId(depositAccountId) },
+            { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
           balanceCredited = true;
-          console.log(`✅ Balance credited to account name "${depositAccountId}": +₹${creditAmount}`);
+          console.log(`✅ Balance credited to account ID ${depositAccountId}: +₹${creditAmount}`);
         }
-      }
 
-      if (!balanceCredited) {
-        console.warn(`⚠️ BALANCE WARNING: Could not find deposit account "${depositAccountId}" to credit ₹${creditAmount}. Payment saved but balance NOT updated.`);
+        // If ObjectId lookup failed, try by account name
+        if (!balanceCredited) {
+          const updateResult = await PaymentAccount.findOneAndUpdate(
+            { accountName: depositAccountId },
+            { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (updateResult) {
+            balanceCredited = true;
+            console.log(`✅ Balance credited to account name "${depositAccountId}": +₹${creditAmount}`);
+          }
+        }
+
+        if (!balanceCredited) {
+          console.warn(`⚠️ BALANCE WARNING: Could not find deposit account "${depositAccountId}" to credit ₹${creditAmount}. Payment saved but balance NOT updated.`);
+        }
+      } else {
+        // For Cash/Cheque — balance will be credited when Record Deposit is done
+        console.log(`ℹ️ Cash/Cheque payment — balance will be credited on Record Deposit`);
       }
     } catch (balanceErr) {
       console.error(`⚠️ BALANCE ERROR: Failed to credit balance for payment ${result.insertedId}:`, balanceErr.message);
     }
 
-// ✅ COA: Debit Undeposited Funds + Credit Accounts Receivable
-// ✅ COA: Debit selected deposit account + Credit Accounts Receivable
+// ✅ COA: Debit deposit account + Credit Accounts Receivable
 const currentOrgId = req.user?.orgId || null;
 try {
-  // Dynamically find COA account matching the selected deposit account
- // depositTo is a PaymentAccount ObjectId — look up its name first
-let cleanDepositName = 'Undeposited Funds';
-try {
-  const PaymentAccountCol = db.collection('paymentaccounts');
-  if (ObjectId.isValid(depositTo)) {
-    const depositAccount = await PaymentAccountCol.findOne({ _id: new ObjectId(depositTo) });
-    if (depositAccount) {
-      cleanDepositName = depositAccount.accountName;
-      console.log(`💰 Resolved deposit account name: "${cleanDepositName}"`);
+  // Resolve deposit account name
+  let cleanDepositName = 'Undeposited Funds';
+  try {
+    const PaymentAccountCol = db.collection('paymentaccounts');
+    if (ObjectId.isValid(depositTo)) {
+      const depositAccount = await PaymentAccountCol.findOne({ _id: new ObjectId(depositTo) });
+      if (depositAccount) {
+        cleanDepositName = depositAccount.accountName;
+        console.log(`💰 Resolved deposit account name: "${cleanDepositName}"`);
+      }
     }
+  } catch (e) {
+    console.warn('⚠️ Could not resolve deposit account name:', e.message);
   }
-} catch (e) {
-  console.warn('⚠️ Could not resolve deposit account name:', e.message);
-}
 
-  console.log(`💰 COA lookup for deposit account: "${cleanDepositName}"`);
-
+  // Look up COA IDs
   const [cashId, arId] = await Promise.all([
     ChartOfAccount.findOne({
       accountName: { $regex: new RegExp(`^${cleanDepositName}$`, 'i') },
-      orgId: currentOrgId
+      ...(currentOrgId ? { orgId: currentOrgId } : {})
     }).select('_id').lean().then(acc => {
-      if (acc) {
-        console.log(`✅ Found COA: ${cleanDepositName}`);
-        return acc._id;
-      }
-      console.log(`⚠️ Not found: "${cleanDepositName}", fallback to Undeposited Funds`);
+      if (acc) return acc._id;
+      console.log(`⚠️ COA not found for "${cleanDepositName}", trying Undeposited Funds`);
       return getSystemAccountId('Undeposited Funds', currentOrgId);
     }),
     getSystemAccountId('Accounts Receivable', currentOrgId),
   ]);
-let txnDate;
-if (paymentDate && paymentDate.includes('/')) {
-  const [day, month, year] = paymentDate.split('/');
-  txnDate = new Date(`${year}-${month}-${day}`);
-} else {
-  txnDate = new Date(paymentDate);
-}
-if (isNaN(txnDate)) txnDate = new Date();
+
+  // Parse payment date — supports DD/MM/YYYY and ISO formats
+  let txnDate;
+  if (paymentDate && typeof paymentDate === 'string' && paymentDate.includes('/')) {
+    const [day, month, year] = paymentDate.split('/');
+    txnDate = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`);
+  } else {
+    txnDate = new Date(paymentDate);
+  }
+  if (isNaN(txnDate)) txnDate = new Date();
+
   const paymentAmount = parseFloat(amountReceived);
 
-  if (cashId) await postTransactionToCOA({
-    accountId: cashId, orgId: currentOrgId, date: txnDate,
-    description: `Payment received - ${paymentNumber} - ${customerName}`,
-    referenceType: 'Payment',
-    referenceId: result.insertedId,
-    referenceNumber: paymentNumber,
-    debit: paymentAmount, credit: 0
-  });
+  console.log(`💰 Posting COA for payment ${paymentNumber}:`);
+  console.log(`   cashId (${cleanDepositName}): ${cashId}`);
+  console.log(`   arId (Accounts Receivable): ${arId}`);
+  console.log(`   amount: ${paymentAmount}`);
+  console.log(`   orgId: ${currentOrgId}`);
 
-  if (arId) await postTransactionToCOA({
-    accountId: arId, orgId: currentOrgId, date: txnDate,
-    description: `Payment received - ${paymentNumber} - ${customerName}`,
-    referenceType: 'Payment',
-    referenceId: result.insertedId,
-    referenceNumber: paymentNumber,
-    debit: 0, credit: paymentAmount
-  });
+  // For Cash/Cheque → Dr Undeposited Funds (not the bank yet)
+  // For others → Dr Bank directly
+  const depositCOAId = ['Cash', 'Cheque'].includes(paymentMode)
+    ? await getSystemAccountId('Undeposited Funds', currentOrgId)
+    : cashId;
+
+  if (depositCOAId) {
+    await postTransactionToCOA({
+      accountId: depositCOAId, orgId: currentOrgId, date: txnDate,
+      description: `Payment received - ${paymentNumber} - ${customerName}`,
+      referenceType: 'Payment',
+      referenceId: result.insertedId,
+      referenceNumber: paymentNumber,
+      debit: paymentAmount, credit: 0
+    });
+    console.log(`✅ COA Debit posted to: ${['Cash', 'Cheque'].includes(paymentMode) ? 'Undeposited Funds' : cleanDepositName}`);
+  } else {
+    console.warn(`⚠️ COA depositCOAId not found for "${cleanDepositName}" — debit NOT posted`);
+  }
+
+  if (arId) {
+    await postTransactionToCOA({
+      accountId: arId, orgId: currentOrgId, date: txnDate,
+      description: `Payment received - ${paymentNumber} - ${customerName}`,
+      referenceType: 'Payment',
+      referenceId: result.insertedId,
+      referenceNumber: paymentNumber,
+      debit: 0, credit: paymentAmount
+    });
+    console.log(`✅ COA Credit posted to: Accounts Receivable`);
+  } else {
+    console.warn(`⚠️ COA arId not found for "Accounts Receivable" — credit NOT posted`);
+  }
 
   console.log(`✅ COA posted for payment: ${paymentNumber}`);
 } catch (coaErr) {
   console.error('⚠️ COA post error (payment received):', coaErr.message);
 }
+
+    // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    try {
+      const mongoose = require('mongoose');
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+            new mongoose.Schema({}, { strict: false }),
+            'providertransactions');
+
+      // Only create for non-Cash/Cheque (those go through Record Deposit)
+      const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
+      if (creditImmediately && depositTo && mongoose.Types.ObjectId.isValid(depositTo)) {
+        await ProviderTransaction.create({
+          accountId:            new mongoose.Types.ObjectId(depositTo),
+          orgId:                req.user?.orgId || null,
+          transactionDate:      new Date(paymentDate),
+          description:          `Customer Payment: ${customerName}`,
+          amount:               parseFloat(amountReceived),
+          transactionType:      'CREDIT',
+          reconciliationStatus: 'CATEGORIZED',
+          categoryLabel:        'Customer Payment',
+          source:               'SYSTEM_ENTRY',
+          linkedRecordId:       result.insertedId,
+          linkedRecordType:     'PaymentReceived',
+          journalRef:           paymentNumber,
+          categorizedAt:        new Date(),
+          categorizedBy:        req.user?.email || 'system',
+          importedAt:           new Date(),
+          importedBy:           req.user?.email || 'system',
+        });
+        console.log(`✅ ProviderTransaction created for payment received: ${paymentNumber}`);
+      }
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction create error (payment received):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION ─────────────────────────────────────────────
 
     // ============================================================================
     // SEND PAYMENT RECEIPT EMAIL WITH PROOFS - ZOHO BOOKS WORKFLOW
@@ -1318,12 +1391,57 @@ router.delete('/:id', verifyToken, async (req, res) => {
       });
     }
 
+    // ── REVERSE INVOICE PAYMENTS ON DELETE ──────────────────────────────────
+    try {
+      if (payment.invoicePayments && Object.keys(payment.invoicePayments).length > 0) {
+        for (const [invoiceId, amount] of Object.entries(payment.invoicePayments)) {
+          if (!ObjectId.isValid(invoiceId)) continue;
+          const invoice = await db.collection('invoices')
+            .findOne({ _id: new ObjectId(invoiceId) });
+          if (!invoice) continue;
+
+          const reversedAmountPaid = (invoice.amountPaid || 0) - parseFloat(amount);
+          const reversedAmountDue  = invoice.totalAmount - reversedAmountPaid;
+
+          let newStatus = invoice.status;
+          if (reversedAmountPaid <= 0) {
+            newStatus = 'SENT';
+          } else if (reversedAmountPaid > 0 && reversedAmountDue > 0) {
+            newStatus = 'PARTIALLY_PAID';
+          }
+
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            {
+              $pull: { payments: { paymentId: id } },
+              $set: {
+                amountPaid: Math.max(0, reversedAmountPaid),
+                amountDue:  Math.max(0, reversedAmountDue),
+                status:     newStatus,
+                updatedAt:  new Date()
+              }
+            }
+          );
+          console.log(`✅ Invoice ${invoice.invoiceNumber} reversed — status: ${newStatus}`);
+        }
+      }
+    } catch (invoiceReverseErr) {
+      console.error('⚠️ Invoice reversal error (payment delete):', invoiceReverseErr.message);
+    }
+    // ── END INVOICE REVERSAL ─────────────────────────────────────────────────
+
     // ── BALANCE REVERSE ON DELETE ────────────────────────────────────────────
     // When a payment is deleted, reverse the credit — deduct the amount back from the account
     try {
       const depositAccountId = payment.depositTo;
       const deductAmount = parseFloat(payment.amountReceived);
       let balanceReversed = false;
+
+      // Skip if already deposited — Block 2 (deposit reversal) will handle it
+      if (payment.depositedToAccountId) {
+        console.log('ℹ️ Skipping balance reverse — deposit reversal block will handle it');
+        balanceReversed = true; // prevents Block 1 from running
+      }
 
       if (depositAccountId && deductAmount > 0) {
         const PaymentAccountCol = db.collection('paymentaccounts');
@@ -1361,6 +1479,126 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
     // ── END BALANCE REVERSE ──────────────────────────────────────────────────
 
+    // ── COA REVERSAL ON DELETE ───────────────────────────────────────────────
+    try {
+      const currentOrgId  = req.user?.orgId || null;
+      const deleteAmount  = parseFloat(payment.amountReceived);
+      const paymentMode   = payment.paymentMode;
+      const paymentNumber = payment.paymentNumber;
+      const customerName  = payment.customerName;
+
+      // Parse payment date
+      let txnDate;
+      if (payment.paymentDate && payment.paymentDate.includes('/')) {
+        const [day, month, year] = payment.paymentDate.split('/');
+        txnDate = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`);
+      } else {
+        txnDate = new Date(payment.paymentDate);
+      }
+      if (isNaN(txnDate)) txnDate = new Date();
+
+      // Resolve which COA account was debited
+      // Cash/Cheque → Undeposited Funds, others → actual bank account
+      let depositCOAId;
+      if (['Cash', 'Cheque'].includes(paymentMode)) {
+        depositCOAId = await getSystemAccountId('Undeposited Funds', currentOrgId);
+      } else {
+        let depositName = 'Undeposited Funds';
+        if (payment.depositTo && ObjectId.isValid(payment.depositTo)) {
+          const acc = await db.collection('paymentaccounts')
+            .findOne({ _id: new ObjectId(payment.depositTo) });
+          if (acc) depositName = acc.accountName;
+        }
+        const coaAcc = await ChartOfAccount.findOne({
+          accountName: { $regex: new RegExp(`^${depositName}$`, 'i') },
+          ...(currentOrgId ? { orgId: currentOrgId } : {})
+        }).select('_id').lean();
+        depositCOAId = coaAcc ? coaAcc._id
+                               : await getSystemAccountId('Undeposited Funds', currentOrgId);
+      }
+
+      const arId         = await getSystemAccountId('Accounts Receivable', currentOrgId);
+      const paymentObjId = new ObjectId(id);
+
+      // REVERSE: Cr Undeposited Funds / Bank (was Dr before)
+      if (depositCOAId) {
+        await postTransactionToCOA({
+          accountId:       depositCOAId,
+          orgId:           currentOrgId,
+          date:            txnDate,
+          description:     `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+          referenceType:   'Payment',
+          referenceId:     paymentObjId,
+          referenceNumber: paymentNumber,
+          debit:           0,
+          credit:          deleteAmount,  // ← reverses the Dr
+        });
+        console.log(`✅ COA Reversal: Cr Undeposited/Bank ₹${deleteAmount}`);
+      }
+
+      // REVERSE: Dr Accounts Receivable (was Cr before)
+      if (arId) {
+        await postTransactionToCOA({
+          accountId:       arId,
+          orgId:           currentOrgId,
+          date:            txnDate,
+          description:     `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+          referenceType:   'Payment',
+          referenceId:     paymentObjId,
+          referenceNumber: paymentNumber,
+          debit:           deleteAmount,  // ← reverses the Cr
+          credit:          0,
+        });
+        console.log(`✅ COA Reversal: Dr Accounts Receivable ₹${deleteAmount}`);
+      }
+
+      console.log(`✅ COA fully reversed for deleted payment: ${paymentNumber}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA reversal error (payment delete):', coaErr.message);
+    }
+    // ── END COA REVERSAL ─────────────────────────────────────────────────────
+
+    // ── REVERSE DEPOSIT COA IF ALREADY DEPOSITED ─────────────────────────────
+    try {
+      if (payment.depositedToAccountId) {
+        const bankAccount = await db.collection('paymentaccounts')
+          .findOne({ _id: new ObjectId(payment.depositedToAccountId) });
+
+        if (bankAccount) {
+          const bankCOA = await ChartOfAccount.findOne({
+            accountName: { $regex: new RegExp(`^${bankAccount.accountName}$`, 'i') },
+            ...(req.user?.orgId ? { orgId: req.user.orgId } : {})
+          }).lean();
+
+          if (bankCOA) {
+            // Reverse: Cr Bank (was Dr on deposit)
+            await postTransactionToCOA({
+              accountId:       bankCOA._id,
+              orgId:           req.user?.orgId || null,
+              date:            new Date(),
+              description:     `REVERSAL - Deposit for Payment ${payment.paymentNumber}`,
+              referenceType:   'Payment',
+              referenceId:     new ObjectId(id),
+              referenceNumber: payment.paymentNumber,
+              debit:           0,
+              credit:          parseFloat(payment.amountReceived),
+            });
+
+            // Reverse PaymentAccount balance
+            await db.collection('paymentaccounts').updateOne(
+              { _id: new ObjectId(payment.depositedToAccountId) },
+              { $inc: { currentBalance: -parseFloat(payment.amountReceived) } }
+            );
+
+            console.log(`✅ Bank COA reversed for deposited payment: ${payment.paymentNumber}`);
+          }
+        }
+      }
+    } catch (depositReversalErr) {
+      console.error('⚠️ Deposit reversal error:', depositReversalErr.message);
+    }
+    // ── END DEPOSIT REVERSAL ──────────────────────────────────────────────────
+
     res.json({
       success: true,
       message: 'Payment deleted successfully'
@@ -1373,6 +1611,497 @@ router.delete('/:id', verifyToken, async (req, res) => {
       message: 'Error deleting payment',
       error: error.message
     });
+  }
+});
+
+// ============================================================================
+// GET /:id/pdf — generate and download payment receipt PDF
+// ============================================================================
+
+router.get('/:id/pdf', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    // Fetch linked invoice
+    let linkedInvoice = null;
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      if (invoiceIds.length > 0 && ObjectId.isValid(invoiceIds[0])) {
+        linkedInvoice = await db.collection('invoices').findOne({ _id: new ObjectId(invoiceIds[0]) });
+      }
+    } catch (_) {}
+
+    // Fetch org details
+    let orgData = null;
+    try {
+      const mongoose = require('mongoose');
+      const OrgModel = mongoose.models.Organization ||
+        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
+      orgData = await OrgModel.findOne({ orgId: payment.orgId }).lean();
+    } catch (_) {}
+    const orgName  = orgData?.orgName   || 'Billing Team';
+    const orgGST   = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone     || '';
+    const orgEmail = orgData?.email     || '';
+    const orgAddr  = orgData?.address   || '';
+
+    const PDFDocument = require('pdfkit');
+    const uploadsDir  = path.join(__dirname, '..', 'uploads', 'payments');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const filename = `payment-${payment.paymentNumber}.pdf`;
+    const filepath = path.join(uploadsDir, filename);
+
+    const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const stream = fs.createWriteStream(filepath);
+    doc.pipe(stream);
+
+    const pageW = 515;
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges    = parseFloat(payment.bankCharges    || 0);
+    const amountDue      = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
+
+    // ── Logo ──────────────────────────────────────────────────────────────────
+    const logoPath = getOrgLogoPath ? getOrgLogoPath(payment.orgId) : null;
+    const textX    = logoPath ? 126 : 50;
+    const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+    const textBlockH   = 14 + 12 + contactLines.length * 9;
+    const logoY        = 35 + textBlockH / 2 - 27;
+
+    if (logoPath) {
+      try { doc.image(logoPath, 44, logoY, { width: 72, height: 55, fit: [72, 55] }); } catch (_) {}
+    }
+
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+       .text(orgName.toUpperCase(), textX, 35, { width: 200 });
+    doc.fontSize(7).fillColor('#444444').font('Helvetica')
+       .text('BILLING & FINANCE', textX, 49, { width: 200, characterSpacing: 1 });
+    doc.fontSize(7).fillColor('#000000');
+    let cy = 61;
+    contactLines.forEach(l => { doc.text(l, textX, cy, { width: 240 }); cy += 9; });
+
+    doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+       .text('PAYMENT RECEIPT', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+    doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+       .text(payment.paymentNumber, 380, 52, { width: 170, align: 'right' });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text(`Date: ${payment.paymentDate}`, 380, 74, { width: 170, align: 'right' });
+
+    // ── Divider ───────────────────────────────────────────────────────────────
+    const headerBottom = Math.max(cy + 4, 90);
+    doc.moveTo(40, headerBottom).lineTo(555, headerBottom).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
+
+    // ── Customer info ─────────────────────────────────────────────────────────
+    let y = headerBottom + 16;
+    doc.fontSize(9).fillColor('#666666').font('Helvetica-Bold').text('RECEIVED FROM', 40, y);
+    y += 14;
+    doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold').text(payment.customerName || '', 40, y);
+    y += 14;
+    if (payment.customerEmail) {
+      doc.fontSize(9).fillColor('#444444').font('Helvetica').text(payment.customerEmail, 40, y);
+      y += 12;
+    }
+
+    // ── Payment details table ─────────────────────────────────────────────────
+    y += 10;
+    doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
+    y += 12;
+
+    const rows = [
+      ['Payment Number',  payment.paymentNumber],
+      ['Payment Date',    payment.paymentDate],
+      ['Payment Mode',    payment.paymentMode],
+      linkedInvoice ? ['Invoice Number', linkedInvoice.invoiceNumber] : null,
+      payment.reference ? ['Reference Number', payment.reference] : null,
+      bankCharges > 0 ? ['Bank Charges', `Rs.${bankCharges.toFixed(2)}`] : null,
+    ].filter(Boolean);
+
+    rows.forEach(([label, value]) => {
+      doc.fontSize(9).fillColor('#666666').font('Helvetica').text(label, 40, y, { width: 200 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica').text(value, 250, y, { width: 305, align: 'right' });
+      y += 16;
+    });
+
+    y += 4;
+    doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
+    y += 12;
+
+    // ── Amount received ───────────────────────────────────────────────────────
+    doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold').text('Amount Received', 40, y, { width: 300 });
+    doc.fontSize(14).fillColor('#27AE60').font('Helvetica-Bold').text(`Rs.${amountReceived.toFixed(2)}`, 250, y - 2, { width: 305, align: 'right' });
+    y += 20;
+
+    if (linkedInvoice && amountDue >= 0) {
+      doc.fontSize(9).fillColor('#666666').font('Helvetica').text('Remaining Balance', 40, y, { width: 300 });
+      const balColor = amountDue > 0 ? '#DC2626' : '#27AE60';
+      doc.fontSize(9).fillColor(balColor).font('Helvetica-Bold').text(`Rs.${amountDue.toFixed(2)}`, 250, y, { width: 305, align: 'right' });
+      y += 16;
+    }
+
+    if (payment.notes) {
+      y += 10;
+      doc.fontSize(9).fillColor('#666666').font('Helvetica-Bold').text('Notes:', 40, y);
+      y += 12;
+      doc.fontSize(9).fillColor('#444444').font('Helvetica').text(payment.notes, 40, y, { width: pageW });
+    }
+
+    // ── Authorized Signatory ──────────────────────────────────────────────────
+    const signBoxW = 220;
+    const authBoxX = 555 - signBoxW;
+    const signSectionY = 700;
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+       .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+    doc.moveTo(authBoxX, signSectionY + 30)
+       .lineTo(authBoxX + signBoxW, signSectionY + 30)
+       .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+    doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+       .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    doc.moveTo(40, 760).lineTo(555, 760).lineWidth(1.5).strokeColor('#dde4ef').stroke();
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
+       .text(`${orgName}${orgGST ? ' · GSTIN: ' + orgGST : ''} · ${payment.paymentNumber}`, 40, 766, { width: pageW / 2 });
+    doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, 766, { width: pageW, align: 'right' });
+
+    doc.end();
+
+    await new Promise((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    res.download(filepath, `Payment-${payment.paymentNumber}.pdf`);
+  } catch (error) {
+    console.error('❌ Error generating payment PDF:', error);
+    res.status(500).json({ success: false, message: 'Error generating PDF', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET /:id/email-preview — return payment receipt email HTML for preview
+// ============================================================================
+
+router.get('/:id/email-preview', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    let linkedInvoice = null;
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      if (invoiceIds.length > 0 && ObjectId.isValid(invoiceIds[0])) {
+        linkedInvoice = await db.collection('invoices').findOne({ _id: new ObjectId(invoiceIds[0]) });
+      }
+    } catch (_) {}
+
+    let orgData = null;
+    try {
+      const mongoose = require('mongoose');
+      const OrgModel = mongoose.models.Organization ||
+        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
+      orgData = await OrgModel.findOne({ orgId: payment.orgId }).lean();
+    } catch (_) {}
+    const orgName  = orgData?.orgName   || 'Billing Team';
+    const orgGST   = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone     || '';
+    const orgEmail = orgData?.email     || '';
+
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges    = parseFloat(payment.bankCharges    || 0);
+    const amountDue      = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #0f1e3d 0%, #1a3a6b 50%, #2463ae 100%); color: white; padding: 30px 32px; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0 0 6px 0; font-size: 22px; }
+    .header p  { margin: 0; font-size: 13px; opacity: 0.85; }
+    .content { background: #f8f9fa; padding: 28px 32px; border-radius: 0 0 8px 8px; }
+    .success-badge { background: #d4edda; color: #155724; padding: 14px 18px; border-radius: 8px; text-align: center; margin: 0 0 20px 0; border: 1px solid #c3e6cb; }
+    .payment-box { background: white; padding: 20px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid #1a3a6b; }
+    .payment-box h3 { margin: 0 0 14px 0; color: #0f1e3d; font-size: 15px; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: #666; }
+    .detail-value { font-weight: 600; color: #222; }
+    .total-row { padding-top: 12px; margin-top: 8px; border-top: 2px solid #1a3a6b; font-size: 15px; font-weight: bold; }
+    .balance-due { color: #dc2626; }
+    .balance-paid { color: #15803d; }
+    .footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Payment Receipt</h1>
+      <p>${orgName} — Billing &amp; Finance</p>
+    </div>
+    <div class="content">
+      <div class="success-badge">
+        <h2 style="margin:0 0 4px 0;font-size:17px;">Payment Received Successfully</h2>
+        <p style="margin:0;font-size:13px;">We have received your payment of ₹${amountReceived.toFixed(2)}</p>
+      </div>
+      <div class="payment-box">
+        <h3>Payment Details</h3>
+        <div class="detail-row"><span class="detail-label">Payment Number</span><span class="detail-value">${payment.paymentNumber}</span></div>
+        <div class="detail-row"><span class="detail-label">Payment Date</span><span class="detail-value">${payment.paymentDate}</span></div>
+        <div class="detail-row"><span class="detail-label">Payment Mode</span><span class="detail-value">${payment.paymentMode}</span></div>
+        ${linkedInvoice ? `<div class="detail-row"><span class="detail-label">Invoice Number</span><span class="detail-value">${linkedInvoice.invoiceNumber}</span></div>` : ''}
+        ${payment.reference ? `<div class="detail-row"><span class="detail-label">Reference Number</span><span class="detail-value">${payment.reference}</span></div>` : ''}
+        ${bankCharges > 0 ? `<div class="detail-row"><span class="detail-label">Bank Charges</span><span class="detail-value" style="color:#dc2626;">-₹${bankCharges.toFixed(2)}</span></div>` : ''}
+        <div class="detail-row total-row"><span>Amount Received</span><span class="balance-paid">₹${amountReceived.toFixed(2)}</span></div>
+        ${linkedInvoice ? `<div class="detail-row" style="padding-top:8px;"><span class="detail-label">Remaining Balance</span><span class="detail-value ${amountDue > 0 ? 'balance-due' : 'balance-paid'}">₹${amountDue.toFixed(2)}</span></div>` : ''}
+      </div>
+      ${payment.notes ? `<div style="background:white;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px;"><strong style="color:#0f1e3d;">Notes:</strong><p style="margin:6px 0 0 0;color:#555;">${payment.notes}</p></div>` : ''}
+    </div>
+    <div class="footer">
+      <strong>${orgName}</strong><br>
+      ${orgGST ? `GST: ${orgGST}<br>` : ''}
+      ${orgPhone ? `Ph: ${orgPhone}<br>` : ''}
+      ${orgEmail || ''}
+    </div>
+  </div>
+</body>
+</html>`;
+
+    res.json({
+      success: true,
+      data: {
+        subject: `Payment Receipt - ${payment.paymentNumber} - Rs.${amountReceived.toFixed(2)}`,
+        html,
+        to: payment.customerEmail || '',
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error generating payment email preview:', error);
+    res.status(500).json({ success: false, message: 'Error generating email preview', error: error.message });
+  }
+});
+
+// ============================================================================
+// PATCH /:id/mark-as-sent — mark payment as sent without sending email
+// ============================================================================
+
+router.patch('/:id/mark-as-sent', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    await db.collection('payments_received').updateOne(query, {
+      $set: { status: 'sent', markedAsSentAt: new Date(), updatedAt: new Date() }
+    });
+
+    console.log(`✅ Payment marked as sent (no email): ${payment.paymentNumber}`);
+    res.json({ success: true, message: 'Payment marked as sent' });
+  } catch (error) {
+    console.error('❌ Error marking payment as sent:', error);
+    res.status(500).json({ success: false, message: 'Error marking payment as sent', error: error.message });
+  }
+});
+
+// ============================================================================
+// POST /:id/send-email — send payment receipt email to customer
+// ============================================================================
+
+router.post('/:id/send-email', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const toEmail = payment.customerEmail;
+    if (!toEmail) {
+      return res.status(400).json({ success: false, message: 'Customer email not available on this payment' });
+    }
+
+    if (!emailTransporter) {
+      return res.status(503).json({ success: false, message: 'Email service not configured' });
+    }
+
+    // Fetch linked invoice for balance info
+    let linkedInvoice = null;
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      if (invoiceIds.length > 0 && ObjectId.isValid(invoiceIds[0])) {
+        linkedInvoice = await db.collection('invoices').findOne({ _id: new ObjectId(invoiceIds[0]) });
+      }
+    } catch (_) {}
+
+    // Fetch org details
+    let orgData = null;
+    try {
+      const mongoose = require('mongoose');
+      const OrgModel = mongoose.models.Organization ||
+        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
+      orgData = await OrgModel.findOne({ orgId: payment.orgId }).lean();
+    } catch (_) {}
+    const orgName  = orgData?.orgName   || 'Billing Team';
+    const orgGST   = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone     || '';
+    const orgEmail = orgData?.email     || '';
+
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges    = parseFloat(payment.bankCharges    || 0);
+    const amountDue      = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
+
+    const emailHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #0f1e3d 0%, #1a3a6b 50%, #2463ae 100%); color: white; padding: 30px 32px; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0 0 6px 0; font-size: 22px; }
+    .header p  { margin: 0; font-size: 13px; opacity: 0.85; }
+    .content { background: #f8f9fa; padding: 28px 32px; border-radius: 0 0 8px 8px; }
+    .success-badge { background: #d4edda; color: #155724; padding: 14px 18px; border-radius: 8px; text-align: center; margin: 0 0 20px 0; border: 1px solid #c3e6cb; }
+    .success-badge h2 { margin: 0 0 4px 0; font-size: 17px; }
+    .success-badge p  { margin: 0; font-size: 13px; }
+    .payment-box { background: white; padding: 20px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid #1a3a6b; }
+    .payment-box h3 { margin: 0 0 14px 0; color: #0f1e3d; font-size: 15px; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: #666; }
+    .detail-value { font-weight: 600; color: #222; }
+    .total-row { padding-top: 12px; margin-top: 8px; border-top: 2px solid #1a3a6b; font-size: 15px; font-weight: bold; }
+    .balance-due { color: #dc2626; }
+    .balance-paid { color: #15803d; }
+    .footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Payment Receipt</h1>
+      <p>${orgName} — Billing &amp; Finance</p>
+    </div>
+    <div class="content">
+      <div class="success-badge">
+        <h2>Payment Received Successfully</h2>
+        <p>We have received your payment of ₹${amountReceived.toFixed(2)}</p>
+      </div>
+
+      <div class="payment-box">
+        <h3>Payment Details</h3>
+        <div class="detail-row">
+          <span class="detail-label">Payment Number</span>
+          <span class="detail-value">${payment.paymentNumber}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Payment Date</span>
+          <span class="detail-value">${payment.paymentDate}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Payment Mode</span>
+          <span class="detail-value">${payment.paymentMode}</span>
+        </div>
+        ${linkedInvoice ? `
+        <div class="detail-row">
+          <span class="detail-label">Invoice Number</span>
+          <span class="detail-value">${linkedInvoice.invoiceNumber}</span>
+        </div>` : ''}
+        ${payment.reference ? `
+        <div class="detail-row">
+          <span class="detail-label">Reference Number</span>
+          <span class="detail-value">${payment.reference}</span>
+        </div>` : ''}
+        ${bankCharges > 0 ? `
+        <div class="detail-row">
+          <span class="detail-label">Bank Charges</span>
+          <span class="detail-value" style="color:#dc2626;">-₹${bankCharges.toFixed(2)}</span>
+        </div>` : ''}
+        <div class="detail-row total-row">
+          <span>Amount Received</span>
+          <span class="balance-paid">₹${amountReceived.toFixed(2)}</span>
+        </div>
+        ${linkedInvoice ? `
+        <div class="detail-row" style="padding-top:8px;">
+          <span class="detail-label">Remaining Balance</span>
+          <span class="detail-value ${amountDue > 0 ? 'balance-due' : 'balance-paid'}">₹${amountDue.toFixed(2)}</span>
+        </div>` : ''}
+      </div>
+
+      ${payment.notes ? `
+      <div style="background:white;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px;">
+        <strong style="color:#0f1e3d;">Notes:</strong>
+        <p style="margin:6px 0 0 0;color:#555;">${payment.notes}</p>
+      </div>` : ''}
+
+      <div style="background:white;padding:16px 18px;border-radius:8px;font-size:13px;">
+        <strong style="color:#0f1e3d;">Need Help?</strong>
+        <p style="margin:8px 0 0 0;color:#555;">
+          ${orgEmail ? `📧 ${orgEmail}<br>` : ''}
+          ${orgPhone ? `📞 ${orgPhone}<br>` : ''}
+          🕐 Mon–Fri, 9 AM – 6 PM IST
+        </p>
+      </div>
+    </div>
+    <div class="footer">
+      <strong>${orgName}</strong><br>
+      ${orgGST ? `GST: ${orgGST}<br>` : ''}
+      This is an automated email. Please do not reply.
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await emailTransporter.sendMail({
+      from:    `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
+      to:      toEmail,
+      subject: `Payment Receipt - ${payment.paymentNumber} - ₹${amountReceived.toFixed(2)}`,
+      html:    emailHtml,
+    });
+
+    // Update payment record
+    await db.collection('payments_received').updateOne(query, {
+      $set: { emailSent: true, emailSentAt: new Date(), status: 'sent', updatedAt: new Date() },
+      $push: { emailsSent: { sentTo: toEmail, sentAt: new Date() } }
+    });
+
+    console.log(`📧 Payment receipt email sent to ${toEmail} for ${payment.paymentNumber}`);
+    res.json({ success: true, message: `Payment receipt email sent to ${toEmail}` });
+  } catch (error) {
+    console.error('❌ Error sending payment email:', error);
+    res.status(500).json({ success: false, message: 'Error sending email', error: error.message });
   }
 });
 
@@ -1515,6 +2244,34 @@ router.get('/:id/proofs/:proofIndex/download', verifyToken, async (req, res) => 
 // GET NEXT PAYMENT NUMBER
 // ============================================================================
 
+
+// ============================================================================
+// DEBUG: COA ACCOUNT CHECK
+// ============================================================================
+
+router.get('/debug/coa-check', verifyToken, async (req, res) => {
+  try {
+    const orgId = req.user?.orgId || null;
+
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: ['Accounts Receivable', 'Undeposited Funds', 'Cash', 'Bank'] },
+      ...(orgId ? { orgId } : {})
+    }).select('accountName isSystemAccount orgId').lean();
+
+    const allAccounts = await ChartOfAccount.find(
+      orgId ? { orgId } : {}
+    ).select('accountName isSystemAccount').lean();
+
+    res.json({
+      orgId,
+      matchingAccounts: accounts,
+      totalOrgAccounts: allAccounts.length,
+      allAccountNames: allAccounts.map(a => a.accountName)
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 
 module.exports = router;

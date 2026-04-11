@@ -275,6 +275,33 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     } catch (e) { _showError('Failed to mark as returned: $e'); }
   }
 
+  Future<void> _markChallanAsSent(DeliveryChallan challan) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the customer.\n\nDo you want to mark this challan as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await DeliveryChallanService.markChallanAsSent(challan.id);
+      _showSuccess('Challan marked as sent');
+      _loadAll();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
+  }
+
   Future<void> _sendChallan(DeliveryChallan challan) async {
     if (challan.customerEmail == null || challan.customerEmail!.isEmpty) {
       _showError('Customer email required to send challan'); return;
@@ -1014,6 +1041,8 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
               if (challan.status == 'DELIVERED' || challan.status == 'PARTIALLY_INVOICED')
                 _menuItem('convert', Icons.receipt_long_outlined,   _blue,   'Convert to Invoice'),
               _menuItem('send',     Icons.send_outlined,            _purple, 'Send via Email'),
+              if (challan.status == 'DRAFT')
+                _menuItem('mark_as_sent', Icons.mark_email_read_outlined, _orange, 'Mark as Sent'),
               _menuItem('download', Icons.download_outlined,        _navy,   'Download PDF'),
               if (challan.status != 'DRAFT' && challan.status != 'CANCELLED')
                 _menuItem('return', Icons.keyboard_return_outlined, _orange, 'Mark as Returned'),
@@ -1028,8 +1057,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
                 case 'dispatch':  _dispatchChallan(challan);    break;
                 case 'delivered': _markAsDelivered(challan);    break;
                 case 'convert':   _convertToInvoice(challan);   break;
-                case 'send':      _sendChallan(challan);        break;
-                case 'download':  _downloadPDF(challan);        break;
+                case 'send':          _sendChallan(challan);          break;
+                case 'mark_as_sent':  await _markChallanAsSent(challan); break;
+                case 'download':      _downloadPDF(challan);            break;
                 case 'return':    _markAsReturned(challan);     break;
                 case 'ticket':    _raiseTicket(challan);        break;
                 case 'delete':    _deleteChallan(challan);      break;

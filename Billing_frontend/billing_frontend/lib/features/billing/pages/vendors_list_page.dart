@@ -844,7 +844,7 @@ class _VendorsListPageState extends State<VendorsListPage> {
 
         // Name
         DataCell(SizedBox(width: 170, child: InkWell(
-          onTap: () => _openEdit(v),
+          onTap: () => _viewDetails(v),
           child: Text(v.name,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, fontSize: 13, decoration: TextDecoration.underline)),

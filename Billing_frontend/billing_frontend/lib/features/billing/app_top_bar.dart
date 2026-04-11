@@ -28,15 +28,32 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      flexibleSpace: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [kNavyDark, kNavy],
-          ),
-        ),
+      // ── backgroundColor = kNavyDark (matches gradient start color).
+      // This means:
+      //   • Embedded mode  → toolbarHeight collapses to 0 via Theme override,
+      //                       so this color is hidden — nothing visible at all.
+      //   • Standalone screen → kNavyDark sits behind the flexibleSpace gradient
+      //                         seamlessly — no double color, no gap.
+      backgroundColor: kNavyDark,
+
+      // ── flexibleSpace renders the gradient only when height > 1.
+      // When _EmbeddedPage collapses toolbarHeight → 0, maxHeight ≤ 1
+      // and SizedBox.shrink() is returned — zero paint, zero bar.
+      flexibleSpace: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxHeight <= 1) return const SizedBox.shrink();
+          return Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [kNavyDark, kNavy],
+              ),
+            ),
+          );
+        },
       ),
+
       elevation: 0,
       automaticallyImplyLeading: false,
       titleSpacing: 0,

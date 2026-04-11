@@ -1,11 +1,6 @@
 // ============================================================================
 // NEW VENDOR CREDIT SCREEN
 // ============================================================================
-// File: lib/screens/billing/pages/new_vendor_credit.dart
-// UI matches new_bill.dart structure exactly
-// Navy blue gradient theme
-// ============================================================================
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -19,15 +14,42 @@ import '../widgets/document_preview_buttons.dart';
 import 'new_vendor.dart';
 import '../../../../core/services/bill_service.dart';
 
-// Navy blue gradient colors
-const Color _navyDark = Color(0xFF0D1B3E);
-const Color _navyMid = Color(0xFF1A3A6B);
-const Color _navyLight = Color(0xFF2463AE);
+const Color _navyDark   = Color(0xFF0D1B3E);
+const Color _navyMid    = Color(0xFF1A3A6B);
+const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
+
+const List<double> _kGstRates = [0, 5, 12, 18, 28];
+const List<String> _kUnits    = ['Nos', 'Hrs', 'Kg', 'Pcs', 'Box', 'Mtr', 'Ltr', 'Dz', 'MT', 'Set'];
+
+// Column widths for items table
+const double _colNo      = 36.0;
+const double _colDesc    = 200.0;
+const double _colHsn     = 110.0;
+const double _colUnit    = 80.0;
+const double _colQty     = 70.0;
+const double _colRate    = 95.0;
+const double _colDisc    = 110.0;
+const double _colGst     = 80.0;
+const double _colTaxable = 100.0;
+const double _colTax1    = 90.0;
+const double _colTax2    = 90.0;
+const double _colAmt     = 95.0;
+const double _colDel     = 44.0;
+
+// Indian states list (same as invoice)
+const List<String> kIndianStates = [
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+  'Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh',
+  'Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab',
+  'Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
+  'Uttarakhand','West Bengal','Andaman and Nicobar Islands','Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu','Delhi','Jammu and Kashmir',
+  'Ladakh','Lakshadweep','Puducherry',
+];
 
 class NewVendorCreditScreen extends StatefulWidget {
   final String? creditId;
-
   const NewVendorCreditScreen({Key? key, this.creditId}) : super(key: key);
 
   @override
@@ -37,12 +59,12 @@ class NewVendorCreditScreen extends StatefulWidget {
 class _NewVendorCreditScreenState extends State<NewVendorCreditScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  bool _isSaving = false;
+  bool _isSaving  = false;
 
   // Controllers
   final _reasonController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _termsController = TextEditingController();
+  final _notesController  = TextEditingController();
+  final List<TextEditingController> _descControllers = [];
 
   // Vendor
   String? _selectedVendorId;
@@ -50,45 +72,51 @@ class _NewVendorCreditScreenState extends State<NewVendorCreditScreen> {
   String? _selectedVendorEmail;
   String? _selectedVendorPhone;
   String? _selectedVendorGSTIN;
+  String? _selectedVendorPAN;
+  String  _gstRegistrationType = '';
+
+  // Addresses
+  VendorAddress _billingAddress  = const VendorAddress();
+  VendorAddress _shippingAddress = const VendorAddress();
+  bool _sameAsBilling = true;
+
+  // Place of supply
+  String _placeOfSupply = '';
+  String _orgState      = '';
+  bool   _isInterState  = false;
 
   // Credit Details
-  DateTime _creditDate = DateTime.now();
-  String? _linkedBillId;
-  String? _linkedBillNumber;
-  Bill? _linkedBill; // stores full bill object after selection
-bool _loadingBills = false;
+  DateTime _creditDate    = DateTime.now();
+  String?  _linkedBillId;
+  String?  _linkedBillNumber;
+  Bill?    _linkedBill;
+  bool     _loadingBills = false;
 
-  // Tax
-  double _gstRate = 18;
-  double _tdsRate = 0;
-  double _tcsRate = 0;
-  bool _enableGST = true;
-  bool _enableTDS = false;
-  bool _enableTCS = false;
+  // Tax toggles
+  double _tdsRate  = 0;
+  double _tcsRate  = 0;
+  bool   _enableTDS = false;
+  bool   _enableTCS = false;
 
   // Items
   List<MutableCreditItem> _items = [];
 
-  // Calculations
-  double _subTotal = 0;
-  double _tdsAmount = 0;
-  double _tcsAmount = 0;
-  double _gstAmount = 0;
+  // Totals
+  double _subTotal   = 0;
+  double _totalCGST  = 0;
+  double _totalSGST  = 0;
+  double _totalIGST  = 0;
+  double _totalTax   = 0;
+  double _tdsAmount  = 0;
+  double _tcsAmount  = 0;
   double _totalAmount = 0;
-  int _totalQty = 0;
 
   final List<String> _creditReasons = [
-    'Goods Returned',
-    'Overcharged by Vendor',
-    'Quality Issue',
-    'Advance Payment Excess',
-    'Discount After Billing',
-    'Duplicate Invoice',
-    'Service Not Delivered',
-    'Other',
+    'Goods Returned', 'Overcharged by Vendor', 'Quality Issue',
+    'Advance Payment Excess', 'Discount After Billing',
+    'Duplicate Invoice', 'Service Not Delivered', 'Other',
   ];
 
-  // Dynamic COA expense accounts — loaded from backend
   List<Map<String, dynamic>> _coaExpAccounts = [];
   bool _loadingCoaAccounts = false;
 
@@ -97,6 +125,7 @@ bool _loadingBills = false;
     super.initState();
     _addItem();
     _loadCoaExpenseAccounts();
+    _loadOrgState();
     if (widget.creditId != null) _loadCreditData();
   }
 
@@ -104,15 +133,79 @@ bool _loadingBills = false;
   void dispose() {
     _reasonController.dispose();
     _notesController.dispose();
-    _termsController.dispose();
+    for (final c in _descControllers) { c.dispose(); }
     super.dispose();
   }
 
-  void _addItem() {
-    setState(() => _items.add(MutableCreditItem()));
+  // ── Org state ──────────────────────────────────────────────────────────────
+  Future<void> _loadOrgState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
+      final resp  = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/finance/invoices/org-state'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        setState(() => _orgState = body['data']?['state'] ?? '');
+        _updateInterState();
+      }
+    } catch (_) {}
   }
 
-  // ── Load COA Expense accounts from backend ──────────────────────────────────
+  void _updateInterState() {
+    final newVal = _placeOfSupply.isNotEmpty && _orgState.isNotEmpty &&
+        _placeOfSupply.toLowerCase() != _orgState.toLowerCase();
+    if (newVal != _isInterState) {
+      setState(() => _isInterState = newVal);
+      _calculateAmounts();
+    }
+  }
+
+  // ── Item management ────────────────────────────────────────────────────────
+  void _addItem() {
+    setState(() {
+      _items.add(MutableCreditItem(itemGstRate: 18));
+      _descControllers.add(TextEditingController());
+    });
+  }
+
+  void _removeItem(int index) {
+    setState(() {
+      _items.removeAt(index);
+      _descControllers[index].dispose();
+      _descControllers.removeAt(index);
+      _calculateAmounts();
+    });
+  }
+
+  // ── Calculations ───────────────────────────────────────────────────────────
+  void _calculateAmounts() {
+    setState(() {
+      _subTotal  = 0;
+      _totalCGST = 0;
+      _totalSGST = 0;
+      _totalIGST = 0;
+      for (final item in _items) {
+        item.recalculate(isInterState: _isInterState);
+        _subTotal  += item.taxableAmount;
+        _totalCGST += item.cgstAmount;
+        _totalSGST += item.sgstAmount;
+        _totalIGST += item.igstAmount;
+      }
+      _subTotal  = double.parse(_subTotal.toStringAsFixed(2));
+      _totalCGST = double.parse(_totalCGST.toStringAsFixed(2));
+      _totalSGST = double.parse(_totalSGST.toStringAsFixed(2));
+      _totalIGST = double.parse(_totalIGST.toStringAsFixed(2));
+      _totalTax  = double.parse((_totalCGST + _totalSGST + _totalIGST).toStringAsFixed(2));
+      _tdsAmount = _enableTDS ? double.parse((_subTotal * _tdsRate / 100).toStringAsFixed(2)) : 0;
+      _tcsAmount = _enableTCS ? double.parse((_subTotal * _tcsRate / 100).toStringAsFixed(2)) : 0;
+      _totalAmount = double.parse((_subTotal + _totalTax - _tdsAmount + _tcsAmount).toStringAsFixed(2));
+    });
+  }
+
+  // ── COA accounts ───────────────────────────────────────────────────────────
   Future<void> _loadCoaExpenseAccounts() async {
     setState(() => _loadingCoaAccounts = true);
     try {
@@ -164,66 +257,51 @@ bool _loadingBills = false;
     }
   }
 
-  void _removeItem(int index) {
-    setState(() { _items.removeAt(index); _calculate(); });
-  }
-
-  void _calculate() {
-    setState(() {
-      _subTotal = 0;
-      _totalQty = 0;
-      for (var item in _items) {
-        if (item.quantity > 0 && item.rate > 0) {
-          double amt = item.quantity * item.rate;
-          if (item.discount > 0) {
-            amt = item.discountType == 'percentage'
-                ? amt - (amt * item.discount / 100)
-                : amt - item.discount;
-          }
-          item.amount = amt;
-          _subTotal += amt;
-          _totalQty += item.quantity.toInt();
-        }
-      }
-      _tdsAmount = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
-      _tcsAmount = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
-      final gstBase = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount = _enableGST ? (gstBase * _gstRate / 100) : 0;
-      _totalAmount = _subTotal - _tdsAmount + _tcsAmount + _gstAmount;
-    });
-  }
-
   Future<void> _loadCreditData() async {
     setState(() => _isLoading = true);
     try {
       final credit = await VendorCreditService.getVendorCredit(widget.creditId!);
+      for (final c in _descControllers) { c.dispose(); }
+      _descControllers.clear();
       setState(() {
-        _selectedVendorId = credit.vendorId;
-        _selectedVendorName = credit.vendorName;
+        _selectedVendorId    = credit.vendorId;
+        _selectedVendorName  = credit.vendorName;
         _selectedVendorEmail = credit.vendorEmail;
         _selectedVendorPhone = credit.vendorPhone;
         _selectedVendorGSTIN = credit.vendorGSTIN;
-        _creditDate = credit.creditDate;
-        _linkedBillId = credit.billId;
-        _linkedBillNumber = credit.billNumber;
+        _selectedVendorPAN   = credit.vendorPAN;
+        _gstRegistrationType = credit.gstRegistrationType;
+        _billingAddress      = VendorAddress.fromJson(credit.billingAddress);
+        _shippingAddress     = VendorAddress.fromJson(credit.shippingAddress);
+        _sameAsBilling       = credit.billingAddress.toString() == credit.shippingAddress.toString();
+        _placeOfSupply       = credit.placeOfSupply;
+        _creditDate          = credit.creditDate;
+        _linkedBillId        = credit.billId;
+        _linkedBillNumber    = credit.billNumber;
         _reasonController.text = credit.reason;
-        _notesController.text = credit.notes ?? '';
-        _gstRate = credit.gstRate;
-        _tdsAmount = credit.tdsAmount;
-        _tcsAmount = credit.tcsAmount;
-        _enableGST = credit.gstRate > 0;
-        _enableTDS = credit.tdsAmount > 0;
-        _enableTCS = credit.tcsAmount > 0;
+        _notesController.text  = credit.notes ?? '';
+        _tdsRate   = credit.tdsRate;
+        _tcsRate   = credit.tcsRate;
+        _enableTDS = credit.tdsRate > 0;
+        _enableTCS = credit.tcsRate > 0;
         _items = credit.items.map((i) => MutableCreditItem(
-          itemDetails: i.itemDetails,
-          account: i.account,
-          quantity: i.quantity,
-          rate: i.rate,
-          discount: i.discount,
+          itemDetails:  i.itemDetails,
+          account:      i.account,
+          hsnCode:      i.hsnCode,
+          sacCode:      i.sacCode,
+          unit:         i.unit,
+          quantity:     i.quantity,
+          rate:         i.rate,
+          discount:     i.discount,
           discountType: i.discountType,
-          amount: i.amount,
+          itemGstRate:  i.itemGstRate,
+          amount:       i.amount,
         )).toList();
-        _calculate();
+        for (final item in _items) {
+          _descControllers.add(TextEditingController(text: item.itemDetails));
+        }
+        _updateInterState();
+        _calculateAmounts();
       });
     } catch (e) {
       _showError('Failed to load credit: $e');
@@ -239,7 +317,7 @@ bool _loadingBills = false;
     if (nonEmpty.isEmpty) { _showError('Please add at least one item'); return false; }
     for (var item in nonEmpty) {
       if (item.quantity <= 0) { _showError('All items must have quantity > 0'); return false; }
-      if (item.rate <= 0) { _showError('All items must have rate > 0'); return false; }
+      if (item.rate <= 0)     { _showError('All items must have rate > 0');     return false; }
     }
     return true;
   }
@@ -247,28 +325,85 @@ bool _loadingBills = false;
   Map<String, dynamic> _buildBody() {
     final valid = _items.where((i) => i.itemDetails.trim().isNotEmpty).toList();
     return {
-      'vendorId': _selectedVendorId,
-      'vendorName': _selectedVendorName,
-      'vendorEmail': _selectedVendorEmail,
-      'vendorPhone': _selectedVendorPhone ?? '',
-      'vendorGSTIN': _selectedVendorGSTIN,
-      'creditDate': _creditDate.toIso8601String(),
-      'billId': _linkedBillId,
-      'billNumber': _linkedBillNumber,
-      'reason': _reasonController.text.trim(),
-      'notes': _notesController.text.trim(),
-      'items': valid.map((i) => i.toJson()).toList(),
-      'gstRate': _enableGST ? _gstRate : 0,
-      'tdsRate': _enableTDS ? _tdsRate : 0,
-      'tcsRate': _enableTCS ? _tcsRate : 0,
-      'subTotal': _subTotal,
-      'cgst': _gstAmount / 2,
-      'sgst': _gstAmount / 2,
-      'tdsAmount': _tdsAmount,
-      'tcsAmount': _tcsAmount,
-      'totalAmount': _totalAmount,
-      'status': 'OPEN',
+      'vendorId':            _selectedVendorId,
+      'vendorName':          _selectedVendorName,
+      'vendorEmail':         _selectedVendorEmail,
+      'vendorPhone':         _selectedVendorPhone ?? '',
+      'vendorGSTIN':         _selectedVendorGSTIN,
+      'vendorPAN':           _selectedVendorPAN ?? '',
+      'gstRegistrationType': _gstRegistrationType,
+      'billingAddress':      _billingAddress.toJson(),
+      'shippingAddress':     _sameAsBilling ? _billingAddress.toJson() : _shippingAddress.toJson(),
+      'placeOfSupply':       _placeOfSupply,
+      'isInterState':        _isInterState,
+      'creditDate':          _creditDate.toIso8601String(),
+      'billId':              _linkedBillId,
+      'billNumber':          _linkedBillNumber,
+      'reason':              _reasonController.text.trim(),
+      'notes':               _notesController.text.trim(),
+      'items':               valid.map((i) => i.toJson()).toList(),
+      'tdsRate':             _enableTDS ? _tdsRate : 0,
+      'tcsRate':             _enableTCS ? _tcsRate : 0,
+      'subTotal':            _subTotal,
+      'totalCGST':           _totalCGST,
+      'totalSGST':           _totalSGST,
+      'totalIGST':           _totalIGST,
+      'totalTax':            _totalTax,
+      'cgst':                _totalCGST,
+      'sgst':                _totalSGST,
+      'tdsAmount':           _tdsAmount,
+      'tcsAmount':           _tcsAmount,
+      'totalAmount':         _totalAmount,
+      'status':              'OPEN',
     };
+  }
+
+  Future<void> _markAsSent() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (!_validateForm()) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the vendor.\n\nDo you want to mark this vendor credit as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = _buildBody();
+      VendorCredit credit;
+      if (widget.creditId != null) {
+        credit = await VendorCreditService.updateVendorCredit(widget.creditId!, data);
+      } else {
+        credit = await VendorCreditService.createVendorCredit(data);
+      }
+      await VendorCreditService.markAsSent(credit.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Vendor credit marked as sent'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ));
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.toString()), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Future<void> _save() async {
@@ -390,6 +525,16 @@ bool _loadingBills = false;
               label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
             ),
             const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _isSaving ? null : _markAsSent,
+              icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+              label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.white38),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+            const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: _isSaving ? null : _save,
               icon: _isSaving
@@ -420,6 +565,10 @@ bool _loadingBills = false;
           const SizedBox(height: 20),
           _buildCreditDetailsSection(),
           const SizedBox(height: 20),
+          _buildPlaceOfSupplySection(),
+          const SizedBox(height: 20),
+          _buildAddressSection(),
+          const SizedBox(height: 20),
           _buildItemsSection(),
           const SizedBox(height: 20),
           _buildNotesSection(),
@@ -448,23 +597,19 @@ bool _loadingBills = false;
                 border: Border.all(color: Colors.grey[300]!),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.business_outlined, color: _navyAccent),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _selectedVendorName ?? 'Select Vendor *',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: _selectedVendorName != null ? _navyDark : Colors.grey[600],
-                        fontWeight: _selectedVendorName != null ? FontWeight.w600 : FontWeight.normal,
-                      ),
-                    ),
+              child: Row(children: [
+                const Icon(Icons.business_outlined, color: _navyAccent),
+                const SizedBox(width: 12),
+                Expanded(child: Text(
+                  _selectedVendorName ?? 'Select Vendor *',
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: _selectedVendorName != null ? _navyDark : Colors.grey[600],
+                    fontWeight: _selectedVendorName != null ? FontWeight.w600 : FontWeight.normal,
                   ),
-                  const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                ],
-              ),
+                )),
+                const Icon(Icons.arrow_drop_down, color: Colors.grey),
+              ]),
             ),
           ),
           if (_selectedVendorEmail != null) ...[
@@ -475,17 +620,155 @@ bool _loadingBills = false;
               Text(_selectedVendorEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
             ]),
           ],
-          if (_selectedVendorGSTIN != null) ...[
+          if (_selectedVendorGSTIN != null && _selectedVendorGSTIN!.isNotEmpty) ...[
             const SizedBox(height: 6),
             Row(children: [
               const Icon(Icons.receipt_long, size: 16, color: Colors.grey),
               const SizedBox(width: 6),
               Text('GSTIN: $_selectedVendorGSTIN', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+              if (_selectedVendorPAN != null && _selectedVendorPAN!.isNotEmpty) ...[
+                const SizedBox(width: 16),
+                Text('PAN: $_selectedVendorPAN', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+              ],
             ]),
+          ],
+          if (_gstRegistrationType.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: _navyAccent.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(_gstRegistrationType, style: TextStyle(fontSize: 12, color: _navyMid, fontWeight: FontWeight.w500)),
+            ),
           ],
         ],
       ),
     );
+  }
+
+  // ── Place of Supply ────────────────────────────────────────────────────────
+  Widget _buildPlaceOfSupplySection() {
+    return _card(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _sectionTitle('Place of Supply', Icons.location_on_outlined),
+        const SizedBox(height: 8),
+        Text('Determines CGST+SGST (intra-state) or IGST (inter-state)',
+            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<String>(
+          value: _placeOfSupply.isNotEmpty ? _placeOfSupply : null,
+          decoration: InputDecoration(
+            labelText: 'Place of Supply',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            prefixIcon: const Icon(Icons.place),
+          ),
+          hint: const Text('Select State'),
+          items: kIndianStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+          onChanged: (v) { setState(() => _placeOfSupply = v ?? ''); _updateInterState(); },
+        ),
+        if (_placeOfSupply.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _isInterState ? Colors.orange[50] : Colors.green[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _isInterState ? Colors.orange[300]! : Colors.green[300]!),
+            ),
+            child: Row(children: [
+              Icon(_isInterState ? Icons.swap_horiz : Icons.check_circle_outline,
+                  color: _isInterState ? Colors.orange[700] : Colors.green[700]),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                _isInterState
+                    ? 'Inter-State: IGST will be applied'
+                    : 'Intra-State: CGST + SGST will be applied',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                    color: _isInterState ? Colors.orange[900] : Colors.green[900]),
+              )),
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  // ── Address Section ────────────────────────────────────────────────────────
+  Widget _buildAddressSection() {
+    return _card(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _sectionTitle('Billing & Shipping Address', Icons.location_city),
+        const SizedBox(height: 16),
+        if (!_billingAddress.isEmpty) ...[
+          Text('Billing Address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+            child: Text(_billingAddress.formatted, style: TextStyle(fontSize: 13, color: Colors.grey[800])),
+          ),
+          const SizedBox(height: 16),
+        ],
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('Ship To', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          Row(children: [
+            Text('Same as Billing', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+            Switch(value: _sameAsBilling, activeColor: _navyAccent,
+              onChanged: (v) => setState(() { _sameAsBilling = v; if (v) _shippingAddress = _billingAddress; })),
+          ]),
+        ]),
+        if (!_sameAsBilling) ...[
+          const SizedBox(height: 12),
+          _buildAddressFields(
+            label: 'Shipping Address',
+            address: _shippingAddress,
+            onChanged: (addr) => setState(() => _shippingAddress = addr),
+          ),
+        ] else ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+            child: Text(
+              _billingAddress.isEmpty ? 'No billing address — select a vendor to auto-fill' : _billingAddress.formatted,
+              style: TextStyle(fontSize: 13, color: _billingAddress.isEmpty ? Colors.grey[500] : Colors.grey[800],
+                  fontStyle: _billingAddress.isEmpty ? FontStyle.italic : FontStyle.normal),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _buildAddressFields({required String label, required VendorAddress address, required ValueChanged<VendorAddress> onChanged}) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+      const SizedBox(height: 8),
+      TextFormField(initialValue: address.street,
+        decoration: InputDecoration(labelText: 'Street', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+        onChanged: (v) => onChanged(VendorAddress(street: v, city: address.city, state: address.state, zip: address.zip, country: address.country))),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: TextFormField(initialValue: address.city,
+          decoration: InputDecoration(labelText: 'City', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(VendorAddress(street: address.street, city: v, state: address.state, zip: address.zip, country: address.country)))),
+        const SizedBox(width: 8),
+        Expanded(child: TextFormField(initialValue: address.state,
+          decoration: InputDecoration(labelText: 'State', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(VendorAddress(street: address.street, city: address.city, state: v, zip: address.zip, country: address.country)))),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: TextFormField(initialValue: address.zip,
+          decoration: InputDecoration(labelText: 'PIN/ZIP', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(VendorAddress(street: address.street, city: address.city, state: address.state, zip: v, country: address.country)))),
+        const SizedBox(width: 8),
+        Expanded(child: TextFormField(initialValue: address.country,
+          decoration: InputDecoration(labelText: 'Country', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), isDense: true),
+          onChanged: (v) => onChanged(VendorAddress(street: address.street, city: address.city, state: address.state, zip: address.zip, country: v)))),
+      ]),
+    ]);
   }
 
   // -----------------------------------------------------------------------
@@ -841,37 +1124,31 @@ final list = List<Map<String, dynamic>>.from(
                             // ✅ Auto-fill items from bill
                             _items = (b['items'] as List? ?? [])
                                 .map((item) => MutableCreditItem(
-                                      itemDetails: item['itemDetails']
-                                              ?.toString() ??
-                                          '',
-                                      account:
-                                          item['account']?.toString(),
-                                      quantity:
-                                          (item['quantity'] ?? 0)
-                                              .toDouble(),
-                                      rate: (item['rate'] ?? 0)
-                                          .toDouble(),
-                                      discount:
-                                          (item['discount'] ?? 0)
-                                              .toDouble(),
-                                      discountType: item['discountType']
-                                              ?.toString() ??
-                                          'percentage',
-                                      amount: (item['amount'] ?? 0)
-                                          .toDouble(),
+                                      itemDetails: item['itemDetails']?.toString() ?? '',
+                                      account:     item['account']?.toString(),
+                                      hsnCode:     item['hsnCode']?.toString() ?? '',
+                                      sacCode:     item['sacCode']?.toString() ?? '',
+                                      unit:        item['unit']?.toString() ?? 'Nos',
+                                      quantity:    (item['quantity'] ?? 0).toDouble(),
+                                      rate:        (item['rate'] ?? 0).toDouble(),
+                                      discount:    (item['discount'] ?? 0).toDouble(),
+                                      discountType: item['discountType']?.toString() ?? 'percentage',
+                                      itemGstRate: (item['itemGstRate'] ?? item['gstRate'] ?? 18).toDouble(),
+                                      amount:      (item['amount'] ?? 0).toDouble(),
                                     ))
                                 .toList();
+                            // Rebuild desc controllers
+                            for (final c in _descControllers) { c.dispose(); }
+                            _descControllers.clear();
+                            for (final item in _items) {
+                              _descControllers.add(TextEditingController(text: item.itemDetails));
+                            }
                             // ✅ Auto-fill tax settings from bill
-                            _gstRate =
-                                (b['gstRate'] ?? 18).toDouble();
-                            _tdsRate =
-                                (b['tdsRate'] ?? 0).toDouble();
-                            _tcsRate =
-                                (b['tcsRate'] ?? 0).toDouble();
-                            _enableGST = _gstRate > 0;
+                            _tdsRate   = (b['tdsRate'] ?? 0).toDouble();
+                            _tcsRate   = (b['tcsRate'] ?? 0).toDouble();
                             _enableTDS = _tdsRate > 0;
                             _enableTCS = _tcsRate > 0;
-                            _calculate();
+                            _calculateAmounts();
                           });
                           Navigator.pop(context);
                         },
@@ -939,256 +1216,272 @@ final list = List<Map<String, dynamic>>.from(
   );
 }
 
-  // -----------------------------------------------------------------------
-  // ITEMS SECTION
-  // -----------------------------------------------------------------------
-
+  // ── Items Section — horizontal scrollable table ────────────────────────────
   Widget _buildItemsSection() {
+    final double tableWidth = _colNo + _colDesc + _colHsn + _colUnit + _colQty +
+        _colRate + _colDisc + _colGst + _colTaxable + _colTax1 +
+        (_isInterState ? 0 : _colTax2) + _colAmt + _colDel;
+
     return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _sectionTitle('Line Items', Icons.list_alt),
-              ElevatedButton.icon(
-                onPressed: _addItem,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Item'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _navyAccent,
-                  foregroundColor: Colors.white,
-                ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _sectionTitle('Line Items', Icons.list_alt),
+          if (_placeOfSupply.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: _isInterState ? Colors.orange[50] : Colors.blue[50],
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _isInterState ? Colors.orange[300]! : Colors.blue[300]!),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Header
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [_navyDark, _navyMid],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(8),
+              child: Text(_isInterState ? 'IGST' : 'CGST + SGST',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                      color: _isInterState ? Colors.orange[800] : Colors.blue[800])),
             ),
-            child: LayoutBuilder(builder: (ctx, cs) {
-              final isMobile = cs.maxWidth < 600;
-              if (isMobile) {
-                return const Text('ITEMS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
-              }
-              return const Row(
-                children: [
-                  Expanded(flex: 3, child: Text('ITEM DETAILS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                  SizedBox(width: 8),
-                  Expanded(flex: 2, child: Text('ACCOUNT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                  SizedBox(width: 8),
-                  SizedBox(width: 70, child: Text('QTY', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
-                  SizedBox(width: 8),
-                  SizedBox(width: 90, child: Text('RATE (₹)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                  SizedBox(width: 8),
-                  SizedBox(width: 80, child: Text('DISCOUNT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                  SizedBox(width: 8),
-                  SizedBox(width: 100, child: Text('AMOUNT (₹)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                  SizedBox(width: 48),
-                ],
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          if (_items.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(children: [
-                  Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 12),
-                  Text('No items added', style: TextStyle(color: Colors.grey[600])),
+        ]),
+        const SizedBox(height: 14),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Header
+              Container(
+                decoration: BoxDecoration(
+                  color: _navyDark,
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                ),
+                child: Row(children: [
+                  _thCell('#',           _colNo),
+                  _thCell('DESCRIPTION', _colDesc),
+                  _thCell('HSN / SAC',   _colHsn),
+                  _thCell('UNIT',        _colUnit),
+                  _thCell('QTY',         _colQty,     align: TextAlign.center),
+                  _thCell('RATE (₹)',    _colRate,    align: TextAlign.right),
+                  _thCell('DISCOUNT',    _colDisc,    align: TextAlign.right),
+                  _thCell('GST %',       _colGst,     align: TextAlign.center),
+                  _thCell('TAXABLE',     _colTaxable, align: TextAlign.right),
+                  if (_isInterState)
+                    _thCell('IGST',      _colTax1,    align: TextAlign.right)
+                  else ...[
+                    _thCell('CGST',      _colTax1,    align: TextAlign.right),
+                    _thCell('SGST',      _colTax2,    align: TextAlign.right),
+                  ],
+                  _thCell('AMOUNT',      _colAmt,     align: TextAlign.right),
+                  SizedBox(width: _colDel),
                 ]),
               ),
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _items.length,
-              separatorBuilder: (_, __) => const Divider(height: 12),
-              itemBuilder: (_, i) => _buildItemRow(i),
-            ),
-        ],
+              if (_items.isEmpty)
+                Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    border: Border(left: BorderSide(color: Colors.grey[200]!), right: BorderSide(color: Colors.grey[200]!), bottom: BorderSide(color: Colors.grey[200]!)),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.inbox_outlined, size: 20, color: Colors.grey[400]),
+                    const SizedBox(width: 8),
+                    Text('No items — click Add Item below', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  ]),
+                )
+              else
+                ...List.generate(_items.length, (i) => _buildItemTableRow(i)),
+              // Add item row
+              InkWell(
+                onTap: _addItem,
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                child: Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: _navyAccent.withOpacity(0.05),
+                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    border: Border(
+                      left: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      right: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      bottom: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.add_circle_outline, size: 18, color: _navyAccent),
+                    const SizedBox(width: 8),
+                    Text('+ Add Item', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyAccent)),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _thCell(String text, double width, {TextAlign align = TextAlign.left}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Text(text, textAlign: align,
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
       ),
     );
   }
 
-  Widget _buildItemRow(int index) {
-    final item = _items[index];
-    return LayoutBuilder(builder: (context, constraints) {
-      final isMobile = constraints.maxWidth < 600;
-      if (isMobile) {
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: item.itemDetails,
-                      decoration: InputDecoration(
-                        labelText: 'Item Description',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                        isDense: true,
-                      ),
-                      onChanged: (v) => item.itemDetails = v,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                    onPressed: () => _removeItem(index),
-                  ),
+  InputDecoration _cellDecoration(String? hint) => InputDecoration(
+    hintText: hint,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey[300]!)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey[300]!)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _navyAccent)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+    isDense: true,
+  );
+
+  Widget _buildItemTableRow(int index) {
+    final item     = _items[index];
+    final isOdd    = index.isOdd;
+    final descCtrl = _descControllers[index];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isOdd ? const Color(0xFFF7F9FC) : Colors.white,
+        border: Border(
+          left:   BorderSide(color: Colors.grey[200]!),
+          right:  BorderSide(color: Colors.grey[200]!),
+          bottom: BorderSide(color: Colors.grey[200]!),
+        ),
+      ),
+      child: IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          // #
+          SizedBox(width: _colNo, child: Center(child: Text('${index + 1}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)))),
+          // Description
+          SizedBox(width: _colDesc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: TextFormField(
+              controller: descCtrl,
+              maxLines: null, minLines: 1,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              decoration: _cellDecoration('Item / Service'),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              onChanged: (v) => setState(() => item.itemDetails = v),
+            ))),
+          // HSN/SAC
+          SizedBox(width: _colHsn, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: TextFormField(
+              initialValue: item.hsnCode.isNotEmpty ? item.hsnCode : item.sacCode,
+              decoration: _cellDecoration('HSN/SAC'),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              onChanged: (v) => setState(() { item.hsnCode = v; item.sacCode = v; }),
+            ))),
+          // Unit
+          SizedBox(width: _colUnit, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: DropdownButtonFormField<String>(
+              value: _kUnits.contains(item.unit) ? item.unit : 'Nos',
+              decoration: _cellDecoration(null),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              isDense: true,
+              items: _kUnits.map((u) => DropdownMenuItem(value: u, child: Text(u, style: const TextStyle(fontSize: 13)))).toList(),
+              onChanged: (v) => setState(() => item.unit = v ?? 'Nos'),
+            ))),
+          // Qty
+          SizedBox(width: _colQty, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: TextFormField(
+              initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+              decoration: _cellDecoration('0'),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+              onChanged: (v) { setState(() { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+            ))),
+          // Rate
+          SizedBox(width: _colRate, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: TextFormField(
+              initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+              decoration: _cellDecoration('0.00'),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              textAlign: TextAlign.right,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (v) { setState(() { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+            ))),
+          // Discount
+          SizedBox(width: _colDisc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Row(children: [
+              Expanded(child: TextFormField(
+                initialValue: item.discount > 0 ? item.discount.toString() : '',
+                decoration: _cellDecoration('0'),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                textAlign: TextAlign.right,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (v) { setState(() { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+              )),
+              PopupMenuButton<String>(
+                initialValue: item.discountType,
+                padding: EdgeInsets.zero,
+                icon: Text(item.discountType == 'percentage' ? '%' : '₹',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent)),
+                onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'percentage', child: Text('% Percentage')),
+                  const PopupMenuItem(value: 'amount',     child: Text('₹ Flat Amount')),
                 ],
               ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-                    decoration: InputDecoration(labelText: 'Qty', border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)), isDense: true),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculate(); },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-                    decoration: InputDecoration(labelText: 'Rate (₹)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)), isDense: true),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculate(); },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: Text('₹${item.amount.toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.right),
-                  ),
-                ),
-              ]),
-            ],
-          ),
-        );
-      }
-
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 3, child: TextFormField(
-            initialValue: item.itemDetails,
-            decoration: InputDecoration(
-              hintText: 'Enter item description',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            maxLines: 2,
-            onChanged: (v) => item.itemDetails = v,
-          )),
-          const SizedBox(width: 8),
-          Expanded(flex: 2, child: DropdownButtonFormField<String>(
-            value: item.account,
-            decoration: InputDecoration(
-              hintText: 'Account',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            isExpanded: true,
-            items: _coaExpAccounts.map((a) => DropdownMenuItem(value: a['accountName'] as String, child: Text(a['accountName'] as String, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) => setState(() => item.account = v),
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 70, child: TextFormField(
-            initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-            decoration: InputDecoration(
-              hintText: '0',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculate(); },
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 90, child: TextFormField(
-            initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-            decoration: InputDecoration(
-              hintText: '0.00',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textAlign: TextAlign.right,
-            onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculate(); },
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 80, child: Row(children: [
-            Expanded(child: TextFormField(
-              initialValue: item.discount > 0 ? item.discount.toString() : '',
-              decoration: InputDecoration(
-                hintText: '0',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+            ]))),
+          // GST %
+          SizedBox(width: _colGst, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: DropdownButtonFormField<double>(
+              value: _kGstRates.contains(item.itemGstRate) ? item.itemGstRate : 18.0,
+              decoration: _cellDecoration(null),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+              isDense: true,
+              items: _kGstRates.map((r) => DropdownMenuItem(value: r, child: Text('${r.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 13)))).toList(),
+              onChanged: (v) { setState(() { item.itemGstRate = v ?? 18.0; _calculateAmounts(); }); },
+            ))),
+          // Taxable
+          SizedBox(width: _colTaxable, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(item.taxableAmount > 0 ? '₹${item.taxableAmount.toStringAsFixed(2)}' : '—',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87)))),
+          // CGST or IGST
+          SizedBox(width: _colTax1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(
+                _isInterState
+                    ? (item.igstAmount > 0 ? '₹${item.igstAmount.toStringAsFixed(2)}' : '—')
+                    : (item.cgstAmount > 0 ? '₹${item.cgstAmount.toStringAsFixed(2)}' : '—'),
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                    color: _isInterState ? Colors.orange[700] : Colors.blue[700]),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              textAlign: TextAlign.right,
-              onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculate(); },
-            )),
-            PopupMenuButton<String>(
-              initialValue: item.discountType,
-              icon: const Icon(Icons.arrow_drop_down, size: 16),
-              onSelected: (v) => setState(() { item.discountType = v; _calculate(); }),
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: 'percentage', child: Text('%')),
-                const PopupMenuItem(value: 'amount', child: Text('₹')),
-              ],
-            ),
-          ])),
-          const SizedBox(width: 8),
-          Container(
-            width: 100,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Text(item.amount.toStringAsFixed(2),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign.right),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
+              if (item.itemGstRate > 0)
+                Text(_isInterState ? '${item.itemGstRate.toStringAsFixed(0)}%' : '${(item.itemGstRate / 2).toStringAsFixed(1)}%',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+            ]))),
+          // SGST (intra-state only)
+          if (!_isInterState)
+            SizedBox(width: _colTax2, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(item.sgstAmount > 0 ? '₹${item.sgstAmount.toStringAsFixed(2)}' : '—',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.blue[700])),
+                if (item.itemGstRate > 0)
+                  Text('${(item.itemGstRate / 2).toStringAsFixed(1)}%', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+              ]))),
+          // Amount
+          SizedBox(width: _colAmt, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text('₹${item.amount.toStringAsFixed(2)}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)))),
+          // Delete
+          SizedBox(width: _colDel, child: IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
             onPressed: () => _removeItem(index),
-          ),
-        ],
-      );
-    });
+          )),
+        ]),
+      ),
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -1228,34 +1521,12 @@ final list = List<Map<String, dynamic>>.from(
         _sectionTitle('Tax Settings', Icons.calculate),
         const SizedBox(height: 16),
         SwitchListTile(
-          title: const Text('Enable GST'),
-          value: _enableGST,
-          activeColor: _navyAccent,
-          contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableGST = v; _calculate(); }),
-        ),
-        if (_enableGST) ...[
-          const SizedBox(height: 8),
-          TextFormField(
-            initialValue: _gstRate.toString(),
-            decoration: InputDecoration(
-              labelText: 'GST Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _gstRate = double.tryParse(v) ?? 18; _calculate(); }),
-          ),
-        ],
-        const SizedBox(height: 12),
-        SwitchListTile(
           title: const Text('Enable TDS'),
           subtitle: const Text('Tax Deducted at Source', style: TextStyle(fontSize: 11)),
           value: _enableTDS,
           activeColor: _navyAccent,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableTDS = v; _calculate(); }),
+          onChanged: (v) => setState(() { _enableTDS = v; _calculateAmounts(); }),
         ),
         if (_enableTDS) ...[
           const SizedBox(height: 8),
@@ -1268,7 +1539,7 @@ final list = List<Map<String, dynamic>>.from(
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _tdsRate = double.tryParse(v) ?? 0; _calculate(); }),
+            onChanged: (v) => setState(() { _tdsRate = double.tryParse(v) ?? 0; _calculateAmounts(); }),
           ),
         ],
         const SizedBox(height: 12),
@@ -1278,7 +1549,7 @@ final list = List<Map<String, dynamic>>.from(
           value: _enableTCS,
           activeColor: _navyAccent,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableTCS = v; _calculate(); }),
+          onChanged: (v) => setState(() { _enableTCS = v; _calculateAmounts(); }),
         ),
         if (_enableTCS) ...[
           const SizedBox(height: 8),
@@ -1291,7 +1562,7 @@ final list = List<Map<String, dynamic>>.from(
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _tcsRate = double.tryParse(v) ?? 0; _calculate(); }),
+            onChanged: (v) => setState(() { _tcsRate = double.tryParse(v) ?? 0; _calculateAmounts(); }),
           ),
         ],
       ],
@@ -1309,6 +1580,12 @@ final list = List<Map<String, dynamic>>.from(
         _sectionTitle('Credit Summary', Icons.summarize),
         const SizedBox(height: 16),
         _summaryRow('Sub Total', _subTotal),
+        if (_isInterState) ...[
+          if (_totalIGST > 0) ...[const SizedBox(height: 6), _summaryRow('IGST', _totalIGST)],
+        ] else ...[
+          if (_totalCGST > 0) ...[const SizedBox(height: 6), _summaryRow('CGST', _totalCGST)],
+          if (_totalSGST > 0) ...[const SizedBox(height: 6), _summaryRow('SGST', _totalSGST)],
+        ],
         if (_enableTDS && _tdsAmount > 0) ...[
           const SizedBox(height: 6),
           _summaryRow('TDS (${_tdsRate.toStringAsFixed(1)}%)', -_tdsAmount, color: Colors.red[700]),
@@ -1316,12 +1593,6 @@ final list = List<Map<String, dynamic>>.from(
         if (_enableTCS && _tcsAmount > 0) ...[
           const SizedBox(height: 6),
           _summaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%)', _tcsAmount),
-        ],
-        if (_enableGST && _gstAmount > 0) ...[
-          const SizedBox(height: 6),
-          _summaryRow('CGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
-          const SizedBox(height: 6),
-          _summaryRow('SGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
         ],
         const Divider(thickness: 2),
         const SizedBox(height: 6),
@@ -1332,15 +1603,12 @@ final list = List<Map<String, dynamic>>.from(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [_navyDark.withOpacity(0.1), _navyLight.withOpacity(0.1)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: _navyAccent.withOpacity(0.3)),
           ),
           child: Column(children: [
-            _infoRow('Total Qty:', _totalQty.toString()),
-            const SizedBox(height: 4),
             _infoRow('Items:', _items.where((i) => i.itemDetails.isNotEmpty).length.toString()),
           ]),
         ),
@@ -1350,13 +1618,11 @@ final list = List<Map<String, dynamic>>.from(
           child: ElevatedButton.icon(
             onPressed: _isSaving ? null : _save,
             icon: _isSaving
-                ? const SizedBox(width: 16, height: 16,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.save),
             label: Text(_isSaving ? 'Saving...' : 'Save Vendor Credit'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _navyAccent,
-              foregroundColor: Colors.white,
+              backgroundColor: _navyAccent, foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1458,11 +1724,20 @@ final list = List<Map<String, dynamic>>.from(
                                       subtitle: Text(v.email),
                                       onTap: () {
                                         setState(() {
-                                          _selectedVendorId = v.id;
-                                          _selectedVendorName = v.vendorName;
+                                          _selectedVendorId    = v.id;
+                                          _selectedVendorName  = v.vendorName;
                                           _selectedVendorEmail = v.email;
                                           _selectedVendorPhone = v.phoneNumber;
-                                          _selectedVendorGSTIN = null;
+                                          _selectedVendorGSTIN = v.gstNumber.isNotEmpty ? v.gstNumber : null;
+                                          _selectedVendorPAN   = v.panNumber.isNotEmpty ? v.panNumber : null;
+                                          _gstRegistrationType = v.gstRegistrationType;
+                                          _billingAddress      = v.billingAddress;
+                                          _shippingAddress     = v.shippingAddress.isEmpty ? v.billingAddress : v.shippingAddress;
+                                          _sameAsBilling       = v.shippingAddress.isEmpty;
+                                          if (v.placeOfSupply.isNotEmpty) {
+                                            _placeOfSupply = v.placeOfSupply;
+                                            _updateInterState();
+                                          }
                                         });
                                         Navigator.pop(ctx);
                                       },
@@ -1504,11 +1779,13 @@ final list = List<Map<String, dynamic>>.from(
     );
     if (result != null && result is Map<String, dynamic>) {
       setState(() {
-        _selectedVendorId = result['id'];
-        _selectedVendorName = result['vendorName'];
+        _selectedVendorId    = result['id'];
+        _selectedVendorName  = result['vendorName'];
         _selectedVendorEmail = result['email'];
         _selectedVendorPhone = result['phoneNumber'] ?? result['phone'] ?? '';
         _selectedVendorGSTIN = result['gstNumber'];
+        _selectedVendorPAN   = result['panNumber'];
+        _gstRegistrationType = result['gstRegistrationType'] ?? '';
       });
     }
   }

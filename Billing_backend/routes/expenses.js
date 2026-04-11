@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
@@ -130,6 +130,10 @@ expenseNumber: {
     ref: 'Invoice',
     default: null
   },
+  providerTransactionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
   orgId: { type: String, index: true, default: null }
 }, {
   timestamps: true // Automatically adds createdAt and updatedAt
@@ -153,31 +157,45 @@ const PaymentAccount = mongoose.models.PaymentAccount || mongoose.model('Payment
 
 async function getExpenseAccountId(accountName, orgId = null) {
   try {
-    // Step 1: Try exact match first
+    // ✅ Only valid expense-type accounts allowed
+    const EXPENSE_TYPES = ['Expense', 'Other Expense', 'Cost Of Goods Sold'];
+
+    // Step 1: Try exact match — only if it's an Expense-type account
     let acc = await ChartOfAccount.findOne({
       accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $in: EXPENSE_TYPES },
       ...(orgId ? { orgId } : {}),
     }).select('_id').lean();
     if (acc) return acc._id;
 
-    // Step 2: Not found — AUTO CREATE the expense account
-    console.log(`📝 COA account "${accountName}" not found — creating automatically...`);
+    // Step 1b: Check if account exists BUT is the wrong type (Asset, Liability etc.)
+    const wrongTypeAcc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $nin: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id accountType').lean();
+    if (wrongTypeAcc) {
+      console.warn(`⚠️ Account "${accountName}" is type "${wrongTypeAcc.accountType}" — not an expense account. ` +
+        `COA post skipped. If this is a Fixed Asset, record it in the Fixed Assets module instead.`);
+      return null; // ← safe: COA post is skipped, expense still saves normally
+    }
 
+    // Step 2: Not found at all — AUTO CREATE as Expense type
+    console.log(`📝 COA account "${accountName}" not found — creating automatically as Expense type...`);
     const newAcc = await ChartOfAccount.create({
-      accountName:        accountName,
-      accountCode:        `EXP-${Date.now().toString().slice(-6)}`,
-      accountType:        'Expense',
-      orgId:              orgId,
-      accountSubType:     'Operating Expense',
-      description:        `${accountName} expenses`,
-      isSystemAccount:    false,
-      isActive:           true,
-      openingBalance:     0,
-      currentBalance:     0,
-      currency:           'INR',
-      transactions:       [],
+      accountName:     accountName,
+      accountCode:     `EXP-${Date.now().toString().slice(-6)}`,
+      accountType:     'Expense',
+      orgId:           orgId,
+      accountSubType:  'Operating Expense',
+      description:     `${accountName} expenses`,
+      isSystemAccount: false,
+      isActive:        true,
+      openingBalance:  0,
+      currentBalance:  0,
+      currency:        'INR',
+      transactions:    [],
     });
-
     console.log(`✅ Auto-created COA account: "${accountName}" → ID: ${newAcc._id}`);
     return newAcc._id;
 
@@ -492,7 +510,7 @@ router.post('/', upload.single('receipt'), async (req, res) => {
       date, expenseAccount, amount, tax, paidThrough,
       vendor, invoiceNumber, customerName, isBillable,
       project, markupPercentage, reportingTags, notes,
-      isItemized, itemizedExpenses
+      isItemized, itemizedExpenses, providerTransactionId
     } = req.body;
 
     console.log('📥 Creating expense in MongoDB:', { date, expenseAccount, amount, paidThrough });
@@ -585,6 +603,7 @@ router.post('/', upload.single('receipt'), async (req, res) => {
       itemizedExpenses: parsedItemizedExpenses,
       isBilled: false,
       invoiceId: null,
+      providerTransactionId: providerTransactionId || null,
       orgId: req.user?.orgId || null,
       expenseNumber: await generateExpenseNumber(req.user?.orgId || null),
       receiptFile: req.file ? {
@@ -680,6 +699,46 @@ router.post('/', upload.single('receipt'), async (req, res) => {
       console.error('⚠️ COA posting error (expense create):', coaErr.message);
     }
     // ── END COA POSTING ─────────────────────────────────────────────────────
+
+    // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    try {
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+            new mongoose.Schema({}, { strict: false }),
+            'providertransactions');
+
+      // Find the PaymentAccount by name or ID
+      const ptAccount = paidThrough
+        ? (mongoose.Types.ObjectId.isValid(paidThrough)
+            ? await PaymentAccount.findById(paidThrough).lean()
+            : await PaymentAccount.findOne({ accountName: paidThrough }).lean())
+        : null;
+
+      if (ptAccount) {
+        await ProviderTransaction.create({
+          accountId:            ptAccount._id,
+          orgId:                req.user?.orgId || null,
+          transactionDate:      new Date(date),
+          description:          `Expense: ${expenseAccount}${vendor ? ' - ' + vendor : ''}`,
+          amount:               newExpense.total,
+          transactionType:      'DEBIT',
+          reconciliationStatus: 'CATEGORIZED',
+          categoryLabel:        expenseAccount,
+          source:               'SYSTEM_ENTRY',
+          linkedRecordId:       newExpense._id,
+          linkedRecordType:     'Expense',
+          journalRef:           newExpense.expenseNumber || newExpense._id.toString(),
+          categorizedAt:        new Date(),
+          categorizedBy:        req.user?.email || 'system',
+          importedAt:           new Date(),
+          importedBy:           req.user?.email || 'system',
+        });
+        console.log(`✅ ProviderTransaction created for expense: ${newExpense.expenseNumber}`);
+      }
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction create error (expense):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION ─────────────────────────────────────────────
 
     res.status(201).json({
       success: true,
@@ -1140,6 +1199,24 @@ router.delete('/:id', async (req, res) => {
       console.error('⚠️ COA reversal error (expense delete):', coaErr.message);
     }
     // ── END COA REVERSAL ────────────────────────────────────────────────────
+
+    // ── DELETE LINKED PROVIDER TRANSACTION ──────────────────────────────────
+    try {
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+            new mongoose.Schema({}, { strict: false }),
+            'providertransactions');
+
+      await ProviderTransaction.deleteMany({
+        linkedRecordId:   expense._id,
+        linkedRecordType: 'Expense',
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      });
+      console.log(`✅ ProviderTransaction deleted for expense: ${expense._id}`);
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction delete error (expense):', ptErr.message);
+    }
+    // ── END DELETE PROVIDER TRANSACTION ─────────────────────────────────────
 
     res.json({ success: true, message: 'Expense deleted successfully' });
   } catch (error) {
@@ -1773,6 +1850,180 @@ try {
       fs.unlinkSync(req.file.path);
     }
     handleError(res, 500, 'Error importing expenses', error);
+  }
+});
+
+// ============================================================================
+// ROUTE — GET /:id/pdf
+// Generates and downloads a PDF for a single expense
+// ============================================================================
+router.get('/:id/pdf', async (req, res) => {
+  // Support token-based auth (for direct URL downloads)
+  if (!req.user && req.query.token) {
+    try {
+      const jwt = require('jsonwebtoken');
+      req.user  = jwt.verify(req.query.token, process.env.FINANCE_JWT_SECRET || process.env.JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+  }
+
+  try {
+    const expense = await Expense.findOne({
+      _id:   req.params.id,
+      orgId: req.user?.orgId,
+    }).lean();
+    if (!expense) return res.status(404).json({ success: false, message: 'Expense not found' });
+
+    // ── Fetch org details ──────────────────────────────────────────────────
+    let orgName  = 'Your Company';
+    let orgGST   = '';
+    let orgAddr  = '';
+    let orgEmail = '';
+    let orgPhone = '';
+    try {
+      const OrgModel = mongoose.models.Organization ||
+        mongoose.model('Organization', new mongoose.Schema({
+          orgId: String, orgName: String, gstNumber: String,
+          address: String, email: String, phone: String,
+        }), 'organizations');
+      const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+      if (org) {
+        orgName  = org.orgName    || orgName;
+        orgGST   = org.gstNumber  || '';
+        orgAddr  = org.address    || '';
+        orgEmail = org.email      || '';
+        orgPhone = org.phone      || '';
+      }
+    } catch (e) { /* org fetch is best-effort */ }
+
+    // ── Setup PDF ──────────────────────────────────────────────────────────
+    const PDFDocument = require('pdfkit');
+    const uploadsDir  = path.join(__dirname, '..', 'uploads', 'expenses');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const expNum  = expense.expenseNumber || expense._id.toString();
+    const filename = `expense-${expNum}.pdf`;
+    const filepath = path.join(uploadsDir, filename);
+
+    const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const stream = fs.createWriteStream(filepath);
+    doc.pipe(stream);
+
+    const pageW = 515;
+
+    // ── Header ─────────────────────────────────────────────────────────────
+    const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold').text(orgName.toUpperCase(), 40, 35, { width: 300 });
+    doc.fontSize(7).fillColor('#444444').font('Helvetica').text('BILLING & FINANCE', 40, 49, { width: 300, characterSpacing: 1 });
+    let cy = 61;
+    contactLines.forEach(line => { doc.fontSize(7).fillColor('#000000').text(line, 40, cy, { width: 300 }); cy += 9; });
+
+    doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold').text('EXPENSE VOUCHER', 380, 40, { width: 175, align: 'right', characterSpacing: 2 });
+    doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold').text(expNum, 380, 52, { width: 175, align: 'right' });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text(`Date: ${new Date(expense.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}`, 380, 76, { width: 175, align: 'right' });
+
+    // ── Divider ────────────────────────────────────────────────────────────
+    const divY = Math.max(cy, 100) + 8;
+    doc.moveTo(40, divY).lineTo(555, divY).lineWidth(1).strokeColor('#0f1e3d').stroke();
+
+    // ── Meta grid ─────────────────────────────────────────────────────────
+    const metaY = divY + 10;
+    const colW  = pageW / 2;
+
+    // Col 1 — Vendor / Paid Through
+    doc.rect(40, metaY, colW, 70).fillAndStroke('#f7f9fc', '#dde4ef');
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text('VENDOR / PAID THROUGH', 48, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(expense.vendor || 'N/A', 48, metaY + 18, { width: colW - 16 });
+    doc.fontSize(7).fillColor('#555555').font('Helvetica').text(`Paid Through: ${expense.paidThrough || 'N/A'}`, 48, metaY + 30, { width: colW - 16 });
+    if (expense.customerName) {
+      doc.text(`Customer: ${expense.customerName}`, 48, metaY + 40, { width: colW - 16 });
+    }
+
+    // Col 2 — Expense Details
+    const col2X = 40 + colW;
+    doc.rect(col2X, metaY, colW, 70).fillAndStroke('#f7f9fc', '#dde4ef');
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text('EXPENSE DETAILS', col2X + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica').text(`Expense #: ${expNum}`, col2X + 8, metaY + 18, { width: colW - 16 });
+    doc.fontSize(7).text(`Account: ${expense.expenseAccount || 'N/A'}`, col2X + 8, metaY + 29, { width: colW - 16 });
+    if (expense.invoiceNumber) doc.text(`Ref Invoice: ${expense.invoiceNumber}`, col2X + 8, metaY + 39, { width: colW - 16 });
+    doc.text(`Billable: ${expense.isBillable ? 'Yes' : 'No'}`, col2X + 8, metaY + 49, { width: colW - 16 });
+
+    // ── Items table ────────────────────────────────────────────────────────
+    let tableY = metaY + 80;
+    doc.rect(40, tableY, pageW, 20).fill('#0f1e3d');
+    doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+    doc.text('#',           42,  tableY + 7, { width: 16 });
+    doc.text('ACCOUNT',     58,  tableY + 7, { width: 180 });
+    doc.text('DESCRIPTION', 238, tableY + 7, { width: 180 });
+    doc.text('AMOUNT',      418, tableY + 7, { width: 137, align: 'right' });
+
+    let rowY = tableY + 20;
+    const rows = expense.isItemized && expense.itemizedExpenses?.length
+      ? expense.itemizedExpenses.map(i => ({ account: i.expenseAccount, desc: i.description, amount: i.amount }))
+      : [{ account: expense.expenseAccount, desc: expense.notes || '', amount: expense.amount }];
+
+    rows.forEach((row, idx) => {
+      const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+      doc.rect(40, rowY, pageW, 20).fill(fill);
+      doc.rect(40, rowY, pageW, 20).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+      doc.fontSize(7).fillColor('#000000').font('Helvetica');
+      doc.text(String(idx + 1),       42,  rowY + 7, { width: 16 });
+      doc.text(row.account || 'N/A',  58,  rowY + 7, { width: 178, ellipsis: true });
+      doc.text(row.desc    || '—',    238, rowY + 7, { width: 178, ellipsis: true });
+      doc.font('Helvetica-Bold').text(`Rs. ${(row.amount || 0).toFixed(2)}`, 418, rowY + 7, { width: 137, align: 'right' });
+      rowY += 20;
+    });
+
+    // ── Totals ─────────────────────────────────────────────────────────────
+    const totX = 315;
+    const totW = 240;
+    let totY = rowY + 16;
+
+    const tRow = (label, value, bold = false) => {
+      doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, totX, totY, { width: 140 });
+      doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(value, totX + 140, totY, { width: 100, align: 'right' });
+      doc.moveTo(totX, totY + 11).lineTo(totX + totW, totY + 11).lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
+      totY += 14;
+    };
+
+    tRow('Subtotal:', `Rs. ${(expense.amount || 0).toFixed(2)}`);
+    if ((expense.tax || 0) > 0) tRow('Tax:', `Rs. ${expense.tax.toFixed(2)}`);
+
+    totY += 4;
+    doc.rect(totX, totY, totW, 24).fill('#0f1e3d');
+    doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('Total', totX + 6, totY + 7);
+    doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
+       .text(`Rs. ${(expense.total || 0).toFixed(2)}`, totX, totY + 5, { width: totW - 6, align: 'right' });
+
+    // ── Notes ──────────────────────────────────────────────────────────────
+    if (expense.notes) {
+      const notesY = totY + 40;
+      doc.rect(40, notesY, pageW, 14).fill('#fffbeb');
+      doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold')
+         .text(`Notes: ${expense.notes}`, 48, notesY + 4, { width: pageW - 16 });
+    }
+
+    // ── Footer ─────────────────────────────────────────────────────────────
+    const footerY = doc.page.height - 50;
+    doc.moveTo(40, footerY).lineTo(555, footerY).lineWidth(0.5).strokeColor('#cccccc').stroke();
+    doc.fontSize(7).fillColor('#888888').font('Helvetica')
+       .text(`${orgName} | Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footerY + 8, { width: pageW, align: 'center' });
+
+    doc.end();
+
+    stream.on('finish', () => {
+      res.download(filepath, `Expense-${expNum}.pdf`);
+    });
+    stream.on('error', (err) => {
+      console.error('❌ PDF stream error:', err);
+      res.status(500).json({ success: false, message: 'PDF generation failed' });
+    });
+
+  } catch (err) {
+    console.error('❌ Expense PDF error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

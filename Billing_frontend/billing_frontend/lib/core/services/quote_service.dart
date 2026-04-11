@@ -170,35 +170,63 @@ class QuoteItem {
   final double discount;
   final String discountType;
   final double amount;
+  final String hsnCode;
+  final String unit;
+  final double itemGstRate;
+  final double taxableAmount;
+  final double cgstAmount;
+  final double sgstAmount;
+  final double igstAmount;
 
   QuoteItem({
     required this.itemDetails,
     required this.quantity,
     required this.rate,
-    this.discount = 0,
-    this.discountType = 'percentage',
+    this.discount      = 0,
+    this.discountType  = 'percentage',
     required this.amount,
+    this.hsnCode       = '',
+    this.unit          = 'Nos',
+    this.itemGstRate   = 18,
+    this.taxableAmount = 0,
+    this.cgstAmount    = 0,
+    this.sgstAmount    = 0,
+    this.igstAmount    = 0,
   });
 
   factory QuoteItem.fromJson(Map<String, dynamic> json) {
     return QuoteItem(
-      itemDetails: json['itemDetails'] ?? '',
-      quantity: (json['quantity'] ?? 0).toDouble(),
-      rate: (json['rate'] ?? 0).toDouble(),
-      discount: (json['discount'] ?? 0).toDouble(),
-      discountType: json['discountType'] ?? 'percentage',
-      amount: (json['amount'] ?? 0).toDouble(),
+      itemDetails:   json['itemDetails']   ?? '',
+      quantity:      (json['quantity']     ?? 0).toDouble(),
+      rate:          (json['rate']         ?? 0).toDouble(),
+      discount:      (json['discount']     ?? 0).toDouble(),
+      discountType:  json['discountType']  ?? 'percentage',
+      amount:        (json['amount']       ?? 0).toDouble(),
+      hsnCode:       json['hsnCode']       ?? '',
+      unit:          json['unit']          ?? 'Nos',
+      itemGstRate:   (json['itemGstRate']  ?? 18).toDouble(),
+      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
+      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
+      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
+      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails': itemDetails,
-      'quantity': quantity,
-      'rate': rate,
-      'discount': discount,
-      'discountType': discountType,
-      'amount': amount,
+      'itemDetails':   itemDetails,
+      'quantity':      quantity,
+      'rate':          rate,
+      'discount':      discount,
+      'discountType':  discountType,
+      'amount':        amount,
+      'hsnCode':       hsnCode,
+      'unit':          unit,
+      'itemGstRate':   itemGstRate,
+      'taxableAmount': taxableAmount,
+      'cgstAmount':    cgstAmount,
+      'sgstAmount':    sgstAmount,
+      'igstAmount':    igstAmount,
     };
   }
 }

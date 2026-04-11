@@ -54,7 +54,7 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
   DateTime? _fromDate, _toDate;
   String _dateFilterType    = 'All';
 
-  final List<String> _statusFilters = ['All', 'Unbilled', 'Approved', 'Billed', 'Rejected'];
+  final List<String> _statusFilters = ['All', 'Unbilled', 'Submitted', 'Approved', 'Billed', 'Rejected'];
 
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
@@ -145,6 +145,14 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
     if (ok == true) _refresh();
   }
 
+  Future<void> _submit(TimeEntry e) async {
+    try {
+      await TimesheetService.submitEntry(e.id);
+      _showSuccess('Entry submitted for approval');
+      _refresh();
+    } catch (err) { _showError('Failed: $err'); }
+  }
+
   Future<void> _approve(TimeEntry e) async {
     try { await TimesheetService.approveEntry(e.id); _showSuccess('Entry approved'); _refresh(); }
     catch (err) { _showError('Failed: $err'); }
@@ -193,6 +201,15 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
   }
 
   // ── bulk actions ───────────────────────────────────────────────────────────
+  Future<void> _bulkSubmit() async {
+    if (_selectedEntries.isEmpty) { _showError('Select entries to submit'); return; }
+    try {
+      final result = await TimesheetService.bulkSubmit(_selectedEntries.toList());
+      _showSuccess('${result['success'] ?? 0} entries submitted for approval');
+      _refresh();
+    } catch (err) { _showError('Failed: $err'); }
+  }
+
   Future<void> _bulkApprove() async {
     if (_selectedEntries.isEmpty) { _showError('Select entries to approve'); return; }
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
@@ -439,6 +456,9 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
         const SizedBox(width: 16),
         ElevatedButton.icon(onPressed: _bulkApprove, icon: const Icon(Icons.check, size: 16), label: const Text('Approve'),
             style: ElevatedButton.styleFrom(backgroundColor: _tsGreen, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(onPressed: _bulkSubmit, icon: const Icon(Icons.send_outlined, size: 16), label: const Text('Submit'),
+            style: ElevatedButton.styleFrom(backgroundColor: _tsBlue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
         const Spacer(),
         TextButton(onPressed: () => setState(() { _selectedEntries.clear(); _selectAll = false; }), child: const Text('Deselect All', style: TextStyle(color: _tsNavy))),
       ]));
@@ -529,6 +549,10 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
         DataCell(SizedBox(width: 80, child: _billableBadge(e.isBillable))),
         DataCell(SizedBox(width: 110, child: _statusBadge(e.status))),
         DataCell(SizedBox(width: 220, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+          if (e.status == 'Unbilled' || e.status == 'Rejected') ...[
+            _rowBtn(Icons.send_outlined, 'Submit', _tsBlue, () => _submit(e)),
+            const SizedBox(width: 4),
+          ],
           if (canApprove) ...[_rowBtn(Icons.check_circle_outline, 'Approve', _tsGreen, () => _approve(e)), const SizedBox(width: 4)],
           if (canReject)  ...[_rowBtn(Icons.cancel_outlined, 'Reject', _tsRed, () => _reject(e)), const SizedBox(width: 4)],
           PopupMenuButton<String>(icon: const Icon(Icons.more_vert, size: 20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

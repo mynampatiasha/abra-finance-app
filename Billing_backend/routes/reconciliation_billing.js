@@ -23,6 +23,9 @@ const { verifyFinanceJWT } = require('../middleware/finance_jwt');
 // Apply auth middleware to all routes
 router.use(verifyFinanceJWT);
 
+// COA helpers (used by multi-match routes)
+const { postTransactionToCOA, ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
+
 // ============================================================================
 // SECTION 1: MONGOOSE SCHEMAS & MODELS
 // ============================================================================
@@ -76,7 +79,7 @@ const ProviderTransactionSchema = new mongoose.Schema({
   },
  reconciliationStatus: {
     type: String,
-    enum: ['UNMATCHED', 'PENDING', 'MATCHED', 'REJECTED', 'IGNORED', 'CARRIED_FORWARD'],
+    enum: ['UNMATCHED', 'PENDING', 'MATCHED', 'REJECTED', 'IGNORED', 'CARRIED_FORWARD', 'CATEGORIZED', 'RECONCILED', 'UNCATEGORIZED'],
     default: 'UNMATCHED',
     index: true,
   },
@@ -167,8 +170,9 @@ const ProviderTransactionSchema = new mongoose.Schema({
   },
 });
 
-ProviderTransactionSchema.pre('save', async function() {
+ProviderTransactionSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  next();
 });
 
 // ReconciliationSession Schema
@@ -343,8 +347,9 @@ orgId: { type: String, index: true, default: null },
   },
 });
 
-ReconciliationSessionSchema.pre('save', async function() {
+ReconciliationSessionSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  next();
 });
 
 // ColumnMapping Schema
@@ -513,6 +518,8 @@ const ReconciliationAuditLogSchema = new mongoose.Schema({
 
 const ReconciliationAuditLog = mongoose.models.ReconciliationAuditLog ||
   mongoose.model('ReconciliationAuditLog', ReconciliationAuditLogSchema);
+
+const { applyRulesToBatch } = require('./transaction_rules');
 
 async function createAuditLog(sessionId, accountId, action, details = null, performedBy = 'system', notes = null) {
   try {
@@ -1272,17 +1279,29 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
     console.log(`✅ Import complete: ${imported.length} imported, ${duplicates.length} duplicates skipped, ${errors.length} errors`);
 
+    // Auto-apply transaction rules to newly imported transactions
+    let rulesResult = { autoApplied: 0, pending: 0 };
+    if (imported.length > 0) {
+      try {
+        rulesResult = await applyRulesToBatch(imported, accountId, req.user?.orgId || null);
+      } catch (rulesErr) {
+        console.error('⚠️ Rules engine error (non-blocking):', rulesErr.message);
+      }
+    }
+
     res.json({
       success: true,
-      message: `Successfully imported ${imported.length} transaction(s)${duplicates.length > 0 ? `, ${duplicates.length} duplicate(s) skipped` : ''}`,
+      message: `Successfully imported ${imported.length} transaction(s)${duplicates.length > 0 ? `, ${duplicates.length} duplicate(s) skipped` : ''}${rulesResult.autoApplied > 0 ? `, ${rulesResult.autoApplied} auto-categorized by rules` : ''}`,
       data: {
         batchId,
-        imported: imported.length,
-        duplicates: duplicates.length,
+        imported:         imported.length,
+        duplicates:       duplicates.length,
         duplicateDetails: duplicates,
-        errors: errors.length,
-        errorDetails: errors,
-        transactions: imported,
+        errors:           errors.length,
+        errorDetails:     errors,
+        transactions:     imported,
+        rulesApplied:     rulesResult.autoApplied,
+        rulesPending:     rulesResult.pending,
       },
     });
 
@@ -3286,6 +3305,333 @@ router.get('/history/:accountId', async (req, res) => {
       message: 'Failed to fetch reconciliation history.',
       error: error.message,
     });
+  }
+});
+
+// ============================================================================
+// BLOCK B — Multi-match & COA reconciliation routes
+// ============================================================================
+
+const PaymentAccountModel = mongoose.models.PaymentAccount ||
+  mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+
+function orgFilter(req) {
+  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+}
+
+async function resolveBankCOA(accountId, orgId = null) {
+  const pa = await PaymentAccountModel.findById(accountId).lean();
+  if (!pa) throw new Error(`PaymentAccount ${accountId} not found`);
+  const coa = await ChartOfAccount.findOne({ accountName: pa.accountName, ...(orgId ? { orgId } : {}) }).lean();
+  if (!coa) throw new Error(`COA not found for: ${pa.accountName}`);
+  return coa;
+}
+
+// POST /reconciliation/multi-match/many-to-one
+router.post('/multi-match/many-to-one', async (req, res) => {
+  try {
+    const { providerTransactionIds, expenseId, forceMatch = false } = req.body;
+    if (!providerTransactionIds?.length || !expenseId) {
+      return res.status(400).json({ success: false, message: 'providerTransactionIds[] and expenseId required' });
+    }
+
+    const txns    = await ProviderTransaction.find({ _id: { $in: providerTransactionIds }, ...orgFilter(req) });
+    const expense = await Expense.findById(expenseId);
+    if (!txns.length) return res.status(404).json({ success: false, message: 'Transactions not found' });
+    if (!expense)     return res.status(404).json({ success: false, message: 'Expense not found' });
+
+    const bankTotal  = txns.reduce((s, t) => s + t.amount, 0);
+    const expAmount  = expense.total || 0;
+    const difference = Math.abs(bankTotal - expAmount);
+
+    if (difference > 50 && !forceMatch) {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        message: `Amount mismatch: Bank total ₹${bankTotal} vs Expense ₹${expAmount} (diff ₹${difference})`,
+        details: { bankTotal, expAmount, difference },
+      });
+    }
+
+    const bankCOA    = await resolveBankCOA(txns[0].accountId.toString(), req.user?.orgId);
+    const journalRef = `BNK-MULTI-${Date.now().toString().slice(-6)}`;
+
+    for (const txn of txns) {
+      await postTransactionToCOA({
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,
+        date: txn.transactionDate,
+        description: `Multi-match [${txns.length} txns] → ${expense.expenseAccount} | ${journalRef}`,
+        referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
+        debit: 0, credit: txn.amount,
+      });
+      await ProviderTransaction.findByIdAndUpdate(txn._id, {
+        $set: {
+          reconciliationStatus: 'MATCHED',
+          matchedExpenseId:     expense._id,
+          matchedBy:            forceMatch ? 'manual-forced-multi' : 'manual-multi',
+          matchedAt:            new Date(),
+          journalRef,
+          variance:             txn.amount - (expAmount / txns.length),
+        },
+      });
+    }
+
+    if (expense.expenseAccountId) {
+      await postTransactionToCOA({
+        accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,
+        date: new Date(expense.date),
+        description: `Multi-match | ${journalRef}`,
+        referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
+        debit: expAmount, credit: 0,
+      });
+    }
+
+    await Expense.findByIdAndUpdate(expenseId, {
+      $set: { isReconciledMatched: true, reconciledAt: new Date(), multiMatchJournalRef: journalRef },
+    });
+
+    res.json({
+      success: true,
+      message: `${txns.length} bank transactions matched to 1 expense`,
+      data:    { journalRef, bankTotal, expAmount, difference },
+    });
+  } catch (err) {
+    console.error('❌ many-to-one multi-match error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /reconciliation/multi-match/one-to-many
+router.post('/multi-match/one-to-many', async (req, res) => {
+  try {
+    const { providerTransactionId, expenseIds, forceMatch = false } = req.body;
+    if (!providerTransactionId || !expenseIds?.length) {
+      return res.status(400).json({ success: false, message: 'providerTransactionId and expenseIds[] required' });
+    }
+
+    const txn      = await ProviderTransaction.findOne({ _id: providerTransactionId, ...orgFilter(req) });
+    const expenses = await Expense.find({ _id: { $in: expenseIds } });
+    if (!txn)             return res.status(404).json({ success: false, message: 'Transaction not found' });
+    if (!expenses.length) return res.status(404).json({ success: false, message: 'Expenses not found' });
+
+    const expTotal   = expenses.reduce((s, e) => s + (e.total || 0), 0);
+    const difference = Math.abs(txn.amount - expTotal);
+
+    if (difference > 50 && !forceMatch) {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        message: `Amount mismatch: Bank ₹${txn.amount} vs Expenses total ₹${expTotal} (diff ₹${difference})`,
+        details: { bankAmount: txn.amount, expTotal, difference },
+      });
+    }
+
+    const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+    const journalRef = `BNK-MULTI-${Date.now().toString().slice(-6)}`;
+
+    await postTransactionToCOA({
+      accountId: bankCOA._id, orgId: req.user?.orgId || null,
+      date: txn.transactionDate,
+      description: `Multi-match → ${expenses.length} expenses | ${journalRef}`,
+      referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef,
+      debit: 0, credit: txn.amount,
+    });
+
+    for (const expense of expenses) {
+      if (expense.expenseAccountId) {
+        await postTransactionToCOA({
+          accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,
+          date: txn.transactionDate,
+          description: `Multi-match ${expense.expenseAccount} | ${journalRef}`,
+          referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
+          debit: expense.total || 0, credit: 0,
+        });
+      }
+      await Expense.findByIdAndUpdate(expense._id, {
+        $set: {
+          providerTransactionId: txn._id,
+          isReconciledMatched:   true,
+          reconciledAt:          new Date(),
+          multiMatchJournalRef:  journalRef,
+        },
+      });
+    }
+
+    await ProviderTransaction.findByIdAndUpdate(txn._id, {
+      $set: {
+        reconciliationStatus: 'MATCHED',
+        matchedBy:            forceMatch ? 'manual-forced-multi' : 'manual-multi',
+        matchedAt:            new Date(),
+        journalRef,
+        multiMatchExpenseIds: expenseIds,
+        variance:             txn.amount - expTotal,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `1 bank transaction matched to ${expenses.length} expenses`,
+      data:    { journalRef, bankAmount: txn.amount, expTotal, difference },
+    });
+  } catch (err) {
+    console.error('❌ one-to-many multi-match error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /reconciliation/coa-lines
+router.get('/coa-lines', async (req, res) => {
+  try {
+    const { accountId, startDate, endDate } = req.query;
+    const pa = await PaymentAccountModel.findById(accountId).lean();
+    if (!pa) return res.status(404).json({ success: false, message: 'Account not found' });
+
+    const bankCOA = await ChartOfAccount.findOne({
+      accountName: pa.accountName,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    }).lean();
+    if (!bankCOA) return res.status(404).json({ success: false, message: 'Bank COA account not found' });
+
+    const filter = { accountId: bankCOA._id };
+    if (req.user?.orgId) filter.orgId = req.user.orgId;
+    if (startDate) filter.date = { ...filter.date, $gte: new Date(startDate) };
+    if (endDate)   filter.date = { ...filter.date, $lte: new Date(endDate) };
+
+    const lines = await AccountTransaction.find(filter).sort({ date: -1 }).lean();
+    res.json({ success: true, bankCOABalance: bankCOA.closingBalance, count: lines.length, data: lines });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /reconciliation/match-coa-line
+router.post('/match-coa-line', async (req, res) => {
+  try {
+    const { providerTransactionId, accountTransactionId, forceMatch = false } = req.body;
+    const providerTxn    = await ProviderTransaction.findOne({ _id: providerTransactionId, ...orgFilter(req) });
+    const accountTxnLine = await AccountTransaction.findById(accountTransactionId);
+    if (!providerTxn)    return res.status(404).json({ success: false, message: 'Provider transaction not found' });
+    if (!accountTxnLine) return res.status(404).json({ success: false, message: 'COA line not found' });
+
+    const providerAmt = providerTxn.amount;
+    const coaAmt      = providerTxn.transactionType === 'DEBIT' ? accountTxnLine.credit : accountTxnLine.debit;
+    const difference  = Math.abs(providerAmt - coaAmt);
+
+    if (difference > 50 && !forceMatch) {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        message: `Amount mismatch: Bank ₹${providerAmt} vs COA line ₹${coaAmt} (diff ₹${difference})`,
+        details: { providerAmt, coaAmt, difference },
+      });
+    }
+
+    await ProviderTransaction.findByIdAndUpdate(providerTxn._id, {
+      $set: {
+        reconciliationStatus: 'MATCHED',
+        matchedCOALineId:     accountTxnLine._id,
+        matchedBy:            forceMatch ? 'recon-forced' : 'recon-manual',
+        matchedAt:            new Date(),
+        variance:             providerAmt - coaAmt,
+      },
+    });
+    await AccountTransaction.findByIdAndUpdate(accountTxnLine._id, {
+      $set: { isReconciled: true, reconciledAt: new Date(), providerTransactionId: providerTxn._id },
+    });
+
+    res.json({ success: true, message: 'Matched to COA line successfully', difference });
+  } catch (err) {
+    console.error('❌ match-coa-line error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /reconciliation/sessions/:id/report/pdf
+router.get('/sessions/:id/report/pdf', async (req, res) => {
+  try {
+    const ReconciliationSession = mongoose.models.ReconciliationSession ||
+      mongoose.model('ReconciliationSession', new mongoose.Schema({}, { strict: false }), 'reconciliationsessions');
+
+    const session = await ReconciliationSession.findOne({ _id: req.params.id, ...orgFilter(req) }).lean();
+    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+
+    const txns = await ProviderTransaction.find({
+      accountId:       session.accountId,
+      transactionDate: { $gte: session.periodStart, $lte: session.periodEnd },
+    }).sort({ transactionDate: 1 }).lean();
+
+    const pa = await PaymentAccountModel.findById(session.accountId).lean();
+
+    const matched     = txns.filter(t => t.reconciliationStatus === 'MATCHED' && !t.isAdjustment);
+    const adjustments = txns.filter(t => t.isAdjustment);
+    const carriedFwd  = txns.filter(t => t.isCarriedForward);
+    const unmatched   = txns.filter(t => t.reconciliationStatus === 'UNMATCHED');
+
+    const fmt     = n => `₹${(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    const fmtDate = d => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reconciliation Report</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:12px;color:#333;margin:30px}
+h1{color:#1e3a8a;font-size:20px;margin-bottom:4px}
+.subtitle{color:#666;font-size:13px;margin-bottom:20px}
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.summary-card{background:#f0f4f8;border-radius:8px;padding:12px;text-align:center}
+.summary-card .label{font-size:10px;color:#666;margin-bottom:4px}
+.summary-card .value{font-size:18px;font-weight:bold;color:#1e3a8a}
+table{width:100%;border-collapse:collapse;margin-bottom:20px}
+th{background:#0d1b3e;color:white;padding:8px;text-align:left;font-size:11px}
+td{padding:7px 8px;border-bottom:1px solid #eee;font-size:11px}
+tr:nth-child(even){background:#fafafa}
+.section-title{font-size:14px;font-weight:bold;color:#1e3a8a;margin:16px 0 8px 0;border-bottom:2px solid #1e3a8a;padding-bottom:4px}
+.status-matched{color:#27ae60;font-weight:bold}
+.status-adj{color:#e67e22;font-weight:bold}
+.status-cf{color:#9b59b6;font-weight:bold}
+.status-unmatched{color:#e74c3c;font-weight:bold}
+.balance-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee}
+.balance-row.total{font-weight:bold;font-size:14px;border-top:2px solid #1e3a8a;margin-top:4px}
+.footer{margin-top:30px;text-align:center;color:#999;font-size:10px}
+.locked-badge{background:#27ae60;color:white;padding:2px 8px;border-radius:12px;font-size:10px}
+.inprogress-badge{background:#e67e22;color:white;padding:2px 8px;border-radius:12px;font-size:10px}
+</style></head><body>
+<h1>🏦 Reconciliation Report</h1>
+<div class="subtitle">${pa?.accountName || 'Account'} &nbsp;•&nbsp; ${fmtDate(session.periodStart)} – ${fmtDate(session.periodEnd)} &nbsp;•&nbsp;
+<span class="${session.isLocked ? 'locked-badge' : 'inprogress-badge'}">${session.isLocked ? '🔒 Locked' : 'In Progress'}</span></div>
+<div class="summary-grid">
+  <div class="summary-card"><div class="label">Matched</div><div class="value">${matched.length}</div></div>
+  <div class="summary-card"><div class="label">Adjustments</div><div class="value">${adjustments.length}</div></div>
+  <div class="summary-card"><div class="label">Carried Forward</div><div class="value">${carriedFwd.length}</div></div>
+  <div class="summary-card"><div class="label">Unmatched</div><div class="value" style="color:#e74c3c">${unmatched.length}</div></div>
+</div>
+<div class="section-title">Balance Summary</div>
+<div class="balance-row"><span>Provider Balance</span><span>${fmt(session.providerBalance)}</span></div>
+<div class="balance-row"><span>System Balance</span><span>${fmt(session.systemBalance)}</span></div>
+<div class="balance-row total"><span>Difference</span><span style="color:${Math.abs(session.balanceDifference || 0) < 0.01 ? '#27ae60' : '#e74c3c'}">${fmt(session.balanceDifference)}</span></div>
+<div class="section-title">Matched Transactions (${matched.length})</div>
+<table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th><th>Variance</th></tr></thead><tbody>
+${matched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${t.transactionType}</td><td>${fmt(t.amount)}</td><td class="status-matched">${fmt(Math.abs(t.variance || 0))}</td></tr>`).join('')}
+</tbody></table>
+${adjustments.length > 0 ? `<div class="section-title">Adjustments (${adjustments.length})</div>
+<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Reason</th></tr></thead><tbody>
+${adjustments.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${fmt(t.amount)}</td><td class="status-adj">${t.adjustmentReason || '—'}</td></tr>`).join('')}
+</tbody></table>` : ''}
+${carriedFwd.length > 0 ? `<div class="section-title">Carried Forward (${carriedFwd.length})</div>
+<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Notes</th></tr></thead><tbody>
+${carriedFwd.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${fmt(t.amount)}</td><td class="status-cf">${t.carriedForwardNotes || '—'}</td></tr>`).join('')}
+</tbody></table>` : ''}
+${unmatched.length > 0 ? `<div class="section-title">Unmatched Transactions (${unmatched.length})</div>
+<table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
+${unmatched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${t.transactionType}</td><td class="status-unmatched">${fmt(t.amount)}</td></tr>`).join('')}
+</tbody></table>` : ''}
+<div class="footer">Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} &nbsp;•&nbsp; Abra Finance</div>
+</body></html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Disposition', `inline; filename="reconciliation-report-${req.params.id}.html"`);
+    res.send(html);
+  } catch (err) {
+    console.error('❌ PDF report error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

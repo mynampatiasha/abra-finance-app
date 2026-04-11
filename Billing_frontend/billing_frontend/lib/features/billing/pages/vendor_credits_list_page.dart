@@ -340,6 +340,33 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   // ACTIONS
   // -----------------------------------------------------------------------
 
+  Future<void> _markCreditAsSent(VendorCredit c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the vendor.\n\nDo you want to mark this vendor credit as Sent anyway?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await VendorCreditService.markAsSent(c.id);
+      _showSuccess('Vendor credit marked as sent');
+      _refresh();
+    } catch (e) { _showError('Failed: $e'); }
+  }
+
   Future<void> _voidCredit(VendorCredit c) async {
     final ok = await _confirm('Void Credit',
         'Are you sure you want to void ${c.creditNumber}? This cannot be undone.', 'Void', Colors.orange);
@@ -937,6 +964,7 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                   if (r == true) _refresh();
                   break;
                 case 'void': await _voidCredit(c); break;
+                case 'mark_as_sent': await _markCreditAsSent(c); break;
                 case 'delete': await _deleteCredit(c); break;
               }
             },
@@ -948,6 +976,11 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 const PopupMenuItem(value: 'edit',
                   child: ListTile(leading: Icon(Icons.edit, size: 17),
                       title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+              if (c.status != 'VOID')
+                const PopupMenuItem(value: 'mark_as_sent',
+                  child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: Colors.orange),
+                      title: Text('Mark as Sent', style: TextStyle(color: Colors.orange)),
+                      contentPadding: EdgeInsets.zero)),
               if (c.status == 'OPEN' || c.status == 'PARTIALLY_APPLIED')
                 const PopupMenuItem(value: 'void',
                   child: ListTile(leading: Icon(Icons.block, size: 17, color: Colors.orange),

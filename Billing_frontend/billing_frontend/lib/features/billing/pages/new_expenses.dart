@@ -35,6 +35,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'new_chart_of_account.dart'; // ✅ FIX 2: for Add Account navigation
 import '../../../../core/services/invoice_service.dart'; // for BillingCustomer + getBillingCustomers
+import 'new_customer.dart';
+import 'new_vendor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR CONSTANTS — exact match to new_vendor_credit.dart
@@ -70,7 +72,25 @@ class _ItemizedRow {
 // ─────────────────────────────────────────────────────────────────────────────
 class NewExpensePage extends StatefulWidget {
   final String? expenseId;
-  const NewExpensePage({Key? key, this.expenseId}) : super(key: key);
+  final double? prefilledAmount;
+  final String? prefilledDate;       // format: 'dd/MM/yyyy'
+  final String? prefilledReference;
+  final String? prefilledNotes;
+  final String? providerTransactionId;
+  final bool showAppBar;
+  final Function(String recordId)? onSavedCallback;
+
+  const NewExpensePage({
+    Key? key,
+    this.expenseId,
+    this.prefilledAmount,
+    this.prefilledDate,
+    this.prefilledReference,
+    this.prefilledNotes,
+    this.providerTransactionId,
+    this.showAppBar = true,
+    this.onSavedCallback,
+  }) : super(key: key);
 
   @override
   State<NewExpensePage> createState() => _NewExpensePageState();
@@ -145,6 +165,18 @@ class _NewExpensePageState extends State<NewExpensePage> {
   void initState() {
     super.initState();
     _dateCtrl.text = DateFormat('dd/MM/yyyy').format(DateTime.now());
+    if (widget.prefilledAmount != null && widget.prefilledAmount! > 0) {
+      _amountCtrl.text = widget.prefilledAmount!.toStringAsFixed(2);
+    }
+    if (widget.prefilledDate != null && widget.prefilledDate!.isNotEmpty) {
+      _dateCtrl.text = widget.prefilledDate!;
+    }
+    if (widget.prefilledReference != null && widget.prefilledReference!.isNotEmpty) {
+      _invoiceCtrl.text = widget.prefilledReference!;
+    }
+    if (widget.prefilledNotes != null && widget.prefilledNotes!.isNotEmpty) {
+      _notesCtrl.text = widget.prefilledNotes!;
+    }
     _loadAllAccounts();
     _loadCoaExpenseAccounts();
     _loadVendors();
@@ -498,6 +530,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
           isItemized:       _isItemized,
           itemizedExpenses: itemizedData,
           receiptFile:      _receiptFile,
+          providerTransactionId: widget.providerTransactionId,
         );
       } else {
         result = await _expenseService.updateExpense(
@@ -524,6 +557,11 @@ class _NewExpensePageState extends State<NewExpensePage> {
       if (result['success'] == true) {
         _showSuccess(result['message'] ?? 'Expense saved successfully!');
         if (mounted) Navigator.pop(context, true);
+        final createdId = result['data']?['_id']?.toString()
+            ?? result['data']?['expenseId']?.toString()
+            ?? result['_id']?.toString()
+            ?? '';
+        widget.onSavedCallback?.call(createdId);
       }
     } catch (e) {
       _showError('Error saving expense: $e');
@@ -656,14 +694,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        appBar: _buildAppBar(),
+        appBar: widget.showAppBar ? _buildAppBar() : null,
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: _buildAppBar(),
+      appBar: widget.showAppBar ? _buildAppBar() : null,
       body: Form(
         key: _formKey,
         child: LayoutBuilder(
@@ -779,6 +817,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
           _buildItemsSection(),
           const SizedBox(height: 20),
           _buildVendorSection(),
+          const SizedBox(height: 20),
+          _buildCustomerSection(), // ✅ always visible
           const SizedBox(height: 20),
           _buildBillableSection(),
           const SizedBox(height: 20),
@@ -1643,6 +1683,22 @@ class _NewExpensePageState extends State<NewExpensePage> {
               ]),
             ),
             actions: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NewCustomerPage()),
+                  );
+                  if (result == true) _showCustomerSelector();
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add New Customer'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navyAccent,
+                  side: const BorderSide(color: _navyAccent),
+                ),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Cancel'),
@@ -1764,6 +1820,25 @@ class _NewExpensePageState extends State<NewExpensePage> {
             ]),
           ),
           actions: [
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => NewVendorPage()),
+                );
+                if (result == true) {
+                  await _loadVendors();
+                  _showVendorSelector();
+                }
+              },
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add Vendor'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _navyAccent,
+                side: const BorderSide(color: _navyAccent),
+              ),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancel'),
@@ -1771,6 +1846,74 @@ class _NewExpensePageState extends State<NewExpensePage> {
           ],
         );
       }),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: BILLABLE
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: CUSTOMER (always visible)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildCustomerSection() {
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle('Customer', Icons.person_outline),
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: _showCustomerSelector,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(children: [
+                const Icon(Icons.person_outline, color: _navyAccent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _selectedCustomerName ?? 'Select Customer (Optional)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: _selectedCustomerName != null
+                          ? _navyDark
+                          : Colors.grey[600],
+                      fontWeight: _selectedCustomerName != null
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                if (_selectedCustomerName != null)
+                  InkWell(
+                    onTap: () => setState(() {
+                      _selectedCustomerId    = null;
+                      _selectedCustomerName  = null;
+                      _selectedCustomerEmail = null;
+                    }),
+                    child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                  )
+                else
+                  const Icon(Icons.arrow_drop_down, color: Colors.grey),
+              ]),
+            ),
+          ),
+          if (_selectedCustomerEmail != null) ...[
+            const SizedBox(height: 6),
+            Row(children: [
+              const Icon(Icons.email_outlined, size: 14, color: Colors.grey),
+              const SizedBox(width: 6),
+              Text(_selectedCustomerEmail!,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1822,92 +1965,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
           if (_isBillable) ...[
             const SizedBox(height: 16),
 
-            // Customer — dialog selector (same as new_invoice.dart)
-            LayoutBuilder(builder: (ctx, cs) {
-              final isWide = cs.maxWidth > 600;
-              final customerField = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  InkWell(
-                    onTap: _showCustomerSelector,
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: _isBillable &&
-                                  _selectedCustomerName == null
-                              ? Colors.red.shade300
-                              : Colors.grey[300]!,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.person_outline,
-                            color: _navyAccent),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _selectedCustomerName ??
-                                'Select Customer *',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: _selectedCustomerName != null
-                                  ? _navyDark
-                                  : Colors.grey[600],
-                              fontWeight:
-                                  _selectedCustomerName != null
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-                        const Icon(Icons.arrow_drop_down,
-                            color: Colors.grey),
-                      ]),
-                    ),
-                  ),
-                  if (_selectedCustomerEmail != null) ...[
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      const Icon(Icons.email_outlined,
-                          size: 14, color: Colors.grey),
-                      const SizedBox(width: 6),
-                      Text(_selectedCustomerEmail!,
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600])),
-                    ]),
-                  ],
-                  if (_isBillable &&
-                      _selectedCustomerName == null) ...[
-                    const SizedBox(height: 4),
-                    Text('Required when billable',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.red.shade700)),
-                  ],
-                ],
-              );
-              // Project — free text field
-              final projectField = _textField(
-                controller: _projectCtrl,
-                label: 'Project (Optional)',
-                hint: 'Enter project name',
-                required: false,
-                icon: Icons.folder_outlined,
-              );
-              return isWide
-                  ? Row(children: [
-                      Expanded(child: customerField),
-                      const SizedBox(width: 16),
-                      Expanded(child: projectField),
-                    ])
-                  : Column(children: [
-                      customerField,
-                      const SizedBox(height: 16),
-                      projectField,
-                    ]);
-            }),
+            // Project — free text field
+            _textField(
+              controller: _projectCtrl,
+              label: 'Project (Optional)',
+              hint: 'Enter project name',
+              required: false,
+              icon: Icons.folder_outlined,
+            ),
 
             const SizedBox(height: 16),
             _textField(

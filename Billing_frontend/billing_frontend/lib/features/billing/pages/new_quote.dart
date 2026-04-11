@@ -19,6 +19,23 @@ const Color _navyMid = Color(0xFF1A3A6B);
 const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
+// Column widths for items table
+const double _colNo      = 36.0;
+const double _colDesc    = 200.0;
+const double _colHsn     = 110.0;
+const double _colUnit    = 80.0;
+const double _colQty     = 70.0;
+const double _colRate    = 95.0;
+const double _colDisc    = 110.0;
+const double _colGst     = 80.0;
+const double _colTaxable = 100.0;
+const double _colTax1    = 90.0;
+const double _colAmt     = 95.0;
+const double _colDel     = 44.0;
+
+const List<double> _kGstRates = [0, 5, 12, 18, 28];
+const List<String> _kUnits    = ['Nos','Hrs','Kg','Pcs','Box','Mtr','Ltr','Dz','MT','Set'];
+
 class NewQuoteScreen extends StatefulWidget {
   final String? quoteId;
 
@@ -46,6 +63,9 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   String? _selectedCustomerName;
   String? _selectedCustomerEmail;
   String? _selectedCustomerPhone;
+  String _customerGSTIN       = '';
+  String _customerPAN         = '';
+  String _gstRegistrationType = '';
   DateTime _quoteDate = DateTime.now();
   DateTime _expiryDate = DateTime.now().add(const Duration(days: 30));
   
@@ -59,6 +79,7 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
 
   // Items List
   List<QuoteItemData> _items = [];
+  final List<TextEditingController> _descControllers = [];
 
   // Calculations
   double _subTotal = 0;
@@ -86,49 +107,61 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     _subjectController.dispose();
     _customerNotesController.dispose();
     _termsConditionsController.dispose();
+    for (final c in _descControllers) { c.dispose(); }
     super.dispose();
   }
 
   void _calculateAmounts() {
     setState(() {
-      _subTotal = 0;
+      _subTotal      = 0;
       _totalQuantity = 0;
-      
+
       for (var item in _items) {
         if (item.quantity > 0 && item.rate > 0) {
-          double itemAmount = item.quantity * item.rate;
-          
+          double taxable = item.quantity * item.rate;
           if (item.discount > 0) {
-            if (item.discountType == 'percentage') {
-              itemAmount = itemAmount - (itemAmount * item.discount / 100);
-            } else {
-              itemAmount = itemAmount - item.discount;
-            }
+            taxable = item.discountType == 'percentage'
+                ? taxable - (taxable * item.discount / 100)
+                : taxable - item.discount;
           }
-          
-          item.amount = itemAmount;
-          _subTotal += itemAmount;
+          taxable = double.parse(taxable.toStringAsFixed(2));
+          item.taxableAmount = taxable;
+          final gst = item.itemGstRate;
+          item.cgstAmount = double.parse((taxable * (gst / 2) / 100).toStringAsFixed(2));
+          item.sgstAmount = item.cgstAmount;
+          item.igstAmount = 0;
+          item.amount     = double.parse((taxable + item.cgstAmount + item.sgstAmount).toStringAsFixed(2));
+          _subTotal      += taxable;
           _totalQuantity += item.quantity.toInt();
+        } else {
+          item.taxableAmount = 0;
+          item.cgstAmount    = 0;
+          item.sgstAmount    = 0;
+          item.igstAmount    = 0;
+          item.amount        = 0;
         }
       }
-      
-      _tdsAmount = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
-      _tcsAmount = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
-      double gstBase = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount = _enableGST ? (gstBase * _gstRate / 100) : 0;
-      _totalAmount = _subTotal - _tdsAmount + _tcsAmount + _gstAmount;
+
+      _tdsAmount   = _enableTDS ? double.parse((_subTotal * _tdsRate / 100).toStringAsFixed(2)) : 0;
+      _tcsAmount   = _enableTCS ? double.parse((_subTotal * _tcsRate / 100).toStringAsFixed(2)) : 0;
+      final gstBase = _subTotal - _tdsAmount + _tcsAmount;
+      _gstAmount   = _enableGST ? double.parse((gstBase * _gstRate / 100).toStringAsFixed(2)) : 0;
+      _totalAmount = double.parse((_subTotal - _tdsAmount + _tcsAmount + _gstAmount).toStringAsFixed(2));
     });
   }
 
   void _addNewItem() {
     setState(() {
-      _items.add(QuoteItemData());
+      _items.add(QuoteItemData(itemGstRate: 18));
+      _descControllers.add(TextEditingController());
     });
   }
 
   void _removeItem(int index) {
     setState(() {
       _items.removeAt(index);
+      _descControllers[index].dispose();
+      _descControllers.removeAt(index);
       _calculateAmounts();
     });
   }
@@ -161,13 +194,21 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
         _enableGST = quote.gstRate > 0;
         
         _items = quote.items.map((item) => QuoteItemData(
-          itemDetails: item.itemDetails,
-          quantity: item.quantity,
-          rate: item.rate,
-          discount: item.discount,
+          itemDetails:  item.itemDetails,
+          quantity:     item.quantity,
+          rate:         item.rate,
+          discount:     item.discount,
           discountType: item.discountType,
-          amount: item.amount,
+          amount:       item.amount,
+          hsnCode:      item.hsnCode,
+          unit:         item.unit,
+          itemGstRate:  item.itemGstRate,
         )).toList();
+        for (final c in _descControllers) { c.dispose(); }
+        _descControllers.clear();
+        for (final item in _items) {
+          _descControllers.add(TextEditingController(text: item.itemDetails));
+        }
         
         _calculateAmounts();
       });
@@ -318,11 +359,23 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: Text(widget.quoteId != null ? 'Edit Quote' : 'New Quote'),
-        backgroundColor: const Color(0xFF1e3a8a),
-        foregroundColor: Colors.white,
-        actions: isNarrow
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [_navyDark, _navyMid, _navyLight],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+          child: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            foregroundColor: Colors.white,
+            title: Text(widget.quoteId != null ? 'Edit Quote' : 'New Quote',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            actions: isNarrow
             ? [
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -433,6 +486,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                 ),
                 const SizedBox(width: 16),
               ],
+          ),
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -505,74 +560,54 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: Colors.white, borderRadius: BorderRadius.circular(10),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Customer Information',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1e3a8a),
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(gradient: const LinearGradient(colors: [_navyDark, _navyLight]), borderRadius: BorderRadius.circular(6)),
+            child: const Icon(Icons.person_outline, color: Colors.white, size: 18)),
+          const SizedBox(width: 10),
+          const Text('Customer Information', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+        ]),
+        const SizedBox(height: 16),
+        InkWell(
+          onTap: _showCustomerSelector,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              const Icon(Icons.person_outline, color: _navyAccent), const SizedBox(width: 12),
+              Expanded(child: Text(_selectedCustomerName ?? 'Select Customer *',
+                  style: TextStyle(fontSize: 15,
+                      color: _selectedCustomerName != null ? _navyDark : Colors.grey[600],
+                      fontWeight: _selectedCustomerName != null ? FontWeight.w600 : FontWeight.normal))),
+              const Icon(Icons.arrow_drop_down, color: Colors.grey),
+            ]),
           ),
-          const SizedBox(height: 16),
-          InkWell(
-            onTap: () => _showCustomerSelector(),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.person_outline, color: Color(0xFF3498DB)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _selectedCustomerName ?? 'Select Customer *',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: _selectedCustomerName != null
-                            ? const Color(0xFF1e3a8a)
-                            : Colors.grey[600],
-                        fontWeight: _selectedCustomerName != null
-                            ? FontWeight.w500
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                  const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                ],
-              ),
-            ),
-          ),
-          if (_selectedCustomerEmail != null) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(Icons.email_outlined, size: 18, color: Colors.grey),
-                const SizedBox(width: 8),
-                Text(
-                  _selectedCustomerEmail!,
-                  style: TextStyle(color: Colors.grey[700]),
-                ),
-              ],
-            ),
-          ],
+        ),
+        if (_selectedCustomerEmail != null) ...[
+          const SizedBox(height: 10),
+          Row(children: [const Icon(Icons.email_outlined, size: 16, color: Colors.grey), const SizedBox(width: 6),
+            Text(_selectedCustomerEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13))]),
         ],
-      ),
+        if (_customerGSTIN.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            const Icon(Icons.business, size: 16, color: Colors.grey), const SizedBox(width: 6),
+            Text('GSTIN: $_customerGSTIN', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+            if (_customerPAN.isNotEmpty) ...[const SizedBox(width: 16),
+              Text('PAN: $_customerPAN', style: TextStyle(color: Colors.grey[700], fontSize: 13))],
+          ]),
+        ],
+        if (_gstRegistrationType.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: _navyAccent.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
+            child: Text(_gstRegistrationType, style: TextStyle(fontSize: 12, color: _navyMid, fontWeight: FontWeight.w500))),
+        ],
+      ]),
     );
   }
 
@@ -786,223 +821,193 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   }
 
   Widget _buildItemsSection() {
+    final double tableWidth = _colNo + _colDesc + _colHsn + _colUnit + _colQty +
+        _colRate + _colDisc + _colGst + _colTaxable + _colTax1 + _colTax1 + _colAmt + _colDel;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Item Table',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1e3a8a),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(gradient: const LinearGradient(colors: [_navyDark, _navyLight]), borderRadius: BorderRadius.circular(6)),
+            child: const Icon(Icons.list_alt, color: Colors.white, size: 18)),
+          const SizedBox(width: 10),
+          const Text('Items', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+        ]),
+        const SizedBox(height: 14),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                decoration: const BoxDecoration(
+                  color: _navyDark,
+                  borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
                 ),
+                child: Row(children: [
+                  _thCell('#',           _colNo),
+                  _thCell('DESCRIPTION', _colDesc),
+                  _thCell('HSN / SAC',   _colHsn),
+                  _thCell('UNIT',        _colUnit),
+                  _thCell('QTY',         _colQty,     align: TextAlign.center),
+                  _thCell('RATE (₹)',    _colRate,    align: TextAlign.right),
+                  _thCell('DISCOUNT',    _colDisc,    align: TextAlign.right),
+                  _thCell('GST %',       _colGst,     align: TextAlign.center),
+                  _thCell('TAXABLE',     _colTaxable, align: TextAlign.right),
+                  _thCell('CGST',        _colTax1,    align: TextAlign.right),
+                  _thCell('SGST',        _colTax1,    align: TextAlign.right),
+                  _thCell('AMOUNT',      _colAmt,     align: TextAlign.right),
+                  SizedBox(width: _colDel),
+                ]),
               ),
-              ElevatedButton.icon(
-                onPressed: _addNewItem,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Item'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1e3a8a),
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Horizontally scrollable table
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
+              if (_items.isEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 28),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1e3a8a),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: const [
-                      SizedBox(width: 220, child: Text('ITEM DETAILS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 70, child: Text('QTY', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
-                      SizedBox(width: 12),
-                      SizedBox(width: 100, child: Text('RATE (₹)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                      SizedBox(width: 12),
-                      SizedBox(width: 110, child: Text('DISCOUNT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                      SizedBox(width: 12),
-                      SizedBox(width: 110, child: Text('AMOUNT (₹)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
-                      SizedBox(width: 44),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                if (_items.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      children: [
-                        Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
-                        const SizedBox(height: 16),
-                        Text('No items added yet', style: TextStyle(color: Colors.grey[600])),
-                      ],
+                    color: Colors.grey[50],
+                    border: Border(
+                      left: BorderSide(color: Colors.grey[200]!),
+                      right: BorderSide(color: Colors.grey[200]!),
+                      bottom: BorderSide(color: Colors.grey[200]!),
                     ),
-                  )
-                else
-                  ...List.generate(_items.length, (index) {
-                    return Column(
-                      children: [
-                        _buildItemRow(index),
-                        if (index < _items.length - 1)
-                          const Divider(height: 16),
-                      ],
-                    );
-                  }),
-              ],
-            ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.inbox_outlined, size: 20, color: Colors.grey[400]),
+                    const SizedBox(width: 8),
+                    Text('No items — click Add Item below', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  ]),
+                )
+              else
+                ...List.generate(_items.length, (i) => _buildItemTableRow(i)),
+              InkWell(
+                onTap: _addNewItem,
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                child: Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: _navyAccent.withOpacity(0.05),
+                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    border: Border(
+                      left: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      right: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      bottom: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.add_circle_outline, size: 18, color: _navyAccent),
+                    const SizedBox(width: 8),
+                    Text('+ Add Item', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyAccent)),
+                  ]),
+                ),
+              ),
+            ]),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
-  Widget _buildItemRow(int index) {
-    final item = _items[index];
+  Widget _thCell(String text, double width, {TextAlign align = TextAlign.left}) =>
+      SizedBox(width: width,
+        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Text(text, textAlign: align,
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.4))));
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 220,
-          child: TextFormField(
-            initialValue: item.itemDetails,
-            decoration: InputDecoration(
-              hintText: 'Enter item description',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            maxLines: 2,
-            onChanged: (value) {
-              item.itemDetails = value;
-            },
-          ),
+  Widget _buildItemTableRow(int index) {
+    final item     = _items[index];
+    final isOdd    = index.isOdd;
+    final descCtrl = _descControllers[index];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isOdd ? const Color(0xFFF7F9FC) : Colors.white,
+        border: Border(
+          left: BorderSide(color: Colors.grey[200]!),
+          right: BorderSide(color: Colors.grey[200]!),
+          bottom: BorderSide(color: Colors.grey[200]!),
         ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 70,
-          child: TextFormField(
-            initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-            decoration: InputDecoration(
-              hintText: '0',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (value) {
-              item.quantity = double.tryParse(value) ?? 0;
-              _calculateAmounts();
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 100,
-          child: TextFormField(
-            initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-            decoration: InputDecoration(
-              hintText: '0.00',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textAlign: TextAlign.right,
-            onChanged: (value) {
-              item.rate = double.tryParse(value) ?? 0;
-              _calculateAmounts();
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 110,
-          child: Row(
-            children: [
-              Expanded(
-                child: TextFormField(
-                  initialValue: item.discount > 0 ? item.discount.toString() : '',
-                  decoration: InputDecoration(
-                    hintText: '0',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  textAlign: TextAlign.right,
-                  onChanged: (value) {
-                    item.discount = double.tryParse(value) ?? 0;
-                    _calculateAmounts();
-                  },
-                ),
-              ),
-              PopupMenuButton<String>(
-                initialValue: item.discountType,
-                icon: const Icon(Icons.arrow_drop_down, size: 18),
-                onSelected: (value) {
-                  setState(() {
-                    item.discountType = value;
-                    _calculateAmounts();
-                  });
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'percentage', child: Text('%')),
-                  const PopupMenuItem(value: 'amount', child: Text('₹')),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Container(
-          width: 110,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[300]!),
-          ),
-          child: Text(
-            item.amount.toStringAsFixed(2),
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            textAlign: TextAlign.right,
-          ),
-        ),
-        const SizedBox(width: 4),
-        IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-          onPressed: () => _removeItem(index),
-          tooltip: 'Remove item',
-        ),
-      ],
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        SizedBox(width: _colNo, child: Center(child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: Colors.grey[600])))),
+        SizedBox(width: _colDesc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: TextFormField(controller: descCtrl,
+            decoration: InputDecoration(hintText: 'Item description',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
+            maxLines: null, keyboardType: TextInputType.multiline,
+            onChanged: (v) { item.itemDetails = v; }))),
+        SizedBox(width: _colHsn, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: TextFormField(initialValue: item.hsnCode,
+            decoration: InputDecoration(hintText: 'HSN/SAC',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
+            onChanged: (v) => item.hsnCode = v))),
+        SizedBox(width: _colUnit, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: DropdownButtonFormField<String>(
+            value: _kUnits.contains(item.unit) ? item.unit : 'Nos', isExpanded: true,
+            decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
+            items: _kUnits.map((u) => DropdownMenuItem(value: u, child: Text(u, style: const TextStyle(fontSize: 12)))).toList(),
+            onChanged: (v) => setState(() => item.unit = v ?? 'Nos')))),
+        SizedBox(width: _colQty, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: TextFormField(initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+            decoration: InputDecoration(hintText: '0',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
+            keyboardType: TextInputType.number, textAlign: TextAlign.center,
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+            onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); }))),
+        SizedBox(width: _colRate, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: TextFormField(initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+            decoration: InputDecoration(hintText: '0.00',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true), textAlign: TextAlign.right,
+            onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); }))),
+        SizedBox(width: _colDisc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(children: [
+            Expanded(child: TextFormField(initialValue: item.discount > 0 ? item.discount.toString() : '',
+              decoration: InputDecoration(hintText: '0',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true), textAlign: TextAlign.right,
+              onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); })),
+            PopupMenuButton<String>(initialValue: item.discountType,
+              icon: const Icon(Icons.arrow_drop_down, size: 18), padding: EdgeInsets.zero,
+              onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'percentage', child: Text('%')),
+                const PopupMenuItem(value: 'amount',     child: Text('₹')),
+              ]),
+          ]))),
+        SizedBox(width: _colGst, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: DropdownButtonFormField<double>(
+            value: _kGstRates.contains(item.itemGstRate) ? item.itemGstRate : 18.0, isExpanded: true,
+            decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
+            items: _kGstRates.map((r) => DropdownMenuItem(value: r, child: Text('${r.toInt()}%', style: const TextStyle(fontSize: 12)))).toList(),
+            onChanged: (v) => setState(() { item.itemGstRate = v ?? 18; _calculateAmounts(); })))),
+        SizedBox(width: _colTaxable, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(item.taxableAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
+        SizedBox(width: _colTax1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(item.cgstAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
+        SizedBox(width: _colTax1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(item.sgstAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
+        SizedBox(width: _colAmt, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(item.amount.toStringAsFixed(2), textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navyDark)))),
+        SizedBox(width: _colDel, child: IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+          onPressed: () => _removeItem(index), tooltip: 'Remove')),
+      ]),
     );
   }
 
@@ -1377,10 +1382,13 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                                         subtitle: Text(customer.customerEmail),
                                         onTap: () {
                                           setState(() {
-                                            _selectedCustomerId = customer.id;
-                                            _selectedCustomerName = customer.customerName;
+                                            _selectedCustomerId    = customer.id;
+                                            _selectedCustomerName  = customer.customerName;
                                             _selectedCustomerEmail = customer.customerEmail;
                                             _selectedCustomerPhone = customer.customerPhone;
+                                            _customerGSTIN         = customer.gstNumber;
+                                            _customerPAN           = customer.panNumber;
+                                            _gstRegistrationType   = customer.gstRegistrationType;
                                           });
                                           Navigator.pop(context);
                                         },
@@ -1427,24 +1435,45 @@ class QuoteItemData {
   double discount;
   String discountType;
   double amount;
+  String hsnCode;
+  String unit;
+  double itemGstRate;
+  double taxableAmount;
+  double cgstAmount;
+  double sgstAmount;
+  double igstAmount;
 
   QuoteItemData({
-    this.itemDetails = '',
-    this.quantity = 0,
-    this.rate = 0,
-    this.discount = 0,
-    this.discountType = 'percentage',
-    this.amount = 0,
+    this.itemDetails   = '',
+    this.quantity      = 0,
+    this.rate          = 0,
+    this.discount      = 0,
+    this.discountType  = 'percentage',
+    this.amount        = 0,
+    this.hsnCode       = '',
+    this.unit          = 'Nos',
+    this.itemGstRate   = 18,
+    this.taxableAmount = 0,
+    this.cgstAmount    = 0,
+    this.sgstAmount    = 0,
+    this.igstAmount    = 0,
   });
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails': itemDetails,
-      'quantity': quantity,
-      'rate': rate,
-      'discount': discount,
-      'discountType': discountType,
-      'amount': amount,
+      'itemDetails':   itemDetails,
+      'quantity':      quantity,
+      'rate':          rate,
+      'discount':      discount,
+      'discountType':  discountType,
+      'amount':        amount,
+      'hsnCode':       hsnCode,
+      'unit':          unit,
+      'itemGstRate':   itemGstRate,
+      'taxableAmount': taxableAmount,
+      'cgstAmount':    cgstAmount,
+      'sgstAmount':    sgstAmount,
+      'igstAmount':    igstAmount,
     };
   }
 }

@@ -228,6 +228,21 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
     } catch (e) { _showError('Share failed: $e'); }
   }
 
+  Future<void> _markPaymentAsSent(PaymentMade p) async {
+    final ok = await _confirmDialog(
+      title: 'Mark as Sent?',
+      message: 'The email will NOT be sent to the vendor.\n\nDo you want to mark this payment as Sent anyway?',
+      confirmLabel: 'Mark as Sent',
+      confirmColor: _navy,
+    );
+    if (ok != true) return;
+    try {
+      await PaymentMadeService.markPaymentAsSent(p.id);
+      _showSuccess('${p.paymentNumber} marked as sent');
+      _refresh();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
+  }
+
   Future<void> _whatsApp(PaymentMade p) async {
     try {
       _showSuccess('Looking up vendor phone…');
@@ -1130,20 +1145,22 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             onSelected: (v) {
               switch (v) {
-                case 'view':   _showDetail(p); break;
-                case 'edit':   _openEdit(p.id); break;
-                case 'pdf':    _downloadPDF(p); break;
-                case 'ticket': _raiseTicket(p); break;
-                case 'delete': _delete(p); break;
+                case 'view':         _showDetail(p); break;
+                case 'edit':         _openEdit(p.id); break;
+                case 'pdf':          _downloadPDF(p); break;
+                case 'mark_as_sent': _markPaymentAsSent(p); break;
+                case 'ticket':       _raiseTicket(p); break;
+                case 'delete':       _delete(p); break;
               }
             },
             itemBuilder: (_) => [
-              _menuItem('view',   Icons.visibility_outlined,              _blue,   'View Details'),
-              _menuItem('edit',   Icons.edit_outlined,                    _orange, 'Edit Payment'),
-              _menuItem('pdf',    Icons.picture_as_pdf_outlined,          _red,    'Download PDF'),
-              _menuItem('ticket', Icons.confirmation_number_outlined,     _orange, 'Raise Ticket'),
+              _menuItem('view',         Icons.visibility_outlined,          _blue,   'View Details'),
+              _menuItem('edit',         Icons.edit_outlined,                _orange, 'Edit Payment'),
+              _menuItem('pdf',          Icons.picture_as_pdf_outlined,      _red,    'Download PDF'),
+              _menuItem('mark_as_sent', Icons.mark_email_read_outlined,     _orange, 'Mark as Sent'),
+              _menuItem('ticket',       Icons.confirmation_number_outlined,  _orange, 'Raise Ticket'),
               const PopupMenuDivider(),
-              _menuItem('delete', Icons.delete_outline,                   _red,    'Delete', textColor: _red),
+              _menuItem('delete',       Icons.delete_outline,               _red,    'Delete', textColor: _red),
             ],
           ),
         ]))),

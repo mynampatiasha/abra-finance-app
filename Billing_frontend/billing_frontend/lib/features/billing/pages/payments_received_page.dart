@@ -252,6 +252,39 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
 
   // ── actions ───────────────────────────────────────────────────────────────
 
+  Future<void> _markPaymentAsSent(Map<String, dynamic> p) async {
+    final ok = await _confirmDialog(
+      title: 'Mark as Sent?',
+      message: 'The email will NOT be sent to the customer.\n\nDo you want to mark this payment as Sent anyway?',
+      confirmLabel: 'Mark as Sent',
+      confirmColor: _navy,
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService.markPaymentAsSent(p['id']);
+      _showSuccess('Payment marked as sent');
+      _refresh();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
+  }
+
+  Future<void> _sendPaymentEmail(Map<String, dynamic> p) async {
+    final customerEmail = p['customerEmail']?.toString() ?? '';
+    final ok = await _confirmDialog(
+      title: 'Send Payment Receipt?',
+      message: customerEmail.isNotEmpty
+          ? 'Send payment receipt email to $customerEmail?'
+          : 'Send payment receipt email to the customer?',
+      confirmLabel: 'Send Email',
+      confirmColor: _green,
+    );
+    if (ok != true) return;
+    try {
+      await PaymentService.sendPaymentEmail(p['id']);
+      _showSuccess('Payment receipt email sent');
+      _refresh();
+    } catch (e) { _showError('Failed to send email: $e'); }
+  }
+
   Future<void> _delete(Map<String, dynamic> p) async {
     final ok = await _confirmDialog(
       title: 'Delete Payment #${p['paymentNumber']}?',
@@ -358,10 +391,10 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
     }
     try {
       _showSuccess('Looking up customer phone…');
-      final res      = await BillingCustomersService.getCustomerById(customerId);
-      final customer = res['data'];
-      final phone =
-          (customer?['primaryPhone'] ?? customer?['phone'] ?? '').toString().trim();
+      final customer = await BillingCustomersService.getCustomerById(customerId);
+      final phone = customer.primaryPhone.trim().isNotEmpty
+          ? customer.primaryPhone.trim()
+          : customer.mobile.trim();
 
       if (phone.isEmpty) {
         _showError('Customer phone not available. Please update the customer profile.');
@@ -1243,22 +1276,28 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
                 borderRadius: BorderRadius.circular(10)),
             onSelected: (v) {
               switch (v) {
-                case 'view':   _viewDetails(p); break;
-                case 'proofs': _viewProofs(p);  break;
-                case 'ticket': _raiseTicket(p); break;
-                case 'delete': _delete(p);      break;
+                case 'view':         _viewDetails(p);         break;
+                case 'proofs':       _viewProofs(p);          break;
+                case 'mark_as_sent': _markPaymentAsSent(p);   break;
+                case 'send_email':   _sendPaymentEmail(p);    break;
+                case 'ticket':       _raiseTicket(p);         break;
+                case 'delete':       _delete(p);              break;
               }
             },
             itemBuilder: (_) => [
-              _menuItem('view',   Icons.visibility_outlined,
+              _menuItem('view',         Icons.visibility_outlined,
                   _blue,   'View Details'),
               if (p['hasProofs'] == true)
                 _menuItem('proofs', Icons.attach_file,
                     _green,  'View Proofs'),
-              _menuItem('ticket', Icons.confirmation_number_outlined,
+              _menuItem('mark_as_sent', Icons.mark_email_read_outlined,
+                  _orange, 'Mark as Sent'),
+              _menuItem('send_email',   Icons.send_outlined,
+                  _green,  'Send Email'),
+              _menuItem('ticket',       Icons.confirmation_number_outlined,
                   _orange, 'Raise Ticket'),
               const PopupMenuDivider(),
-              _menuItem('delete', Icons.delete_outline,
+              _menuItem('delete',       Icons.delete_outline,
                   _red, 'Delete', textColor: _red),
             ],
           ),

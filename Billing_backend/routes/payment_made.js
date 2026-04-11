@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // PAYMENTS MADE - COMPLETE BACKEND (UPDATED)
 // ============================================================================
 // File: backend/routes/payment_made.js
@@ -130,6 +130,7 @@ const paymentMadeSchema = new mongoose.Schema(
     pdfGeneratedAt: Date,
 
     orgId: { type: String, index: true, default: null },
+    providerTransactionId: { type: mongoose.Schema.Types.ObjectId, default: null },
     createdBy: { type: String, required: true },
     updatedBy: String,
   },
@@ -345,6 +346,18 @@ async function generatePaymentPDF(payment, orgId) {
       doc.fontSize(12).fillColor('#27AE60').font('Helvetica-Bold')
         .text(`₹ ${(payment.totalAmount || 0).toFixed(2)}`, vX, curY + 5, { width: 65, align: 'right' });
 
+      // ── AUTHORIZED SIGNATORY ─────────────────────────────────────────────
+      const signBoxW = 220;
+      const authBoxX = 555 - signBoxW;
+      const signSectionY = yPos + 20;
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      doc.moveTo(authBoxX, signSectionY + 30)
+         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+         .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+
       const footerY = 730;
       doc.moveTo(40, footerY).lineTo(555, footerY).lineWidth(1).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
@@ -459,7 +472,15 @@ router.get('/', async (req, res) => {
       paymentType, page = 1, limit = 20, search,
     } = req.query;
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    // FIX: orgId filter — also match records where orgId is null/missing
+    // (records created before orgId enforcement will have orgId: null)
+    if (req.user?.orgId) {
+      query.$or = [
+        { orgId: req.user.orgId },
+        { orgId: null },
+        { orgId: { $exists: false } },
+      ];
+    }
     if (status) query.status = status;
     if (vendorId) query.vendorId = vendorId;
     if (paymentMode) query.paymentMode = paymentMode;
@@ -497,7 +518,10 @@ router.get('/', async (req, res) => {
 // GET stats
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    // FIX: also include records with orgId: null
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+      : {};
     const stats = await PaymentMade.aggregate([
       { $match: orgFilter },
       {
@@ -612,10 +636,15 @@ router.post('/', async (req, res) => {
         // ── COA for bill payment: Debit AP + Credit Bank/Cash ───────────────
         try {
           const currentOrgId = req.user?.orgId || null;
-          const [apId, bankId] = await Promise.all([
-            getSystemAccountId('Accounts Payable', currentOrgId),
-            getSystemAccountId('Undeposited Funds', currentOrgId),
-          ]);
+const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+
+// Use actual paid from account (SBI-Tester etc.) instead of Undeposited Funds
+let bankId = null;
+if (data.paidFromAccountId) {
+  bankId = data.paidFromAccountId; // use the actual bank account selected
+} else {
+  bankId = await getSystemAccountId('Undeposited Funds', currentOrgId);
+}
           const txnDate = new Date(payment.paymentDate);
           if (apId) {
             await postTransactionToCOA({
@@ -695,6 +724,39 @@ router.post('/', async (req, res) => {
         console.error(`⚠️ COA post error (payment items):`, coaErr.message);
       }
     }
+
+    // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    try {
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+            new mongoose.Schema({}, { strict: false }),
+            'providertransactions');
+
+      if (data.paidFromAccountId && mongoose.Types.ObjectId.isValid(data.paidFromAccountId)) {
+        await ProviderTransaction.create({
+          accountId:            new mongoose.Types.ObjectId(data.paidFromAccountId),
+          orgId:                req.user?.orgId || null,
+          transactionDate:      new Date(payment.paymentDate),
+          description:          `Vendor Payment: ${payment.vendorName}`,
+          amount:               payment.totalAmount || payment.amount || 0,
+          transactionType:      'DEBIT',
+          reconciliationStatus: 'CATEGORIZED',
+          categoryLabel:        'Vendor Payment',
+          source:               'SYSTEM_ENTRY',
+          linkedRecordId:       payment._id,
+          linkedRecordType:     'PaymentMade',
+          journalRef:           payment.paymentNumber,
+          categorizedAt:        new Date(),
+          categorizedBy:        req.user?.email || 'system',
+          importedAt:           new Date(),
+          importedBy:           req.user?.email || 'system',
+        });
+        console.log(`✅ ProviderTransaction created for payment made: ${payment.paymentNumber}`);
+      }
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction create error (payment made):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION ─────────────────────────────────────────────
 
     try { await sendPaymentEmail(payment, req.user?.orgId || null); } catch (_) {}
 
@@ -945,6 +1007,25 @@ router.post('/bulk-import', importUpload.single('file'), async (req, res) => {
   }
 });
 
+
+// PATCH /:id/mark-sent
+router.patch('/:id/mark-sent', async (req, res) => {
+  try {
+    const payment = await PaymentMade.findOne({
+      _id: req.params.id,
+      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    });
+    if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
+    payment.status = 'RECORDED';
+    payment.emailsSent = payment.emailsSent || [];
+    payment.emailsSent.push({ sentAt: new Date(), emailType: 'payment_confirmation', markedManually: true });
+    payment.updatedBy = req.user?.email || 'system';
+    await payment.save();
+    res.json({ success: true, message: 'Payment marked as sent', data: payment });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/payments-made/:id/vendor-phone
 // Looks up vendor phone directly from DB — no need to store it on payment

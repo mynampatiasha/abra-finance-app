@@ -293,6 +293,63 @@ class PurchaseOrderService {
 // PURCHASE ORDER MODEL
 // ============================================================================
 
+// Address model for PO
+class POAddress {
+  final String attention;
+  final String street;
+  final String city;
+  final String state;
+  final String zip;
+  final String country;
+  final String phone;
+
+  const POAddress({
+    this.attention = '',
+    this.street    = '',
+    this.city      = '',
+    this.state     = '',
+    this.zip       = '',
+    this.country   = 'India',
+    this.phone     = '',
+  });
+
+  factory POAddress.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const POAddress();
+    return POAddress(
+      attention: json['attention'] ?? '',
+      street:    json['street']    ?? '',
+      city:      json['city']      ?? '',
+      state:     json['state']     ?? '',
+      zip:       json['zip']       ?? '',
+      country:   json['country']   ?? 'India',
+      phone:     json['phone']     ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'attention': attention,
+    'street':    street,
+    'city':      city,
+    'state':     state,
+    'zip':       zip,
+    'country':   country,
+    'phone':     phone,
+  };
+
+  POAddress copyWith({
+    String? attention, String? street, String? city,
+    String? state, String? zip, String? country, String? phone,
+  }) => POAddress(
+    attention: attention ?? this.attention,
+    street:    street    ?? this.street,
+    city:      city      ?? this.city,
+    state:     state     ?? this.state,
+    zip:       zip       ?? this.zip,
+    country:   country   ?? this.country,
+    phone:     phone     ?? this.phone,
+  );
+}
+
 class PurchaseOrder {
   final String id;
   final String purchaseOrderNumber;
@@ -300,6 +357,13 @@ class PurchaseOrder {
   final String vendorName;
   final String? vendorEmail;
   final String? vendorPhone;
+  final String vendorGSTIN;
+  final String vendorPAN;
+  final String gstRegistrationType;
+  final POAddress billingAddress;
+  final POAddress shippingAddress;
+  final String placeOfSupply;
+  final bool isInterState;
   final String? referenceNumber;
   final DateTime purchaseOrderDate;
   final DateTime? expectedDeliveryDate;
@@ -312,14 +376,14 @@ class PurchaseOrder {
   final String? vendorNotes;
   final String? termsAndConditions;
   final double subTotal;
+  final double totalCGST;
+  final double totalSGST;
+  final double totalIGST;
+  final double totalTax;
   final double tdsRate;
   final double tdsAmount;
   final double tcsRate;
   final double tcsAmount;
-  final double gstRate;
-  final double cgst;
-  final double sgst;
-  final double igst;
   final double totalAmount;
   final String status;
   final String? receiveStatus;
@@ -335,6 +399,13 @@ class PurchaseOrder {
     required this.vendorName,
     this.vendorEmail,
     this.vendorPhone,
+    this.vendorGSTIN       = '',
+    this.vendorPAN         = '',
+    this.gstRegistrationType = '',
+    this.billingAddress    = const POAddress(),
+    this.shippingAddress   = const POAddress(),
+    this.placeOfSupply     = '',
+    this.isInterState      = false,
     this.referenceNumber,
     required this.purchaseOrderDate,
     this.expectedDeliveryDate,
@@ -347,14 +418,14 @@ class PurchaseOrder {
     this.vendorNotes,
     this.termsAndConditions,
     required this.subTotal,
+    this.totalCGST   = 0,
+    this.totalSGST   = 0,
+    this.totalIGST   = 0,
+    this.totalTax    = 0,
     required this.tdsRate,
     required this.tdsAmount,
     required this.tcsRate,
     required this.tcsAmount,
-    required this.gstRate,
-    required this.cgst,
-    required this.sgst,
-    required this.igst,
     required this.totalAmount,
     required this.status,
     this.receiveStatus,
@@ -372,6 +443,13 @@ class PurchaseOrder {
       vendorName: json['vendorName'] ?? '',
       vendorEmail: json['vendorEmail'],
       vendorPhone: json['vendorPhone'],
+      vendorGSTIN:          json['vendorGSTIN']          ?? '',
+      vendorPAN:            json['vendorPAN']            ?? '',
+      gstRegistrationType:  json['gstRegistrationType']  ?? '',
+      billingAddress:  POAddress.fromJson(json['billingAddress']  as Map<String, dynamic>?),
+      shippingAddress: POAddress.fromJson(json['shippingAddress'] as Map<String, dynamic>?),
+      placeOfSupply:   json['placeOfSupply'] ?? '',
+      isInterState:    json['isInterState']  ?? false,
       referenceNumber: json['referenceNumber'],
       purchaseOrderDate: json['purchaseOrderDate'] != null
           ? DateTime.parse(json['purchaseOrderDate'])
@@ -389,15 +467,15 @@ class PurchaseOrder {
           .toList(),
       vendorNotes: json['vendorNotes'],
       termsAndConditions: json['termsAndConditions'],
-      subTotal: (json['subTotal'] ?? 0).toDouble(),
-      tdsRate: (json['tdsRate'] ?? 0).toDouble(),
-      tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
-      tcsRate: (json['tcsRate'] ?? 0).toDouble(),
-      tcsAmount: (json['tcsAmount'] ?? 0).toDouble(),
-      gstRate: (json['gstRate'] ?? 18).toDouble(),
-      cgst: (json['cgst'] ?? 0).toDouble(),
-      sgst: (json['sgst'] ?? 0).toDouble(),
-      igst: (json['igst'] ?? 0).toDouble(),
+      subTotal:   (json['subTotal']   ?? 0).toDouble(),
+      totalCGST:  (json['totalCGST']  ?? 0).toDouble(),
+      totalSGST:  (json['totalSGST']  ?? 0).toDouble(),
+      totalIGST:  (json['totalIGST']  ?? 0).toDouble(),
+      totalTax:   (json['totalTax']   ?? 0).toDouble(),
+      tdsRate:    (json['tdsRate']    ?? 0).toDouble(),
+      tdsAmount:  (json['tdsAmount']  ?? 0).toDouble(),
+      tcsRate:    (json['tcsRate']    ?? 0).toDouble(),
+      tcsAmount:  (json['tcsAmount']  ?? 0).toDouble(),
       totalAmount: (json['totalAmount'] ?? 0).toDouble(),
       status: json['status'] ?? 'DRAFT',
       receiveStatus: json['receiveStatus'],
@@ -426,35 +504,63 @@ class PurchaseOrderItem {
   double discount;
   String discountType;
   double amount;
+  String hsnCode;
+  String unit;
+  double itemGstRate;
+  double taxableAmount;
+  double cgstAmount;
+  double sgstAmount;
+  double igstAmount;
 
   PurchaseOrderItem({
-    this.itemDetails = '',
-    this.quantity = 0,
-    this.rate = 0,
-    this.discount = 0,
+    this.itemDetails  = '',
+    this.quantity     = 0,
+    this.rate         = 0,
+    this.discount     = 0,
     this.discountType = 'percentage',
-    this.amount = 0,
+    this.amount       = 0,
+    this.hsnCode      = '',
+    this.unit         = 'Nos',
+    this.itemGstRate  = 18,
+    this.taxableAmount= 0,
+    this.cgstAmount   = 0,
+    this.sgstAmount   = 0,
+    this.igstAmount   = 0,
   });
 
   factory PurchaseOrderItem.fromJson(Map<String, dynamic> json) {
     return PurchaseOrderItem(
-      itemDetails: json['itemDetails'] ?? '',
-      quantity: (json['quantity'] ?? 0).toDouble(),
-      rate: (json['rate'] ?? 0).toDouble(),
-      discount: (json['discount'] ?? 0).toDouble(),
-      discountType: json['discountType'] ?? 'percentage',
-      amount: (json['amount'] ?? 0).toDouble(),
+      itemDetails:   json['itemDetails']   ?? '',
+      quantity:      (json['quantity']     ?? 0).toDouble(),
+      rate:          (json['rate']         ?? 0).toDouble(),
+      discount:      (json['discount']     ?? 0).toDouble(),
+      discountType:  json['discountType']  ?? 'percentage',
+      amount:        (json['amount']       ?? 0).toDouble(),
+      hsnCode:       json['hsnCode']       ?? '',
+      unit:          json['unit']          ?? 'Nos',
+      itemGstRate:   (json['itemGstRate']  ?? 18).toDouble(),
+      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
+      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
+      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
+      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails': itemDetails,
-      'quantity': quantity,
-      'rate': rate,
-      'discount': discount,
-      'discountType': discountType,
-      'amount': amount,
+      'itemDetails':   itemDetails,
+      'quantity':      quantity,
+      'rate':          rate,
+      'discount':      discount,
+      'discountType':  discountType,
+      'amount':        amount,
+      'hsnCode':       hsnCode,
+      'unit':          unit,
+      'itemGstRate':   itemGstRate,
+      'taxableAmount': taxableAmount,
+      'cgstAmount':    cgstAmount,
+      'sgstAmount':    sgstAmount,
+      'igstAmount':    igstAmount,
     };
   }
 }
