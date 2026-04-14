@@ -85,6 +85,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - .env
     - assets/icon/
     - assets/images/
     - assets/abra_finance_logo.jpg
