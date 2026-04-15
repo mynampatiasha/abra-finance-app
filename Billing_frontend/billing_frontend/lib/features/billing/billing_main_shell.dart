@@ -685,39 +685,42 @@ Widget _getSelectedPage() {
     return Scaffold(
       key: _scaffoldKey,
       drawer: isMobile ? _buildDrawer() : null,
-      body: Row(
-        children: [
-          // ── Sidebar (desktop) ────────────────────────────────────────────────
-          if (!isMobile)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: _isSidebarExpanded ? 240 : 70,
-              child: _buildSidebarContent(isDrawer: false),
-            ),
+body: SafeArea(
+        child: Row(
+          children: [
+            // ── Sidebar (desktop) ──────────────────────────────────────────────
+            if (!isMobile)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: _isSidebarExpanded ? 240 : 70,
+                child: _buildSidebarContent(isDrawer: false),
+              ),
 
-          // ── Main content ─────────────────────────────────────────────────────
-          Expanded(
-            child: Column(
-              children: [
-                _buildTopBar(isMobile),
-                Expanded(
-                  child: Container(
-                    color: _kPageBg,
-                    child: _getSelectedPage(),
+            // ── Main content ───────────────────────────────────────────────────
+            Expanded(
+              child: Column(
+                children: [
+                  _buildTopBar(isMobile),
+                  Expanded(
+                    child: Container(
+                      color: _kPageBg,
+                      child: _getSelectedPage(),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  // ── Top bar ──────────────────────────────────────────────────────────────────
-  Widget _buildTopBar(bool isMobile) {
-    return Container(
-      height: 60,
+Widget _buildTopBar(bool isMobile) {
+  return SafeArea(
+    bottom: false,
+    child: Container(
+      height: kToolbarHeight,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.centerLeft,
@@ -735,7 +738,6 @@ Widget _getSelectedPage() {
               tooltip: 'Open Menu',
             ),
           const SizedBox(width: 8),
-          // Page title
           Expanded(
             child: Text(
               _currentPageTitle,
@@ -747,7 +749,6 @@ Widget _getSelectedPage() {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // ── Org switcher chip (top bar) ────────────────────────────────────
           if (_orgName.isNotEmpty)
             GestureDetector(
               onTap: () => _showOrgSwitcher(context),
@@ -792,7 +793,10 @@ Widget _getSelectedPage() {
               child: Text(
                 _name.isNotEmpty ? _name[0].toUpperCase() : 'U',
                 style: const TextStyle(
-                    color: _kWhite, fontSize: 12, fontWeight: FontWeight.bold),
+                  color: _kWhite,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -804,8 +808,9 @@ Widget _getSelectedPage() {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ── Sidebar content (shared between desktop sidebar and drawer) ───────────────
   Widget _buildSidebarContent({required bool isDrawer}) {
