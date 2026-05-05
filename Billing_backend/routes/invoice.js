@@ -503,9 +503,9 @@ async function generateInvoicePDF(invoice) {
       if (logoPath) {
         try {
           doc.image(logoPath, 40, 35, { 
-            width: 120,
-            height: 60,
-            fit: [120, 60]
+            width: 72,
+            height: 55,
+            fit: [72, 55]
           });
           logoLoaded = true;
           console.log('   ✅ Logo embedded in PDF');
@@ -1715,6 +1715,29 @@ const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
 
         const invoice = new Invoice(invoiceData);
         await invoice.save();
+
+        // ── COA posting (same as regular create) ─────────────────────────────
+        try {
+          const currentOrgId = req.user?.orgId || null;
+          const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+            getSystemAccountId('Accounts Receivable'),
+            getSystemAccountId('Sales'),
+            getSystemAccountId('Tax Payable'),
+            getSystemAccountId('TDS Receivable'),
+            getSystemAccountId('TDS Payable'),
+          ]);
+          const txnDate = new Date(invoice.invoiceDate);
+          const desc    = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
+          if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+          if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+          if (taxId    && (invoice.cgst + invoice.sgst) > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.cgst + invoice.sgst });
+          if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+          if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+          console.log(`   ✅ COA posted for imported invoice: ${invoice.invoiceNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (invoice.js import row ${rowNum}):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
 
         results.imported++;
         console.log(`   ✅ Row ${rowNum}: imported invoice ${invoice.invoiceNumber}`);

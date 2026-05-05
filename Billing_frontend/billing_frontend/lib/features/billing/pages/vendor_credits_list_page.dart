@@ -37,6 +37,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   String _selectedStatus = 'All';
   final List<String> _statusFilters = ['All', 'OPEN', 'PARTIALLY_APPLIED', 'CLOSED', 'VOID'];
 
@@ -589,7 +592,7 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                     ? SizedBox(height: 400, child: _buildError())
                     : _credits.isEmpty
                         ? SizedBox(height: 400, child: _buildEmpty())
-                        : _buildTable(),
+                        : _isTableView ? _buildTable() : _buildListView(),
             if (!_isLoading && _credits.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -693,6 +696,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               style: IconButton.styleFrom(
                   backgroundColor: _navyAccent.withOpacity(0.1), padding: const EdgeInsets.all(8)),
             ),
+            const SizedBox(width: 4),
+            _buildViewToggle(),
             const SizedBox(width: 4),
             _actionBtn(isWide ? 'Import' : 'Import', Icons.upload_file, const Color(0xFF9B59B6), _showImportDialog, compact: !isWide),
             const SizedBox(width: 6),
@@ -803,6 +808,144 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   }
 
   // -----------------------------------------------------------------------
+  // VIEW TOGGLE + LIST VIEW
+  // -----------------------------------------------------------------------
+
+  Widget _buildViewToggle() => Container(
+    height: 42,
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(10),
+      color: Colors.white,
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? _navyDark : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.grey[600])),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildListView() {
+    if (_credits.isEmpty) return SizedBox(height: 400, child: _buildEmpty());
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: _credits.map((c) => _buildCreditCard(c)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildCreditCard(VendorCredit c) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Row 1: credit # + status badge
+          Row(children: [
+            Expanded(child: InkWell(
+              onTap: () => _openDetail(c),
+              child: Text(c.creditNumber, style: TextStyle(color: _navyAccent, fontWeight: FontWeight.bold, fontSize: 15, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+            )),
+            _statusBadge(c.status),
+          ]),
+          const SizedBox(height: 8),
+          // Row 2: vendor + date
+          Row(children: [
+            const Icon(Icons.store_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(c.vendorName, style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.calendar_today, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Text(DateFormat('dd MMM yyyy').format(c.creditDate), style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+          ]),
+          if (c.reason.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Row(children: [
+              const Icon(Icons.info_outline, size: 14, color: Color(0xFF7F8C8D)),
+              const SizedBox(width: 5),
+              Expanded(child: Text(c.reason, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+            ]),
+          ],
+          const SizedBox(height: 8),
+          // Row 3: amounts
+          Row(children: [
+            _amountChip('Total', '₹${c.totalAmount.toStringAsFixed(2)}', _navyDark),
+            const SizedBox(width: 8),
+            _amountChip('Applied', '₹${c.appliedAmount.toStringAsFixed(2)}', Colors.green[700]!),
+            const SizedBox(width: 8),
+            _amountChip('Balance', '₹${c.balanceAmount.toStringAsFixed(2)}', c.balanceAmount > 0 ? _navyAccent : Colors.grey[500]!),
+          ]),
+          const Divider(height: 16),
+          // Actions row
+          Row(children: [
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              onSelected: (v) async {
+                switch (v) {
+                  case 'view': _openDetail(c); break;
+                  case 'edit':
+                    final r = await Navigator.push(context, MaterialPageRoute(builder: (_) => NewVendorCreditScreen(creditId: c.id)));
+                    if (r == true) _refresh();
+                    break;
+                  case 'void':         await _voidCredit(c);        break;
+                  case 'mark_as_sent': await _markCreditAsSent(c);  break;
+                  case 'delete':       await _deleteCredit(c);       break;
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'view', child: ListTile(leading: const Icon(Icons.visibility, size: 17, color: _navyAccent), title: const Text('View Details'), contentPadding: EdgeInsets.zero)),
+                if (c.status != 'VOID' && c.status != 'CLOSED')
+                  const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, size: 17), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                if (c.status != 'VOID')
+                  const PopupMenuItem(value: 'mark_as_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: Colors.orange), title: Text('Mark as Sent', style: TextStyle(color: Colors.orange)), contentPadding: EdgeInsets.zero)),
+                if (c.status == 'OPEN' || c.status == 'PARTIALLY_APPLIED')
+                  const PopupMenuItem(value: 'void', child: ListTile(leading: Icon(Icons.block, size: 17, color: Colors.orange), title: Text('Void', style: TextStyle(color: Colors.orange)), contentPadding: EdgeInsets.zero)),
+                if (c.status != 'CLOSED')
+                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+              ],
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _amountChip(String label, String value, Color color) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+      Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+    ]);
+  }
+
+  // -----------------------------------------------------------------------
   // TABLE
   // -----------------------------------------------------------------------
 
@@ -900,7 +1043,11 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
         DataCell(SizedBox(
           width: 130,
           child: InkWell(
-            onTap: () => _openDetail(c),
+            onTap: () async {
+              final r = await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => NewVendorCreditScreen(creditId: c.id)));
+              if (r == true) _refresh();
+            },
             child: Text(c.creditNumber,
                 style: const TextStyle(
                     color: _navyAccent, fontWeight: FontWeight.w600,

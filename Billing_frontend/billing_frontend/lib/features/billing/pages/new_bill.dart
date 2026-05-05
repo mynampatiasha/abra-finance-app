@@ -33,7 +33,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/bill_service.dart';
 import '../../../../core/services/billing_vendors_service.dart';
 import '../../../../app/config/api_config.dart';
+import '../../../../core/finance_secure_storage.dart';
 import 'new_vendor.dart';
+import 'new_chart_of_account.dart';
 import '../widgets/document_preview_buttons.dart';
 
 // Navy blue gradient colors — exact match to new_vendor_credit.dart
@@ -42,6 +44,28 @@ const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 const Color _green      = Color(0xFF27AE60);
+
+// ── Items table column widths ─────────────────────────────────────────────────
+const double _bColNo      = 36.0;
+const double _bColDesc    = 190.0;
+const double _bColAcct    = 150.0;
+const double _bColHsn     = 100.0;
+const double _bColUnit    = 80.0;
+const double _bColQty     = 70.0;
+const double _bColRate    = 90.0;
+const double _bColDisc    = 110.0;
+const double _bColGst     = 80.0;
+const double _bColTaxable = 100.0;
+const double _bColTax1    = 90.0;   // CGST
+const double _bColTax2    = 90.0;   // SGST
+const double _bColAmt     = 100.0;
+const double _bColDel     = 44.0;
+
+// Unit options
+const List<String> _kBillUnits = ['Nos', 'Hrs', 'Kg', 'Pcs', 'Box', 'Mtr', 'Ltr', 'Dz', 'MT', 'Set'];
+
+// GST rate options
+const List<double> _kBillGstRates = [0, 5, 12, 18, 28];
 
 class NewBillScreen extends StatefulWidget {
   final String? billId;
@@ -135,48 +159,71 @@ class _NewBillScreenState extends State<NewBillScreen> {
   Future<void> _loadCoaExpenseAccounts() async {
     setState(() => _loadingCoaAccounts = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token') ?? '';
-      final uri   = Uri.parse(
-          '${ApiConfig.baseUrl}/api/finance/chart-of-accounts?accountType=Expense&limit=200');
-      final resp  = await http.get(uri, headers: {
-        'Content-Type': 'application/json',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+
+      // Fetch all three expense-type buckets in parallel — same as new_expenses.dart
+      final types = ['Expense', 'Other Expense', 'Cost Of Goods Sold'];
+      final futures = types.map((t) {
+        final encodedType = Uri.encodeComponent(t);
+        final uri = Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/chart-of-accounts?accountType=$encodedType&limit=500');
+        return http.get(uri, headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+          'x-branch-ids': branchHdr,
+        });
       });
-      if (resp.statusCode == 200) {
-        final body     = jsonDecode(resp.body);
-        final accounts = (body['data']?['accounts'] as List? ?? []);
-        if (mounted) {
-          setState(() {
-            _coaExpAccounts = accounts
-                .map((a) => {
-                      '_id':         a['_id']?.toString() ?? '',
-                      'accountName': a['accountName']?.toString() ?? '',
-                    })
-                .toList();
-            _loadingCoaAccounts = false;
-          });
+
+      final responses = await Future.wait(futures);
+
+      final allAccounts = <Map<String, dynamic>>[];
+      for (final resp in responses) {
+        if (resp.statusCode == 200) {
+          final body     = jsonDecode(resp.body);
+          final accounts = (body['data']?['accounts'] as List? ?? []);
+          allAccounts.addAll(accounts.map((a) => {
+                '_id':         a['_id']?.toString() ?? '',
+                'accountName': a['accountName']?.toString() ?? '',
+                'accountType': a['accountType']?.toString() ?? '',
+              }));
         }
-      } else {
-        throw Exception('COA fetch failed: ${resp.statusCode}');
+      }
+
+      // Deduplicate by _id, then sort alphabetically
+      final seen   = <String>{};
+      final unique = allAccounts.where((a) {
+        final id = a['_id'] as String;
+        if (id.isEmpty || seen.contains(id)) return false;
+        seen.add(id);
+        return true;
+      }).toList()
+        ..sort((a, b) =>
+            (a['accountName'] as String).compareTo(b['accountName'] as String));
+
+      if (mounted) {
+        setState(() {
+          _coaExpAccounts     = unique;
+          _loadingCoaAccounts = false;
+        });
       }
     } catch (_) {
       // Fallback to common expense accounts
       if (mounted) {
         setState(() {
           _coaExpAccounts = [
-            {'_id': '1',  'accountName': 'Office Supplies'},
-            {'_id': '2',  'accountName': 'Rent Expense'},
-            {'_id': '3',  'accountName': 'Utilities'},
-            {'_id': '4',  'accountName': 'Software Subscriptions'},
-            {'_id': '5',  'accountName': 'Travel & Entertainment'},
-            {'_id': '6',  'accountName': 'Professional Services'},
-            {'_id': '7',  'accountName': 'Marketing & Advertising'},
-            {'_id': '8',  'accountName': 'Maintenance & Repairs'},
-            {'_id': '9',  'accountName': 'Insurance'},
-            {'_id': '10', 'accountName': 'Salaries & Wages'},
-            {'_id': '11', 'accountName': 'Cost of Goods Sold'},
-            {'_id': '12', 'accountName': 'Other Expenses'},
+            {'_id': '1',  'accountName': 'Advertising & Marketing',  'accountType': 'Expense'},
+            {'_id': '2',  'accountName': 'Cost of Goods Sold',        'accountType': 'Cost Of Goods Sold'},
+            {'_id': '3',  'accountName': 'Fuel',                      'accountType': 'Expense'},
+            {'_id': '4',  'accountName': 'Insurance',                 'accountType': 'Expense'},
+            {'_id': '5',  'accountName': 'Meals & Entertainment',     'accountType': 'Expense'},
+            {'_id': '6',  'accountName': 'Office Supplies',           'accountType': 'Expense'},
+            {'_id': '7',  'accountName': 'Other Expenses',            'accountType': 'Other Expense'},
+            {'_id': '8',  'accountName': 'Professional Fees',         'accountType': 'Expense'},
+            {'_id': '9',  'accountName': 'Rent',                      'accountType': 'Expense'},
+            {'_id': '10', 'accountName': 'Travel & Conveyance',       'accountType': 'Expense'},
+            {'_id': '11', 'accountName': 'Utilities',                 'accountType': 'Expense'},
           ];
           _loadingCoaAccounts = false;
         });
@@ -204,24 +251,43 @@ class _NewBillScreenState extends State<NewBillScreen> {
       _totalQuantity = 0;
       for (var item in _items) {
         if (item.quantity > 0 && item.rate > 0) {
-          double itemAmount = item.quantity * item.rate;
+          // taxable = qty × rate − discount
+          double taxable = item.quantity * item.rate;
           if (item.discount > 0) {
             if (item.discountType == 'percentage') {
-              itemAmount = itemAmount - (itemAmount * item.discount / 100);
+              taxable = taxable - (taxable * item.discount / 100);
             } else {
-              itemAmount = itemAmount - item.discount;
+              taxable = taxable - item.discount;
             }
           }
-          item.amount = itemAmount;
-          _subTotal      += itemAmount;
+          item.taxableAmount = double.parse(taxable.toStringAsFixed(2));
+
+          // Per-item GST (always intra-state CGST+SGST for bills)
+          final gst = item.itemGstRate;
+          item.cgstAmount = double.parse((taxable * (gst / 2) / 100).toStringAsFixed(2));
+          item.sgstAmount = item.cgstAmount;
+          item.igstAmount = 0;
+
+          item.amount = double.parse(
+              (taxable + item.cgstAmount + item.sgstAmount).toStringAsFixed(2));
+
+          _subTotal      += taxable;
           _totalQuantity += item.quantity.toInt();
+        } else {
+          item.taxableAmount = 0;
+          item.cgstAmount    = 0;
+          item.sgstAmount    = 0;
+          item.igstAmount    = 0;
+          item.amount        = 0;
         }
       }
+      _subTotal = double.parse(_subTotal.toStringAsFixed(2));
+
       _tdsAmount = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
       _tcsAmount = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
-      final double gstBase = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount   = _enableGST ? (gstBase * _gstRate / 100) : 0;
-      _totalAmount = _subTotal - _tdsAmount + _tcsAmount + _gstAmount;
+      final double totalItemTax = _items.fold(0.0, (s, i) => s + i.cgstAmount + i.sgstAmount + i.igstAmount);
+      _gstAmount   = totalItemTax;
+      _totalAmount = _subTotal - _tdsAmount + _tcsAmount + totalItemTax;
     });
   }
 
@@ -254,13 +320,21 @@ class _NewBillScreenState extends State<NewBillScreen> {
         _enableTCS  = bill.tcsRate > 0;
         _enableGST  = bill.gstRate > 0;
         _items = bill.items.map((item) => MutableBillItem(
-          itemDetails:  item.itemDetails,
-          account:      item.account,
-          quantity:     item.quantity,
-          rate:         item.rate,
-          discount:     item.discount,
-          discountType: item.discountType,
-          amount:       item.amount,
+          itemDetails:   item.itemDetails,
+          account:       item.account,
+          quantity:      item.quantity,
+          rate:          item.rate,
+          discount:      item.discount,
+          discountType:  item.discountType,
+          amount:        item.amount,
+          hsnCode:       item.hsnCode,
+          sacCode:       item.sacCode,
+          unit:          item.unit,
+          itemGstRate:   item.itemGstRate,
+          taxableAmount: item.taxableAmount,
+          cgstAmount:    item.cgstAmount,
+          sgstAmount:    item.sgstAmount,
+          igstAmount:    item.igstAmount,
         )).toList();
         _calculateAmounts();
       });
@@ -305,12 +379,56 @@ class _NewBillScreenState extends State<NewBillScreen> {
     };
   }
 
+  Future<void> _markAsSent() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedVendorId == null) { _showErrorSnackbar('Please select a vendor'); return; }
+    if (!_validateItems()) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the vendor.\n\nDo you want to mark this bill as Sent (Open) anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      final billData = _buildBillData('OPEN');
+      Bill bill;
+      if (widget.billId != null) {
+        bill = await BillService.updateBill(widget.billId!, billData);
+      } else {
+        bill = await BillService.createBill(billData);
+      }
+      await BillService.markAsSent(bill.id);
+      _showSuccessSnackbar('Bill marked as sent: ${bill.billNumber}');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showErrorSnackbar('Failed to mark as sent: $e');
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _saveAsDraft() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedVendorId == null) { _showErrorSnackbar('Please select a vendor'); return; }
     if (!_validateItems()) return;
-    setState(() => _isSaving = true);
-    try {
+    setState(() => _isSaving = true);    try {
       final billData = _buildBillData('DRAFT');
       Bill bill;
       if (widget.billId != null) {
@@ -480,6 +598,17 @@ class _NewBillScreenState extends State<NewBillScreen> {
             onPressed: _isSaving ? null : () => Navigator.pop(context),
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          const SizedBox(width: 8),
+          // Mark as Sent — no email, just status → OPEN
+          OutlinedButton.icon(
+            onPressed: _isSaving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+            label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white38),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
           ),
           const SizedBox(width: 8),
           TextButton.icon(
@@ -704,291 +833,361 @@ class _NewBillScreenState extends State<NewBillScreen> {
   }
 
   // ============================================================================
-  // ITEMS SECTION
+  // ITEMS SECTION — horizontally scrollable table with HSN/Unit/GST columns
   // ============================================================================
 
   Widget _buildItemsSection() {
+    final double tableWidth = _bColNo + _bColDesc + _bColAcct + _bColHsn +
+        _bColUnit + _bColQty + _bColRate + _bColDisc + _bColGst +
+        _bColTaxable + _bColTax1 + _bColTax2 + _bColAmt + _bColDel;
+
     return _card(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _sectionTitle('Line Items', Icons.list_alt),
-            ElevatedButton.icon(
-              onPressed: _addNewItem,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add Item'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _navyAccent,
-                foregroundColor: Colors.white,
+        _sectionTitle('Line Items', Icons.list_alt),
+        const SizedBox(height: 14),
+
+        // Horizontally scrollable table
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+              // ── Table header ──────────────────────────────────────────────
+              Container(
+                decoration: BoxDecoration(
+                  color: _navyDark,
+                  borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                ),
+                child: Row(children: [
+                  _bThCell('#',          _bColNo),
+                  _bThCell('DESCRIPTION',_bColDesc),
+                  _bThCell('ACCOUNT',    _bColAcct),
+                  _bThCell('HSN / SAC',  _bColHsn),
+                  _bThCell('UNIT',       _bColUnit),
+                  _bThCell('QTY',        _bColQty,     align: TextAlign.center),
+                  _bThCell('RATE (₹)',   _bColRate,    align: TextAlign.right),
+                  _bThCell('DISCOUNT',   _bColDisc,    align: TextAlign.right),
+                  _bThCell('GST %',      _bColGst,     align: TextAlign.center),
+                  _bThCell('TAXABLE',    _bColTaxable, align: TextAlign.right),
+                  _bThCell('CGST',       _bColTax1,    align: TextAlign.right),
+                  _bThCell('SGST',       _bColTax2,    align: TextAlign.right),
+                  _bThCell('AMOUNT',     _bColAmt,     align: TextAlign.right),
+                  SizedBox(width: _bColDel),
+                ]),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
 
-        // Table Header — gradient matching vendor credit
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [_navyDark, _navyMid],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-            ),
-            borderRadius: BorderRadius.circular(8),
+              // ── Data rows ─────────────────────────────────────────────────
+              if (_items.isEmpty)
+                Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    border: Border(
+                      left:   BorderSide(color: Colors.grey[200]!),
+                      right:  BorderSide(color: Colors.grey[200]!),
+                      bottom: BorderSide(color: Colors.grey[200]!),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.inbox_outlined, size: 20, color: Colors.grey[400]),
+                    const SizedBox(width: 8),
+                    Text('No items — click Add Item below',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  ]),
+                )
+              else
+                ...List.generate(_items.length, (i) => _buildItemTableRow(i)),
+
+              // ── Add Item row ──────────────────────────────────────────────
+              InkWell(
+                onTap: _addNewItem,
+                borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                child: Container(
+                  width: tableWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: _navyAccent.withOpacity(0.05),
+                    borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    border: Border(
+                      left:   BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      right:  BorderSide(color: _navyAccent.withOpacity(0.25)),
+                      bottom: BorderSide(color: _navyAccent.withOpacity(0.25)),
+                    ),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.add_circle_outline, size: 18, color: _navyAccent),
+                    const SizedBox(width: 8),
+                    Text('+ Add Item',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold,
+                            color: _navyAccent)),
+                  ]),
+                ),
+              ),
+            ]),
           ),
-          child: LayoutBuilder(builder: (ctx, cs) {
-            final isMobile = cs.maxWidth < 600;
-            if (isMobile) {
-              return const Text('ITEMS',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
-            }
-            return const Row(children: [
-              Expanded(flex: 3, child: Text('ITEM DETAILS',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-              SizedBox(width: 8),
-              Expanded(flex: 2, child: Text('ACCOUNT',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-              SizedBox(width: 8),
-              SizedBox(width: 70, child: Text('QTY',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                  textAlign: TextAlign.center)),
-              SizedBox(width: 8),
-              SizedBox(width: 90, child: Text('RATE (₹)',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                  textAlign: TextAlign.right)),
-              SizedBox(width: 8),
-              SizedBox(width: 90, child: Text('DISCOUNT',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                  textAlign: TextAlign.right)),
-              SizedBox(width: 8),
-              SizedBox(width: 110, child: Text('AMOUNT (₹)',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                  textAlign: TextAlign.right)),
-              SizedBox(width: 48),
-            ]);
-          }),
         ),
-
-        const SizedBox(height: 8),
-
-        if (_items.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(children: [
-                Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text('No items added yet', style: TextStyle(color: Colors.grey[600])),
-              ]),
-            ),
-          )
-        else
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _items.length,
-            separatorBuilder: (_, __) => const Divider(height: 16),
-            itemBuilder: (_, index) => _buildItemRow(index),
-          ),
       ],
     ));
   }
 
-  Widget _buildItemRow(int index) {
-    final item = _items[index];
-    return LayoutBuilder(builder: (context, constraints) {
-      final isMobile = constraints.maxWidth < 600;
-
-      // Mobile card layout — matching vendor credit
-      if (isMobile) {
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.itemDetails,
-                    decoration: InputDecoration(
-                      labelText: 'Item Description',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                      isDense: true,
-                    ),
-                    maxLines: 2,
-                    onChanged: (v) => item.itemDetails = v,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                  onPressed: () => _removeItem(index),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: item.account,
-                decoration: InputDecoration(
-                  labelText: 'Account',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                  isDense: true,
-                ),
-                isExpanded: true,
-                items: _coaExpAccounts.map((a) =>
-                    DropdownMenuItem(value: a['accountName'] as String, child: Text(a['accountName'] as String, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (v) => setState(() => item.account = v),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-                    decoration: InputDecoration(
-                        labelText: 'Qty',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                        isDense: true),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-                    decoration: InputDecoration(
-                        labelText: 'Rate (₹)',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                        isDense: true),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: Text('₹${item.amount.toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.right),
-                  ),
-                ),
-              ]),
-            ],
-          ),
-        );
-      }
-
-      // Desktop row layout — unchanged from original
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 3, child: TextFormField(
-            initialValue: item.itemDetails,
-            decoration: InputDecoration(
-              hintText: 'Enter item description',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            maxLines: 2,
-            onChanged: (v) => item.itemDetails = v,
-          )),
-          const SizedBox(width: 8),
-          Expanded(flex: 2, child: DropdownButtonFormField<String>(
-            value: item.account,
-            decoration: InputDecoration(
-              hintText: 'Select',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            isExpanded: true,
-            items: _coaExpAccounts.map((a) =>
-                DropdownMenuItem(value: a['accountName'] as String, child: Text(a['accountName'] as String, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) => setState(() => item.account = v),
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 70, child: TextFormField(
-            initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-            decoration: InputDecoration(
-              hintText: '0',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); },
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 90, child: TextFormField(
-            initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-            decoration: InputDecoration(
-              hintText: '0.00',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textAlign: TextAlign.right,
-            onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); },
-          )),
-          const SizedBox(width: 8),
-          SizedBox(width: 90, child: Row(children: [
-            Expanded(child: TextFormField(
-              initialValue: item.discount > 0 ? item.discount.toString() : '',
-              decoration: InputDecoration(
-                hintText: '0',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              textAlign: TextAlign.right,
-              onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); },
-            )),
-            PopupMenuButton<String>(
-              initialValue: item.discountType,
-              icon: const Icon(Icons.arrow_drop_down, size: 18),
-              onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: 'percentage', child: Text('%')),
-                const PopupMenuItem(value: 'amount',     child: Text('₹')),
-              ],
-            ),
-          ])),
-          const SizedBox(width: 8),
-          Container(
-            width: 110,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Text(item.amount.toStringAsFixed(2),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                textAlign: TextAlign.right),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
-            onPressed: () => _removeItem(index),
-            tooltip: 'Remove item',
-          ),
-        ],
-      );
-    });
+  // ── Table header cell ─────────────────────────────────────────────────────
+  Widget _bThCell(String text, double width, {TextAlign align = TextAlign.left}) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+        child: Text(text, textAlign: align,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 11,
+                fontWeight: FontWeight.bold, letterSpacing: 0.4)),
+      ),
+    );
   }
+
+  // ── Cell input decoration ─────────────────────────────────────────────────
+  InputDecoration _bCellDeco([String? hint]) => InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+    border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: Colors.grey[300]!)),
+    focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: _navyAccent, width: 1.5)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+    isDense: true,
+  );
+
+  // ── Single data row ───────────────────────────────────────────────────────
+  Widget _buildItemTableRow(int index) {
+    final item  = _items[index];
+    final isOdd = index.isOdd;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isOdd ? const Color(0xFFF7F9FC) : Colors.white,
+        border: Border(
+          left:   BorderSide(color: Colors.grey[200]!),
+          right:  BorderSide(color: Colors.grey[200]!),
+          bottom: BorderSide(color: Colors.grey[200]!),
+        ),
+      ),
+      child: IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+
+          // # number
+          SizedBox(width: _bColNo,
+            child: Center(child: Text('${index + 1}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+                    color: Colors.black54)))),
+
+          // Description
+          SizedBox(width: _bColDesc,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: TextFormField(
+                initialValue: item.itemDetails,
+                maxLines: null, minLines: 1,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                decoration: _bCellDeco('Item / Service'),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                onChanged: (v) => setState(() => item.itemDetails = v),
+              ))),
+
+          // Account (searchable)
+          SizedBox(width: _bColAcct,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: InkWell(
+                onTap: _loadingCoaAccounts ? null : () => _showAccountSelector(item),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(children: [
+                    Expanded(child: Text(
+                      item.account ?? 'Select…',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: item.account != null ? _navyDark : Colors.grey[400],
+                      ),
+                    )),
+                    _loadingCoaAccounts
+                        ? const SizedBox(width: 12, height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.5))
+                        : Icon(Icons.search, size: 14, color: Colors.grey[400]),
+                  ]),
+                ),
+              ))),
+
+          // HSN / SAC
+          SizedBox(width: _bColHsn,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: TextFormField(
+                initialValue: item.hsnCode.isNotEmpty ? item.hsnCode : item.sacCode,
+                decoration: _bCellDeco('HSN/SAC'),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                onChanged: (v) => setState(() { item.hsnCode = v; item.sacCode = v; }),
+              ))),
+
+          // Unit
+          SizedBox(width: _bColUnit,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: DropdownButtonFormField<String>(
+                value: _kBillUnits.contains(item.unit) ? item.unit : 'Nos',
+                decoration: _bCellDeco(),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                isDense: true,
+                items: _kBillUnits.map((u) => DropdownMenuItem(
+                    value: u,
+                    child: Text(u, style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (v) => setState(() => item.unit = v ?? 'Nos'),
+              ))),
+
+          // Qty
+          SizedBox(width: _bColQty,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: TextFormField(
+                initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+                decoration: _bCellDeco('0'),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                textAlign: TextAlign.center,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                onChanged: (v) { setState(() { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+              ))),
+
+          // Rate
+          SizedBox(width: _bColRate,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: TextFormField(
+                initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+                decoration: _bCellDeco('0.00'),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                textAlign: TextAlign.right,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (v) { setState(() { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+              ))),
+
+          // Discount + % / ₹ toggle
+          SizedBox(width: _bColDisc,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(children: [
+                Expanded(child: TextFormField(
+                  initialValue: item.discount > 0 ? item.discount.toString() : '',
+                  decoration: _bCellDeco('0'),
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                  textAlign: TextAlign.right,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (v) { setState(() { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); }); },
+                )),
+                PopupMenuButton<String>(
+                  initialValue: item.discountType,
+                  padding: EdgeInsets.zero,
+                  icon: Text(item.discountType == 'percentage' ? '%' : '₹',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                          color: _navyAccent)),
+                  onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'percentage', child: Text('% Percentage')),
+                    const PopupMenuItem(value: 'amount',     child: Text('₹ Flat Amount')),
+                  ],
+                ),
+              ]))),
+
+          // GST %
+          SizedBox(width: _bColGst,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: DropdownButtonFormField<double>(
+                value: _kBillGstRates.contains(item.itemGstRate) ? item.itemGstRate : 18.0,
+                decoration: _bCellDeco(),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+                isDense: true,
+                items: _kBillGstRates.map((r) => DropdownMenuItem(
+                    value: r,
+                    child: Text('${r.toStringAsFixed(0)}%',
+                        style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (v) { setState(() { item.itemGstRate = v ?? 18.0; _calculateAmounts(); }); },
+              ))),
+
+          // Taxable (read-only)
+          SizedBox(width: _bColTaxable,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                item.taxableAmount > 0
+                    ? '₹${item.taxableAmount.toStringAsFixed(2)}' : '—',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                    color: Colors.black87)))),
+
+          // CGST (read-only)
+          SizedBox(width: _bColTax1,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(
+                  item.cgstAmount > 0
+                      ? '₹${item.cgstAmount.toStringAsFixed(2)}' : '—',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                      color: Colors.blue[700]),
+                ),
+                if (item.itemGstRate > 0)
+                  Text('${(item.itemGstRate / 2).toStringAsFixed(1)}%',
+                      style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+              ]))),
+
+          // SGST (read-only)
+          SizedBox(width: _bColTax2,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(
+                  item.sgstAmount > 0
+                      ? '₹${item.sgstAmount.toStringAsFixed(2)}' : '—',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                      color: Colors.blue[700]),
+                ),
+                if (item.itemGstRate > 0)
+                  Text('${(item.itemGstRate / 2).toStringAsFixed(1)}%',
+                      style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+              ]))),
+
+          // Amount (read-only)
+          SizedBox(width: _bColAmt,
+            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                item.amount > 0
+                    ? '₹${item.amount.toStringAsFixed(2)}' : '—',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold,
+                    color: _navyDark)))),
+
+          // Delete
+          SizedBox(width: _bColDel,
+            child: Center(child: IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+              onPressed: () => _removeItem(index),
+              tooltip: 'Remove item',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ))),
+        ]),
+      ),
+    );
+  }
+
+
 
   // ============================================================================
   // NOTES SECTION
@@ -1333,12 +1532,21 @@ class _NewBillScreenState extends State<NewBillScreen> {
           const SizedBox(height: 6),
           _summaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%)', _tcsAmount),
         ],
-        if (_enableGST && _gstAmount > 0) ...[
-          const SizedBox(height: 6),
-          _summaryRow('CGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
-          const SizedBox(height: 6),
-          _summaryRow('SGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
-        ],
+        // Per-item CGST/SGST totals
+        Builder(builder: (_) {
+          final totalCgst = _items.fold(0.0, (s, i) => s + i.cgstAmount);
+          final totalSgst = _items.fold(0.0, (s, i) => s + i.sgstAmount);
+          return Column(children: [
+            if (totalCgst > 0) ...[
+              const SizedBox(height: 6),
+              _summaryRow('CGST', totalCgst),
+            ],
+            if (totalSgst > 0) ...[
+              const SizedBox(height: 6),
+              _summaryRow('SGST', totalSgst),
+            ],
+          ]);
+        }),
 
         const Divider(thickness: 2),
         const SizedBox(height: 6),
@@ -1421,6 +1629,228 @@ class _NewBillScreenState extends State<NewBillScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // ============================================================================
+  // ACCOUNT SELECTOR DIALOG — same pattern as new_expenses.dart
+  // ============================================================================
+
+  Future<void> _showAccountSelector(MutableBillItem item) async {
+    final searchCtrl = TextEditingController();
+    List<Map<String, dynamic>> filtered = List.from(_coaExpAccounts);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          void doFilter(String q) {
+            setDlg(() {
+              filtered = q.trim().isEmpty
+                  ? List.from(_coaExpAccounts)
+                  : _coaExpAccounts
+                      .where((a) => (a['accountName'] as String)
+                          .toLowerCase()
+                          .contains(q.trim().toLowerCase()))
+                      .toList();
+            });
+          }
+
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+              child: Column(children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [_navyDark, _navyMid],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.account_tree_outlined, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Select Account',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ]),
+                ),
+
+                // Search bar
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                  child: TextField(
+                    controller: searchCtrl,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search accounts…',
+                      prefixIcon: const Icon(Icons.search, color: _navyAccent),
+                      suffixIcon: searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                searchCtrl.clear();
+                                doFilter('');
+                              })
+                          : null,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: _navyAccent, width: 2)),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    onChanged: doFilter,
+                  ),
+                ),
+
+                // Count
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                  child: Row(children: [
+                    Text('${filtered.length} account(s)',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                  ]),
+                ),
+
+                // List
+                Expanded(
+                  child: filtered.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.search_off, size: 40, color: Colors.grey[300]),
+                              const SizedBox(height: 8),
+                              Text('No accounts found',
+                                  style: TextStyle(color: Colors.grey[500])),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (_, i) {
+                            final acc  = filtered[i];
+                            final name = acc['accountName'] as String;
+                            final type = (acc['accountType'] as String?) ?? '';
+                            final isSelected = item.account == name;
+                            return ListTile(
+                              dense: true,
+                              selected: isSelected,
+                              selectedTileColor: _navyAccent.withOpacity(0.08),
+                              leading: CircleAvatar(
+                                radius: 16,
+                                backgroundColor: isSelected
+                                    ? _navyAccent
+                                    : _navyAccent.withOpacity(0.1),
+                                child: Icon(
+                                  Icons.account_tree_outlined,
+                                  size: 14,
+                                  color: isSelected ? Colors.white : _navyAccent,
+                                ),
+                              ),
+                              title: Text(name,
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: _navyDark)),
+                              subtitle: type.isNotEmpty
+                                  ? Text(type,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey[500]))
+                                  : null,
+                              trailing: isSelected
+                                  ? const Icon(Icons.check_circle,
+                                      color: _navyAccent, size: 18)
+                                  : null,
+                              onTap: () {
+                                setState(() => item.account = name);
+                                Navigator.pop(ctx);
+                              },
+                            );
+                          },
+                        ),
+                ),
+
+                // ── Add Account button ──────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        // Close the account selector dialog first
+                        Navigator.pop(ctx);
+
+                        // Navigate to NewChartOfAccountScreen
+                        // Pre-fill with whatever the user typed in the search box
+                        final created = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => NewChartOfAccountScreen(
+                              initialName: searchCtrl.text.trim().isNotEmpty
+                                  ? searchCtrl.text.trim()
+                                  : null,
+                              initialType: 'Expense',
+                              initialSubType: 'Expense',
+                            ),
+                          ),
+                        );
+
+                        // If a new account was saved, reload the list and
+                        // auto-select the newly created account on this item
+                        if (created == true && mounted) {
+                          await _loadCoaExpenseAccounts();
+                          // The last account added will be the one whose name
+                          // matches what was typed — pick it up if possible
+                          if (searchCtrl.text.trim().isNotEmpty) {
+                            final match = _coaExpAccounts.firstWhere(
+                              (a) => (a['accountName'] as String)
+                                  .toLowerCase()
+                                  .contains(searchCtrl.text.trim().toLowerCase()),
+                              orElse: () => {},
+                            );
+                            if (match.isNotEmpty) {
+                              setState(() => item.account = match['accountName'] as String);
+                            }
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add Account'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _navyAccent,
+                        side: const BorderSide(color: _navyAccent),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
     );
   }
 

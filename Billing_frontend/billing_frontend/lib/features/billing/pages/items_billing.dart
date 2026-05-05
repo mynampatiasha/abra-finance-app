@@ -101,6 +101,7 @@ class _ItemsBillingState extends State<ItemsBilling> {
   bool _selectAll = false;
 
   // ── Scroll ────────────────────────────────────────────────────────────────
+  bool _isTableView = true;
   final ScrollController _tableHScroll = ScrollController();
   final ScrollController _statsHScroll = ScrollController();
 
@@ -841,7 +842,7 @@ Future<void> _runBulkImport() async {
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _filtered.isEmpty
                         ? SizedBox(height: 400, child: _buildEmptyState())
-                        : _buildTable(),
+                        : _isTableView ? _buildTable() : _buildItemListView(),
             if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -883,6 +884,7 @@ Future<void> _runBulkImport() async {
     const SizedBox(width: 8),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Item',     Icons.add_rounded,        _navy,   _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import',       Icons.upload_file_rounded, _purple, _showImportDialog),
@@ -907,6 +909,7 @@ Future<void> _runBulkImport() async {
       ]),
       const SizedBox(height: 10),
       Row(children: [
+        _buildViewToggle(), const SizedBox(width: 10),
         _actionBtn('New Item',     Icons.add_rounded,        _navy,   _openNew),
         const SizedBox(width: 8),
         _actionBtn('Import',       Icons.upload_file_rounded, _purple, _showImportDialog),
@@ -933,6 +936,7 @@ Future<void> _runBulkImport() async {
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: [
+          _buildViewToggle(), const SizedBox(width: 8),
           _typeDropdown(),
           const SizedBox(width: 8),
           _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
@@ -1208,6 +1212,156 @@ Future<void> _runBulkImport() async {
 
   // ==========================================================================
   //  TABLE — DataTable with horizontal drag-to-scroll
+  // ==========================================================================
+
+  // ==========================================================================
+  //  VIEW TOGGLE + LIST VIEW
+  // ==========================================================================
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  Widget _buildItemListView() {
+    final items = _pageItems;
+    if (items.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildItemListCard(items[i]),
+      ),
+    );
+  }
+
+  Widget _buildItemListCard(ItemData item) {
+    final isSelected = _selectedIds.contains(item.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _openEdit(item), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Row 1: Checkbox + Name + Status
+            Row(children: [
+              Checkbox(value: isSelected, onChanged: (_) => _toggleSelect(item.id), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(
+                onTap: () => _openEdit(item),
+                child: Text(item.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+              )),
+              const SizedBox(width: 8),
+              _buildStatusBadge(item.status),
+            ]),
+            // Description
+            if (item.description != null && item.description!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 40),
+                child: Text(item.description!, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 2, overflow: TextOverflow.ellipsis),
+              ),
+            ],
+            const SizedBox(height: 10),
+            // Row 2: Type badge + Unit
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: item.type == 'Service' ? Colors.blue[50] : Colors.green[50],
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: (item.type == 'Service' ? Colors.blue[200] : Colors.green[200])!),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 6, height: 6, decoration: BoxDecoration(color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700], shape: BoxShape.circle)),
+                  const SizedBox(width: 4),
+                  Text(item.type, style: TextStyle(color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700], fontSize: 12, fontWeight: FontWeight.w700)),
+                ]),
+              ),
+              if (item.unit != null && item.unit!.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                Icon(Icons.straighten_outlined, size: 13, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(item.unit!, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ],
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            // Row 3: Prices + Actions
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Selling Price', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${item.sellingPrice.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Cost Price', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text(item.costPrice != null ? '₹${item.costPrice!.toStringAsFixed(2)}' : '—', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+              ])),
+              // Actions
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(
+                  onTap: () => _shareItem(item), borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                )),
+                const SizedBox(width: 6),
+                Tooltip(message: 'WhatsApp', child: InkWell(
+                  onTap: () => _whatsAppItem(item), borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.chat, size: 16, color: Color(0xFF25D366))),
+                )),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (value) async {
+                    switch (value) {
+                      case 'edit':   _openEdit(item);         break;
+                      case 'ticket': _raiseTicket(item);      break;
+                      case 'delete': await _deleteItem(item); break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: Color(0xFFE67E22)), title: Text('Raise Ticket', style: TextStyle(color: Color(0xFFE67E22))), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================================================
+  //  TABLE
   // ==========================================================================
 
   Widget _buildTable() {

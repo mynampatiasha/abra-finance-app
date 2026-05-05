@@ -34,6 +34,7 @@ import '../erp/erp_users_management_screen.dart';
 import '../../data/services/finance_auth_service.dart';
 import '../../core/services/api_service.dart';
 import 'pages/finance_profile_page.dart';
+import '../auth/finance_branch_selector_page.dart';
 import 'pages/currency_adjustments_list_page.dart';
 import 'pages/projects_list_page.dart';
 import 'pages/timesheets_list_page.dart';
@@ -225,9 +226,65 @@ class _BillingMainShellState extends State<BillingMainShell> {
   String                      _orgId         = '';
   String                      _orgName       = '';
   String?                     _orgLogoUrl;
+  String?                     _entityName;    // ✅ NEW: Entity/Group name
   Map<String, dynamic>        _permissions   = {};
   List<Map<String, dynamic>>  _organizations = [];
   bool                        _sessionLoaded = false;
+
+  // ── Branch data ───────────────────────────────────────────────────────────
+  List<Map<String, dynamic>>  _branches           = [];
+  List<String>                _selectedBranchIds  = [];
+
+  // ── Organization selection data ───────────────────────────────────────────
+  List<String>                _selectedOrgIds     = [];  // ✅ NEW: Track selected org IDs
+
+  String get _branchLabel {
+    if (_branches.isEmpty) return '';
+    if (_selectedBranchIds.isEmpty || _selectedBranchIds.length == _branches.length) return 'All Branches';
+    if (_selectedBranchIds.length == 1) {
+      final b = _branches.firstWhere((b) => b['branchId'] == _selectedBranchIds.first, orElse: () => {});
+      return (b['branchName'] as String?) ?? '1 Branch';
+    }
+    return '${_selectedBranchIds.length} Branches';
+  }
+
+  // ✅ NEW: Computed organization display label
+  String get _orgLabel {
+    // Check if multi-org mode is active
+    if (_organizations.length <= 1) {
+      // Single org mode - show the org name
+      return _orgName;
+    }
+    
+    // Multi-org mode - check what's selected
+    if (_selectedOrgIds.isEmpty) {
+      // No selection or default to current org
+      return _orgName;
+    }
+    
+    if (_selectedOrgIds.length == 1 && _selectedOrgIds.first == 'ALL') {
+      // All organizations selected
+      if (_entityName != null && _entityName!.isNotEmpty) {
+        return '$_entityName (All ${_organizations.length} Orgs)';
+      }
+      return 'All Organizations (${_organizations.length})';
+    }
+    
+    if (_selectedOrgIds.length == 1) {
+      // Single org selected - show its name
+      final org = _organizations.firstWhere(
+        (o) => o['orgId'] == _selectedOrgIds.first,
+        orElse: () => {},
+      );
+      return (org['orgName'] as String?) ?? _orgName;
+    }
+    
+    // Multiple specific orgs selected
+    if (_entityName != null && _entityName!.isNotEmpty) {
+      return '$_entityName (${_selectedOrgIds.length} Orgs)';
+    }
+    return '${_selectedOrgIds.length} Organizations';
+  }
 
   String _token = '';
 
@@ -353,21 +410,42 @@ class _BillingMainShellState extends State<BillingMainShell> {
     final orgId      = await FinanceSecureStorage.getOrgId()      ?? '';
     final orgName    = await FinanceSecureStorage.getOrgName()    ?? '';
     final orgLogoUrl = await FinanceSecureStorage.getOrgLogoUrl();
+    final entityName = await FinanceSecureStorage.getEntityName();  // ✅ NEW: Entity name
     final perms      = await FinanceSecureStorage.getPermissions();
     final orgs       = await FinanceSecureStorage.getOrganizations();
     final token      = await FinanceSecureStorage.getToken() ?? '';
+    var   branches   = await FinanceSecureStorage.getBranches();
+    final selBranches= await FinanceSecureStorage.getSelectedBranchIds();
+    final selOrgs    = await FinanceSecureStorage.getSelectedOrgIds();  // ✅ NEW: Load selected org IDs
+
+    // If storage has no branches but we have a valid token, fetch fresh from API
+    if (branches.isEmpty && token.isNotEmpty) {
+      try {
+        final res = await FinanceAuthService.get('/api/finance/branches');
+        if (res['success'] == true) {
+          branches = (res['data']?['branches'] as List? ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          await FinanceSecureStorage.saveBranches(branches);
+        }
+      } catch (_) {}
+    }
 
     if (mounted) {
       setState(() {
-        _userRole      = role;
-        _name          = name;
-        _orgId         = orgId;
-        _orgName       = orgName;
-        _orgLogoUrl    = orgLogoUrl;
-        _permissions   = perms;
-        _organizations = orgs;
-        _token         = token;
-        _sessionLoaded = true;
+        _userRole           = role;
+        _name               = name;
+        _orgId              = orgId;
+        _orgName            = orgName;
+        _orgLogoUrl         = orgLogoUrl;
+        _entityName         = entityName;  // ✅ NEW: Entity name
+        _permissions        = perms;
+        _organizations      = orgs;
+        _token              = token;
+        _branches           = branches;
+        _selectedBranchIds  = selBranches;
+        _selectedOrgIds     = selOrgs;  // ✅ NEW: Set selected org IDs
+        _sessionLoaded      = true;
       });
     }
   }
@@ -412,10 +490,37 @@ class _BillingMainShellState extends State<BillingMainShell> {
       if (!mounted) return;
       if (result['success'] == true) {
         ApiService().clearTokenCache();
-        if (mounted) setState(() { _currentRoute = 'loading'; _currentPageTitle = 'Dashboard'; _expandedSections.updateAll((key, _) => false); _orgId = orgId; _orgName = orgName; _orgLogoUrl = null; _permissions = {}; });
+        if (mounted) setState(() { _currentRoute = 'loading'; _currentPageTitle = 'Dashboard'; _expandedSections.updateAll((key, _) => false); _orgId = orgId; _orgName = orgName; _orgLogoUrl = null; _permissions = {}; _branches = []; _selectedBranchIds = []; });
+        await FinanceSecureStorage.saveBranches([]);
+        await FinanceSecureStorage.saveSelectedBranchIds([]);
         await _loadSession();
         await Future.delayed(const Duration(milliseconds: 300));
-        if (mounted) Navigator.pop(context);
+        if (mounted) Navigator.pop(context); // close loading dialog
+
+        // ── Show branch picker as a popup dialog (not a full page) ──────────
+        if (mounted && _branches.isNotEmpty) {
+          final allowedBranchIds = await FinanceSecureStorage.getAllowedBranchIds();
+          if (!mounted) return;
+          final branchResult = await showDialog<List<String>>(
+            context: context,
+            barrierDismissible: false,
+            barrierColor: Colors.black.withOpacity(0.5),
+            builder: (_) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+              child: _BranchPickerDialog(
+                branches:          _branches,
+                selectedBranchIds: _selectedBranchIds,
+                allowedBranchIds:  allowedBranchIds,
+              ),
+            ),
+          );
+          if (branchResult != null && mounted) {
+            await FinanceSecureStorage.saveSelectedBranchIds(branchResult);
+            setState(() { _selectedBranchIds = branchResult; });
+          }
+        }
+
         if (mounted) setState(() { _currentRoute = 'home'; _currentPageTitle = 'Dashboard'; });
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [const Icon(Icons.check_circle, color: Colors.white, size: 16), const SizedBox(width: 8), Text('Switched to $orgName')]),
@@ -428,6 +533,57 @@ class _BillingMainShellState extends State<BillingMainShell> {
     } catch (e) {
       if (mounted) Navigator.pop(context);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error switching organisation: $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
+    }
+  }
+
+  // ── Branch switcher ───────────────────────────────────────────────────────
+  Future<void> _showBranchSwitcher() async {
+    if (_branches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No branches set up for this organisation.'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+
+    // Read allowed branches for this user (empty = no restriction)
+    final allowedBranchIds = await FinanceSecureStorage.getAllowedBranchIds();
+
+    if (!mounted) return;
+    final result = await showDialog<List<String>>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.5),
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: _BranchPickerDialog(
+          branches:          _branches,
+          selectedBranchIds: _selectedBranchIds,
+          allowedBranchIds:  allowedBranchIds,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      await FinanceSecureStorage.saveSelectedBranchIds(result);
+      setState(() {
+        _selectedBranchIds = result;
+        _currentRoute      = 'loading';
+      });
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (mounted) setState(() => _currentRoute = 'home');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [
+          const Icon(Icons.account_tree_rounded, color: Colors.white, size: 16),
+          const SizedBox(width: 8),
+          Text(result.isEmpty ? 'Showing all branches' : 'Branch filter applied'),
+        ]),
+        backgroundColor: const Color(0xFF2563EB),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ));
     }
   }
 
@@ -494,7 +650,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
       case 'tms/raise_ticket':               return _EmbeddedPage(child: const RaiseTicketScreen());
       case 'tms/my_tickets':                 return _EmbeddedPage(child: const MyTicketsScreen());
       case 'tms/all_tickets':                return _EmbeddedPage(child: const AllTicketsScreen());
-      case 'tms/closed_tickets':             return _EmbeddedPage(child: const ClosedTicketsScreen());
+      case 'tms/closed_tickets':             return _ClosedTicketsLauncher();
       case 'items':                          return _EmbeddedPage(child: const ItemsBilling());
       case 'sales/customers':                return _EmbeddedPage(child: const CustomersListPage());
       case 'sales/invoices':                 return _EmbeddedPage(child: const InvoicesListPage());
@@ -559,6 +715,9 @@ class _BillingMainShellState extends State<BillingMainShell> {
       ),
     );
     if (confirm != true || !mounted) return;
+    // ✅ FIX: Clear API token cache FIRST before clearing storage
+    ApiService().clearTokenCache();
+    await ApiService().logout();
     await FinanceSecureStorage.clearSession();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const FinanceWelcomeScreen()), (route) => false);
@@ -580,8 +739,9 @@ class _BillingMainShellState extends State<BillingMainShell> {
       child: Scaffold(
         key: _scaffoldKey,
         drawer: isMobile ? _buildDrawer() : null,
-        body: GlobalTimerBar(
-          child: Row(children: [
+        body: SafeArea(
+          child: GlobalTimerBar(
+            child: Row(children: [
             if (!isMobile)
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
@@ -593,7 +753,8 @@ class _BillingMainShellState extends State<BillingMainShell> {
               Expanded(child: Container(color: _kPageBg, child: _getSelectedPage())),
             ])),
           ]),
-        ),
+            ),  // GlobalTimerBar
+          ),  // SafeArea
       ),
     );
   }
@@ -601,7 +762,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
   // ── Top bar ───────────────────────────────────────────────────────────────
   Widget _buildTopBar(bool isMobile) {
     return Container(
-      height: 60,
+      height: kToolbarHeight,
       decoration: const BoxDecoration(
         gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [_kNavyDark, _kNavy]),
       ),
@@ -622,7 +783,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
         Expanded(child: Text(_currentPageTitle, style: const TextStyle(color: _kWhite, fontSize: 18, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
 
         // ── Org name chip ─────────────────────────────────────────────────
-        if (_orgName.isNotEmpty)
+        if (_orgLabel.isNotEmpty)
           GestureDetector(
             onTap: () => _showOrgSwitcher(context),
             child: Container(
@@ -631,8 +792,8 @@ class _BillingMainShellState extends State<BillingMainShell> {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 const Icon(Icons.business, color: _kWhite, size: 14),
                 const SizedBox(width: 5),
-                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 120),
-                  child: Text(_orgName, style: const TextStyle(color: _kWhite, fontSize: 12, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 180),
+                  child: Text(_orgLabel, style: const TextStyle(color: _kWhite, fontSize: 12, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
                 if (_organizations.length > 1) ...[const SizedBox(width: 3), const Icon(Icons.swap_horiz, color: _kWhite, size: 14)],
               ]),
             ),
@@ -683,6 +844,45 @@ class _BillingMainShellState extends State<BillingMainShell> {
             ]),
             if (showFull && _orgName.isNotEmpty) ...[
               const SizedBox(height: 10),
+              // ── Entity Name (if set) ──────────────────────────────────────
+              if (_entityName != null && _entityName!.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        _kBlueAccent.withOpacity(0.15),
+                        _kBlueAccent.withOpacity(0.08),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _kBlueAccent.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.business_center_rounded, color: _kBlueAccent, size: 13),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _entityName!,
+                          style: TextStyle(
+                            color: _kBlueAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              // ── Organization Card ─────────────────────────────────────────
               GestureDetector(
                 onTap: () => _showOrgSwitcher(context),
                 child: Container(
@@ -691,13 +891,34 @@ class _BillingMainShellState extends State<BillingMainShell> {
                   child: Row(children: [
                     const Icon(Icons.business, color: _kWhite, size: 14), const SizedBox(width: 6),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_orgName, style: const TextStyle(color: _kWhite, fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                      Text(_orgLabel, style: const TextStyle(color: _kWhite, fontSize: 14, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
                       Text(_userRole.toUpperCase(), style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.5)),
                     ])),
                     if (_organizations.length > 1) const Icon(Icons.unfold_more, color: _kWhite, size: 14),
                   ]),
                 ),
               ),
+              // ── Branch switcher chip ────────────────────────────────────
+              if (_branches.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: _showBranchSwitcher,
+                  child: Container(
+                    width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3D8EFF).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF3D8EFF).withOpacity(0.35)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.account_tree_rounded, color: Color(0xFF3D8EFF), size: 13),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(_branchLabel, style: const TextStyle(color: Color(0xFF3D8EFF), fontSize: 12, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                      const Icon(Icons.swap_horiz_rounded, color: Color(0xFF3D8EFF), size: 13),
+                    ]),
+                  ),
+                ),
+              ],
             ],
           ]),
         ),
@@ -740,6 +961,40 @@ class _BillingMainShellState extends State<BillingMainShell> {
   }
 
   Widget _buildDrawer() => Drawer(child: _buildSidebarContent(isDrawer: true));
+}
+
+// =============================================================================
+// CLOSED TICKETS LAUNCHER — navigates as a full page on first build
+// =============================================================================
+class _ClosedTicketsLauncher extends StatefulWidget {
+  const _ClosedTicketsLauncher();
+
+  @override
+  State<_ClosedTicketsLauncher> createState() => _ClosedTicketsLauncherState();
+}
+
+class _ClosedTicketsLauncherState extends State<_ClosedTicketsLauncher> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ClosedTicketsScreen()),
+        ).then((_) {
+          // When user presses back, go back to dashboard in the shell
+          final shell = context.findAncestorStateOfType<_BillingMainShellState>();
+          shell?._goToDashboard();
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: CircularProgressIndicator(color: Color(0xFF1E3A8A)));
+  }
 }
 
 // =============================================================================
@@ -1115,87 +1370,761 @@ class _EmbeddedPage extends StatelessWidget {
 // =============================================================================
 // ORG SWITCHER CARD
 // =============================================================================
-class _OrgSwitcherCard extends StatelessWidget {
-  final List<Map<String, dynamic>>                             organizations;
-  final String                                                 currentOrgId;
-  final Future<void> Function(String orgId, String orgName)   onOrgSelected;
+// BRANCH PICKER DIALOG — same popup style as _OrgSwitcherCard
+// Returns List<String> of selected branchIds (empty = all branches)
+// =============================================================================
+class _BranchPickerDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> branches;
+  final List<String>               selectedBranchIds;
+  final List<String>               allowedBranchIds; // empty = no restriction
 
-  const _OrgSwitcherCard({required this.organizations, required this.currentOrgId, required this.onOrgSelected});
+  const _BranchPickerDialog({
+    required this.branches,
+    required this.selectedBranchIds,
+    required this.allowedBranchIds,
+  });
+
+  @override
+  State<_BranchPickerDialog> createState() => _BranchPickerDialogState();
+}
+
+class _BranchPickerDialogState extends State<_BranchPickerDialog> {
+  late Set<String> _selected;
+  late List<Map<String, dynamic>> _visible;
+
+  @override
+  void initState() {
+    super.initState();
+    // Filter branches to only allowed ones if restriction exists
+    _visible = widget.allowedBranchIds.isEmpty
+        ? widget.branches
+        : widget.branches
+            .where((b) => widget.allowedBranchIds.contains(b['branchId'] as String? ?? ''))
+            .toList();
+    // Pre-select only branches that are both currently selected and visible
+    _selected = widget.selectedBranchIds
+        .where((id) => _visible.any((b) => b['branchId'] == id))
+        .toSet();
+  }
+
+  void _toggle(String branchId) {
+    setState(() {
+      _selected.contains(branchId) ? _selected.remove(branchId) : _selected.add(branchId);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(maxWidth: 420),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 40, offset: const Offset(0, 16))]),
+      constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 40, offset: const Offset(0, 16))],
+      ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // ── Header ──────────────────────────────────────────────────────────
         Container(
           padding: const EdgeInsets.all(20),
           decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: LinearGradient(
+              colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
             borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
           ),
           child: Row(children: [
-            Container(padding: const EdgeInsets.all(10),
+            Container(
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 20)),
+              child: const Icon(Icons.account_tree_rounded, color: Colors.white, size: 20),
+            ),
             const SizedBox(width: 14),
             const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Switch Organisation', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+              Text('Select Branch', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
               SizedBox(height: 2),
-              Text('Select the organisation to work in', style: TextStyle(color: Colors.white60, fontSize: 12)),
+              Text('Leave all unchecked to see all branches', style: TextStyle(color: Colors.white60, fontSize: 12)),
             ])),
-            IconButton(icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20), onPressed: () => Navigator.pop(context), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+              onPressed: () => Navigator.pop(context),
+              padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+            ),
           ]),
         ),
+
+        // ── Branch list ──────────────────────────────────────────────────────
         Flexible(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
-            child: Column(children: organizations.map((org) {
-              final orgId     = org['orgId']?.toString()   ?? '';
-              final orgName   = org['orgName']?.toString() ?? '';
-              final role      = org['role']?.toString()    ?? '';
-              final isCurrent = orgId == currentOrgId;
+            child: Column(children: _visible.map((branch) {
+              final branchId   = branch['branchId']   as String? ?? '';
+              final branchName = branch['branchName'] as String? ?? '';
+              final city       = branch['city']       as String? ?? '';
+              final isChecked  = _selected.contains(branchId);
               return GestureDetector(
-                onTap: () => onOrgSelected(orgId, orgName),
+                onTap: () => _toggle(branchId),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
-                    color: isCurrent ? const Color(0xFF2563EB).withOpacity(0.06) : const Color(0xFFF8FAFC),
+                    color: isChecked ? const Color(0xFF2563EB).withOpacity(0.06) : const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0), width: isCurrent ? 2 : 1),
+                    border: Border.all(
+                      color: isChecked ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                      width: isChecked ? 2 : 1,
+                    ),
                   ),
                   child: Row(children: [
-                    Container(width: 46, height: 46,
-                      decoration: BoxDecoration(color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(12)),
-                      child: Center(child: Text(orgName.isNotEmpty ? orgName[0].toUpperCase() : 'O',
-                          style: TextStyle(color: isCurrent ? Colors.white : const Color(0xFF64748B), fontSize: 18, fontWeight: FontWeight.bold)))),
+                    Container(
+                      width: 46, height: 46,
+                      decoration: BoxDecoration(
+                        color: isChecked ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(child: Text(
+                        branchName.isNotEmpty ? branchName[0].toUpperCase() : 'B',
+                        style: TextStyle(
+                          color: isChecked ? Colors.white : const Color(0xFF64748B),
+                          fontSize: 18, fontWeight: FontWeight.bold,
+                        ),
+                      )),
+                    ),
                     const SizedBox(width: 14),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(orgName, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFF0F172A))),
-                      const SizedBox(height: 4),
-                      Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: isCurrent ? const Color(0xFF2563EB).withOpacity(0.1) : const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(6)),
-                        child: Text(role.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isCurrent ? const Color(0xFF2563EB) : const Color(0xFF64748B), letterSpacing: 0.5))),
+                      Text(branchName, style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600,
+                        color: isChecked ? const Color(0xFF2563EB) : const Color(0xFF0F172A),
+                      )),
+                      if (city.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Row(children: [
+                          const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF94A3B8)),
+                          const SizedBox(width: 4),
+                          Text(city, style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                        ]),
+                      ],
                     ])),
-                    if (isCurrent)
-                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: const Color(0xFF2563EB).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                        child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.check_circle_rounded, color: Color(0xFF2563EB), size: 14), SizedBox(width: 4),
-                          Text('Active', style: TextStyle(color: Color(0xFF2563EB), fontSize: 11, fontWeight: FontWeight.w600)),
-                        ]))
-                    else
-                      const Icon(Icons.chevron_right_rounded, color: Color(0xFFCBD5E1), size: 20),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 24, height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isChecked ? const Color(0xFF2563EB) : Colors.transparent,
+                        border: Border.all(
+                          color: isChecked ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
+                          width: 2,
+                        ),
+                      ),
+                      child: isChecked
+                          ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
+                          : null,
+                    ),
                   ]),
                 ),
               );
             }).toList()),
           ),
         ),
+
+        // ── Footer buttons ───────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Row(children: [
+            // Select All / Clear
+            TextButton(
+              onPressed: () => setState(() {
+                _selected.length == _visible.length
+                    ? _selected.clear()
+                    : _selected = _visible.map((b) => b['branchId'] as String? ?? '').toSet();
+              }),
+              child: Text(
+                _selected.length == _visible.length ? 'Clear All' : 'Select All',
+                style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              ),
+            ),
+            const Spacer(),
+            // Confirm
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, _selected.toList()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Text(
+                _selected.isEmpty ? 'All Branches' : 'Apply (${_selected.length})',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+            ),
+          ]),
+        ),
       ]),
+    );
+  }
+}
+
+// =============================================================================
+class _OrgSwitcherCard extends StatefulWidget {
+  final List<Map<String, dynamic>> organizations;
+  final String currentOrgId;
+  final Future<void> Function(String orgId, String orgName) onOrgSelected;
+
+  const _OrgSwitcherCard({
+    required this.organizations,
+    required this.currentOrgId,
+    required this.onOrgSelected,
+  });
+
+  @override
+  State<_OrgSwitcherCard> createState() => _OrgSwitcherCardState();
+}
+
+class _OrgSwitcherCardState extends State<_OrgSwitcherCard> {
+  Set<String> _selectedOrgIds = {};
+  bool _selectAll = false;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentSelection();
+  }
+
+  Future<void> _loadCurrentSelection() async {
+    final selectedIds = await FinanceSecureStorage.getSelectedOrgIds();
+    setState(() {
+      if (selectedIds.isNotEmpty && selectedIds[0] == 'ALL') {
+        _selectAll = true;
+        _selectedOrgIds = widget.organizations
+            .map((org) => org['orgId'] as String)
+            .toSet();
+      } else if (selectedIds.isNotEmpty) {
+        _selectedOrgIds = selectedIds.toSet();
+        _selectAll = _selectedOrgIds.length == widget.organizations.length;
+      } else {
+        // Default: current org only
+        _selectedOrgIds = {widget.currentOrgId};
+      }
+    });
+  }
+
+  void _toggleOrgSelection(String orgId) {
+    setState(() {
+      if (_selectedOrgIds.contains(orgId)) {
+        _selectedOrgIds.remove(orgId);
+        _selectAll = false;
+      } else {
+        _selectedOrgIds.add(orgId);
+        if (_selectedOrgIds.length == widget.organizations.length) {
+          _selectAll = true;
+        }
+      }
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      _selectAll = !_selectAll;
+      if (_selectAll) {
+        _selectedOrgIds = widget.organizations
+            .map((org) => org['orgId'] as String)
+            .toSet();
+      } else {
+        _selectedOrgIds.clear();
+      }
+    });
+  }
+
+  Future<void> _applySelection() async {
+    if (_selectedOrgIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one organisation'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    try {
+      // ✅ FIX: If single org selected, switch backend context via selectOrg
+      if (_selectedOrgIds.length == 1 && !_selectAll) {
+        final selectedOrgId = _selectedOrgIds.first;
+        
+        // Only call selectOrg if switching to a different org
+        if (selectedOrgId != widget.currentOrgId) {
+          final result = await FinanceAuthService.selectOrg(selectedOrgId);
+          
+          if (result['success'] != true) {
+            if (!mounted) return;
+            setState(() => _loading = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message'] ?? 'Failed to switch organisation'),
+                backgroundColor: Colors.red,
+              ),
+            );
+            return;
+          }
+          
+          // Clear API token cache after org switch
+          ApiService().clearTokenCache();
+          
+          // Clear stored branches so _loadSession will fetch fresh ones
+          await FinanceSecureStorage.saveBranches([]);
+          await FinanceSecureStorage.saveSelectedBranchIds([]);
+        }
+        
+        // Save single org selection
+        await FinanceSecureStorage.saveSelectedOrgIds([selectedOrgId]);
+      } else {
+        // Multi-org or "All" selection — save selection without backend switch
+        if (_selectAll) {
+          await FinanceSecureStorage.saveSelectedOrgIds(['ALL']);
+        } else {
+          await FinanceSecureStorage.saveSelectedOrgIds(_selectedOrgIds.toList());
+        }
+        
+        // If multi-org, select ALL branches
+        await FinanceSecureStorage.saveSelectedBranchIds([]);
+      }
+
+      setState(() => _loading = false);
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      // Refresh the page
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _selectAll
+                ? 'Viewing all organizations'
+                : _selectedOrgIds.length == 1
+                    ? 'Switched to ${widget.organizations.firstWhere((o) => o['orgId'] == _selectedOrgIds.first, orElse: () => {})['orgName'] ?? 'organization'}'
+                    : 'Viewing ${_selectedOrgIds.length} organizations',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Trigger a rebuild of the main shell
+      if (context.mounted) {
+        // Force refresh by popping and pushing
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const BillingMainShell()),
+        );
+      }
+    } catch (e) {
+      setState(() => _loading = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error switching organisation: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 420, maxHeight: 600),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 40,
+            offset: const Offset(0, 16),
+          )
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.swap_horiz_rounded,
+                      color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Switch Organisation',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold)),
+                      SizedBox(height: 2),
+                      Text('Select one or more organisations',
+                          style: TextStyle(
+                              color: Colors.white60, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded,
+                      color: Colors.white, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  // ✅ NEW: Entity Name Display (if set)
+                  FutureBuilder<String?>(
+                    future: FinanceSecureStorage.getEntityName(),
+                    builder: (context, snapshot) {
+                      final entityName = snapshot.data;
+                      if (entityName == null || entityName.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF2563EB).withOpacity(0.08),
+                              const Color(0xFF3B82F6).withOpacity(0.04),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF2563EB).withOpacity(0.2),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2563EB).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.business_center_rounded,
+                                color: Color(0xFF2563EB),
+                                size: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Entity/Group',
+                                    style: TextStyle(
+                                      color: Color(0xFF64748B),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    entityName,
+                                    style: const TextStyle(
+                                      color: Color(0xFF0F172A),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  // "All Organizations" checkbox
+                  GestureDetector(
+                    onTap: _loading ? null : _toggleSelectAll,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _selectAll
+                            ? const Color(0xFF2563EB).withOpacity(0.06)
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _selectAll
+                              ? const Color(0xFF2563EB)
+                              : const Color(0xFFE2E8F0),
+                          width: _selectAll ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: _selectAll
+                                  ? const Color(0xFF2563EB)
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: _selectAll
+                                    ? const Color(0xFF2563EB)
+                                    : const Color(0xFFCBD5E1),
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: _selectAll
+                                ? const Icon(Icons.check,
+                                    color: Colors.white, size: 16)
+                                : null,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'All Organizations',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${widget.organizations.length} orgs',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF2563EB),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Individual org checkboxes
+                  ...widget.organizations.map((org) {
+                    final orgId = org['orgId']?.toString() ?? '';
+                    final orgName = org['orgName']?.toString() ?? '';
+                    final role = org['role']?.toString() ?? '';
+                    final isSelected = _selectedOrgIds.contains(orgId);
+
+                    return GestureDetector(
+                      onTap: _loading
+                          ? null
+                          : () => _toggleOrgSelection(orgId),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF2563EB).withOpacity(0.06)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF2563EB)
+                                : const Color(0xFFE2E8F0),
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF2563EB)
+                                    : Colors.transparent,
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF2563EB)
+                                      : const Color(0xFFCBD5E1),
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: isSelected
+                                  ? const Icon(Icons.check,
+                                      color: Colors.white, size: 16)
+                                  : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF2563EB)
+                                    : const Color(0xFFE2E8F0),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  orgName.isNotEmpty
+                                      ? orgName[0].toUpperCase()
+                                      : 'O',
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : const Color(0xFF64748B),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    orgName,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: isSelected
+                                          ? const Color(0xFF2563EB)
+                                          : const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? const Color(0xFF2563EB)
+                                              .withOpacity(0.1)
+                                          : const Color(0xFFE2E8F0),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      role.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: isSelected
+                                            ? const Color(0xFF2563EB)
+                                            : const Color(0xFF64748B),
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ),
+
+          // Apply button
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(
+                top: BorderSide(color: const Color(0xFFE2E8F0)),
+              ),
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed:
+                    _loading || _selectedOrgIds.isEmpty ? null : _applySelection,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  disabledBackgroundColor: const Color(0xFFE2E8F0),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                child: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(
+                        _selectedOrgIds.isEmpty
+                            ? 'Select at least one'
+                            : _selectAll
+                                ? 'Apply - All Organizations'
+                                : 'Apply - ${_selectedOrgIds.length} Organisation${_selectedOrgIds.length != 1 ? 's' : ''}',
+                        style: TextStyle(
+                          color: _selectedOrgIds.isEmpty
+                              ? const Color(0xFF94A3B8)
+                              : Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

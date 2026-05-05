@@ -11,11 +11,13 @@
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/finance_secure_storage.dart';
 import '../../data/services/finance_auth_service.dart';
 import 'finance_register_page.dart';
 import 'finance_org_selector_page.dart';
 import 'finance_post_login_splash.dart';
+import 'finance_branch_selector_page.dart';
 import '../billing/billing_main_shell.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
@@ -91,14 +93,20 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
     if (res['success'] == true) {
       final data = res['data'] as Map<String, dynamic>;
       if (res['requireOrgSelect'] == true) {
-        await FinanceSecureStorage.saveTempToken(data['tempToken'] ?? '');
+        final tempToken = data['tempToken'] as String? ?? '';
+        await FinanceSecureStorage.saveTempToken(tempToken);
         final orgs = List<Map<String, dynamic>>.from(data['organizations'] ?? []);
         final user = data['user'] as Map<String, dynamic>;
         if (!mounted) return;
+        TextInput.finishAutofillContext();
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => FinanceOrgSelectorPage(organizations: orgs, user: user),
+            builder: (_) => FinanceOrgSelectorPage(
+              organizations: orgs,
+              user: user,
+              tempToken: tempToken,   // ✅ pass directly — avoids web storage race
+            ),
           ),
         );
       } else {
@@ -114,13 +122,15 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
           orgName: user['orgName'] ?? '',
         );
         if (!mounted) return;
+        TextInput.finishAutofillContext();
         Navigator.pushReplacement(
           context,
           PageRouteBuilder(
-            pageBuilder: (_, __, ___) => FinancePostLoginSplash(
-              userName:    user['name'] ?? 'User',
-              orgName:     user['orgName'] ?? 'Your Organisation',
-              destination: const BillingMainShell(),
+            pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
+              orgId:          user['orgId'] ?? '',
+              orgName:        user['orgName'] ?? 'Your Organisation',
+              userName:       user['name'] ?? 'User',
+              isInitialLogin: true,
             ),
             transitionsBuilder: (_, anim, __, child) =>
                 FadeTransition(opacity: anim, child: child),
@@ -306,9 +316,10 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
           BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 40, offset: const Offset(0, 16)),
         ],
       ),
-      child: Form(
-        key: _formKey,
-        child: Column(
+      child: AutofillGroup(
+        child: Form(
+          key: _formKey,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text('Sign In',
@@ -341,6 +352,7 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
               ctrl: _emailCtrl, label: 'Email Address',
               hint: 'you@company.com', icon: Icons.email_outlined,
               keyboard: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Email is required';
                 if (!v.contains('@')) return 'Enter a valid email';
@@ -353,6 +365,7 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
               ctrl: _pwCtrl, label: 'Password',
               hint: '••••••••', icon: Icons.lock_outline_rounded,
               obscure: _obscure,
+              autofillHints: const [AutofillHints.password],
               suffix: IconButton(
                 icon: Icon(
                   _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -449,12 +462,11 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
               ),
             ),
           ],
-        ),
-      ),
+        ),  // Column
+        ),  // Form
+      ),    // AutofillGroup
     );
   }
-
-  // ── Field — pure white text ────────────────────────────────────────────────
   Widget _buildField({
     required TextEditingController ctrl,
     required String label,
@@ -463,12 +475,14 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
     TextInputType keyboard = TextInputType.text,
     bool obscure = false,
     Widget? suffix,
+    List<String>? autofillHints,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: ctrl,
       keyboardType: keyboard,
       obscureText: obscure,
+      autofillHints: autofillHints,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       validator: validator,
       decoration: InputDecoration(

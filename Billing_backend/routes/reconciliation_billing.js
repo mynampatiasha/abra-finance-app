@@ -1,14 +1,14 @@
-﻿// ============================================================================
+// ============================================================================
 // RECONCILIATION BILLING - COMPLETE BACKEND (ALL FIXES APPLIED)
 // ============================================================================
 // File: backend/routes/reconciliation_billing.js
 // 
 // FIXES APPLIED:
-// ✅ 1. Support both account ID and account name in queries
-// ✅ 2. Better error messages for debugging
-// ✅ 3. Enhanced match validation with detailed warnings
-// ✅ 4. Fixed petty cash expense queries
-// ✅ 5. Added comprehensive logging
+// ? 1. Support both account ID and account name in queries
+// ? 2. Better error messages for debugging
+// ? 3. Enhanced match validation with detailed warnings
+// ? 4. Fixed petty cash expense queries
+// ? 5. Added comprehensive logging
 // ============================================================================
 
 const express = require('express');
@@ -532,9 +532,9 @@ async function createAuditLog(sessionId, accountId, action, details = null, perf
       notes,
     });
     await log.save();
-    console.log(`📋 Audit log: ${action} — Session ${sessionId}`);
+    console.log(`?? Audit log: ${action} � Session ${sessionId}`);
   } catch (err) {
-    console.error('⚠️ Failed to create audit log (non-blocking):', err.message);
+    console.error('?? Failed to create audit log (non-blocking):', err.message);
   }
 }
 // ============================================================================
@@ -556,7 +556,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  console.log('📋 Reconciliation file upload check:');
+  console.log('?? Reconciliation file upload check:');
   console.log('  - Filename:', file.originalname);
   console.log('  - MIME type:', file.mimetype);
   
@@ -566,10 +566,10 @@ const fileFilter = (req, file, cb) => {
   console.log('  - Extension valid:', hasValidExtension);
 
   if (hasValidExtension) {
-    console.log('✅ File accepted');
+    console.log('? File accepted');
     return cb(null, true);
   } else {
-    console.log('❌ File rejected - invalid extension');
+    console.log('? File rejected - invalid extension');
     cb(new Error('Only Excel (.xlsx, .xls) and CSV (.csv) files are allowed!'));
   }
 };
@@ -647,7 +647,7 @@ function parseStatementFile(filePath, mapping) {
       header: 1
     });
 
-    console.log(`📊 Total rows in file: ${rawData.length}`);
+    console.log(`?? Total rows in file: ${rawData.length}`);
     
     let headerRowIndex = -1;
     const { columnMappings } = mapping;
@@ -665,13 +665,13 @@ function parseStatementFile(filePath, mapping) {
       
       if (matchCount >= 2) {
         headerRowIndex = i;
-        console.log(`✅ Found header row at index ${i}: ${row.join(' | ')}`);
+        console.log(`? Found header row at index ${i}: ${row.join(' | ')}`);
         break;
       }
     }
     
     if (headerRowIndex === -1) {
-      console.log('⚠️ Could not auto-detect header row, using row 0');
+      console.log('?? Could not auto-detect header row, using row 0');
       headerRowIndex = 0;
     }
     
@@ -680,11 +680,11 @@ function parseStatementFile(filePath, mapping) {
       range: headerRowIndex
     });
 
-    console.log(`📊 Parsed ${data.length} data rows (after skipping ${headerRowIndex + 1} header rows)`);
+    console.log(`?? Parsed ${data.length} data rows (after skipping ${headerRowIndex + 1} header rows)`);
     
     return data;
   } catch (error) {
-    console.error('❌ Error parsing file:', error);
+    console.error('? Error parsing file:', error);
     throw new Error(`Failed to parse file: ${error.message}`);
   }
 }
@@ -735,7 +735,7 @@ function extractTransactionData(row, mapping) {
   
   const actualCreditColumn = findColumnName(row, creditColumnNames);
   
-  console.log(`📊 Found columns: Date="${actualDateColumn}", Debit="${actualDebitColumn}", Credit="${actualCreditColumn}"`);
+  console.log(`?? Found columns: Date="${actualDateColumn}", Debit="${actualDebitColumn}", Credit="${actualCreditColumn}"`);
   
   let debitValue = actualDebitColumn ? row[actualDebitColumn] : 0;
   let creditValue = actualCreditColumn ? row[actualCreditColumn] : 0;
@@ -817,11 +817,11 @@ function extractTransactionData(row, mapping) {
   };
 }
 
-// ✅ FIXED: Auto-match with account name/ID support
+// ? FIXED: Auto-match with account name/ID support
 async function autoMatchTransactions(accountId, dateRange) {
-  console.log('🔍 Starting auto-match algorithm...');
-  console.log('📊 Account ID:', accountId);
-  console.log('📊 Date range:', dateRange);
+  console.log('?? Starting auto-match algorithm...');
+  console.log('?? Account ID:', accountId);
+  console.log('?? Date range:', dateRange);
 
   const { startDate, endDate } = dateRange;
 
@@ -831,20 +831,20 @@ async function autoMatchTransactions(accountId, dateRange) {
     reconciliationStatus: 'UNMATCHED',
   }).sort({ transactionDate: 1 });
 
-  console.log(`📊 Found ${providerTxns.length} unmatched provider transactions`);
+  console.log(`?? Found ${providerTxns.length} unmatched provider transactions`);
 
  const PaymentAccount = mongoose.models.PaymentAccount || 
   mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
   const account = await PaymentAccount.findById(accountId);
 
   if (!account) {
-    console.log('❌ Account not found:', accountId);
+    console.log('? Account not found:', accountId);
     return { matchedCount: 0, pendingCount: 0, totalProcessed: 0 };
   }
 
-  console.log('✅ Found account:', account.accountName);
+  console.log('? Found account:', account.accountName);
 
-  // ✅ FIXED: Merged $or into $and — two $or keys in same object
+  // ? FIXED: Merged $or into $and � two $or keys in same object
   // silently overwrites the first one in MongoDB
   const systemExpenses = await Expense.find({
     $and: [
@@ -870,22 +870,22 @@ async function autoMatchTransactions(accountId, dateRange) {
     ]
   }).sort({ date: 1 });
 
-  console.log(`📊 Found ${systemExpenses.length} unmatched system expenses`);
+  console.log(`?? Found ${systemExpenses.length} unmatched system expenses`);
 
   if (systemExpenses.length > 0) {
-    console.log('📋 Sample expenses:');
+    console.log('?? Sample expenses:');
     systemExpenses.slice(0, 3).forEach((exp, i) => {
-      console.log(`  ${i + 1}. Date: ${exp.date}, Amount: ₹${exp.total}, Account: ${exp.expenseAccount}, Paid Through: ${exp.paidThrough}`);
+      console.log(`  ${i + 1}. Date: ${exp.date}, Amount: ?${exp.total}, Account: ${exp.expenseAccount}, Paid Through: ${exp.paidThrough}`);
     });
   }
 
   if (providerTxns.length === 0) {
-    console.log('⚠️ No provider transactions to match');
+    console.log('?? No provider transactions to match');
     return { matchedCount: 0, pendingCount: 0, totalProcessed: 0 };
   }
 
   if (systemExpenses.length === 0) {
-    console.log('⚠️ No system expenses found to match against');
+    console.log('?? No system expenses found to match against');
     return { matchedCount: 0, pendingCount: 0, totalProcessed: providerTxns.length };
   }
 
@@ -946,7 +946,7 @@ async function autoMatchTransactions(accountId, dateRange) {
         await bestMatch.save();
 
         matchedCount++;
-        console.log(`✅ Auto-matched (${bestConfidence}%): ₹${providerTxn.amount} ↔ ₹${bestMatch.total} ${bestMatch.expenseAccount}`);
+        console.log(`? Auto-matched (${bestConfidence}%): ?${providerTxn.amount} ? ?${bestMatch.total} ${bestMatch.expenseAccount}`);
       } else {
         providerTxn.reconciliationStatus = 'PENDING';
         providerTxn.matchedExpenseId = bestMatch._id;
@@ -956,14 +956,14 @@ async function autoMatchTransactions(accountId, dateRange) {
         await providerTxn.save();
 
         pendingCount++;
-        console.log(`🟡 Pending match (${bestConfidence}%): ₹${providerTxn.amount} ↔ ₹${bestMatch.total} ${bestMatch.expenseAccount}`);
+        console.log(`?? Pending match (${bestConfidence}%): ?${providerTxn.amount} ? ?${bestMatch.total} ${bestMatch.expenseAccount}`);
       }
     } else {
-      console.log(`❌ No match found for: ₹${providerTxn.amount} on ${providerTxn.transactionDate.toISOString().split('T')[0]}`);
+      console.log(`? No match found for: ?${providerTxn.amount} on ${providerTxn.transactionDate.toISOString().split('T')[0]}`);
     }
   }
 
-  console.log(`\n✅ Auto-match complete: ${matchedCount} matched, ${pendingCount} pending`);
+  console.log(`\n? Auto-match complete: ${matchedCount} matched, ${pendingCount} pending`);
 
   return {
     matchedCount,
@@ -972,9 +972,9 @@ async function autoMatchTransactions(accountId, dateRange) {
   };
 }
 
-// ✅ FIXED: Calculate session stats with account name/ID support
+// ? FIXED: Calculate session stats with account name/ID support
 async function calculateSessionStats(accountId, startDate, endDate) {
-  console.log('📊 Calculating session stats...');
+  console.log('?? Calculating session stats...');
   console.log('  - Account ID:', accountId);
   console.log('  - Date range:', startDate, 'to', endDate);
   
@@ -1075,8 +1075,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
       });
     }
 
-    console.log('📥 Processing import for account:', accountId);
-    console.log('📄 File:', req.file.originalname);
+    console.log('?? Processing import for account:', accountId);
+    console.log('?? File:', req.file.originalname);
 
     let mapping;
 
@@ -1121,42 +1121,42 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const skipped = [];
     const duplicates = [];
 
-    console.log('\n📊 ========================================');
-    console.log('📊 STARTING ROW-BY-ROW IMPORT ANALYSIS');
-    console.log('📊 ========================================');
-    console.log(`📊 Total rows in file: ${rows.length}`);
-    console.log(`📊 Column mappings:`, JSON.stringify(mapping.columnMappings, null, 2));
-    console.log('📊 ========================================\n');
+    console.log('\n?? ========================================');
+    console.log('?? STARTING ROW-BY-ROW IMPORT ANALYSIS');
+    console.log('?? ========================================');
+    console.log(`?? Total rows in file: ${rows.length}`);
+    console.log(`?? Column mappings:`, JSON.stringify(mapping.columnMappings, null, 2));
+    console.log('?? ========================================\n');
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNumber = i + 1;
 
       try {
-        console.log(`\n🔍 ===== ROW ${rowNumber} ANALYSIS =====`);
-        console.log(`📄 Raw row data:`, JSON.stringify(row, null, 2));
+        console.log(`\n?? ===== ROW ${rowNumber} ANALYSIS =====`);
+        console.log(`?? Raw row data:`, JSON.stringify(row, null, 2));
 
         const dateColumn = mapping.columnMappings.dateColumn;
         const dateValue = row[dateColumn];
 
-        console.log(`📅 Date column name: "${dateColumn}"`);
-        console.log(`📅 Date value found: "${dateValue}" (type: ${typeof dateValue})`);
+        console.log(`?? Date column name: "${dateColumn}"`);
+        console.log(`?? Date value found: "${dateValue}" (type: ${typeof dateValue})`);
 
         const debitColumn = mapping.columnMappings.debitColumn || 'Debit';
         const creditColumn = mapping.columnMappings.creditColumn || 'Credit';
         const debitValue = row[debitColumn];
         const creditValue = row[creditColumn];
 
-        console.log(`💰 Debit column name: "${debitColumn}"`);
-        console.log(`💰 Debit value found: "${debitValue}" (type: ${typeof debitValue})`);
-        console.log(`💰 Credit column name: "${creditColumn}"`);
-        console.log(`💰 Credit value found: "${creditValue}" (type: ${typeof creditValue})`);
+        console.log(`?? Debit column name: "${debitColumn}"`);
+        console.log(`?? Debit value found: "${debitValue}" (type: ${typeof debitValue})`);
+        console.log(`?? Credit column name: "${creditColumn}"`);
+        console.log(`?? Credit value found: "${creditValue}" (type: ${typeof creditValue})`);
 
         if (!dateValue || (!debitValue && !creditValue)) {
           const reason = !dateValue
             ? `Empty date column "${dateColumn}"`
             : `No amount in Debit ("${debitColumn}") or Credit ("${creditColumn}")`;
-          console.log(`⏭️ SKIPPED: ${reason}`);
+          console.log(`?? SKIPPED: ${reason}`);
           skipped.push({ row: rowNumber, reason });
           continue;
         }
@@ -1167,24 +1167,24 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         if (isHeader) {
           const reason = `Header row detected: "${dateStr}"`;
-          console.log(`⏭️ SKIPPED: ${reason}`);
+          console.log(`?? SKIPPED: ${reason}`);
           skipped.push({ row: rowNumber, reason });
           continue;
         }
 
-        console.log(`✅ Row ${rowNumber} passed validation checks`);
-        console.log(`🔄 Attempting to extract transaction data...`);
+        console.log(`? Row ${rowNumber} passed validation checks`);
+        console.log(`?? Attempting to extract transaction data...`);
 
         const txnData = extractTransactionData(row, mapping);
 
-        console.log(`✅ Transaction data extracted:`, {
+        console.log(`? Transaction data extracted:`, {
           date: txnData.transactionDate,
           amount: txnData.amount,
           type: txnData.transactionType,
           description: txnData.description
         });
 
-        // ── DUPLICATE DETECTION ───────────────────────────────────────────────
+        // -- DUPLICATE DETECTION -----------------------------------------------
         // Check if a transaction with the same accountId + amount + transactionDate
         // already exists in the database. If yes, skip and count as duplicate.
         // Date comparison uses a 1-minute window to handle minor time offsets
@@ -1205,8 +1205,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
         });
 
         if (existingTxn) {
-          const dupReason = `Duplicate: same account, amount ₹${txnData.amount}, date ${txnData.transactionDate.toISOString().split('T')[0]}, type ${txnData.transactionType}`;
-          console.log(`⚠️ DUPLICATE SKIPPED (Row ${rowNumber}): ${dupReason}`);
+          const dupReason = `Duplicate: same account, amount ?${txnData.amount}, date ${txnData.transactionDate.toISOString().split('T')[0]}, type ${txnData.transactionType}`;
+          console.log(`?? DUPLICATE SKIPPED (Row ${rowNumber}): ${dupReason}`);
           duplicates.push({
             row: rowNumber,
             reason: dupReason,
@@ -1216,7 +1216,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
           });
           continue;
         }
-        // ── END DUPLICATE DETECTION ───────────────────────────────────────────
+        // -- END DUPLICATE DETECTION -------------------------------------------
 
         const providerTxn = new ProviderTransaction({
           accountId,
@@ -1230,11 +1230,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
         await providerTxn.save();
         imported.push(providerTxn);
 
-        console.log(`✅✅✅ Row ${rowNumber}: SUCCESSFULLY IMPORTED - ${txnData.transactionDate.toISOString().split('T')[0]} - ₹${txnData.amount}`);
+        console.log(`??? Row ${rowNumber}: SUCCESSFULLY IMPORTED - ${txnData.transactionDate.toISOString().split('T')[0]} - ?${txnData.amount}`);
 
       } catch (error) {
-        console.error(`❌❌❌ Row ${rowNumber} ERROR:`, error.message);
-        console.error(`❌ Full error:`, error);
+        console.error(`??? Row ${rowNumber} ERROR:`, error.message);
+        console.error(`? Full error:`, error);
         errors.push({
           row: rowNumber,
           error: error.message,
@@ -1242,27 +1242,27 @@ router.post('/import', upload.single('file'), async (req, res) => {
       }
     }
 
-    console.log('\n📊 ========================================');
-    console.log('📊 IMPORT SUMMARY');
-    console.log('📊 ========================================');
-    console.log(`✅ Successfully imported: ${imported.length} rows`);
-    console.log(`⚠️ Duplicates skipped:   ${duplicates.length} rows`);
-    console.log(`⏭️ Skipped:              ${skipped.length} rows`);
-    console.log(`❌ Errors:               ${errors.length} rows`);
-    console.log('📊 ========================================');
+    console.log('\n?? ========================================');
+    console.log('?? IMPORT SUMMARY');
+    console.log('?? ========================================');
+    console.log(`? Successfully imported: ${imported.length} rows`);
+    console.log(`?? Duplicates skipped:   ${duplicates.length} rows`);
+    console.log(`?? Skipped:              ${skipped.length} rows`);
+    console.log(`? Errors:               ${errors.length} rows`);
+    console.log('?? ========================================');
 
     if (duplicates.length > 0) {
-      console.log('\n⚠️ DUPLICATE ROWS DETAILS:');
+      console.log('\n?? DUPLICATE ROWS DETAILS:');
       duplicates.forEach(d => console.log(`  Row ${d.row}: ${d.reason}`));
     }
 
     if (skipped.length > 0) {
-      console.log('\n⏭️ SKIPPED ROWS DETAILS:');
+      console.log('\n?? SKIPPED ROWS DETAILS:');
       skipped.forEach(s => console.log(`  Row ${s.row}: ${s.reason}`));
     }
 
     if (errors.length > 0) {
-      console.log('\n❌ ERROR ROWS DETAILS:');
+      console.log('\n? ERROR ROWS DETAILS:');
       errors.forEach(e => console.log(`  Row ${e.row}: ${e.error}`));
     }
 
@@ -1277,7 +1277,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
       fs.unlinkSync(req.file.path);
     }
 
-    console.log(`✅ Import complete: ${imported.length} imported, ${duplicates.length} duplicates skipped, ${errors.length} errors`);
+    console.log(`? Import complete: ${imported.length} imported, ${duplicates.length} duplicates skipped, ${errors.length} errors`);
 
     // Auto-apply transaction rules to newly imported transactions
     let rulesResult = { autoApplied: 0, pending: 0 };
@@ -1285,7 +1285,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
       try {
         rulesResult = await applyRulesToBatch(imported, accountId, req.user?.orgId || null);
       } catch (rulesErr) {
-        console.error('⚠️ Rules engine error (non-blocking):', rulesErr.message);
+        console.error('?? Rules engine error (non-blocking):', rulesErr.message);
       }
     }
 
@@ -1306,7 +1306,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Import error:', error);
+    console.error('? Import error:', error);
 
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
@@ -1343,7 +1343,7 @@ router.post('/save-mapping', async (req, res) => {
 
     await mapping.save();
 
-    console.log('✅ Column mapping saved:', mapping._id);
+    console.log('? Column mapping saved:', mapping._id);
 
     res.json({
       success: true,
@@ -1352,7 +1352,7 @@ router.post('/save-mapping', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error saving mapping:', error);
+    console.error('? Error saving mapping:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to save mapping',
@@ -1375,7 +1375,7 @@ router.get('/mappings/:accountId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching mappings:', error);
+    console.error('? Error fetching mappings:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch mappings',
@@ -1417,7 +1417,7 @@ router.get('/provider-transactions', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching provider transactions:', error);
+    console.error('? Error fetching provider transactions:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch provider transactions',
@@ -1426,12 +1426,12 @@ router.get('/provider-transactions', async (req, res) => {
   }
 });
 
-// ✅ FIXED: GET /api/reconciliation/system-expenses
+// ? FIXED: GET /api/reconciliation/system-expenses
 router.get('/system-expenses', async (req, res) => {
   try {
     const { accountId, startDate, endDate, matched } = req.query;
 
-    console.log('📥 Fetching system expenses...');
+    console.log('?? Fetching system expenses...');
     console.log('  - Account ID:', accountId);
     console.log('  - Start Date:', startDate);
     console.log('  - End Date:', endDate);
@@ -1440,25 +1440,25 @@ router.get('/system-expenses', async (req, res) => {
     const filter = {};
     
     if (accountId) {
-      console.log('🔍 Searching expenses for accountId:', accountId);
+      console.log('?? Searching expenses for accountId:', accountId);
       
       const PaymentAccount = mongoose.models.PaymentAccount || 
   mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
       const account = await PaymentAccount.findById(accountId);
       
       if (account) {
-        console.log('✅ Found account:', account.accountName);
+        console.log('? Found account:', account.accountName);
         
-        // ✅ FIX: Search by BOTH ID and account name
+        // ? FIX: Search by BOTH ID and account name
         filter.$or = [
           { paidThrough: accountId },
           { paidThrough: account._id.toString() },
           { paidThrough: account.accountName }
         ];
         
-        console.log('🔍 Searching by: ID OR Name =', account.accountName);
+        console.log('?? Searching by: ID OR Name =', account.accountName);
       } else {
-        console.log('⚠️ Account not found, searching by ID only');
+        console.log('?? Account not found, searching by ID only');
         filter.paidThrough = accountId;
       }
     }
@@ -1490,23 +1490,23 @@ router.get('/system-expenses', async (req, res) => {
       }
     }
 
-    console.log('📊 Final query filter:', JSON.stringify(filter, null, 2));
+    console.log('?? Final query filter:', JSON.stringify(filter, null, 2));
 
     const expenses = await Expense.find(filter).sort({ date: -1 });
 
-    console.log(`✅ Found ${expenses.length} expenses`);
+    console.log(`? Found ${expenses.length} expenses`);
     
-    // ✅ DEBUG: Show sample results
+    // ? DEBUG: Show sample results
     if (expenses.length > 0) {
-      console.log('📋 Sample expenses:');
+      console.log('?? Sample expenses:');
       expenses.slice(0, 3).forEach((exp, i) => {
-        console.log(`  ${i + 1}. Date: ${exp.date}, Amount: ₹${exp.total}, Paid Through: ${exp.paidThrough}`);
+        console.log(`  ${i + 1}. Date: ${exp.date}, Amount: ?${exp.total}, Paid Through: ${exp.paidThrough}`);
       });
     } else if (accountId) {
-      console.log('⚠️ No expenses found. Checking all expenses for this account...');
+      console.log('?? No expenses found. Checking all expenses for this account...');
       const allExpenses = await Expense.find({}).limit(5);
-      console.log(`📋 Total expenses in DB: ${await Expense.countDocuments()}`);
-      console.log('📋 Sample of all expenses (first 5):');
+      console.log(`?? Total expenses in DB: ${await Expense.countDocuments()}`);
+      console.log('?? Sample of all expenses (first 5):');
       allExpenses.forEach((exp, i) => {
         console.log(`  ${i + 1}. Paid Through: "${exp.paidThrough}" (type: ${typeof exp.paidThrough})`);
       });
@@ -1519,7 +1519,7 @@ router.get('/system-expenses', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching system expenses:', error);
+    console.error('? Error fetching system expenses:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch system expenses',
@@ -1540,7 +1540,7 @@ router.post('/auto-match', async (req, res) => {
       });
     }
 
-    console.log('🔍 Starting auto-match for account:', accountId);
+    console.log('?? Starting auto-match for account:', accountId);
 
     const result = await autoMatchTransactions(accountId, {
       startDate: new Date(startDate),
@@ -1554,7 +1554,7 @@ router.post('/auto-match', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Auto-match error:', error);
+    console.error('? Auto-match error:', error);
     res.status(500).json({
       success: false,
       message: 'Auto-match failed',
@@ -1563,8 +1563,8 @@ router.post('/auto-match', async (req, res) => {
   }
 });
 
-// ✅ ENHANCED: POST /api/reconciliation/manual-match with validation
-// ✅ ENHANCED: POST /api/reconciliation/manual-match with validation
+// ? ENHANCED: POST /api/reconciliation/manual-match with validation
+// ? ENHANCED: POST /api/reconciliation/manual-match with validation
 router.post('/manual-match', async (req, res) => {
   try {
     const { providerTxnId, expenseId, forceMatch } = req.body;
@@ -1576,14 +1576,14 @@ router.post('/manual-match', async (req, res) => {
       });
     }
 
-    console.log('🔍 Manual match request:');
+    console.log('?? Manual match request:');
     console.log('  - Provider Txn ID:', providerTxnId);
     console.log('  - Expense ID:', expenseId);
     console.log('  - Force Match:', forceMatch);
 
     const providerTxn = await ProviderTransaction.findOne({
       _id: providerTxnId,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!providerTxn) {
       return res.status(404).json({
@@ -1608,17 +1608,17 @@ router.post('/manual-match', async (req, res) => {
     const warnings = [];
     let matchConfidence = 100;
 
-    console.log('📊 Validation:');
-    console.log('  - Provider: ₹', providerTxn.amount, 'on', providerDate.toISOString().split('T')[0]);
-    console.log('  - Expense: ₹', expense.total, 'on', expense.date);
-    console.log('  - Amount diff: ₹', amountDiff);
+    console.log('?? Validation:');
+    console.log('  - Provider: ?', providerTxn.amount, 'on', providerDate.toISOString().split('T')[0]);
+    console.log('  - Expense: ?', expense.total, 'on', expense.date);
+    console.log('  - Amount diff: ?', amountDiff);
     console.log('  - Date diff:', dateDiff, 'days');
 
     if (amountDiff > 0) {
       warnings.push({
         type: 'amount_mismatch',
         severity: amountDiff > 100 ? 'high' : 'medium',
-        message: `Amount mismatch: Bank ₹${providerTxn.amount} vs System ₹${expense.total} (Difference: ₹${amountDiff})`
+        message: `Amount mismatch: Bank ?${providerTxn.amount} vs System ?${expense.total} (Difference: ?${amountDiff})`
       });
       matchConfidence -= Math.min(30, (amountDiff / 100) * 10);
     }
@@ -1633,7 +1633,7 @@ router.post('/manual-match', async (req, res) => {
     }
 
     if (amountDiff > 500 && !forceMatch) {
-      console.log('⚠️ Large amount mismatch detected, requesting confirmation');
+      console.log('?? Large amount mismatch detected, requesting confirmation');
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
@@ -1652,7 +1652,7 @@ router.post('/manual-match', async (req, res) => {
     }
 
     if (dateDiff > 14 && !forceMatch) {
-      console.log('⚠️ Large date difference detected, requesting confirmation');
+      console.log('?? Large date difference detected, requesting confirmation');
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
@@ -1679,7 +1679,7 @@ router.post('/manual-match', async (req, res) => {
 
     if (amountDiff > 0 || dateDiff > 0) {
       const reasons = [];
-      if (amountDiff > 0) reasons.push(`Amount difference: ₹${amountDiff}`);
+      if (amountDiff > 0) reasons.push(`Amount difference: ?${amountDiff}`);
       if (dateDiff > 0) reasons.push(`Date difference: ${Math.round(dateDiff)} days`);
       providerTxn.varianceReason = reasons.join('; ');
     }
@@ -1692,7 +1692,7 @@ router.post('/manual-match', async (req, res) => {
     expense.reconciledBy = forceMatch ? 'manual-forced' : 'manual';
     await expense.save();
 
-    // ✅ AUDIT LOG — Phase 8
+    // ? AUDIT LOG � Phase 8
     await createAuditLog(null, providerTxn.accountId, forceMatch ? 'TRANSACTION_FORCED_MATCH' : 'TRANSACTION_MATCHED', {
       providerTxnId,
       expenseId,
@@ -1700,9 +1700,9 @@ router.post('/manual-match', async (req, res) => {
       matchConfidence: Math.round(matchConfidence),
     });
 
-    console.log(`✅ Manual match: Provider ${providerTxnId} ↔ Expense ${expenseId}`);
+    console.log(`? Manual match: Provider ${providerTxnId} ? Expense ${expenseId}`);
     if (warnings.length > 0) {
-      console.log(`⚠️ Warnings:`, warnings.map(w => w.message).join('; '));
+      console.log(`?? Warnings:`, warnings.map(w => w.message).join('; '));
     }
 
     res.json({
@@ -1720,7 +1720,7 @@ router.post('/manual-match', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Manual match error:', error);
+    console.error('? Manual match error:', error);
     res.status(500).json({
       success: false,
       message: 'Manual match failed',
@@ -1734,7 +1734,7 @@ router.post('/accept-match/:id', async (req, res) => {
   try {
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!providerTxn) {
@@ -1772,7 +1772,7 @@ router.post('/accept-match/:id', async (req, res) => {
       await expense.save();
     }
 
-    console.log(`✅ Accepted match: Provider ${req.params.id}`);
+    console.log(`? Accepted match: Provider ${req.params.id}`);
 
     res.json({
       success: true,
@@ -1781,7 +1781,7 @@ router.post('/accept-match/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Accept match error:', error);
+    console.error('? Accept match error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to accept match',
@@ -1795,7 +1795,7 @@ router.post('/reject-match/:id', async (req, res) => {
   try {
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!providerTxn) {
@@ -1813,7 +1813,7 @@ router.post('/reject-match/:id', async (req, res) => {
     providerTxn.variance = 0;
     await providerTxn.save();
 
-    console.log(`❌ Rejected match: Provider ${req.params.id}`);
+    console.log(`? Rejected match: Provider ${req.params.id}`);
 
     res.json({
       success: true,
@@ -1822,7 +1822,7 @@ router.post('/reject-match/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Reject match error:', error);
+    console.error('? Reject match error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to reject match',
@@ -1836,7 +1836,7 @@ router.post('/unmatch/:id', async (req, res) => {
   try {
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!providerTxn) {
@@ -1865,7 +1865,7 @@ router.post('/unmatch/:id', async (req, res) => {
     providerTxn.variance = 0;
     await providerTxn.save();
 
-    console.log(`🔓 Unmatched: Provider ${req.params.id}`);
+    console.log(`?? Unmatched: Provider ${req.params.id}`);
 
     res.json({
       success: true,
@@ -1874,7 +1874,7 @@ router.post('/unmatch/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Unmatch error:', error);
+    console.error('? Unmatch error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to unmatch transaction',
@@ -1929,7 +1929,7 @@ const session = new ReconciliationSession({
 
     await session.save();
 
-    console.log('✅ Reconciliation session started:', session._id);
+    console.log('? Reconciliation session started:', session._id);
 
     res.json({
       success: true,
@@ -1938,7 +1938,7 @@ const session = new ReconciliationSession({
     });
 
   } catch (error) {
-    console.error('❌ Error starting session:', error);
+    console.error('? Error starting session:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to start reconciliation session',
@@ -1975,11 +1975,11 @@ router.post('/sessions/verify-opening-balance', async (req, res) => {
     const difference = statementBalance - systemBalance;
     const isMatched = Math.abs(difference) < 0.01;
 
-    console.log(`📊 Opening Balance Verification for "${account.accountName}":`);
-    console.log(`   System Balance:    ₹${systemBalance}`);
-    console.log(`   Statement Balance: ₹${statementBalance}`);
-    console.log(`   Difference:        ₹${difference}`);
-    console.log(`   Result:            ${isMatched ? '✅ MATCHED' : '⚠️ MISMATCH'}`);
+    console.log(`?? Opening Balance Verification for "${account.accountName}":`);
+    console.log(`   System Balance:    ?${systemBalance}`);
+    console.log(`   Statement Balance: ?${statementBalance}`);
+    console.log(`   Difference:        ?${difference}`);
+    console.log(`   Result:            ${isMatched ? '? MATCHED' : '?? MISMATCH'}`);
 
     res.json({
       success: true,
@@ -1999,12 +1999,12 @@ router.post('/sessions/verify-opening-balance', async (req, res) => {
           : 'high',
         message: isMatched
           ? 'Opening balance matches. You can proceed with reconciliation.'
-          : `Opening balance mismatch of ₹${Math.abs(difference).toFixed(2)}. System shows ₹${systemBalance.toFixed(2)} but your statement shows ₹${statementBalance.toFixed(2)}.`,
+          : `Opening balance mismatch of ?${Math.abs(difference).toFixed(2)}. System shows ?${systemBalance.toFixed(2)} but your statement shows ?${statementBalance.toFixed(2)}.`,
       },
     });
 
   } catch (error) {
-    console.error('❌ Error verifying opening balance:', error);
+    console.error('? Error verifying opening balance:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to verify opening balance',
@@ -2032,7 +2032,7 @@ const filter = {};
     });
 
   } catch (error) {
-    console.error('❌ Error fetching sessions:', error);
+    console.error('? Error fetching sessions:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch reconciliation sessions',
@@ -2046,7 +2046,7 @@ router.get('/sessions/:id', async (req, res) => {
   try {
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -2071,7 +2071,7 @@ router.get('/sessions/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching session:', error);
+    console.error('? Error fetching session:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch session details',
@@ -2086,7 +2086,7 @@ router.post('/sessions/:id/finalize', async (req, res) => {
   try {
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -2158,11 +2158,11 @@ router.post('/sessions/:id/finalize', async (req, res) => {
     const closingDifference = statementClosing - systemClosingBalance;
     const isClosingMatched = Math.abs(closingDifference) < 0.01;
 
-    console.log(`📊 Closing Balance Verification for "${account.accountName}":`);
-    console.log(`   System Closing Balance:    ₹${systemClosingBalance}`);
-    console.log(`   Statement Closing Balance: ₹${statementClosing}`);
-    console.log(`   Difference:                ₹${closingDifference}`);
-    console.log(`   Result:                    ${isClosingMatched ? '✅ MATCHED' : '⚠️ MISMATCH'}`);
+    console.log(`?? Closing Balance Verification for "${account.accountName}":`);
+    console.log(`   System Closing Balance:    ?${systemClosingBalance}`);
+    console.log(`   Statement Closing Balance: ?${statementClosing}`);
+    console.log(`   Difference:                ?${closingDifference}`);
+    console.log(`   Result:                    ${isClosingMatched ? '? MATCHED' : '?? MISMATCH'}`);
 
     const { forceFinalize } = req.body;
 
@@ -2176,7 +2176,7 @@ router.post('/sessions/:id/finalize', async (req, res) => {
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
-        message: `Closing balance mismatch detected. System shows ₹${systemClosingBalance.toFixed(2)} but your statement shows ₹${statementClosing.toFixed(2)}. Difference is ₹${Math.abs(closingDifference).toFixed(2)}.`,
+        message: `Closing balance mismatch detected. System shows ?${systemClosingBalance.toFixed(2)} but your statement shows ?${statementClosing.toFixed(2)}. Difference is ?${Math.abs(closingDifference).toFixed(2)}.`,
         closingBalanceCheck: {
           systemClosingBalance,
           statementClosingBalance: statementClosing,
@@ -2209,14 +2209,14 @@ router.post('/sessions/:id/finalize', async (req, res) => {
 
     await session.save();
 
-    // ✅ AUDIT LOG — Phase 8
+    // ? AUDIT LOG � Phase 8
     await createAuditLog(session._id, session.accountId, 'SESSION_FINALIZED', {
       isClosingMatched,
       closingDifference,
       forcedFinalize: session.finalizedWithForce,
     });
 
-    console.log(`🔒 Reconciliation session finalized: ${session._id}`);
+    console.log(`?? Reconciliation session finalized: ${session._id}`);
     console.log(`   Closing balance matched: ${isClosingMatched}`);
     console.log(`   Forced finalization: ${session.finalizedWithForce}`);
 
@@ -2224,12 +2224,12 @@ router.post('/sessions/:id/finalize', async (req, res) => {
       success: true,
       message: isClosingMatched
         ? 'Reconciliation completed and locked successfully. Closing balance verified.'
-        : 'Reconciliation completed and locked. Note: Closing balance had a difference of ₹' + Math.abs(closingDifference).toFixed(2) + ' which was acknowledged.',
+        : 'Reconciliation completed and locked. Note: Closing balance had a difference of ?' + Math.abs(closingDifference).toFixed(2) + ' which was acknowledged.',
       data: session,
     });
 
   } catch (error) {
-    console.error('❌ Error finalizing session:', error);
+    console.error('? Error finalizing session:', error);
     res.status(500).json({
       success: false,
       message: 'Something went wrong while finalizing. Please try again.',
@@ -2243,7 +2243,7 @@ router.post('/sessions/:id/reopen', async (req, res) => {
   try {
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -2267,7 +2267,7 @@ router.post('/sessions/:id/reopen', async (req, res) => {
 
     await session.save();
 
-    console.log('🔓 Reconciliation session reopened:', session._id);
+    console.log('?? Reconciliation session reopened:', session._id);
 
     res.json({
       success: true,
@@ -2276,7 +2276,7 @@ router.post('/sessions/:id/reopen', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error reopening session:', error);
+    console.error('? Error reopening session:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to reopen session',
@@ -2285,7 +2285,7 @@ router.post('/sessions/:id/reopen', async (req, res) => {
   }
 });
 
-// ✅ FIXED: POST /api/reconciliation/petty-cash/count
+// ? FIXED: POST /api/reconciliation/petty-cash/count
 router.post('/petty-cash/count', async (req, res) => {
   try {
     const { 
@@ -2306,11 +2306,11 @@ router.post('/petty-cash/count', async (req, res) => {
       });
     }
 
-    console.log('💰 Petty cash count submission:');
+    console.log('?? Petty cash count submission:');
     console.log('  - Account ID:', accountId);
     console.log('  - Account Name:', accountName);
     console.log('  - Period:', periodStart, 'to', periodEnd);
-    console.log('  - Physical Count: ₹', physicalCashCount);
+    console.log('  - Physical Count: ?', physicalCashCount);
 
     const PaymentAccount = mongoose.models.PaymentAccount || 
   mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
@@ -2323,7 +2323,7 @@ router.post('/petty-cash/count', async (req, res) => {
       });
     }
 
-    // ✅ FIX: Search expenses by BOTH ID and name
+    // ? FIX: Search expenses by BOTH ID and name
     const expenses = await Expense.find({
       $or: [
         { paidThrough: accountId },
@@ -2340,7 +2340,7 @@ router.post('/petty-cash/count', async (req, res) => {
 
     const totalExpenses = expenses.reduce((sum, e) => sum + e.total, 0);
     
-    console.log('  - Total Expenses: ₹', totalExpenses);
+    console.log('  - Total Expenses: ?', totalExpenses);
 
     let session = await ReconciliationSession.findOne({
       accountId,
@@ -2371,7 +2371,7 @@ router.post('/petty-cash/count', async (req, res) => {
 
     await session.save();
 
-    console.log('✅ Petty cash count recorded:', session._id);
+    console.log('? Petty cash count recorded:', session._id);
 
     res.json({
       success: true,
@@ -2380,7 +2380,7 @@ router.post('/petty-cash/count', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error recording petty cash count:', error);
+    console.error('? Error recording petty cash count:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to record petty cash count',
@@ -2389,7 +2389,7 @@ router.post('/petty-cash/count', async (req, res) => {
   }
 });
 
-// ✅ FIXED: GET /api/reconciliation/petty-cash/summary
+// ? FIXED: GET /api/reconciliation/petty-cash/summary
 router.get('/petty-cash/summary', async (req, res) => {
   try {
     const { accountId, startDate, endDate } = req.query;
@@ -2457,7 +2457,7 @@ router.get('/petty-cash/summary', async (req, res) => {
       }
     });
   } catch (e) {
-    console.error('❌ getPettyCashSummary error:', e);
+    console.error('? getPettyCashSummary error:', e);
     res.status(500).json({ success: false, message: e.message });
   }
 });
@@ -2487,7 +2487,7 @@ router.get('/stats/:accountId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching stats:', error);
+    console.error('? Error fetching stats:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch statistics',
@@ -2501,7 +2501,7 @@ router.delete('/provider-transactions/:id', async (req, res) => {
   try {
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!providerTxn) {
@@ -2524,7 +2524,7 @@ router.delete('/provider-transactions/:id', async (req, res) => {
 
     await providerTxn.deleteOne();
 
-    console.log('🗑️ Provider transaction deleted:', req.params.id);
+    console.log('??? Provider transaction deleted:', req.params.id);
 
     res.json({
       success: true,
@@ -2532,7 +2532,7 @@ router.delete('/provider-transactions/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error deleting provider transaction:', error);
+    console.error('? Error deleting provider transaction:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete provider transaction',
@@ -2558,7 +2558,7 @@ router.get('/import-history', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching import history:', error);
+    console.error('? Error fetching import history:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch import history',
@@ -2601,7 +2601,7 @@ router.post('/carry-forward/:id', async (req, res) => {
 
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!providerTxn) {
@@ -2634,23 +2634,23 @@ router.post('/carry-forward/:id', async (req, res) => {
 
     await providerTxn.save();
 
-    // ✅ AUDIT LOG — Phase 8
+    // ? AUDIT LOG � Phase 8
     await createAuditLog(null, providerTxn.accountId, 'TRANSACTION_CARRIED_FORWARD', {
       transactionId: providerTxn._id,
       amount: providerTxn.amount,
       notes,
     });
 
-    console.log(`➡️ Transaction carried forward: ${providerTxn._id} — ₹${providerTxn.amount}`);
+    console.log(`?? Transaction carried forward: ${providerTxn._id} � ?${providerTxn.amount}`);
 
     res.json({
       success: true,
-      message: `Transaction of ₹${providerTxn.amount.toFixed(2)} has been carried forward to the next reconciliation period.`,
+      message: `Transaction of ?${providerTxn.amount.toFixed(2)} has been carried forward to the next reconciliation period.`,
       data: providerTxn,
     });
 
   } catch (error) {
-    console.error('❌ Error carrying forward transaction:', error);
+    console.error('? Error carrying forward transaction:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to carry forward transaction. Please try again.',
@@ -2673,7 +2673,7 @@ router.post('/adjustment/:id', async (req, res) => {
 
     const providerTxn = await ProviderTransaction.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!providerTxn) {
@@ -2708,7 +2708,7 @@ router.post('/adjustment/:id', async (req, res) => {
 
     await adjustmentExpense.save();
 
-    console.log(`📝 Adjustment expense created: ${adjustmentExpense._id} — ₹${providerTxn.amount}`);
+    console.log(`?? Adjustment expense created: ${adjustmentExpense._id} � ?${providerTxn.amount}`);
 
     providerTxn.reconciliationStatus = 'MATCHED';
     providerTxn.matchedExpenseId = adjustmentExpense._id;
@@ -2723,7 +2723,7 @@ router.post('/adjustment/:id', async (req, res) => {
 
     await providerTxn.save();
 
-    // ✅ AUDIT LOG — Phase 8
+    // ? AUDIT LOG � Phase 8
     await createAuditLog(null, providerTxn.accountId, 'TRANSACTION_ADJUSTED', {
       transactionId: providerTxn._id,
       adjustmentExpenseId: adjustmentExpense._id,
@@ -2732,11 +2732,11 @@ router.post('/adjustment/:id', async (req, res) => {
       adjustmentType,
     });
 
-    console.log(`✅ Transaction marked as adjustment: ${providerTxn._id}`);
+    console.log(`? Transaction marked as adjustment: ${providerTxn._id}`);
 
     res.json({
       success: true,
-      message: `Transaction of ₹${providerTxn.amount.toFixed(2)} has been marked as an adjustment and an expense entry has been created.`,
+      message: `Transaction of ?${providerTxn.amount.toFixed(2)} has been marked as an adjustment and an expense entry has been created.`,
       data: {
         providerTransaction: providerTxn,
         adjustmentExpense: adjustmentExpense,
@@ -2744,7 +2744,7 @@ router.post('/adjustment/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error creating adjustment:', error);
+    console.error('? Error creating adjustment:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create adjustment. Please try again.',
@@ -2779,7 +2779,7 @@ router.post('/bulk-resolve', async (req, res) => {
       });
     }
 
-    console.log(`📦 Bulk resolve: ${transactionIds.length} transactions → ${action}`);
+    console.log(`?? Bulk resolve: ${transactionIds.length} transactions ? ${action}`);
 
     const results = [];
     const errors = [];
@@ -2788,7 +2788,7 @@ router.post('/bulk-resolve', async (req, res) => {
       try {
         const providerTxn = await ProviderTransaction.findOne({
           _id: txnId,
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          ...req.orgFilter,
         });
         if (!providerTxn) {
           errors.push({ id: txnId, error: 'Transaction not found' });
@@ -2835,12 +2835,12 @@ router.post('/bulk-resolve', async (req, res) => {
         }
 
       } catch (err) {
-        console.error(`❌ Error processing ${txnId}:`, err.message);
+        console.error(`? Error processing ${txnId}:`, err.message);
         errors.push({ id: txnId, error: err.message });
       }
     }
 
-    console.log(`✅ Bulk resolve complete: ${results.length} success, ${errors.length} errors`);
+    console.log(`? Bulk resolve complete: ${results.length} success, ${errors.length} errors`);
 
     res.json({
       success: true,
@@ -2849,7 +2849,7 @@ router.post('/bulk-resolve', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Bulk resolve error:', error);
+    console.error('? Bulk resolve error:', error);
     res.status(500).json({
       success: false,
       message: 'Bulk resolve failed. Please try again.',
@@ -2864,7 +2864,7 @@ router.get('/sessions/:id/report', async (req, res) => {
   try {
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -2914,7 +2914,7 @@ router.get('/sessions/:id/report', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error generating report data:', error);
+    console.error('? Error generating report data:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to generate report. Please try again.',
@@ -2930,7 +2930,7 @@ router.post('/sessions/:id/submit-for-approval', async (req, res) => {
 
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -2976,12 +2976,12 @@ router.post('/sessions/:id/submit-for-approval', async (req, res) => {
 
     await session.save();
 
-    // ✅ AUDIT LOG — Phase 8
+    // ? AUDIT LOG � Phase 8
     await createAuditLog(session._id, session.accountId, 'SESSION_SUBMITTED_FOR_APPROVAL', {
       submittedBy: session.submittedBy,
     }, session.submittedBy);
 
-    console.log(`📤 Session submitted for approval: ${session._id} by ${session.submittedBy}`);
+    console.log(`?? Session submitted for approval: ${session._id} by ${session.submittedBy}`);
 
     res.json({
       success: true,
@@ -2990,7 +2990,7 @@ router.post('/sessions/:id/submit-for-approval', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error submitting for approval:', error);
+    console.error('? Error submitting for approval:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to submit for approval. Please try again.',
@@ -3013,7 +3013,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
 
     const session = await ReconciliationSession.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!session) {
@@ -3056,13 +3056,13 @@ router.post('/sessions/:id/approve', async (req, res) => {
 
       await session.save();
 
-      // ✅ AUDIT LOG — Phase 8 (approve branch)
+      // ? AUDIT LOG � Phase 8 (approve branch)
       await createAuditLog(session._id, session.accountId, 'SESSION_APPROVED', {
         approvedBy: session.approvedBy,
         approvalNotes,
       }, session.approvedBy);
 
-      console.log(`✅ Session approved and locked: ${session._id} by ${session.approvedBy}`);
+      console.log(`? Session approved and locked: ${session._id} by ${session.approvedBy}`);
 
       res.json({
         success: true,
@@ -3086,13 +3086,13 @@ router.post('/sessions/:id/approve', async (req, res) => {
 
       await session.save();
 
-      // ✅ AUDIT LOG — Phase 8 (reject branch)
+      // ? AUDIT LOG � Phase 8 (reject branch)
       await createAuditLog(session._id, session.accountId, 'SESSION_REJECTED', {
         rejectedBy: session.rejectedBy,
         rejectionReason,
       }, session.rejectedBy);
 
-      console.log(`❌ Session rejected: ${session._id} by ${session.rejectedBy}. Reason: ${rejectionReason}`);
+      console.log(`? Session rejected: ${session._id} by ${session.rejectedBy}. Reason: ${rejectionReason}`);
 
       res.json({
         success: true,
@@ -3102,7 +3102,7 @@ router.post('/sessions/:id/approve', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ Error processing approval:', error);
+    console.error('? Error processing approval:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to process approval. Please try again.',
@@ -3130,7 +3130,7 @@ router.get('/audit-log', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching audit log:', error);
+    console.error('? Error fetching audit log:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch audit log.',
@@ -3232,7 +3232,7 @@ router.get('/alerts/:accountId', async (req, res) => {
       });
     }
 
-    console.log(`📊 Alerts for account ${accountId}: ${alerts.length} alerts`);
+    console.log(`?? Alerts for account ${accountId}: ${alerts.length} alerts`);
 
     res.json({
       success: true,
@@ -3241,7 +3241,7 @@ router.get('/alerts/:accountId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching alerts:', error);
+    console.error('? Error fetching alerts:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch alerts.',
@@ -3267,7 +3267,7 @@ router.get('/history/:accountId', async (req, res) => {
 
     const history = sessions.map(s => ({
       id: s._id,
-      period: `${new Date(s.periodStart).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(s.periodEnd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`,
+      period: `${new Date(s.periodStart).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} � ${new Date(s.periodEnd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`,
       periodStart: s.periodStart,
       periodEnd: s.periodEnd,
       status: s.status,
@@ -3299,7 +3299,7 @@ router.get('/history/:accountId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching history:', error);
+    console.error('? Error fetching history:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch reconciliation history.',
@@ -3309,7 +3309,7 @@ router.get('/history/:accountId', async (req, res) => {
 });
 
 // ============================================================================
-// BLOCK B — Multi-match & COA reconciliation routes
+// BLOCK B � Multi-match & COA reconciliation routes
 // ============================================================================
 
 const PaymentAccountModel = mongoose.models.PaymentAccount ||
@@ -3348,7 +3348,7 @@ router.post('/multi-match/many-to-one', async (req, res) => {
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
-        message: `Amount mismatch: Bank total ₹${bankTotal} vs Expense ₹${expAmount} (diff ₹${difference})`,
+        message: `Amount mismatch: Bank total ?${bankTotal} vs Expense ?${expAmount} (diff ?${difference})`,
         details: { bankTotal, expAmount, difference },
       });
     }
@@ -3358,9 +3358,8 @@ router.post('/multi-match/many-to-one', async (req, res) => {
 
     for (const txn of txns) {
       await postTransactionToCOA({
-        accountId: bankCOA._id, orgId: req.user?.orgId || null,
-        date: txn.transactionDate,
-        description: `Multi-match [${txns.length} txns] → ${expense.expenseAccount} | ${journalRef}`,
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,         date: txn.transactionDate,
+        description: `Multi-match [${txns.length} txns] ? ${expense.expenseAccount} | ${journalRef}`,
         referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
         debit: 0, credit: txn.amount,
       });
@@ -3378,8 +3377,7 @@ router.post('/multi-match/many-to-one', async (req, res) => {
 
     if (expense.expenseAccountId) {
       await postTransactionToCOA({
-        accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,
-        date: new Date(expense.date),
+        accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,         date: new Date(expense.date),
         description: `Multi-match | ${journalRef}`,
         referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
         debit: expAmount, credit: 0,
@@ -3396,7 +3394,7 @@ router.post('/multi-match/many-to-one', async (req, res) => {
       data:    { journalRef, bankTotal, expAmount, difference },
     });
   } catch (err) {
-    console.error('❌ many-to-one multi-match error:', err);
+    console.error('? many-to-one multi-match error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3421,7 +3419,7 @@ router.post('/multi-match/one-to-many', async (req, res) => {
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
-        message: `Amount mismatch: Bank ₹${txn.amount} vs Expenses total ₹${expTotal} (diff ₹${difference})`,
+        message: `Amount mismatch: Bank ?${txn.amount} vs Expenses total ?${expTotal} (diff ?${difference})`,
         details: { bankAmount: txn.amount, expTotal, difference },
       });
     }
@@ -3430,9 +3428,8 @@ router.post('/multi-match/one-to-many', async (req, res) => {
     const journalRef = `BNK-MULTI-${Date.now().toString().slice(-6)}`;
 
     await postTransactionToCOA({
-      accountId: bankCOA._id, orgId: req.user?.orgId || null,
-      date: txn.transactionDate,
-      description: `Multi-match → ${expenses.length} expenses | ${journalRef}`,
+      accountId: bankCOA._id, orgId: req.user?.orgId || null,       date: txn.transactionDate,
+      description: `Multi-match ? ${expenses.length} expenses | ${journalRef}`,
       referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef,
       debit: 0, credit: txn.amount,
     });
@@ -3440,8 +3437,7 @@ router.post('/multi-match/one-to-many', async (req, res) => {
     for (const expense of expenses) {
       if (expense.expenseAccountId) {
         await postTransactionToCOA({
-          accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,
-          date: txn.transactionDate,
+          accountId: expense.expenseAccountId, orgId: req.user?.orgId || null,           date: txn.transactionDate,
           description: `Multi-match ${expense.expenseAccount} | ${journalRef}`,
           referenceType: 'Expense', referenceId: expense._id, referenceNumber: journalRef,
           debit: expense.total || 0, credit: 0,
@@ -3474,7 +3470,7 @@ router.post('/multi-match/one-to-many', async (req, res) => {
       data:    { journalRef, bankAmount: txn.amount, expTotal, difference },
     });
   } catch (err) {
-    console.error('❌ one-to-many multi-match error:', err);
+    console.error('? one-to-many multi-match error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3488,7 +3484,7 @@ router.get('/coa-lines', async (req, res) => {
 
     const bankCOA = await ChartOfAccount.findOne({
       accountName: pa.accountName,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!bankCOA) return res.status(404).json({ success: false, message: 'Bank COA account not found' });
 
@@ -3521,7 +3517,7 @@ router.post('/match-coa-line', async (req, res) => {
       return res.status(400).json({
         success: false,
         requiresConfirmation: true,
-        message: `Amount mismatch: Bank ₹${providerAmt} vs COA line ₹${coaAmt} (diff ₹${difference})`,
+        message: `Amount mismatch: Bank ?${providerAmt} vs COA line ?${coaAmt} (diff ?${difference})`,
         details: { providerAmt, coaAmt, difference },
       });
     }
@@ -3541,7 +3537,7 @@ router.post('/match-coa-line', async (req, res) => {
 
     res.json({ success: true, message: 'Matched to COA line successfully', difference });
   } catch (err) {
-    console.error('❌ match-coa-line error:', err);
+    console.error('? match-coa-line error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3567,7 +3563,7 @@ router.get('/sessions/:id/report/pdf', async (req, res) => {
     const carriedFwd  = txns.filter(t => t.isCarriedForward);
     const unmatched   = txns.filter(t => t.reconciliationStatus === 'UNMATCHED');
 
-    const fmt     = n => `₹${(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    const fmt     = n => `?${(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
     const fmtDate = d => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reconciliation Report</title>
@@ -3594,9 +3590,9 @@ tr:nth-child(even){background:#fafafa}
 .locked-badge{background:#27ae60;color:white;padding:2px 8px;border-radius:12px;font-size:10px}
 .inprogress-badge{background:#e67e22;color:white;padding:2px 8px;border-radius:12px;font-size:10px}
 </style></head><body>
-<h1>🏦 Reconciliation Report</h1>
-<div class="subtitle">${pa?.accountName || 'Account'} &nbsp;•&nbsp; ${fmtDate(session.periodStart)} – ${fmtDate(session.periodEnd)} &nbsp;•&nbsp;
-<span class="${session.isLocked ? 'locked-badge' : 'inprogress-badge'}">${session.isLocked ? '🔒 Locked' : 'In Progress'}</span></div>
+<h1>?? Reconciliation Report</h1>
+<div class="subtitle">${pa?.accountName || 'Account'} &nbsp;�&nbsp; ${fmtDate(session.periodStart)} � ${fmtDate(session.periodEnd)} &nbsp;�&nbsp;
+<span class="${session.isLocked ? 'locked-badge' : 'inprogress-badge'}">${session.isLocked ? '?? Locked' : 'In Progress'}</span></div>
 <div class="summary-grid">
   <div class="summary-card"><div class="label">Matched</div><div class="value">${matched.length}</div></div>
   <div class="summary-card"><div class="label">Adjustments</div><div class="value">${adjustments.length}</div></div>
@@ -3609,28 +3605,28 @@ tr:nth-child(even){background:#fafafa}
 <div class="balance-row total"><span>Difference</span><span style="color:${Math.abs(session.balanceDifference || 0) < 0.01 ? '#27ae60' : '#e74c3c'}">${fmt(session.balanceDifference)}</span></div>
 <div class="section-title">Matched Transactions (${matched.length})</div>
 <table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th><th>Variance</th></tr></thead><tbody>
-${matched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${t.transactionType}</td><td>${fmt(t.amount)}</td><td class="status-matched">${fmt(Math.abs(t.variance || 0))}</td></tr>`).join('')}
+${matched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '�'}</td><td>${t.transactionType}</td><td>${fmt(t.amount)}</td><td class="status-matched">${fmt(Math.abs(t.variance || 0))}</td></tr>`).join('')}
 </tbody></table>
 ${adjustments.length > 0 ? `<div class="section-title">Adjustments (${adjustments.length})</div>
 <table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Reason</th></tr></thead><tbody>
-${adjustments.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${fmt(t.amount)}</td><td class="status-adj">${t.adjustmentReason || '—'}</td></tr>`).join('')}
+${adjustments.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '�'}</td><td>${fmt(t.amount)}</td><td class="status-adj">${t.adjustmentReason || '�'}</td></tr>`).join('')}
 </tbody></table>` : ''}
 ${carriedFwd.length > 0 ? `<div class="section-title">Carried Forward (${carriedFwd.length})</div>
 <table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Notes</th></tr></thead><tbody>
-${carriedFwd.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${fmt(t.amount)}</td><td class="status-cf">${t.carriedForwardNotes || '—'}</td></tr>`).join('')}
+${carriedFwd.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '�'}</td><td>${fmt(t.amount)}</td><td class="status-cf">${t.carriedForwardNotes || '�'}</td></tr>`).join('')}
 </tbody></table>` : ''}
 ${unmatched.length > 0 ? `<div class="section-title">Unmatched Transactions (${unmatched.length})</div>
 <table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
-${unmatched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '—'}</td><td>${t.transactionType}</td><td class="status-unmatched">${fmt(t.amount)}</td></tr>`).join('')}
+${unmatched.map(t => `<tr><td>${fmtDate(t.transactionDate)}</td><td>${t.description || '�'}</td><td>${t.transactionType}</td><td class="status-unmatched">${fmt(t.amount)}</td></tr>`).join('')}
 </tbody></table>` : ''}
-<div class="footer">Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} &nbsp;•&nbsp; Abra Finance</div>
+<div class="footer">Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} &nbsp;�&nbsp; Abra Finance</div>
 </body></html>`;
 
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `inline; filename="reconciliation-report-${req.params.id}.html"`);
     res.send(html);
   } catch (err) {
-    console.error('❌ PDF report error:', err);
+    console.error('? PDF report error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

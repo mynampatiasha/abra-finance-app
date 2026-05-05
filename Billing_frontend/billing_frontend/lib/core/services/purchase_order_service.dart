@@ -139,6 +139,19 @@ class PurchaseOrderService {
     }
   }
 
+  /// Mark purchase order as ISSUED without sending email
+  static Future<PurchaseOrder> markAsSent(String purchaseOrderId) async {
+    try {
+      print('📤 PATCH: $_baseEndpoint/$purchaseOrderId/mark-as-sent');
+      final data = await _api.patch('$_baseEndpoint/$purchaseOrderId/mark-as-sent');
+      print('✅ Purchase order marked as sent');
+      return PurchaseOrder.fromJson(data['data']);
+    } catch (e) {
+      print('❌ Error marking purchase order as sent: $e');
+      rethrow;
+    }
+  }
+
   /// Record purchase receive for a purchase order
   static Future<PurchaseOrder> recordReceive(
       String purchaseOrderId, Map<String, dynamic> receiveData) async {
@@ -200,12 +213,12 @@ class PurchaseOrderService {
     }
   }
 
-  /// Download purchase order PDF - returns URL
+  /// Download purchase order PDF - returns URL via download-url endpoint
   static Future<String> downloadPDF(String purchaseOrderId) async {
     try {
-      print(
-          '📤 GET: $_baseEndpoint/$purchaseOrderId/pdf (PDF download URL)');
-      final url = '${_api.baseUrl}$_baseEndpoint/$purchaseOrderId/pdf';
+      print('📤 GET: $_baseEndpoint/$purchaseOrderId/download-url');
+      final data = await _api.get('$_baseEndpoint/$purchaseOrderId/download-url');
+      final url = data['downloadUrl'] as String? ?? '';
       print('✅ PDF URL: $url');
       return url;
     } catch (e) {

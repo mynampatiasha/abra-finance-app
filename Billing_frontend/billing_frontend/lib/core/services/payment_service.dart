@@ -281,6 +281,42 @@ class PaymentService {
     }
   }
 
+  /// Add proof files to an existing payment
+  static Future<void> addPaymentProofs(String paymentId, List<http.MultipartFile> files) async {
+    try {
+      print('📤 POST: $_baseEndpoint/$paymentId/proofs');
+      final uri = Uri.parse('${_api.baseUrl}$_baseEndpoint/$paymentId/proofs');
+      final request = http.MultipartRequest('POST', uri);
+      final headers = await _api.getHeaders();
+      headers.forEach((k, v) {
+        if (k.toLowerCase() != 'content-type') request.headers[k] = v;
+      });
+      for (final f in files) { request.files.add(f); }
+      final streamed  = await request.send();
+      final response  = await http.Response.fromStream(streamed);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final err = json.decode(response.body);
+        throw Exception(err['message'] ?? 'Upload failed (${response.statusCode})');
+      }
+      print('✅ Proofs added');
+    } catch (e) {
+      print('❌ Error adding payment proofs: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete a single proof from a payment by index
+  static Future<void> deletePaymentProof(String paymentId, int proofIndex) async {
+    try {
+      print('📤 DELETE: $_baseEndpoint/$paymentId/proofs/$proofIndex');
+      await _api.delete('$_baseEndpoint/$paymentId/proofs/$proofIndex');
+      print('✅ Proof deleted');
+    } catch (e) {
+      print('❌ Error deleting payment proof: $e');
+      rethrow;
+    }
+  }
+
   // ============================================================================
   // UNPAID INVOICES
   // ============================================================================
@@ -338,6 +374,28 @@ class PaymentService {
   // UTILITIES
   // ============================================================================
 
+  /// Get customer's current unused credits balance
+  static Future<double> getCustomerUnusedCredits(String customerId) async {
+    try {
+      final data = await _api.get('/api/finance/customers/$customerId/unused-credits');
+      return (data['data']['unusedCredits'] ?? 0).toDouble();
+    } catch (e) {
+      print('❌ Error fetching customer unused credits: $e');
+      return 0.0;
+    }
+  }
+
+  /// Get customer advance register — all advances + utilization history
+  static Future<Map<String, dynamic>> getCustomerAdvanceRegister(String customerId) async {
+    try {
+      final data = await _api.get('/api/finance/customers/$customerId/advance-register');
+      return data['data'] ?? {};
+    } catch (e) {
+      print('❌ Error fetching advance register: $e');
+      return {};
+    }
+  }
+
   /// Get next payment number
   static Future<String> getNextPaymentNumber() async {
     try {
@@ -358,8 +416,8 @@ class PaymentService {
   /// Mark payment as sent (without sending email)
   static Future<void> markPaymentAsSent(String paymentId) async {
     try {
-      print('📤 PUT: $_baseEndpoint/$paymentId/mark-sent');
-      await _api.put('$_baseEndpoint/$paymentId/mark-sent', body: {});
+      print('📤 PATCH: $_baseEndpoint/$paymentId/mark-as-sent');
+      await _api.patch('$_baseEndpoint/$paymentId/mark-as-sent', body: {});
       print('✅ Payment marked as sent');
     } catch (e) {
       print('❌ Error marking payment as sent: $e');
@@ -402,6 +460,54 @@ class PaymentService {
       return url;
     } catch (e) {
       print('❌ Error exporting CSV: $e');
+      rethrow;
+    }
+  }
+
+  // ── Customer Payments With Refundable Balance ─────────────────────────────
+  // Returns all payments for a customer where amountInExcess > 0
+  // Used by the Customer Payment Refund flow in account_detail_page.dart
+  static Future<List<Map<String, dynamic>>> getCustomerPaymentsWithBalance(
+      String customerId) async {
+    try {
+      final headers = await _api.getHeaders();
+      final response = await http.get(
+        Uri.parse('${_api.baseUrl}$_baseEndpoint/customer-payments-with-balance/$customerId'),
+        headers: headers,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Request failed (${response.statusCode})');
+      }
+      final body = json.decode(response.body);
+      final data = body['data'] as List? ?? [];
+      return data.map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p)).toList();
+    } catch (e) {
+      print('❌ Error fetching customer payments with balance: $e');
+      rethrow;
+    }
+  }
+
+  // ── Record Refund on a Payment Received ───────────────────────────────────
+  static Future<Map<String, dynamic>> recordRefund(
+      String paymentId, Map<String, dynamic> refundData) async {
+    try {
+      final headers = await _api.getHeaders();
+      final response = await http.post(
+        Uri.parse('${_api.baseUrl}$_baseEndpoint/$paymentId/refund'),
+        headers: {...headers, 'Content-Type': 'application/json'},
+        body: json.encode(refundData),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        String message = 'Request failed (${response.statusCode})';
+        try {
+          final body = json.decode(response.body);
+          message = body['error'] ?? body['message'] ?? message;
+        } catch (_) {}
+        throw Exception(message);
+      }
+      return json.decode(response.body)['data'] as Map<String, dynamic>;
+    } catch (e) {
+      print('❌ Error recording refund: $e');
       rethrow;
     }
   }

@@ -25,7 +25,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-branch-ids', 'x-org-ids'],
 }));
 
 app.use(express.json({ limit: '10mb' }));
@@ -64,6 +64,9 @@ app.use((req, res, next) => {
 
 // ─── PROTECTED ROUTES (JWT required) ─────────────────────────────────────────
 
+// Branches
+app.use('/api/finance/branches',      verifyFinanceJWT, require('./routes/branches'));
+
 // ERP / User management
 app.use('/api/finance/users',         verifyFinanceJWT, require('./routes/erp_users_management'));
 
@@ -73,6 +76,10 @@ app.use('/api/finance/home',          verifyFinanceJWT, require('./routes/home_b
 
 // Sales
 app.use('/api/finance/invoices', verifyFinanceJWT, require('./routes/invoices'));
+
+// ── Reminder Settings routes ──────────────────────────────────────────────────
+const { settingsRouter, initReminderScheduler } = require('./jobs/reminderScheduler');
+app.use('/api/finance/reminder-settings', verifyFinanceJWT, settingsRouter);
 app.use('/api/finance/recurring-invoices', verifyFinanceJWT, require('./routes/recurring-invoice'));
 app.use('/api/finance/quotes',        verifyFinanceJWT, require('./routes/quotes'));
 app.use('/api/finance/sales-orders',  verifyFinanceJWT, require('./routes/sales-order'));
@@ -99,7 +106,8 @@ app.use('/api/finance/manual-journals',      verifyFinanceJWT, require('./routes
 app.use('/api/finance/currency-adjustments', verifyFinanceJWT, require('./routes/currency_adjustments'));
 app.use('/api/finance/budgets',           verifyFinanceJWT, require('./routes/budgets'));
 app.use('/api/finance/fixed-assets',      verifyFinanceJWT, require('./routes/fixed_assets'));
-app.use('/api/finance/reconciliation',    require('./routes/reconciliation_routes'));
+// ✅ FIX: Added verifyFinanceJWT — was publicly accessible before
+app.use('/api/finance/reconciliation', verifyFinanceJWT, require('./routes/reconciliation_routes'));
 // app.use('/api/finance/reconciliation-v1', verifyFinanceJWT, require('./routes/reconciliation_billing'));
 
 // Items & Banking
@@ -215,245 +223,10 @@ app.get('/api/sync-bank-to-coa', async (req, res) => {
   }
 });
 
-// ONE-TIME: Backfill COA entries for existing invoices
-app.get('/api/backfill-invoice-coa', async (req, res) => {
-  try {
-    const { ChartOfAccount, AccountTransaction, postTransactionToCOA } = require('./routes/chart_of_accounts');
-
-    // Get all system account IDs
-    const [arAcc, salesAcc, taxAcc] = await Promise.all([
-      ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true }).lean(),
-      ChartOfAccount.findOne({ accountName: 'Sales', isSystemAccount: true }).lean(),
-      ChartOfAccount.findOne({ accountName: 'Tax Payable', isSystemAccount: true }).lean(),
-    ]);
-
-    if (!arAcc || !salesAcc || !taxAcc) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'System accounts not found. Run /api/seed-accounts first.' 
-      });
-    }
-
-    // Get all invoices from MongoDB
-    const invoices = await mongoose.connection.db
-      .collection('invoices')
-      .find({})
-      .toArray();
-
-    console.log(`📋 Found ${invoices.length} invoices to backfill`);
-
-    let created = 0;
-    let skipped = 0;
-    const errors = [];
-
-    for (const invoice of invoices) {
-      try {
-        // Check if COA entry already exists for this invoice
-        const existing = await AccountTransaction.findOne({
-          referenceType: 'Invoice',
-          referenceId: invoice._id,
-          accountId: arAcc._id,
-        });
-
-        if (existing) {
-          console.log(`ℹ️ Skipping ${invoice.invoiceNumber} — already posted`);
-          skipped++;
-          continue;
-        }
-
-        // Parse invoice date safely
-        let txnDate = new Date(invoice.invoiceDate);
-        if (isNaN(txnDate)) txnDate = new Date();
-
-        const totalAmount = parseFloat(invoice.totalAmount) || 0;
-        const subTotal   = parseFloat(invoice.subTotal)    || 0;
-        const cgst       = parseFloat(invoice.cgst)        || 0;
-        const sgst       = parseFloat(invoice.sgst)        || 0;
-        const gst        = cgst + sgst;
-
-        // Post AR debit
-        await postTransactionToCOA({
-          accountId:       arAcc._id,
-          date:            txnDate,
-          description:     `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
-          referenceType:   'Invoice',
-          referenceId:     invoice._id,
-          referenceNumber: invoice.invoiceNumber,
-          debit:           totalAmount,
-          credit:          0,
-        });
-
-        // Post Sales credit
-        await postTransactionToCOA({
-          accountId:       salesAcc._id,
-          date:            txnDate,
-          description:     `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
-          referenceType:   'Invoice',
-          referenceId:     invoice._id,
-          referenceNumber: invoice.invoiceNumber,
-          debit:           0,
-          credit:          subTotal,
-        });
-
-        // Post Tax Payable credit (only if GST > 0)
-        if (gst > 0) {
-          await postTransactionToCOA({
-            accountId:       taxAcc._id,
-            date:            txnDate,
-            description:     `GST on Invoice ${invoice.invoiceNumber}`,
-            referenceType:   'Invoice',
-            referenceId:     invoice._id,
-            referenceNumber: invoice.invoiceNumber,
-            debit:           0,
-            credit:          gst,
-          });
-        }
-
-        console.log(`✅ Backfilled: ${invoice.invoiceNumber} — AR ₹${totalAmount}, Sales ₹${subTotal}, GST ₹${gst}`);
-        created++;
-
-      } catch (err) {
-        console.error(`❌ Failed: ${invoice.invoiceNumber} —`, err.message);
-        errors.push(`${invoice.invoiceNumber}: ${err.message}`);
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Backfill complete: ${created} posted, ${skipped} skipped`,
-      created,
-      skipped,
-      errors,
-    });
-
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-
-app.get('/api/backfill-bank-coa', async (req, res) => {
-  try {
-    const { ChartOfAccount, postTransactionToCOA } = require('./routes/chart_of_accounts');
-    
-    const accounts = await mongoose.connection.db
-      .collection('paymentaccounts').find({}).toArray();
-    
-    let created = 0;
-    for (const acc of accounts) {
-      const coaAcc = await ChartOfAccount.findOne({ accountName: acc.accountName });
-      if (!coaAcc) continue;
-      
-      const balance = parseFloat(acc.currentBalance || acc.openingBalance || 0);
-      if (balance <= 0) continue;
-
-      await postTransactionToCOA({
-        accountId:       coaAcc._id,
-        date:            new Date(acc.createdAt || Date.now()),
-        description:     `Opening balance - ${acc.accountName}`,
-        referenceType:   'Opening Balance',
-        referenceId:     acc._id,
-        referenceNumber: 'OPENING',
-        debit:           balance,
-        credit:          0,
-      });
-      
-      console.log(`✅ Opening balance posted: ${acc.accountName} ₹${balance}`);
-      created++;
-    }
-    
-    res.json({ success: true, message: `Done: ${created} opening balances posted` });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.get('/api/backfill-payment-coa', async (req, res) => {
-  try {
-    const { ChartOfAccount, AccountTransaction, postTransactionToCOA } = require('./routes/chart_of_accounts');
-
-    const payments = await mongoose.connection.db
-      .collection('payments_received').find({}).toArray();
-
-    let created = 0;
-    let skipped = 0;
-
-    for (const payment of payments) {
-      // Check if already posted correctly (not to Undeposited Funds)
-      const existing = await AccountTransaction.findOne({
-        referenceType: 'Payment',
-        referenceId:   payment._id,
-      });
-
-      // Delete wrong Undeposited Funds entries if they exist
-      if (existing) {
-        await AccountTransaction.deleteMany({
-          referenceType: 'Payment',
-          referenceId:   payment._id,
-        });
-        console.log(`🗑️ Deleted wrong COA entries for payment ${payment.paymentNumber}`);
-      }
-
-      // Resolve correct deposit account name
-      let depositName = 'Undeposited Funds';
-      if (payment.depositTo) {
-        const { ObjectId } = require('mongodb');
-        if (ObjectId.isValid(payment.depositTo)) {
-          const bankAcc = await mongoose.connection.db
-            .collection('paymentaccounts')
-            .findOne({ _id: new ObjectId(payment.depositTo) });
-          if (bankAcc) depositName = bankAcc.accountName;
-        } else {
-          depositName = payment.depositTo;
-        }
-      }
-
-      // Find COA accounts
-      const [depositAcc, arAcc] = await Promise.all([
-        ChartOfAccount.findOne({ accountName: depositName }),
-        ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true }),
-      ]);
-
-      let txnDate = new Date(payment.paymentDate);
-      if (isNaN(txnDate)) txnDate = new Date();
-
-      const amount = parseFloat(payment.amountReceived) || 0;
-
-      if (depositAcc) await postTransactionToCOA({
-        accountId:       depositAcc._id,
-        date:            txnDate,
-        description:     `Payment received - ${payment.paymentNumber} - ${payment.customerName}`,
-        referenceType:   'Payment',
-        referenceId:     payment._id,
-        referenceNumber: payment.paymentNumber,
-        debit:           amount,
-        credit:          0,
-      });
-
-      if (arAcc) await postTransactionToCOA({
-        accountId:       arAcc._id,
-        date:            txnDate,
-        description:     `Payment received - ${payment.paymentNumber} - ${payment.customerName}`,
-        referenceType:   'Payment',
-        referenceId:     payment._id,
-        referenceNumber: payment.paymentNumber,
-        debit:           0,
-        credit:          amount,
-      });
-
-      console.log(`✅ Payment ${payment.paymentNumber} → ${depositName} ₹${amount}`);
-      created++;
-    }
-
-    res.json({ 
-      success: true, 
-      message: `Done: ${created} payments reposted`,
-      created 
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
+// ✅ FIX: Backfill routes locked — owner/admin only, emergency use
+app.use('/api/backfill-invoice-coa', verifyFinanceJWT, requireOwnerOrAdmin);
+app.use('/api/backfill-bank-coa',    verifyFinanceJWT, requireOwnerOrAdmin);
+app.use('/api/backfill-payment-coa', verifyFinanceJWT, requireOwnerOrAdmin);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ success: false, message: `Cannot ${req.method} ${req.path}` }));
@@ -467,6 +240,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 // ─── START ────────────────────────────────────────────────────────────────────
 async function start() {
   await connectFinanceDB();
+  initReminderScheduler();
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✅ Abra Finance Backend running on port ${PORT}`);
     console.log(`   Health:      http://localhost:${PORT}/health`);

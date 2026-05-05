@@ -259,6 +259,11 @@ router.get('/stats', async (req, res) => {
     
     const userIsAdmin = isAdmin(currentEmployee);
     const baseQuery = { org_id: req.user.orgId };
+
+    // 🌿 Branch filter — scope to selected branch(es) if not ALL
+    if (req.branchIds && req.branchIds.length > 0) {
+      baseQuery.branch_id = { $in: req.branchIds };
+    }
     
     // Filter by email if not admin
     if (!userIsAdmin) {
@@ -337,6 +342,11 @@ router.get('/closed', async (req, res) => {
     
     const userIsAdmin = isAdmin(currentEmployee);
     const query = { status: 'closed', org_id: req.user.orgId };
+
+    // 🌿 Branch filter — scope to selected branch(es) if not ALL
+    if (req.branchIds && req.branchIds.length > 0) {
+      query.branch_id = { $in: req.branchIds };
+    }
     
     // Filter by email if not admin (unless admin flag is set)
     if (!userIsAdmin && admin !== 'true') {
@@ -475,6 +485,7 @@ router.post('/', upload.single('attachment'), async (req, res) => {
       assigned_to: new ObjectId(assigned_to),
       created_by: currentEmployee._id,
       org_id: req.user.orgId,   // 🔒 org isolation
+      branch_id: req.branchIds && req.branchIds.length > 0 ? req.branchIds[0] : null, // 🌿 branch isolation
       created_at: new Date(),
       updated_at: new Date()
     };
@@ -483,6 +494,7 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     
     console.log('✅ Ticket created:', ticket_number);
     console.log('   Assigned to:', assignedEmployee.email);
+    console.log('   Branch:', newTicket.branch_id || 'ALL');
     console.log('─'.repeat(80) + '\n');
     
     res.status(201).json({
@@ -536,6 +548,11 @@ router.get('/', async (req, res) => {
     
     // 🔒 Always scope to current org (new tickets have org_id; old ones without it are excluded)
     query.org_id = req.user.orgId;
+
+    // 🌿 Branch filter — scope to selected branch(es) if not ALL
+    if (req.branchIds && req.branchIds.length > 0) {
+      query.branch_id = { $in: req.branchIds };
+    }
 
     // 🔥 CRITICAL: Filter by assigned email (unless admin flag is set)
     if (!userIsAdmin && admin !== 'true') {
@@ -652,7 +669,7 @@ router.get('/:id', async (req, res) => {
     }
     
     const ticket = await req.db.collection('tickets').aggregate([
-      { $match: { _id: new ObjectId(id) } },
+      { $match: { _id: new ObjectId(id), org_id: req.user.orgId } },
       {
         $lookup: {
           from: 'employee_admins',

@@ -34,6 +34,7 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
   bool _isLoading = true;
   bool _loadingEmployees = true;
   bool _isExporting = false; // For export button state
+  bool _isTableView = true;
 
   // Filters
   String _assignedToFilter = '';
@@ -341,8 +342,12 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E3A8A),
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text(
-          'Closed Tickets Archive',
+          'Closed Tickets',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         actions: [
@@ -359,7 +364,7 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                 children: [
                   _buildStatistics(),
                   _buildSingleRowFilters(),
-                  _buildTicketsTable(),
+                  _isTableView ? _buildTicketsTable() : _buildClosedTicketListView(),
                 ],
               ),
             ),
@@ -689,7 +694,130 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
               ),
             ),
           ),
+          const SizedBox(width: 12),
+          _buildViewToggle(),
         ],
+      ),
+    );
+  }
+
+  // ========================================================================
+  // 🔀 VIEW TOGGLE
+  // ========================================================================
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: const Color(0xFF1E3A8A).withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: const Color(0xFF1E3A8A).withOpacity(0.2)),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? const Color(0xFF1E3A8A) : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 15, color: isSelected ? Colors.white : const Color(0xFF1E3A8A)),
+            const SizedBox(width: 5),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal, color: isSelected ? Colors.white : const Color(0xFF1E3A8A))),
+          ]),
+        ),
+      );
+
+  Widget _buildClosedTicketListView() {
+    if (_filteredTickets.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(48),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))]),
+        child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.archive_outlined, size: 80, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          Text('No closed tickets found', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+        ])),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      itemCount: _filteredTickets.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) => _buildClosedTicketListCard(_filteredTickets[i]),
+    );
+  }
+
+  Widget _buildClosedTicketListCard(Map<String, dynamic> ticket) {
+    final ticketNum  = ticket['ticket_number']?.toString() ?? 'N/A';
+    final subject    = ticket['subject']?.toString() ?? 'No Subject';
+    final assignedTo = ticket['assigned_to_name']?.toString() ?? 'Not Assigned';
+    final priority   = ticket['priority']?.toString() ?? 'Medium';
+    final closedAt   = ticket['closed_at'] ?? ticket['updated_at'];
+    DateTime? closedDate;
+    try { closedDate = DateTime.parse(closedAt?.toString() ?? ''); } catch (_) {}
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: const Color(0xFF1E3A8A), borderRadius: BorderRadius.circular(20)),
+              child: Text(ticketNum, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: const Color(0xFF64748B).withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF64748B).withOpacity(0.3))),
+              child: const Text('CLOSED', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: priority.toLowerCase() == 'high' ? Colors.red[50] : priority.toLowerCase() == 'medium' ? Colors.orange[50] : Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(priority.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: priority.toLowerCase() == 'high' ? Colors.red[700] : priority.toLowerCase() == 'medium' ? Colors.orange[700] : Colors.green[700])),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(subject, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.assignment_ind_outlined, size: 13, color: Colors.grey[500]),
+            const SizedBox(width: 4),
+            Expanded(child: Text('Assigned: $assignedTo', style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+            if (closedDate != null) ...[
+              Icon(Icons.lock_outline, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(DateFormat('dd MMM yyyy').format(closedDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ],
+          ]),
+          const SizedBox(height: 10),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            ElevatedButton.icon(
+              onPressed: () => _reopenTicket(ticket['_id']?.toString() ?? ''),
+              icon: const Icon(Icons.refresh, size: 14),
+              label: const Text('Reopen', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
+              ),
+            ),
+          ]),
+        ]),
       ),
     );
   }
@@ -783,21 +911,17 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
           ),
 
           // Table Content with Horizontal & Vertical Scrolling + Cursor Support
-          Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height - 400,
-            ),
-            child: Scrollbar(
-              thumbVisibility: true,
-              trackVisibility: true,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.vertical,
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  notificationPredicate: (notification) => notification.depth == 1,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+          Scrollbar(
+            thumbVisibility: true,
+            trackVisibility: true,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: Scrollbar(
+                thumbVisibility: true,
+                trackVisibility: true,
+                notificationPredicate: (notification) => notification.depth == 1,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
                     child: DataTable(
                       columnSpacing: 32,
                       horizontalMargin: 24,
@@ -1161,7 +1285,6 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                 ), // Scrollbar (inner)
               ), // SingleChildScrollView (vertical)
             ), // Scrollbar (outer)
-          ), // Container
         ],
       ),
     );

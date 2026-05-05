@@ -31,6 +31,7 @@ import 'new_quote.dart';
 import 'new_sales_order.dart';
 import 'new_credit_note.dart';
 import 'new_payment_made.dart';
+import 'reminder_settings_page.dart';
 
 // ── Brand colours ─────────────────────────────────────────────────────────────
 const Color _navy   = Color(0xFF0D1B3E);
@@ -366,7 +367,6 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
           _metaField('Invoice Date',    DateFormat('dd MMM yyyy').format(inv.invoiceDate)),
           _metaField('Due Date',        DateFormat('dd MMM yyyy').format(inv.dueDate),
               color: inv.amountDue > 0 && inv.dueDate.isBefore(DateTime.now()) ? Colors.red : null),
-          _metaField('Payment Terms',   inv.terms),
           _metaField('Place of Supply', inv.placeOfSupply.isNotEmpty ? inv.placeOfSupply : '—'),
           _metaField('Tax Type',        inv.isInterState ? 'IGST (Inter-State)' : 'CGST + SGST (Intra-State)',
               color: inv.isInterState ? Colors.orange[800] : Colors.green[800]),
@@ -865,6 +865,14 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
             },
           ),
       ])),
+      const SizedBox(height: 24),
+      ReminderLogWidget(
+        invoiceId:      inv.id,
+        reminderPaused: inv.reminderPaused,
+        reminderCount:  inv.reminderCount,
+        onStatusChanged: () => _loadInvoice(),
+      ),
+      const SizedBox(height: 24),
     ]);
   }
 

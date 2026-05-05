@@ -24,6 +24,9 @@ class Quote {
   final DateTime quoteDate;
   final DateTime expiryDate;
   final String? salesperson;
+  final String customerGSTIN;
+  final String customerPAN;
+  final String gstRegistrationType;
   final String? projectName;
   final String? subject;
   final List<QuoteItem> items;
@@ -61,6 +64,9 @@ class Quote {
     required this.quoteDate,
     required this.expiryDate,
     this.salesperson,
+    this.customerGSTIN       = '',
+    this.customerPAN         = '',
+    this.gstRegistrationType = '',
     this.projectName,
     this.subject,
     required this.items,
@@ -100,6 +106,9 @@ class Quote {
       quoteDate: DateTime.parse(json['quoteDate']),
       expiryDate: DateTime.parse(json['expiryDate']),
       salesperson: json['salesperson'],
+      customerGSTIN:        json['customerGSTIN']        ?? '',
+      customerPAN:          json['customerPAN']           ?? '',
+      gstRegistrationType:  json['gstRegistrationType']  ?? '',
       projectName: json['projectName'],
       subject: json['subject'],
       items: (json['items'] as List<dynamic>?)
@@ -451,6 +460,23 @@ class QuoteService {
     }
   }
 
+  // Mark quote as sent (no email)
+  static Future<Quote> markAsSent(String quoteId) async {
+    try {
+      debugPrint('📬 QuoteService: Marking quote $quoteId as sent...');
+
+      final response = await _apiService.patch('/api/finance/quotes/$quoteId/mark-as-sent', body: {});
+
+      debugPrint('✅ QuoteService: Successfully marked quote as sent');
+
+      final data = response['data'] ?? response;
+      return Quote.fromJson(data);
+    } catch (e) {
+      debugPrint('❌ QuoteService: Error marking quote as sent: $e');
+      rethrow;
+    }
+  }
+
   // Send quote to customer
   static Future<Quote> sendQuote(String quoteId) async {
     try {
@@ -469,21 +495,22 @@ class QuoteService {
   }
 
   // Download quote PDF
-static Future<String> downloadPDF(String quoteId) async {
-  try {
-    debugPrint('📄 QuoteService: Getting PDF download URL for quote $quoteId...');
+  static Future<String> downloadPDF(String quoteId) async {
+    try {
+      debugPrint('📄 QuoteService: Getting PDF download URL for quote $quoteId...');
 
-    final headers = await _apiService.getHeaders();
-    final token = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
-    final url = '${_apiService.baseUrl}/api/finance/quotes/$quoteId/download?token=$token';
+      final headers = await _apiService.getHeaders();
+      final token = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
+      final branchIds = headers['x-branch-ids'] ?? 'ALL';
+      final url = '${_apiService.baseUrl}/api/finance/quotes/$quoteId/download?token=$token&branchIds=${Uri.encodeComponent(branchIds)}';
 
-    debugPrint('✅ QuoteService: PDF URL generated: $url');
-    return url;
-  } catch (e) {
-    debugPrint('❌ QuoteService: Error generating PDF URL: $e');
-    rethrow;
+      debugPrint('✅ QuoteService: PDF URL generated: $url');
+      return url;
+    } catch (e) {
+      debugPrint('❌ QuoteService: Error generating PDF URL: $e');
+      rethrow;
+    }
   }
-}
 
   // Accept quote
   static Future<Quote> acceptQuote(String quoteId) async {

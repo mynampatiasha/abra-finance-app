@@ -84,6 +84,7 @@ const OrgGateway = mongoose.models.OrgPaymentGateway ||
 // ── PaymentLink ───────────────────────────────────────────────────────────────
 const paymentLinkSchema = new mongoose.Schema({
   orgId:           { type: String, required: true, index: true },
+  branchId:        { type: String, index: true, default: null },
 
   // Reference number (auto-generated: PL-000001)
   referenceNumber: { type: String, index: true },
@@ -142,8 +143,11 @@ const PaymentLink = mongoose.models.PaymentLink ||
   mongoose.model('PaymentLink', paymentLinkSchema);
 
 // ── Number generator ──────────────────────────────────────────────────────────
-async function generateReferenceNumber(orgId) {
-  const last = await PaymentLink.findOne({ orgId })
+async function generateReferenceNumber(orgId, branchId = null) {
+  const query = { orgId };
+  if (branchId) query.branchId = branchId;
+
+  const last = await PaymentLink.findOne(query)
     .sort({ createdAt: -1 })
     .select('referenceNumber')
     .lean();
@@ -153,7 +157,17 @@ async function generateReferenceNumber(orgId) {
     const num = parseInt(last.referenceNumber.replace('PL-', ''), 10);
     if (!isNaN(num)) next = num + 1;
   }
-  return `PL-${String(next).padStart(6, '0')}`;
+
+  // Guard against duplicate: keep incrementing until we find an unused number
+  let candidate = `PL-${String(next).padStart(6, '0')}`;
+  let exists = await PaymentLink.exists({ ...query, referenceNumber: candidate });
+  while (exists) {
+    next++;
+    candidate = `PL-${String(next).padStart(6, '0')}`;
+    exists = await PaymentLink.exists({ ...query, referenceNumber: candidate });
+  }
+
+  return candidate;
 }
 
 function generateToken() {
@@ -424,7 +438,7 @@ router.get('/links', verifyFinanceJWT, async (req, res) => {
     await syncRazorpayLinkStatuses(req.user.orgId).catch(() => {});
 
     const { status, page = 1, limit = 50, search } = req.query;
-    const filter = { ...orgFilter(req) };
+    const filter = { ...orgFilter(req), ...(req.branchFilter || {}) };
     if (status && status !== 'ALL') filter.status = status;
     if (search) {
       filter.$or = [
@@ -442,7 +456,7 @@ router.get('/links', verifyFinanceJWT, async (req, res) => {
 
     // Stats
     const stats = await PaymentLink.aggregate([
-      { $match: { ...orgFilter(req) } },
+      { $match: { ...orgFilter(req), ...(req.branchFilter || {}) } },
       { $group: {
           _id:       null,
           total:     { $sum: 1 },
@@ -475,7 +489,7 @@ router.get('/links', verifyFinanceJWT, async (req, res) => {
 router.get('/links/:id', verifyFinanceJWT, async (req, res) => {
   try {
     await expireOldLinks();
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) }).lean();
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) }).lean();
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     res.json({ success: true, data: link });
   } catch (e) {
@@ -509,7 +523,7 @@ router.post('/links', verifyFinanceJWT, async (req, res) => {
       ? new Date(expirationDate)
       : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days default
 
-    const referenceNumber = await generateReferenceNumber(req.user.orgId);
+    const referenceNumber = await generateReferenceNumber(req.user.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     const token           = generateToken();
 
     let shortUrl             = '';
@@ -560,6 +574,7 @@ router.post('/links', verifyFinanceJWT, async (req, res) => {
 
     const link = new PaymentLink({
       orgId:                req.user.orgId,
+      branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
       referenceNumber,
       customerId:           customerId || '',
       customerName,
@@ -576,7 +591,17 @@ router.post('/links', verifyFinanceJWT, async (req, res) => {
       createdBy:            req.user.email || 'system',
     });
 
-    await link.save();
+    try {
+      await link.save();
+    } catch (saveErr) {
+      // Duplicate referenceNumber — regenerate and retry once
+      if (saveErr.code === 11000 && saveErr.message.includes('referenceNumber')) {
+        link.referenceNumber = await generateReferenceNumber(req.user.orgId);
+        await link.save();
+      } else {
+        throw saveErr;
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -595,7 +620,7 @@ router.put('/links/:id/expiry', verifyFinanceJWT, async (req, res) => {
     const { expirationDate } = req.body;
     if (!expirationDate) return res.status(400).json({ success: false, message: 'expirationDate is required' });
 
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) });
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) });
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     if (['PAID', 'CANCELED'].includes(link.status)) {
       return res.status(400).json({ success: false, message: `Cannot update expiry — link is ${link.status}` });
@@ -638,7 +663,7 @@ router.put('/links/:id/expiry', verifyFinanceJWT, async (req, res) => {
 // ── POST /links/:id/send — send payment link via email ────────────────────
 router.post('/links/:id/send', verifyFinanceJWT, async (req, res) => {
   try {
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) }).lean();
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) }).lean();
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     if (link.status === 'PAID') return res.status(400).json({ success: false, message: 'Link is already paid' });
     if (link.status === 'CANCELED') return res.status(400).json({ success: false, message: 'Link is canceled' });
@@ -723,7 +748,7 @@ router.post('/links/:id/send', verifyFinanceJWT, async (req, res) => {
 // ── PUT /links/:id/cancel — cancel a payment link ─────────────────────────
 router.put('/links/:id/cancel', verifyFinanceJWT, async (req, res) => {
   try {
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) });
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) });
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     if (link.status === 'PAID')     return res.status(400).json({ success: false, message: 'Cannot cancel a paid link' });
     if (link.status === 'CANCELED') return res.status(400).json({ success: false, message: 'Already canceled' });
@@ -751,7 +776,7 @@ router.put('/links/:id/cancel', verifyFinanceJWT, async (req, res) => {
 // ── DELETE /links/:id — delete a payment link ─────────────────────────────
 router.delete('/links/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) });
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) });
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     if (link.status === 'PAID') {
       return res.status(400).json({ success: false, message: 'Cannot delete a paid link. Cancel it instead.' });
@@ -881,7 +906,7 @@ router.post('/webhook/razorpay', express.raw({ type: 'application/json' }), asyn
 // ── POST /links/:id/mark-paid — manual mark as paid (for testing) ─────────
 router.post('/links/:id/mark-paid', verifyFinanceJWT, async (req, res) => {
   try {
-    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req) });
+    const link = await PaymentLink.findOne({ _id: req.params.id, ...orgFilter(req), ...(req.branchFilter || {}) });
     if (!link) return res.status(404).json({ success: false, message: 'Payment link not found' });
     if (link.status === 'PAID') return res.status(400).json({ success: false, message: 'Already paid' });
 
@@ -929,6 +954,7 @@ async function _markLinkAsPaid(link, paidAmount, rzpPaymentId = '') {
       amountRefunded:  0,
       amountInExcess:  paidAmount,
       orgId:           link.orgId,
+      branchId:        link.branchId || null,
       paymentProofs:   [],
       source:          'payment_link',
       paymentLinkId:   link._id.toString(),

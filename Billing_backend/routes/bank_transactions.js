@@ -60,32 +60,93 @@ const PaymentAccount = mongoose.models.PaymentAccount
 // ============================================================================
 
 function orgFilter(req) {
-  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+  return {
+    ...req.orgFilter,
+    ...(req.branchFilter || {}),
+  };
 }
 
 // Find the COA account linked to a PaymentAccount by name or ID
-async function resolveBankCOA(accountId, orgId = null) {
+// branchId is required for branch-level isolation — each branch has its own COA set
+async function resolveBankCOA(accountId, orgId = null, branchId = null) {
   const pa = await PaymentAccount.findById(accountId).lean();
   if (!pa) throw new Error(`PaymentAccount ${accountId} not found`);
 
-  const coa = await ChartOfAccount.findOne({
+  // Build filter: prefer exact branch match, fall back to org-only if not found
+  const exactFilter = {
     accountName: pa.accountName,
-    ...(orgId ? { orgId } : {}),
-  }).lean();
+    ...(orgId    ? { orgId }    : {}),
+    ...(branchId ? { branchId } : {}),
+  };
+
+  let coa = await ChartOfAccount.findOne(exactFilter).lean();
+
+  // Fallback: if branch-specific COA not found, try org-level (null branchId)
+  if (!coa && branchId) {
+    coa = await ChartOfAccount.findOne({
+      accountName: pa.accountName,
+      ...(orgId ? { orgId } : {}),
+    }).lean();
+  }
 
   if (!coa) throw new Error(`COA account not found for bank: ${pa.accountName}`);
   return coa;
 }
 
-// Build a unique journal reference number
-async function nextJournalRef(orgId = null) {
-  const count = await AccountTransaction.countDocuments({ ...(orgId ? { orgId } : {}) });
+// Build a unique journal reference number — scoped to branch for clean per-branch sequences
+async function nextJournalRef(orgId = null, branchId = null) {
+  const filter = {
+    ...(orgId    ? { orgId }    : {}),
+    ...(branchId ? { branchId } : {}),
+  };
+  const count = await AccountTransaction.countDocuments(filter);
   const pad   = String(count + 1).padStart(5, '0');
   return `BNK-${new Date().getFullYear()}-${pad}`;
 }
 
 // Mark ProviderTransaction(s) as categorized and link journal entries
-async function markCategorized(providerTxnIds, journalRef, categoryLabel, orgId = null, linkedRecordId = null, linkedRecordType = null) {
+// branchId is stamped so the record stays correctly scoped after categorization
+async function markCategorized(providerTxnIds, journalRef, categoryLabel, orgId = null, linkedRecordId = null, linkedRecordType = null, branchId = null) {
+  // ✅ FIX: Determine cash flow section based on account type
+  let cashFlowSection = 'OPERATING'; // default
+  
+  console.log('🔍 [markCategorized] DEBUG - categoryLabel:', categoryLabel);
+  
+  // Get the account type from COA using categoryLabel
+  if (categoryLabel) {
+    const expAcc = await ChartOfAccount.findOne({
+      accountName: categoryLabel,
+      ...(orgId ? { orgId } : {}),
+    }).select('accountType').lean();
+    
+    console.log('🔍 [markCategorized] DEBUG - Found COA account:', expAcc);
+    
+    if (expAcc) {
+      const accType = expAcc.accountType;
+      console.log('🔍 [markCategorized] DEBUG - Account type:', accType);
+      
+      // Asset purchases → Investing Activities
+      if (['Asset', 'Fixed Asset', 'Other Current Asset', 'Other Asset'].includes(accType)) {
+        cashFlowSection = 'INVESTING';
+        console.log('✅ [markCategorized] Cash Flow Section: INVESTING (Asset account)');
+      }
+      // Liability/Equity payments → Financing Activities
+      else if (['Liability', 'Equity', 'Other Current Liability', 'Non Current Liability', 'Other Liability'].includes(accType)) {
+        cashFlowSection = 'FINANCING';
+        console.log('✅ [markCategorized] Cash Flow Section: FINANCING (Liability/Equity account)');
+      }
+      // Expense/Income/COGS → Operating Activities (default)
+      else {
+        cashFlowSection = 'OPERATING';
+        console.log('✅ [markCategorized] Cash Flow Section: OPERATING (Expense/Income/COGS account)');
+      }
+    } else {
+      console.log('⚠️ [markCategorized] COA account not found for categoryLabel:', categoryLabel);
+    }
+  }
+  
+  console.log('🔍 [markCategorized] Final cashFlowSection:', cashFlowSection);
+  
   await ProviderTransaction.updateMany(
     { _id: { $in: providerTxnIds } },
     {
@@ -96,11 +157,15 @@ async function markCategorized(providerTxnIds, journalRef, categoryLabel, orgId 
         journalRef,
         categoryLabel,
         orgId,
+        branchId,
         linkedRecordId,
         linkedRecordType,
+        cashFlowSection,      // ✅ FIX: Add cash flow section
       },
     },
   );
+  
+  console.log(`✅ [markCategorized] Updated ${providerTxnIds.length} ProviderTransaction(s) with cashFlowSection: ${cashFlowSection}`);
 }
 
 // ============================================================================
@@ -148,21 +213,99 @@ router.get('/uncategorized', async (req, res) => {
 });
 
 // ============================================================================
+// ROUTE 1b — GET /stats/:accountId
+// Returns counts + currentBalance for the account detail page header
+// ============================================================================
+router.get('/stats/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const orgF = orgFilter(req);
+    const accountObjId = mongoose.Types.ObjectId.isValid(accountId)
+      ? new mongoose.Types.ObjectId(accountId) : accountId;
+
+    const [uncategorized, categorized, account] = await Promise.all([
+      ProviderTransaction.countDocuments({
+        accountId: accountObjId,
+        reconciliationStatus: { $in: ['UNMATCHED', 'UNCATEGORIZED'] },
+        isExcluded: { $ne: true }, ...orgF,
+      }),
+      ProviderTransaction.countDocuments({
+        accountId: accountObjId,
+        reconciliationStatus: 'CATEGORIZED', ...orgF,
+      }),
+      PaymentAccount.findById(accountId).lean(),
+    ]);
+
+    let bankCOABalance = 0;
+    try {
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+      const bankCOA  = await resolveBankCOA(accountId, req.user?.orgId, branchId);
+      // Compute branch-scoped closing balance from AccountTransaction aggregation
+      const balAgg = await AccountTransaction.aggregate([
+        { $match: {
+          accountId: bankCOA._id,
+          ...req.orgFilter,
+          ...(branchId ? { branchId } : {}),
+        }},
+        { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+      ]);
+      bankCOABalance = (balAgg[0]?.totalDebit || 0) - (balAgg[0]?.totalCredit || 0);
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      data: {
+        uncategorized,
+        categorized,
+        total: uncategorized + categorized,
+        currentBalance: account?.currentBalance ?? 0,
+        bankCOABalance,
+        openingBalance: account?.openingBalance ?? 0,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 1c — GET /all-transactions
+// Returns all ProviderTransactions for the All Transactions tab
+// ============================================================================
+router.get('/all-transactions', async (req, res) => {
+  try {
+    const { accountId, page = 1, limit = 100 } = req.query;
+    if (!accountId) return res.status(400).json({ success: false, message: 'accountId is required' });
+
+    const accountObjId = mongoose.Types.ObjectId.isValid(accountId)
+      ? new mongoose.Types.ObjectId(accountId) : accountId;
+
+    const filter = { accountId: accountObjId, isExcluded: { $ne: true }, ...orgFilter(req) };
+    const total  = await ProviderTransaction.countDocuments(filter);
+    const txns   = await ProviderTransaction.find(filter)
+      .sort({ categorizedAt: -1, transactionDate: -1 })  // Sort by categorization time first, then transaction date
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit))
+      .lean();
+
+    res.json({ success: true, total, data: txns });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
 // ROUTE 2 — GET /ledger
 // Returns all transactions (ledger/passbook view) for an account
 // ============================================================================
 router.get('/ledger', async (req, res) => {
   try {
     const { accountId, startDate, endDate, page = 1, limit = 100 } = req.query;
+    if (!accountId) return res.status(400).json({ success: false, message: 'accountId is required' });
 
-    if (!accountId) {
-      return res.status(400).json({ success: false, message: 'accountId is required' });
-    }
-
-    // Resolve the COA account for this bank account
-    const bankCOA = await resolveBankCOA(accountId, req.user?.orgId);
-
-    const filter = { accountId: bankCOA._id, ...orgFilter(req) };
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const bankCOA  = await resolveBankCOA(accountId, req.user?.orgId, branchId);
+    const filter   = { accountId: bankCOA._id, ...orgFilter(req) };
     if (startDate) filter.date = { ...filter.date, $gte: new Date(startDate) };
     if (endDate)   filter.date = { ...filter.date, $lte: new Date(endDate) };
 
@@ -173,13 +316,23 @@ router.get('/ledger', async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Running balance (already stored in balance field)
+    // Compute branch-scoped closing balance
+    const balAgg = await AccountTransaction.aggregate([
+      { $match: {
+        accountId: bankCOA._id,
+        ...req.orgFilter,
+        ...(branchId ? { branchId } : {}),
+      }},
+      { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+    ]);
+    const branchClosingBalance = (balAgg[0]?.totalDebit || 0) - (balAgg[0]?.totalCredit || 0);
+
     res.json({
       success:         true,
       total,
       page:            parseInt(page),
       totalPages:      Math.ceil(total / parseInt(limit)),
-      currentBalance:  bankCOA.closingBalance,
+      currentBalance:  branchClosingBalance,
       data:            txns,
     });
   } catch (err) {
@@ -224,6 +377,63 @@ router.get('/coa-options', async (req, res) => {
         accountName: a.accountName,
         accountType: a.accountType,
       })),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE 3b — GET /resolve-category-coa
+// Resolves the COA account for a simple category type.
+// Returns the account if found, or a 404 with suggested name+type to create.
+// Used by the frontend to check before categorizing — if missing, prompt user
+// to create the account via NewChartOfAccountScreen.
+// ============================================================================
+const CATEGORY_COA_MAP = {
+  // Money IN
+  interest_income:       { name: 'Interest Income',      type: 'Income',   subType: 'Other Income' },
+  other_income:          { name: 'Other Income',          type: 'Income',   subType: 'Other Income' },
+  expense_refund:        { name: 'Other Income',          type: 'Income',   subType: 'Other Income' },
+  owner_contribution:    { name: "Owner's Contribution",  type: 'Equity',   subType: 'Equity' },
+  vendor_credit_refund:  { name: 'Accounts Payable',      type: 'Liability',subType: 'Accounts Payable' },
+  vendor_payment_refund: { name: 'Accounts Payable',      type: 'Liability',subType: 'Accounts Payable' },
+  // Money OUT
+  owner_drawings:        { name: "Owner's Drawings",      type: 'Equity',   subType: 'Equity' },
+  credit_note_refund:    { name: 'Accounts Receivable',   type: 'Asset',    subType: 'Accounts Receivable' },
+  payment_refund:        { name: 'Accounts Receivable',   type: 'Asset',    subType: 'Accounts Receivable' },
+};
+
+router.get('/resolve-category-coa', async (req, res) => {
+  try {
+    const { categoryType } = req.query;
+    const mapping = CATEGORY_COA_MAP[categoryType];
+    if (!mapping) {
+      return res.json({ success: true, found: true, account: null }); // not a mapped category
+    }
+
+    const account = await ChartOfAccount.findOne({
+      accountName: { $regex: new RegExp(`^${mapping.name}$`, 'i') },
+      isActive: true,
+      ...req.orgFilter,
+      ...(req.branchIds?.length > 0 ? { branchId: req.branchIds[0] } : {}),
+    }).lean();
+
+    if (account) {
+      return res.json({
+        success: true,
+        found:   true,
+        account: { id: account._id, accountName: account.accountName, accountType: account.accountType },
+      });
+    }
+
+    // Not found — return suggested details so frontend can pre-fill the create form
+    return res.json({
+      success:         true,
+      found:           false,
+      suggestedName:   mapping.name,
+      suggestedType:   mapping.type,
+      suggestedSubType: mapping.subType,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -385,10 +595,11 @@ router.post('/categorize/expense', async (req, res) => {
 
     const txnAmount  = amount || txn.amount;
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
 
-    // Resolve bank COA
-    const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+    // Resolve bank COA — branch-scoped
+    const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
     const expenseCOA = await ChartOfAccount.findById(coaAccountId).lean();
     if (!expenseCOA) return res.status(404).json({ success: false, message: 'Expense COA account not found' });
 
@@ -399,6 +610,7 @@ router.post('/categorize/expense', async (req, res) => {
     await postTransactionToCOA({
       accountId:       expenseCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Expense',
@@ -412,6 +624,7 @@ router.post('/categorize/expense', async (req, res) => {
     await postTransactionToCOA({
       accountId:       bankCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Expense',
@@ -429,6 +642,7 @@ router.post('/categorize/expense', async (req, res) => {
     // ── Save expense record ───────────────────────────────────────────────────
     const expense = await Expense.create({
       orgId:                   req.user?.orgId || null,
+      branchId,
       expenseNumber:           journalRef,
       date:                    txnDate.toISOString().split('T')[0],
       expenseAccount:          expenseCOA.accountName,
@@ -448,7 +662,7 @@ router.post('/categorize/expense', async (req, res) => {
     });
 
     // ── Mark provider transaction as categorized ──────────────────────────────
-    await markCategorized([txn._id], journalRef, expenseCOA.accountName, req.user?.orgId, expense._id, 'Expense');
+    await markCategorized([txn._id], journalRef, expenseCOA.accountName, req.user?.orgId, expense._id, 'Expense', branchId);
 
     console.log(`✅ Expense categorized: ${journalRef} ₹${txnAmount} → ${expenseCOA.accountName}`);
 
@@ -472,7 +686,8 @@ router.post('/categorize/deposit', async (req, res) => {
   try {
     const {
       providerTransactionId,
-      coaAccountId,     // Income COA account
+      coaAccountId,     // Income COA account (optional if categoryType is provided)
+      categoryType,     // e.g. 'interest_income', 'owner_contribution' etc.
       customerId,
       customerName,
       date,
@@ -480,8 +695,8 @@ router.post('/categorize/deposit', async (req, res) => {
       notes,
     } = req.body;
 
-    if (!providerTransactionId || !coaAccountId) {
-      return res.status(400).json({ success: false, message: 'providerTransactionId and coaAccountId are required' });
+    if (!providerTransactionId) {
+      return res.status(400).json({ success: false, message: 'providerTransactionId is required' });
     }
 
     const txn = await ProviderTransaction.findOne({
@@ -490,13 +705,41 @@ router.post('/categorize/deposit', async (req, res) => {
     });
     if (!txn) return res.status(404).json({ success: false, message: 'Transaction not found' });
 
+    // Resolve COA account — prefer explicit coaAccountId, else map from categoryType
+    let incomeCOA = null;
+    if (coaAccountId) {
+      incomeCOA = await ChartOfAccount.findById(coaAccountId).lean();
+    } else if (categoryType && CATEGORY_COA_MAP[categoryType]) {
+      const mapping = CATEGORY_COA_MAP[categoryType];
+      incomeCOA = await ChartOfAccount.findOne({
+        accountName: { $regex: new RegExp(`^${mapping.name}$`, 'i') },
+        isActive: true,
+        ...req.orgFilter,
+        ...(req.branchIds?.length > 0 ? { branchId: req.branchIds[0] } : {}),
+      }).lean();
+      // If still not found, return a specific error so frontend can prompt creation
+      if (!incomeCOA) {
+        return res.status(422).json({
+          success:          false,
+          code:             'COA_ACCOUNT_MISSING',
+          message:          `Account "${mapping.name}" not found. Please create it first.`,
+          suggestedName:    mapping.name,
+          suggestedType:    mapping.type,
+          suggestedSubType: mapping.subType,
+        });
+      }
+    }
+
+    if (!incomeCOA) {
+      return res.status(400).json({ success: false, message: 'coaAccountId or categoryType is required' });
+    }
+
     const txnAmount  = amount || txn.amount;
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
 
-    const bankCOA   = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
-    const incomeCOA = await ChartOfAccount.findById(coaAccountId).lean();
-    if (!incomeCOA) return res.status(404).json({ success: false, message: 'Income COA account not found' });
+    const bankCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
 
     const description = `${incomeCOA.accountName}${customerName ? ' - ' + customerName : ''} | ${journalRef}`;
 
@@ -505,6 +748,7 @@ router.post('/categorize/deposit', async (req, res) => {
     await postTransactionToCOA({
       accountId:       bankCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Payment',
@@ -514,10 +758,11 @@ router.post('/categorize/deposit', async (req, res) => {
       credit:          0,
     });
 
-    // Cr Income Account
+    // Cr Income/Equity/Liability Account
     await postTransactionToCOA({
       accountId:       incomeCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Payment',
@@ -527,12 +772,11 @@ router.post('/categorize/deposit', async (req, res) => {
       credit:          txnAmount,
     });
 
-    // ── Update bank account current balance ───────────────────────────────────
     await PaymentAccount.findByIdAndUpdate(txn.accountId, {
       $inc: { currentBalance: txnAmount },
     });
 
-    await markCategorized([txn._id], journalRef, incomeCOA.accountName, req.user?.orgId);
+    await markCategorized([txn._id], journalRef, incomeCOA.accountName, req.user?.orgId, null, null, branchId);
 
     console.log(`✅ Deposit categorized: ${journalRef} ₹${txnAmount} → ${incomeCOA.accountName}`);
 
@@ -574,10 +818,11 @@ router.post('/categorize/transfer', async (req, res) => {
 
     const txnAmount  = amount || txn.amount;
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
 
-    const fromCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
-    const toCOA   = await resolveBankCOA(toAccountId, req.user?.orgId);
+    const fromCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
+    const toCOA   = await resolveBankCOA(toAccountId, req.user?.orgId, branchId);
 
     const description = `Transfer: ${fromCOA.accountName} → ${toCOA.accountName} | ${journalRef}`;
 
@@ -586,6 +831,7 @@ router.post('/categorize/transfer', async (req, res) => {
     await postTransactionToCOA({
       accountId:       toCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Journal',
@@ -599,6 +845,7 @@ router.post('/categorize/transfer', async (req, res) => {
     await postTransactionToCOA({
       accountId:       fromCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description,
       referenceType:   'Journal',
@@ -612,7 +859,7 @@ router.post('/categorize/transfer', async (req, res) => {
     await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: -txnAmount } });
     await PaymentAccount.findByIdAndUpdate(toAccountId,   { $inc: { currentBalance:  txnAmount } });
 
-    await markCategorized([txn._id], journalRef, `Transfer → ${toCOA.accountName}`, req.user?.orgId);
+    await markCategorized([txn._id], journalRef, `Transfer → ${toCOA.accountName}`, req.user?.orgId, null, null, branchId);
 
     console.log(`✅ Transfer: ${journalRef} ₹${txnAmount} ${fromCOA.accountName} → ${toCOA.accountName}`);
 
@@ -651,8 +898,9 @@ router.post('/categorize/split', async (req, res) => {
     if (!txn) return res.status(404).json({ success: false, message: 'Transaction not found' });
 
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
-    const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+    const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
 
     // Validate split amounts sum to transaction amount
     const splitsTotal = splits.reduce((s, sp) => s + parseFloat(sp.amount), 0);
@@ -675,6 +923,7 @@ router.post('/categorize/split', async (req, res) => {
       await postTransactionToCOA({
         accountId:       splitCOA._id,
         orgId:           req.user?.orgId || null,
+        branchId,
         date:            txnDate,
         description,
         referenceType:   'Expense',
@@ -687,6 +936,7 @@ router.post('/categorize/split', async (req, res) => {
       // Save individual expense record for each split
       await Expense.create({
         orgId:                 req.user?.orgId || null,
+        branchId,
         expenseNumber:         `${journalRef}-${splitDetails.length + 1}`,
         date:                  txnDate.toISOString().split('T')[0],
         expenseAccount:        splitCOA.accountName,
@@ -710,6 +960,7 @@ router.post('/categorize/split', async (req, res) => {
     await postTransactionToCOA({
       accountId:       bankCOA._id,
       orgId:           req.user?.orgId || null,
+      branchId,
       date:            txnDate,
       description:     `Split transaction | ${journalRef}`,
       referenceType:   'Expense',
@@ -721,7 +972,7 @@ router.post('/categorize/split', async (req, res) => {
 
     await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: -txn.amount } });
 
-    await markCategorized([txn._id], journalRef, 'Split', req.user?.orgId);
+    await markCategorized([txn._id], journalRef, 'Split', req.user?.orgId, null, null, branchId);
 
     console.log(`✅ Split transaction: ${journalRef} ₹${txn.amount} → ${splits.length} splits`);
 
@@ -759,9 +1010,10 @@ router.post('/categorize/match-invoice', async (req, res) => {
 
     const txnAmount  = amount || txn.amount;
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
 
-    const bankCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+    const bankCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
     const arCOA   = await ChartOfAccount.findOne({
       accountName:     'Accounts Receivable',
       isSystemAccount: true,
@@ -774,6 +1026,7 @@ router.post('/categorize/match-invoice', async (req, res) => {
     // Dr Bank (money arrives)
     await postTransactionToCOA({
       accountId: bankCOA._id, orgId: req.user?.orgId || null,
+      branchId,
       date: txnDate, description,
       referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef,
       debit: txnAmount, credit: 0,
@@ -782,6 +1035,7 @@ router.post('/categorize/match-invoice', async (req, res) => {
     // Cr Accounts Receivable (clears the AR)
     await postTransactionToCOA({
       accountId: arCOA._id, orgId: req.user?.orgId || null,
+      branchId,
       date: txnDate, description,
       referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef,
       debit: 0, credit: txnAmount,
@@ -796,7 +1050,7 @@ router.post('/categorize/match-invoice', async (req, res) => {
     });
 
     await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: txnAmount } });
-    await markCategorized([txn._id], journalRef, `Invoice: ${invoice.invoiceNumber}`, req.user?.orgId, invoice._id, 'Invoice');
+    await markCategorized([txn._id], journalRef, `Invoice: ${invoice.invoiceNumber}`, req.user?.orgId, invoice._id, 'Invoice', branchId);
 
     console.log(`✅ Invoice payment matched: ${journalRef} Invoice ${invoice.invoiceNumber} ₹${txnAmount}`);
 
@@ -834,9 +1088,10 @@ router.post('/categorize/match-bill', async (req, res) => {
 
     const txnAmount  = amount || txn.amount;
     const txnDate    = new Date(date || txn.transactionDate);
-    const journalRef = await nextJournalRef(req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
 
-    const bankCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+    const bankCOA = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
     const apCOA   = await ChartOfAccount.findOne({
       accountName: 'Accounts Payable', isSystemAccount: true, ...orgFilter(req),
     }).lean();
@@ -847,6 +1102,7 @@ router.post('/categorize/match-bill', async (req, res) => {
     // Dr Accounts Payable (clears the AP)
     await postTransactionToCOA({
       accountId: apCOA._id, orgId: req.user?.orgId || null,
+      branchId,
       date: txnDate, description,
       referenceType: 'Bill', referenceId: txn._id, referenceNumber: journalRef,
       debit: txnAmount, credit: 0,
@@ -855,6 +1111,7 @@ router.post('/categorize/match-bill', async (req, res) => {
     // Cr Bank (money leaves)
     await postTransactionToCOA({
       accountId: bankCOA._id, orgId: req.user?.orgId || null,
+      branchId,
       date: txnDate, description,
       referenceType: 'Bill', referenceId: txn._id, referenceNumber: journalRef,
       debit: 0, credit: txnAmount,
@@ -869,7 +1126,7 @@ router.post('/categorize/match-bill', async (req, res) => {
     });
 
     await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: -txnAmount } });
-    await markCategorized([txn._id], journalRef, `Bill: ${bill.billNumber}`, req.user?.orgId, bill._id, 'Bill');
+    await markCategorized([txn._id], journalRef, `Bill: ${bill.billNumber}`, req.user?.orgId, bill._id, 'Bill', branchId);
 
     res.json({
       success: true,
@@ -925,19 +1182,27 @@ router.post('/categorize/undo', async (req, res) => {
     }
 
     // Delete the COA entries created by this categorization
-    const coaEntries = await AccountTransaction.find({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+    // Match by journalRef + orgId + branchId (from the transaction itself, as a plain string).
+    // Do NOT use req.branchFilter here — it uses $in which won't match the stored plain string.
+    const orgId = req.user?.orgId || null;
+    const txnBranchId = txn.branchId || null;
+    const coaDeleteFilter = {
+      referenceNumber: txn.journalRef,
+      ...(orgId ? { orgId } : {}),
+      ...(txnBranchId ? { branchId: txnBranchId } : {}),
+    };
+    const coaEntries = await AccountTransaction.find(coaDeleteFilter);
+    const affectedCOAIds = new Set(coaEntries.map(e => e.accountId.toString()));
 
-    for (const entry of coaEntries) {
-      // Reverse the balance effect
-      await ChartOfAccount.findByIdAndUpdate(entry.accountId, {
-        $inc: { closingBalance: -(entry.debit - entry.credit) },
-      });
-    }
-
-    await AccountTransaction.deleteMany({ referenceNumber: txn.journalRef, ...orgFilter(req) });
+    await AccountTransaction.deleteMany(coaDeleteFilter);
 
     // Delete the linked record if it was created
     await deleteLinkedRecord(txn, req);
+
+    // Recompute closingBalance for all affected COA accounts from scratch — branch-scoped
+    for (const coaId of affectedCOAIds) {
+      await recomputeClosingBalance(coaId, req.user?.orgId, txnBranchId);
+    }
 
     // Reverse PaymentAccount balance
     if (txn.transactionType === 'DEBIT') {
@@ -1004,6 +1269,7 @@ router.post('/manual-entry', async (req, res) => {
       importedAt:           new Date(),
       importedBy:           req.user?.email || 'system',
       orgId:                req.user?.orgId || null,
+      branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
       isManualEntry:        true,
     });
 
@@ -1033,18 +1299,19 @@ async function categorizeExpenseInternal(req, txn) {
   const { coaAccountId, vendorName, date, amount, notes, taxRate, taxAmount } = req.body;
   const txnAmount  = amount || txn.amount;
   const txnDate    = new Date(date || txn.transactionDate);
-  const journalRef = await nextJournalRef(req.user?.orgId);
-  const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+  const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+  const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+  const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
   const expCOA     = await ChartOfAccount.findById(coaAccountId).lean();
 
   const desc = `${expCOA.accountName}${vendorName ? ' - ' + vendorName : ''} | ${journalRef}`;
 
-  await postTransactionToCOA({ accountId: expCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
-  await postTransactionToCOA({ accountId: bankCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
+  await postTransactionToCOA({ accountId: expCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
+  await postTransactionToCOA({ accountId: bankCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
   await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: -txnAmount } });
 
-  await Expense.create({ orgId: req.user?.orgId || null, expenseNumber: journalRef, date: txnDate.toISOString().split('T')[0], expenseAccount: expCOA.accountName, expenseAccountId: expCOA._id, paidThrough: bankCOA.accountName, paidThroughAccountId: bankCOA._id, vendor: vendorName || null, amount: txnAmount, total: txnAmount, tax: taxAmount || 0, taxRate: taxRate || 0, notes: notes || '', providerTransactionId: txn._id, journalRef, createdBy: req.user?.email || 'system' });
-  await markCategorized([txn._id], journalRef, expCOA.accountName, req.user?.orgId);
+  await Expense.create({ orgId: req.user?.orgId || null, branchId, expenseNumber: journalRef, date: txnDate.toISOString().split('T')[0], expenseAccount: expCOA.accountName, expenseAccountId: expCOA._id, paidThrough: bankCOA.accountName, paidThroughAccountId: bankCOA._id, vendor: vendorName || null, amount: txnAmount, total: txnAmount, tax: taxAmount || 0, taxRate: taxRate || 0, notes: notes || '', providerTransactionId: txn._id, journalRef, createdBy: req.user?.email || 'system' });
+  await markCategorized([txn._id], journalRef, expCOA.accountName, req.user?.orgId, null, null, branchId);
   return { journalRef };
 }
 
@@ -1052,16 +1319,17 @@ async function categorizeDepositInternal(req, txn) {
   const { coaAccountId, customerName, date, amount, notes } = req.body;
   const txnAmount  = amount || txn.amount;
   const txnDate    = new Date(date || txn.transactionDate);
-  const journalRef = await nextJournalRef(req.user?.orgId);
-  const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
+  const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+  const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+  const bankCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
   const incCOA     = await ChartOfAccount.findById(coaAccountId).lean();
 
   const desc = `${incCOA.accountName}${customerName ? ' - ' + customerName : ''} | ${journalRef}`;
 
-  await postTransactionToCOA({ accountId: bankCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
-  await postTransactionToCOA({ accountId: incCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
+  await postTransactionToCOA({ accountId: bankCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
+  await postTransactionToCOA({ accountId: incCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
   await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: txnAmount } });
-  await markCategorized([txn._id], journalRef, incCOA.accountName, req.user?.orgId);
+  await markCategorized([txn._id], journalRef, incCOA.accountName, req.user?.orgId, null, null, branchId);
   return { journalRef };
 }
 
@@ -1069,17 +1337,18 @@ async function categorizeTransferInternal(req, txn) {
   const { toAccountId, date, amount } = req.body;
   const txnAmount  = amount || txn.amount;
   const txnDate    = new Date(date || txn.transactionDate);
-  const journalRef = await nextJournalRef(req.user?.orgId);
-  const fromCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId);
-  const toCOA      = await resolveBankCOA(toAccountId, req.user?.orgId);
+  const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+  const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+  const fromCOA    = await resolveBankCOA(txn.accountId.toString(), req.user?.orgId, branchId);
+  const toCOA      = await resolveBankCOA(toAccountId, req.user?.orgId, branchId);
 
   const desc = `Transfer: ${fromCOA.accountName} → ${toCOA.accountName} | ${journalRef}`;
 
-  await postTransactionToCOA({ accountId: toCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Journal', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
-  await postTransactionToCOA({ accountId: fromCOA._id, orgId: req.user?.orgId || null, date: txnDate, description: desc, referenceType: 'Journal', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
+  await postTransactionToCOA({ accountId: toCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Journal', referenceId: txn._id, referenceNumber: journalRef, debit: txnAmount, credit: 0 });
+  await postTransactionToCOA({ accountId: fromCOA._id, orgId: req.user?.orgId || null, branchId, date: txnDate, description: desc, referenceType: 'Journal', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txnAmount });
   await PaymentAccount.findByIdAndUpdate(txn.accountId, { $inc: { currentBalance: -txnAmount } });
   await PaymentAccount.findByIdAndUpdate(toAccountId, { $inc: { currentBalance: txnAmount } });
-  await markCategorized([txn._id], journalRef, `Transfer → ${toCOA.accountName}`, req.user?.orgId);
+  await markCategorized([txn._id], journalRef, `Transfer → ${toCOA.accountName}`, req.user?.orgId, null, null, branchId);
   return { journalRef };
 }
 
@@ -1170,7 +1439,22 @@ router.get('/stats/:accountId', async (req, res) => {
       ProviderTransaction.countDocuments({ ...filter, isExcluded: true }),
     ]);
 
-    const bankCOA = await resolveBankCOA(accountId, req.user?.orgId).catch(() => null);
+    const bankCOA  = await resolveBankCOA(accountId, req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null).catch(() => null);
+
+    // Compute branch-scoped closing balance
+    let branchBalance = 0;
+    if (bankCOA) {
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+      const balAgg = await AccountTransaction.aggregate([
+        { $match: {
+          accountId: bankCOA._id,
+          ...req.orgFilter,
+          ...(branchId ? { branchId } : {}),
+        }},
+        { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+      ]);
+      branchBalance = (balAgg[0]?.totalDebit || 0) - (balAgg[0]?.totalCredit || 0);
+    }
 
     res.json({
       success: true,
@@ -1179,7 +1463,7 @@ router.get('/stats/:accountId', async (req, res) => {
         uncategorized,
         categorized,
         excluded,
-        currentBalance: bankCOA?.closingBalance ?? 0,
+        currentBalance: branchBalance,
       },
     });
   } catch (err) {
@@ -1292,6 +1576,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
         await ProviderTransaction.create({
           accountId: accountObjId,
           orgId:                req.user?.orgId || null,
+          branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
           transactionDate:      parsedDate,
           description:          description || (isCredit ? 'Credit' : 'Debit'),
           referenceNumber:      referenceNum || null,
@@ -1510,8 +1795,9 @@ router.post('/record-deposit', async (req, res) => {
     }
 
     const txnDate    = new Date(depositDate || Date.now());
-    const journalRef = await nextJournalRef(req.user?.orgId);
-    const bankCOA    = await resolveBankCOA(accountId, req.user?.orgId);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+    const bankCOA    = await resolveBankCOA(accountId, req.user?.orgId, branchId);
     let totalDeposit = 0;
 
     if (transactionIds && transactionIds.length > 0) {
@@ -1526,7 +1812,8 @@ router.post('/record-deposit', async (req, res) => {
         const desc = `Deposit: Payment ${pmt.paymentNumber} - ${pmt.customerName} | ${journalRef}`;
         await postTransactionToCOA({
           accountId:       bankCOA._id,
-          orgId:           req.user?.orgId || null,
+          orgId: req.user?.orgId || null,
+          branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date:            txnDate,
           description:     desc,
           referenceType:   'Deposit',
@@ -1539,13 +1826,14 @@ router.post('/record-deposit', async (req, res) => {
         // ✅ FIX — Cr Undeposited Funds (clears it to zero)
         const undepositedCOA = await ChartOfAccount.findOne({
           accountName: 'Undeposited Funds',
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          ...req.orgFilter,
         }).lean();
 
         if (undepositedCOA) {
           await postTransactionToCOA({
             accountId:       undepositedCOA._id,
-            orgId:           req.user?.orgId || null,
+            orgId: req.user?.orgId || null,
+            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
             date:            txnDate,
             description:     desc,
             referenceType:   'Deposit',
@@ -1569,6 +1857,7 @@ router.post('/record-deposit', async (req, res) => {
                                     ? new mongoose.Types.ObjectId(accountId)
                                     : accountId,
             orgId:                req.user?.orgId || null,
+            branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
             transactionDate:      txnDate,
             description:          `Deposit: Payment ${pmt.paymentNumber} - ${pmt.customerName}`,
             amount:               amt,
@@ -1597,7 +1886,8 @@ router.post('/record-deposit', async (req, res) => {
         const desc = dep.description || 'Other Deposit';
         await postTransactionToCOA({
           accountId:       bankCOA._id,
-          orgId:           req.user?.orgId || null,
+          orgId: req.user?.orgId || null,
+          branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date:            txnDate,
           description:     `${desc} | ${journalRef}`,
           referenceType:   'Deposit',
@@ -1614,6 +1904,7 @@ router.post('/record-deposit', async (req, res) => {
                                     ? new mongoose.Types.ObjectId(accountId)
                                     : accountId,
             orgId:                req.user?.orgId || null,
+            branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
             transactionDate:      txnDate,
             description:          dep.description || 'Other Deposit',
             amount:               amt,
@@ -1663,8 +1954,9 @@ router.post('/match-record', async (req, res) => {
     });
     if (!txn) return res.status(404).json({ success: false, message: 'Transaction not found' });
 
-    const journalRef = await nextJournalRef(req.user?.orgId);
-    await markCategorized([txn._id], journalRef, recordType, req.user?.orgId, recordId, recordType);
+    const branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const journalRef = await nextJournalRef(req.user?.orgId, branchId);
+    await markCategorized([txn._id], journalRef, recordType, req.user?.orgId, recordId, recordType, branchId);
     res.json({ success: true, message: `Matched to ${recordType}`, data: { journalRef } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -1673,10 +1965,14 @@ router.post('/match-record', async (req, res) => {
 
 router.post('/mark-categorized', async (req, res) => {
   try {
-    const { providerTransactionId, categoryLabel, linkedRecordId, linkedRecordType } = req.body;
+    const { providerTransactionId, categoryLabel, linkedRecordId, linkedRecordType, journalRef } = req.body;
     if (!providerTransactionId) {
       return res.status(400).json({ success: false, message: 'providerTransactionId required' });
     }
+    // Cast linkedRecordId to ObjectId so deleteLinkedRecord can find it later
+    const linkedRecordObjId = linkedRecordId && mongoose.Types.ObjectId.isValid(linkedRecordId)
+      ? new mongoose.Types.ObjectId(linkedRecordId)
+      : null;
     await ProviderTransaction.findOneAndUpdate(
       { _id: providerTransactionId, ...orgFilter(req) },
       {
@@ -1685,8 +1981,9 @@ router.post('/mark-categorized', async (req, res) => {
           categorizedAt:        new Date(),
           categorizedBy:        'user',
           categoryLabel:        categoryLabel || 'Manual',
-          linkedRecordId:       linkedRecordId || null,
+          linkedRecordId:       linkedRecordObjId,
           linkedRecordType:     linkedRecordType || null,
+          journalRef:           journalRef || null,
         },
       }
     );
@@ -1758,6 +2055,7 @@ router.put('/edit-transaction/:id', async (req, res) => {
       const newAmount = parseFloat(amount) || txn.amount;
       const newDate   = date ? new Date(date) : txn.transactionDate;
       const orgId     = req.user?.orgId || null;
+      const branchId  = txn.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
       // ── Handle Expense type ───────────────────────────────────────────────
       if (!txn.linkedRecordType || txn.linkedRecordType === 'Expense') {
@@ -1766,21 +2064,21 @@ router.put('/edit-transaction/:id', async (req, res) => {
           await Expense.findByIdAndUpdate(expRecord._id, {
             $set: { amount: newAmount, total: newAmount, date: newDate.toISOString().split('T')[0] }
           });
-          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId);
+          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId, branchId);
           const expCOA  = expRecord.expenseAccountId
             ? await ChartOfAccount.findById(expRecord.expenseAccountId).lean()
-            : await ChartOfAccount.findOne({ accountName: expRecord.expenseAccount, ...(orgId ? { orgId } : {}) }).lean();
+            : await ChartOfAccount.findOne({ accountName: expRecord.expenseAccount, ...(orgId ? { orgId } : {}), ...(branchId ? { branchId } : {}) }).lean();
 
           if (expCOA) {
             await postTransactionToCOA({
-              accountId: expCOA._id, orgId,
+              accountId: expCOA._id, orgId, branchId,
               date: newDate, description: description || txn.description,
               referenceType: 'Expense', referenceId: txn._id,
               referenceNumber: txn.journalRef, debit: newAmount, credit: 0,
             });
           }
           await postTransactionToCOA({
-            accountId: bankCOA._id, orgId,
+            accountId: bankCOA._id, orgId, branchId,
             date: newDate, description: description || txn.description,
             referenceType: 'Expense', referenceId: txn._id,
             referenceNumber: txn.journalRef, debit: 0, credit: newAmount,
@@ -1802,20 +2100,22 @@ router.put('/edit-transaction/:id', async (req, res) => {
           });
 
           const apCOA = await ChartOfAccount.findOne({
-            accountName: 'Accounts Payable', ...(orgId ? { orgId } : {}),
+            accountName: 'Accounts Payable',
+            ...(orgId    ? { orgId }    : {}),
+            ...(branchId ? { branchId } : {}),
           }).lean();
-          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId);
+          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId, branchId);
 
           if (apCOA) {
             await postTransactionToCOA({
-              accountId: apCOA._id, orgId,
+              accountId: apCOA._id, orgId, branchId,
               date: newDate, description: description || txn.description,
               referenceType: 'Bill', referenceId: txn._id,
               referenceNumber: txn.journalRef, debit: newAmount, credit: 0,
             });
           }
           await postTransactionToCOA({
-            accountId: bankCOA._id, orgId,
+            accountId: bankCOA._id, orgId, branchId,
             date: newDate, description: description || txn.description,
             referenceType: 'Bill', referenceId: txn._id,
             referenceNumber: txn.journalRef, debit: 0, credit: newAmount,
@@ -1848,19 +2148,21 @@ router.put('/edit-transaction/:id', async (req, res) => {
           });
 
           const arCOA   = await ChartOfAccount.findOne({
-            accountName: 'Accounts Receivable', ...(orgId ? { orgId } : {}),
+            accountName: 'Accounts Receivable',
+            ...(orgId    ? { orgId }    : {}),
+            ...(branchId ? { branchId } : {}),
           }).lean();
-          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId);
+          const bankCOA = await resolveBankCOA(txn.accountId.toString(), orgId, branchId);
 
           await postTransactionToCOA({
-            accountId: bankCOA._id, orgId,
+            accountId: bankCOA._id, orgId, branchId,
             date: newDate, description: description || txn.description,
             referenceType: 'Payment', referenceId: txn._id,
             referenceNumber: txn.journalRef, debit: newAmount, credit: 0,
           });
           if (arCOA) {
             await postTransactionToCOA({
-              accountId: arCOA._id, orgId,
+              accountId: arCOA._id, orgId, branchId,
               date: newDate, description: description || txn.description,
               referenceType: 'Payment', referenceId: txn._id,
               referenceNumber: txn.journalRef, debit: 0, credit: newAmount,
@@ -1949,45 +2251,480 @@ router.put('/edit-transaction/:id', async (req, res) => {
   }
 });
 
+// Helper: recompute ChartOfAccount.closingBalance from AccountTransaction sum
+// branchId scopes the recompute to a specific branch's transactions
+async function recomputeClosingBalance(accountId, orgId = null, branchId = null) {
+  try {
+    const matchFilter = {
+      accountId: mongoose.Types.ObjectId.isValid(accountId)
+        ? new mongoose.Types.ObjectId(accountId.toString()) : accountId,
+      ...(orgId    ? { orgId }    : {}),
+      ...(branchId ? { branchId } : {}),
+    };
+    const agg = await AccountTransaction.aggregate([
+      { $match: matchFilter },
+      { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+    ]);
+    const totalDebit  = agg[0]?.totalDebit  || 0;
+    const totalCredit = agg[0]?.totalCredit || 0;
+    // For asset/bank accounts: balance = debit - credit
+    const newBalance = Math.round((totalDebit - totalCredit) * 100) / 100;
+    // NOTE: closingBalance on ChartOfAccount is org-wide; branch balance is always
+    // computed on-the-fly via aggregation. We still update it for backward compat.
+    await ChartOfAccount.findByIdAndUpdate(accountId, { $set: { closingBalance: newBalance } });
+    return newBalance;
+  } catch (e) {
+    console.error('⚠️ recomputeClosingBalance error:', e.message);
+    return null;
+  }
+}
+
+// ── POST /recompute-balances/:accountId ──────────────────────────────────────
+// Recomputes COA closingBalance from AccountTransaction for a bank account.
+// Call this once to fix any stale balance data.
+router.post('/recompute-balances/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const bankCOA  = await resolveBankCOA(accountId, req.user?.orgId, branchId).catch(() => null);
+    if (!bankCOA) return res.status(404).json({ success: false, message: 'Bank COA not found' });
+
+    const newBalance = await recomputeClosingBalance(bankCOA._id, req.user?.orgId, branchId);
+    res.json({ success: true, message: 'Balance recomputed', closingBalance: newBalance });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ROUTE 25b — POST /cleanup-duplicates (ADMIN ONLY - for fixing duplicate ProviderTransactions)
+router.post('/cleanup-duplicates', async (req, res) => {
+  try {
+    const { linkedRecordId, linkedRecordType } = req.body;
+    
+    if (!linkedRecordId || !linkedRecordType) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'linkedRecordId and linkedRecordType are required' 
+      });
+    }
+
+    console.log('🧹 [Cleanup] Starting duplicate cleanup:', { linkedRecordId, linkedRecordType });
+
+    // Find all SYSTEM_ENTRY transactions for this record
+    const duplicates = await ProviderTransaction.find({
+      linkedRecordId: mongoose.Types.ObjectId.isValid(linkedRecordId) 
+        ? new mongoose.Types.ObjectId(linkedRecordId) 
+        : linkedRecordId,
+      linkedRecordType,
+      source: 'SYSTEM_ENTRY',
+      ...orgFilter(req),
+    }).lean();
+
+    console.log(`🧹 [Cleanup] Found ${duplicates.length} SYSTEM_ENTRY transactions`);
+    
+    if (duplicates.length === 0) {
+      return res.json({ 
+        success: true, 
+        message: 'No duplicates found',
+        deleted: 0 
+      });
+    }
+
+    // Show all found transactions
+    duplicates.forEach((d, idx) => {
+      console.log(`  [${idx + 1}] _id: ${d._id} | amount: ₹${d.amount} | journalRef: ${d.journalRef} | date: ${d.transactionDate}`);
+    });
+
+    // Delete all of them
+    const result = await ProviderTransaction.deleteMany({
+      _id: { $in: duplicates.map(d => d._id) },
+    });
+
+    console.log(`✅ [Cleanup] Deleted ${result.deletedCount} duplicate transactions`);
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} duplicate transactions`,
+      deleted: result.deletedCount,
+      transactions: duplicates.map(d => ({
+        _id: d._id,
+        amount: d.amount,
+        description: d.description,
+        journalRef: d.journalRef,
+      })),
+    });
+  } catch (err) {
+    console.error('❌ cleanup-duplicates error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ROUTE 25c — POST /fix-corrupted-transaction (ADMIN ONLY - for fixing CSV_IMPORT transactions that got corrupted)
+router.post('/fix-corrupted-transaction', async (req, res) => {
+  try {
+    const { transactionId } = req.body;
+    
+    if (!transactionId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'transactionId is required' 
+      });
+    }
+
+    console.log('🔧 [Fix] Finding corrupted transaction:', transactionId);
+
+    const txn = await ProviderTransaction.findOne({
+      _id: mongoose.Types.ObjectId.isValid(transactionId) 
+        ? new mongoose.Types.ObjectId(transactionId) 
+        : transactionId,
+      ...orgFilter(req),
+    });
+
+    if (!txn) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Transaction not found' 
+      });
+    }
+
+    console.log('🔧 [Fix] Transaction BEFORE:', {
+      _id: txn._id,
+      description: txn.description,
+      source: txn.source,
+      linkedRecordType: txn.linkedRecordType,
+      linkedRecordId: txn.linkedRecordId,
+      journalRef: txn.journalRef,
+      reconciliationStatus: txn.reconciliationStatus,
+      categoryLabel: txn.categoryLabel,
+    });
+
+    // Reset to UNCATEGORIZED state
+    txn.reconciliationStatus = 'UNCATEGORIZED';
+    txn.linkedRecordType = null;
+    txn.linkedRecordId = null;
+    txn.journalRef = null;
+    txn.categoryLabel = null;
+    txn.cashFlowSection = null;
+    txn.categorizedAt = null;
+    txn.categorizedBy = null;
+
+    await txn.save();
+
+    console.log('✅ [Fix] Transaction reset to UNCATEGORIZED');
+
+    res.json({
+      success: true,
+      message: 'Transaction reset to UNCATEGORIZED state',
+      transaction: {
+        _id: txn._id,
+        description: txn.description,
+        amount: txn.amount,
+        reconciliationStatus: txn.reconciliationStatus,
+      },
+    });
+  } catch (err) {
+    console.error('❌ fix-corrupted-transaction error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ROUTE 26 — POST /uncategorize/:id
 router.post('/uncategorize/:id', async (req, res) => {
   try {
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log(`🔍 [uncategorize] START — id=${req.params.id} orgId=${req.user?.orgId}`);
+    console.log('═══════════════════════════════════════════════════════════════');
+    
     const txn = await ProviderTransaction.findOne({
       _id: req.params.id, ...orgFilter(req)
     });
+    
+    console.log(`🔍 [uncategorize] Transaction details:`, {
+      found: !!txn,
+      journalRef: txn?.journalRef,
+      linkedRecordId: txn?.linkedRecordId,
+      linkedRecordType: txn?.linkedRecordType,
+      accountId: txn?.accountId,
+      amount: txn?.amount,
+      transactionType: txn?.transactionType,
+      source: txn?.source,
+      reconciliationStatus: txn?.reconciliationStatus,
+    });
+    
     if (!txn) return res.status(404).json({ success: false, message: 'Transaction not found' });
 
-    // Reverse COA entries only if journalRef exists
-    // NOTE: PaymentReceived/PaymentMade categorized via mark-categorized do NOT have journalRef
+    // Collect affected COA account IDs so we can recompute their balances after deletion
+    const affectedCOAIds = new Set();
+
     if (txn.journalRef) {
-      const entries = await AccountTransaction.find({
-        referenceNumber: txn.journalRef, ...orgFilter(req)
-      });
-      for (const entry of entries) {
-        await ChartOfAccount.findByIdAndUpdate(entry.accountId, {
-          $inc: { closingBalance: -(entry.debit - entry.credit) }
-        });
+      // ── Case A: categorized via bank_transactions.js (has journalRef) ──────
+      console.log('📍 [uncategorize] Entering Case A (has journalRef)');
+      
+      const orgId = req.user?.orgId || null;
+      // NOTE: do NOT filter by branchId — AccountTransaction entries may store
+      // branchId differently (array element vs string) causing misses.
+      // referenceNumber + orgId is sufficient to uniquely identify the entries.
+      const coaDeleteFilter = {
+        referenceNumber: txn.journalRef,
+        ...(orgId ? { orgId } : {}),
+      };
+      let entries = await AccountTransaction.find(coaDeleteFilter);
+      console.log(`🔍 [uncategorize] Case A — journalRef=${txn.journalRef} orgId=${orgId} → found ${entries.length} COA entries`);
+      
+      if (entries.length > 0) {
+        console.log('🔍 [uncategorize] COA entries to delete:', entries.map(e => ({
+          accountId: e.accountId,
+          debit: e.debit,
+          credit: e.credit,
+          description: e.description,
+        })));
       }
-      await AccountTransaction.deleteMany({
-        referenceNumber: txn.journalRef, ...orgFilter(req)
-      });
-    }
 
-    // Delete linked record + reverse its own COA + balance
-    await deleteLinkedRecord(txn, req);
+      // Fallback: if journalRef-based delete finds nothing, try by linkedRecordId.
+      // This covers embedded-page saves (NewExpensePage etc.) where the COA entries
+      // were posted with referenceId = expense._id, not referenceNumber = journalRef.
+      if (entries.length === 0 && txn.linkedRecordId) {
+        const linkedObjId = mongoose.Types.ObjectId.isValid(txn.linkedRecordId.toString())
+          ? new mongoose.Types.ObjectId(txn.linkedRecordId.toString())
+          : txn.linkedRecordId;
 
-    // Only reverse bank balance if journalRef exists (bank_transactions.js posted the COA)
-    // For PaymentReceived/PaymentMade the balance was already handled by deleteLinkedRecord
-    if (txn.journalRef) {
-      if (txn.transactionType === 'DEBIT') {
-        await PaymentAccount.findByIdAndUpdate(txn.accountId,
-          { $inc: { currentBalance: txn.amount } });
+        // Try referenceId first
+        let fallbackFilter = {
+          referenceId: linkedObjId,
+          ...(orgId ? { orgId } : {}),
+        };
+        entries = await AccountTransaction.find(fallbackFilter);
+
+        // If still nothing, look up the payment/expense record and try by referenceNumber
+        if (entries.length === 0) {
+          let refNumber = null;
+          try {
+            const PaymentReceived = mongoose.models.PaymentReceived
+              || mongoose.model('PaymentReceived', new mongoose.Schema({}, { strict: false }), 'payments_received');
+            const PaymentMade = mongoose.models.PaymentMade
+              || mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }), 'payments_made');
+            const pr = await PaymentReceived.findById(linkedObjId).lean();
+            if (pr) refNumber = pr.paymentNumber;
+            if (!refNumber) {
+              const pm = await PaymentMade.findById(linkedObjId).lean();
+              if (pm) refNumber = pm.paymentNumber;
+            }
+            if (!refNumber) {
+              const exp = await Expense.findById(linkedObjId).lean();
+              if (exp) refNumber = exp.expenseNumber || exp._id.toString();
+            }
+          } catch (_) {}
+
+          if (refNumber) {
+            fallbackFilter = { referenceNumber: refNumber, ...(orgId ? { orgId } : {}) };
+            entries = await AccountTransaction.find(fallbackFilter);
+            console.log(`[uncategorize] Case A fallback-2 — referenceNumber=${refNumber} → found ${entries.length} COA entries`);
+          }
+        }
+
+        entries.forEach(e => affectedCOAIds.add(e.accountId.toString()));
+        await AccountTransaction.deleteMany(fallbackFilter);
       } else {
-        await PaymentAccount.findByIdAndUpdate(txn.accountId,
-          { $inc: { currentBalance: -txn.amount } });
+        entries.forEach(e => affectedCOAIds.add(e.accountId.toString()));
+        await AccountTransaction.deleteMany(coaDeleteFilter);
+      }
+
+      // Delete the linked Expense/record created during categorization
+      let linkedAmount = txn.amount;
+      console.log(`🔍 [uncategorize] Initial linkedAmount: ₹${linkedAmount}`);
+      
+      if (txn.linkedRecordType === 'Expense' && txn.linkedRecordId) {
+        try {
+          const linked = await Expense.findById(txn.linkedRecordId).lean();
+          console.log(`🔍 [uncategorize] Found linked Expense:`, {
+            _id: linked?._id,
+            total: linked?.total,
+            expenseAccount: linked?.expenseAccount,
+            paidThrough: linked?.paidThrough,
+          });
+          if (linked?.total) {
+            linkedAmount = linked.total;
+            console.log(`✅ [uncategorize] Updated linkedAmount from Expense.total: ₹${linkedAmount}`);
+          }
+        } catch (e) {
+          console.error('⚠️ [uncategorize] Error fetching linked Expense:', e.message);
+        }
+      }
+      
+      console.log(`🔍 [uncategorize] About to delete linked record with skipCOAReversal=true`);
+      await deleteLinkedRecord(txn, req, { skipCOAReversal: true });
+      console.log(`✅ [uncategorize] Linked record deleted`);
+
+      // Restore PaymentAccount.currentBalance
+      // ✅ FIX: Always restore balance when uncategorizing, regardless of source.
+      // When a CSV_IMPORT transaction is categorized as an expense, the PaymentAccount
+      // balance IS reduced. So when uncategorizing, we must restore it.
+      if (txn.accountId) {
+        console.log(`🔍 [uncategorize] Restoring PaymentAccount balance:`, {
+          accountId: txn.accountId,
+          linkedAmount: linkedAmount,
+          transactionType: txn.transactionType,
+          source: txn.source,
+        });
+        
+        // Get current balance before update
+        const accountBefore = await PaymentAccount.findById(txn.accountId).lean();
+        console.log(`🔍 [uncategorize] PaymentAccount BEFORE: currentBalance = ₹${accountBefore?.currentBalance}`);
+        
+        if (txn.transactionType === 'DEBIT') {
+          await PaymentAccount.findByIdAndUpdate(txn.accountId,
+            { $inc: { currentBalance: linkedAmount } });
+          console.log(`✅ [uncategorize] PaymentAccount balance restored: +₹${linkedAmount}`);
+        } else {
+          await PaymentAccount.findByIdAndUpdate(txn.accountId,
+            { $inc: { currentBalance: -linkedAmount } });
+          console.log(`✅ [uncategorize] PaymentAccount balance restored: -₹${linkedAmount}`);
+        }
+        
+        // Get balance after update
+        const accountAfter = await PaymentAccount.findById(txn.accountId).lean();
+        console.log(`🔍 [uncategorize] PaymentAccount AFTER: currentBalance = ₹${accountAfter?.currentBalance}`);
+      } else {
+        console.log(`⚠️ [uncategorize] No accountId found, skipping PaymentAccount balance restoration`);
+      }
+    } else {
+      // ── Case B: no journalRef ────────────────────────────────────────────────
+      console.log('📍 [uncategorize] Entering Case B (no journalRef)');
+      
+      const orgId = req.user?.orgId || null;
+
+      let linkedObjId = null;
+      let paymentNumber = null;
+
+      if (txn.linkedRecordId) {
+        linkedObjId = mongoose.Types.ObjectId.isValid(txn.linkedRecordId.toString())
+          ? new mongoose.Types.ObjectId(txn.linkedRecordId.toString())
+          : txn.linkedRecordId;
+      }
+
+      // ── If linkedRecordId is missing, find the payment by providerTransactionId ──
+      // Old ProviderTransactions created before linkedRecordId was stored fall here.
+      if (!linkedObjId && txn.linkedRecordType) {
+        try {
+          const collectionMap = {
+            PaymentReceived: 'payments_received',
+            PaymentMade:     'payments_made',
+            Expense:         'expenses',
+          };
+          const collName = collectionMap[txn.linkedRecordType];
+          if (collName) {
+            const db = mongoose.connection.db;
+            // Try to find by providerTransactionId field
+            let rec = await db.collection(collName).findOne({
+              providerTransactionId: txn._id,
+              ...(orgId ? { orgId } : {}),
+            });
+            // Fallback: find by matching amount + date window
+            if (!rec) {
+              const txnDate = new Date(txn.transactionDate || txn.createdAt);
+              const dayBefore = new Date(txnDate); dayBefore.setDate(dayBefore.getDate() - 1);
+              const dayAfter  = new Date(txnDate); dayAfter.setDate(dayAfter.getDate() + 1);
+              rec = await db.collection(collName).findOne({
+                ...(orgId ? { orgId } : {}),
+                $or: [
+                  { amountReceived: txn.amount },
+                  { amount: txn.amount },
+                ],
+                createdAt: { $gte: dayBefore, $lte: dayAfter },
+              });
+            }
+            if (rec) {
+              linkedObjId   = rec._id;
+              paymentNumber = rec.paymentNumber || rec.expenseNumber;
+              console.log(`[uncategorize] Case B resolved linkedRecord via collection lookup: ${collName} → ${linkedObjId} paymentNumber=${paymentNumber}`);
+            }
+          }
+        } catch (e) {
+          console.error('[uncategorize] Case B linkedRecord lookup error:', e.message);
+        }
+      }
+
+      // Now delete COA entries — try all available keys
+      let entries = [];
+
+      // 1. Try by referenceId
+      if (linkedObjId) {
+        const f = { referenceId: linkedObjId, ...(orgId ? { orgId } : {}) };
+        entries = await AccountTransaction.find(f);
+        console.log(`[uncategorize] Case B referenceId lookup → found ${entries.length}`);
+        if (entries.length > 0) {
+          entries.forEach(e => affectedCOAIds.add(e.accountId.toString()));
+          await AccountTransaction.deleteMany(f);
+        }
+      }
+
+      // 2. Try by referenceNumber = paymentNumber
+      if (entries.length === 0 && paymentNumber) {
+        const f = { referenceNumber: paymentNumber, ...(orgId ? { orgId } : {}) };
+        entries = await AccountTransaction.find(f);
+        console.log(`[uncategorize] Case B referenceNumber=${paymentNumber} → found ${entries.length}`);
+        if (entries.length > 0) {
+          entries.forEach(e => affectedCOAIds.add(e.accountId.toString()));
+          await AccountTransaction.deleteMany(f);
+        }
+      }
+
+      // 3. Last resort: look up paymentNumber from the record if not yet resolved
+      if (entries.length === 0 && linkedObjId && !paymentNumber) {
+        try {
+          const PaymentReceived = mongoose.models.PaymentReceived
+            || mongoose.model('PaymentReceived', new mongoose.Schema({}, { strict: false }), 'payments_received');
+          const PaymentMade = mongoose.models.PaymentMade
+            || mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }), 'payments_made');
+          const pr = await PaymentReceived.findById(linkedObjId).lean();
+          if (pr?.paymentNumber) paymentNumber = pr.paymentNumber;
+          if (!paymentNumber) {
+            const pm = await PaymentMade.findById(linkedObjId).lean();
+            if (pm?.paymentNumber) paymentNumber = pm.paymentNumber;
+          }
+          if (!paymentNumber) {
+            const exp = await Expense.findById(linkedObjId).lean();
+            if (exp) paymentNumber = exp.expenseNumber || exp._id.toString();
+          }
+          if (paymentNumber) {
+            const f = { referenceNumber: paymentNumber, ...(orgId ? { orgId } : {}) };
+            entries = await AccountTransaction.find(f);
+            console.log(`[uncategorize] Case B fallback referenceNumber=${paymentNumber} → found ${entries.length}`);
+            if (entries.length > 0) {
+              entries.forEach(e => affectedCOAIds.add(e.accountId.toString()));
+              await AccountTransaction.deleteMany(f);
+            }
+          }
+        } catch (_) {}
+      }
+
+      await deleteLinkedRecord(txn, req, { skipCOAReversal: true });
+
+      // Restore PaymentAccount.currentBalance
+      // ✅ FIX: Always restore balance when uncategorizing, regardless of source.
+      if (txn.accountId) {
+        console.log(`🔍 [uncategorize] Restoring PaymentAccount balance (Case B): accountId=${txn.accountId}, amount=${txn.amount}, type=${txn.transactionType}`);
+        if (txn.transactionType === 'DEBIT') {
+          await PaymentAccount.findByIdAndUpdate(txn.accountId,
+            { $inc: { currentBalance: txn.amount } });
+          console.log(`✅ [uncategorize] PaymentAccount balance restored (Case B): +₹${txn.amount}`);
+        } else {
+          await PaymentAccount.findByIdAndUpdate(txn.accountId,
+            { $inc: { currentBalance: -txn.amount } });
+          console.log(`✅ [uncategorize] PaymentAccount balance restored (Case B): -₹${txn.amount}`);
+        }
       }
     }
 
+    // Recompute closingBalance for all affected COA accounts from scratch — branch-scoped
+    const txnBranchIdForRecompute = txn.branchId || null;
+    console.log(`🔍 [uncategorize] Recomputing closingBalance for ${affectedCOAIds.size} COA accounts`);
+    for (const coaId of affectedCOAIds) {
+      await recomputeClosingBalance(coaId, req.user?.orgId, txnBranchIdForRecompute);
+    }
+    console.log(`✅ [uncategorize] COA balances recomputed`);
+
+    console.log(`🔍 [uncategorize] Updating ProviderTransaction status to UNCATEGORIZED`);
     await ProviderTransaction.findByIdAndUpdate(txn._id, {
       $set: {
         reconciliationStatus: 'UNCATEGORIZED',
@@ -1999,6 +2736,11 @@ router.post('/uncategorize/:id', async (req, res) => {
         linkedRecordType: null,
       }
     });
+    console.log(`✅ [uncategorize] ProviderTransaction updated to UNCATEGORIZED`);
+
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('✅ [uncategorize] COMPLETE — Transaction uncategorized successfully');
+    console.log('═══════════════════════════════════════════════════════════════');
 
     res.json({ success: true, message: 'Transaction uncategorized successfully' });
   } catch (err) {
@@ -2008,14 +2750,22 @@ router.post('/uncategorize/:id', async (req, res) => {
 });
 
 // Helper to delete linked records and reverse COA + balances
-async function deleteLinkedRecord(txn, req) {
+async function deleteLinkedRecord(txn, req, { skipCOAReversal = false } = {}) {
   if (!txn.linkedRecordType) {
     await Expense.deleteMany({ providerTransactionId: txn._id, ...orgFilter(req) });
     return;
   }
 
-  const modelQuery = { providerTransactionId: txn._id, ...orgFilter(req) };
-  if (txn.linkedRecordId) modelQuery._id = txn.linkedRecordId;
+  // Build query — prefer _id lookup when linkedRecordId is available (most reliable)
+  let modelQuery;
+  if (txn.linkedRecordId) {
+    const linkedObjId = mongoose.Types.ObjectId.isValid(txn.linkedRecordId.toString())
+      ? new mongoose.Types.ObjectId(txn.linkedRecordId.toString())
+      : txn.linkedRecordId;
+    modelQuery = { _id: linkedObjId, ...orgFilter(req) };
+  } else {
+    modelQuery = { providerTransactionId: txn._id, ...orgFilter(req) };
+  }
 
   switch (txn.linkedRecordType) {
 
@@ -2024,66 +2774,76 @@ async function deleteLinkedRecord(txn, req) {
       if (!expense) break;
       const orgId = req.user?.orgId || null;
 
-      // Reverse COA — credit expense account, debit paidThrough account
-      try {
-        let expAccId = null;
-        let paidAccId = null;
+      // Reverse COA — only when not already handled by direct AccountTransaction deletion
+      if (!skipCOAReversal) {
+        try {
+          const branchId = txn.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+          let expAccId = null;
+          let paidAccId = null;
 
-        expAccId = await ChartOfAccount.findOne({
-          accountName: expense.expenseAccount,
-          ...(orgId ? { orgId } : {}),
-        }).then(a => a?._id).catch(() => null);
-
-        if (mongoose.Types.ObjectId.isValid(expense.paidThrough)) {
-          paidAccId = await ChartOfAccount.findById(expense.paidThrough)
-            .then(a => a?._id).catch(() => null);
-        }
-        if (!paidAccId) {
-          paidAccId = await ChartOfAccount.findOne({
-            accountName: expense.paidThrough,
-            ...(orgId ? { orgId } : {}),
+          expAccId = await ChartOfAccount.findOne({
+            accountName: expense.expenseAccount,
+            ...(orgId    ? { orgId }    : {}),
+            ...(branchId ? { branchId } : {}),
           }).then(a => a?._id).catch(() => null);
-        }
 
-        const txnDate = new Date();
-        const desc = `REVERSAL (Uncategorize) - Expense ${expense._id}`;
+          if (mongoose.Types.ObjectId.isValid(expense.paidThrough)) {
+            paidAccId = await ChartOfAccount.findById(expense.paidThrough)
+              .then(a => a?._id).catch(() => null);
+          }
+          if (!paidAccId) {
+            paidAccId = await ChartOfAccount.findOne({
+              accountName: expense.paidThrough,
+              ...(orgId    ? { orgId }    : {}),
+              ...(branchId ? { branchId } : {}),
+            }).then(a => a?._id).catch(() => null);
+          }
 
-        if (expAccId) {
-          await postTransactionToCOA({
-            accountId: expAccId, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Expense', referenceId: expense._id,
-            referenceNumber: expense._id.toString(),
-            debit: 0, credit: expense.total,
-          });
+          const txnDate = new Date();
+          const desc = `REVERSAL (Uncategorize) - Expense ${expense._id}`;
+
+          // Cr Expense account (reverses the original Dr)
+          if (expAccId) {
+            await postTransactionToCOA({
+              accountId: expAccId, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Expense', referenceId: expense._id,
+              referenceNumber: expense._id.toString(),
+              debit: 0, credit: expense.total,
+            });
+          }
+          // Dr Bank/Cash account (reverses the original Cr)
+          if (paidAccId) {
+            await postTransactionToCOA({
+              accountId: paidAccId, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Expense', referenceId: expense._id,
+              referenceNumber: expense._id.toString(),
+              debit: expense.total, credit: 0,
+            });
+          }
+        } catch (e) {
+          console.error('⚠️ Expense COA reversal error:', e.message);
         }
-        if (paidAccId) {
-          await postTransactionToCOA({
-            accountId: paidAccId, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Expense', referenceId: expense._id,
-            referenceNumber: expense._id.toString(),
-            debit: expense.total, credit: 0,
-          });
-        }
-      } catch (e) {
-        console.error('⚠️ Expense COA reversal error:', e.message);
       }
 
-      // Restore PaymentAccount balance
-      try {
-        const pt = expense.paidThrough;
-        if (mongoose.Types.ObjectId.isValid(pt)) {
-          await PaymentAccount.findByIdAndUpdate(pt,
-            { $inc: { currentBalance: expense.total } });
-        } else {
-          await PaymentAccount.findOneAndUpdate(
-            { accountName: pt },
-            { $inc: { currentBalance: expense.total } }
-          );
+      // Restore PaymentAccount balance — only when COA reversal is also being done
+      // (Case A with journalRef already restores balance via txn.accountId above)
+      if (!skipCOAReversal) {
+        try {
+          const pt = expense.paidThrough;
+          if (mongoose.Types.ObjectId.isValid(pt)) {
+            await PaymentAccount.findByIdAndUpdate(pt,
+              { $inc: { currentBalance: expense.total } });
+          } else {
+            await PaymentAccount.findOneAndUpdate(
+              { accountName: pt },
+              { $inc: { currentBalance: expense.total } }
+            );
+          }
+        } catch (e) {
+          console.error('⚠️ Expense balance restore error:', e.message);
         }
-      } catch (e) {
-        console.error('⚠️ Expense balance restore error:', e.message);
       }
 
       await Expense.deleteOne({ _id: expense._id });
@@ -2100,18 +2860,52 @@ async function deleteLinkedRecord(txn, req) {
 
       // Reverse bill balances if linked
       try {
-        if (payment.billId || payment.vendorBillId) {
-          const Bill = mongoose.models.Bill
-            || mongoose.model('Bill', new mongoose.Schema({}, { strict: false }), 'bills');
+        const Bill = mongoose.models.Bill
+          || mongoose.model('Bill', new mongoose.Schema({}, { strict: false }), 'bills');
+
+        // Handle billsApplied array (standard payment_made.js format)
+        const billsApplied = payment.billsApplied || [];
+        for (const ba of billsApplied) {
+          if (!ba.billId) continue;
+          const bill = await Bill.findById(ba.billId).lean();
+          if (!bill) continue;
+          const appliedAmt   = parseFloat(ba.amountApplied || 0);
+          const newAmountPaid = Math.max(0, (bill.amountPaid || 0) - appliedAmt);
+          const newAmountDue  = Math.max(0, (bill.totalAmount || bill.total || 0) - newAmountPaid);
+
+          let newStatus;
+          if (newAmountPaid <= 0)                                    newStatus = 'OPEN';
+          else if (newAmountPaid > 0 && newAmountDue > 0)           newStatus = 'PARTIALLY_PAID';
+          else                                                        newStatus = 'PAID';
+
+          // Also remove the payment entry from bill.payments array
+          await Bill.findByIdAndUpdate(ba.billId, {
+            amountPaid: newAmountPaid,
+            amountDue:  newAmountDue,
+            status:     newStatus,
+            $pull: { payments: { referenceNumber: payment.paymentNumber } },
+          });
+        }
+
+        // Fallback: handle legacy single billId field
+        if (billsApplied.length === 0 && (payment.billId || payment.vendorBillId)) {
           const billId = payment.billId || payment.vendorBillId;
           const bill = await Bill.findById(billId).lean();
           if (bill) {
-            const restoredBalance = (bill.balanceDue || 0) + (payment.amount || payment.amountPaid || 0);
-            const newStatus = restoredBalance >= (bill.totalAmount || bill.total || 0)
-              ? 'unpaid' : 'partial';
+            const appliedAmt   = parseFloat(payment.amount || payment.amountPaid || 0);
+            const newAmountPaid = Math.max(0, (bill.amountPaid || 0) - appliedAmt);
+            const newAmountDue  = Math.max(0, (bill.totalAmount || bill.total || 0) - newAmountPaid);
+
+            let newStatus;
+            if (newAmountPaid <= 0)                                  newStatus = 'OPEN';
+            else if (newAmountPaid > 0 && newAmountDue > 0)         newStatus = 'PARTIALLY_PAID';
+            else                                                      newStatus = 'PAID';
+
             await Bill.findByIdAndUpdate(billId, {
-              balanceDue: restoredBalance,
-              paymentStatus: newStatus,
+              amountPaid: newAmountPaid,
+              amountDue:  newAmountDue,
+              status:     newStatus,
+              $pull: { payments: { referenceNumber: payment.paymentNumber } },
             });
           }
         }
@@ -2119,72 +2913,95 @@ async function deleteLinkedRecord(txn, req) {
         console.error('⚠️ Bill balance restore error:', e.message);
       }
 
-      // Reverse PaymentAccount (paidFromAccount) balance
-      try {
-        const paidFrom = payment.paidFromAccount || payment.paidThroughAccount || payment.paidThrough;
-        if (paidFrom) {
-          if (mongoose.Types.ObjectId.isValid(paidFrom)) {
-            await PaymentAccount.findByIdAndUpdate(paidFrom,
-              { $inc: { currentBalance: payment.amount || payment.amountPaid || 0 } });
-          } else {
-            await PaymentAccount.findOneAndUpdate(
-              { accountName: paidFrom },
-              { $inc: { currentBalance: payment.amount || payment.amountPaid || 0 } }
-            );
+      // Reverse PaymentAccount (paidFromAccount) balance — only when not already handled by Case A
+      if (!skipCOAReversal) {
+        try {
+          const paidFrom = payment.paidFromAccountId || payment.paidFromAccount || payment.paidThroughAccount || payment.paidThrough;
+          if (paidFrom) {
+            if (mongoose.Types.ObjectId.isValid(paidFrom)) {
+              await PaymentAccount.findByIdAndUpdate(paidFrom,
+                { $inc: { currentBalance: payment.amount || payment.amountPaid || 0 } });
+            } else {
+              await PaymentAccount.findOneAndUpdate(
+                { accountName: paidFrom },
+                { $inc: { currentBalance: payment.amount || payment.amountPaid || 0 } }
+              );
+            }
           }
+        } catch (e) {
+          console.error('⚠️ PaymentMade balance restore error:', e.message);
         }
-      } catch (e) {
-        console.error('⚠️ PaymentMade balance restore error:', e.message);
       }
 
       // Reverse COA entries — Dr AP / Cr Bank
-      try {
-        const apCOA = await ChartOfAccount.findOne({
-          accountName: 'Accounts Payable',
-          ...(orgId ? { orgId } : {}),
-        }).lean();
+      if (!skipCOAReversal) {
+        try {
+          const branchId = txn.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+          const apCOA = await ChartOfAccount.findOne({
+            accountName: 'Accounts Payable',
+            ...(orgId    ? { orgId }    : {}),
+            ...(branchId ? { branchId } : {}),
+          }).lean();
 
-        let bankCOAId = null;
-        const paidFrom = payment.paidFromAccount || payment.paidThroughAccount || payment.paidThrough;
-        if (paidFrom) {
-          if (mongoose.Types.ObjectId.isValid(paidFrom)) {
-            bankCOAId = await ChartOfAccount.findById(paidFrom).then(a => a?._id).catch(() => null);
+          let bankCOAId = null;
+          const paidFrom = payment.paidFromAccountId || payment.paidFromAccount || payment.paidThroughAccount || payment.paidThrough;
+          if (paidFrom) {
+            if (mongoose.Types.ObjectId.isValid(paidFrom)) {
+              bankCOAId = await ChartOfAccount.findById(paidFrom).then(a => a?._id).catch(() => null);
+            }
+            if (!bankCOAId) {
+              const nameToSearch = payment.paidFromAccountName || paidFrom;
+              bankCOAId = await ChartOfAccount.findOne({
+                accountName: nameToSearch,
+                ...(orgId    ? { orgId }    : {}),
+                ...(branchId ? { branchId } : {}),
+              }).then(a => a?._id).catch(() => null);
+            }
           }
-          if (!bankCOAId) {
-            bankCOAId = await ChartOfAccount.findOne({
-              accountName: paidFrom,
-              ...(orgId ? { orgId } : {}),
-            }).then(a => a?._id).catch(() => null);
+
+          const txnDate = new Date();
+          const desc = `REVERSAL (Uncategorize) - PaymentMade ${payment._id}`;
+          const amt = payment.amount || payment.amountPaid || 0;
+
+          // Cr AP (reverses original Dr AP)
+          if (apCOA) {
+            await postTransactionToCOA({
+              accountId: apCOA._id, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Bill', referenceId: payment._id,
+              referenceNumber: payment._id.toString(),
+              debit: 0, credit: amt,
+            });
           }
+          // Dr Bank (reverses original Cr Bank)
+          if (bankCOAId) {
+            await postTransactionToCOA({
+              accountId: bankCOAId, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Bill', referenceId: payment._id,
+              referenceNumber: payment._id.toString(),
+              debit: amt, credit: 0,
+            });
+          }
+        } catch (e) {
+          console.error('⚠️ PaymentMade COA reversal error:', e.message);
         }
-
-        const txnDate = new Date();
-        const desc = `REVERSAL (Uncategorize) - PaymentMade ${payment._id}`;
-        const amt = payment.amount || payment.amountPaid || 0;
-
-        if (apCOA) {
-          await postTransactionToCOA({
-            accountId: apCOA._id, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Bill', referenceId: payment._id,
-            referenceNumber: payment._id.toString(),
-            debit: 0, credit: amt,
-          });
-        }
-        if (bankCOAId) {
-          await postTransactionToCOA({
-            accountId: bankCOAId, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Bill', referenceId: payment._id,
-            referenceNumber: payment._id.toString(),
-            debit: amt, credit: 0,
-          });
-        }
-      } catch (e) {
-        console.error('⚠️ PaymentMade COA reversal error:', e.message);
       }
 
       await PaymentMade.deleteOne({ _id: payment._id });
+
+      // Clean up any system-created ProviderTransaction linked to this payment
+      try {
+        await ProviderTransaction.deleteMany({
+          linkedRecordId:   payment._id,
+          linkedRecordType: 'PaymentMade',
+          source:           'SYSTEM_ENTRY',
+          ...(orgId ? { orgId } : {}),
+        });
+      } catch (e) {
+        console.error('⚠️ PaymentMade system ProviderTransaction cleanup error:', e.message);
+      }
+
       break;
     }
 
@@ -2228,74 +3045,238 @@ async function deleteLinkedRecord(txn, req) {
         console.error('⚠️ Invoice balance restore error:', e.message);
       }
 
-      // Reverse paymentaccounts balance
+      // Reverse paymentaccounts balance — only when not already handled by Case A
+      if (!skipCOAReversal) {
+        try {
+          const depositTo = payment.depositTo;
+          const amt       = parseFloat(payment.amountReceived || 0);
+          if (depositTo && amt > 0) {
+            if (mongoose.Types.ObjectId.isValid(depositTo)) {
+              await PaymentAccount.findByIdAndUpdate(depositTo,
+                { $inc: { currentBalance: -amt } });
+            } else {
+              await PaymentAccount.findOneAndUpdate(
+                { accountName: depositTo },
+                { $inc: { currentBalance: -amt } }
+              );
+            }
+            console.log(`✅ PaymentAccount balance reversed: -₹${amt}`);
+          }
+        } catch (e) {
+          console.error('⚠️ PaymentAccount reverse error (PaymentReceived uncategorize):', e.message);
+        }
+      }
+
+      // Reverse COA entries — Cr deposit account / Dr AR
+      if (!skipCOAReversal) {
+        try {
+          const branchId = txn.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+          const arCOA = await ChartOfAccount.findOne({
+            accountName: 'Accounts Receivable',
+            ...(orgId    ? { orgId }    : {}),
+            ...(branchId ? { branchId } : {}),
+          }).lean();
+
+          let depositCOAId = null;
+          const depositAcct = payment.depositTo || payment.depositToAccount || payment.depositToAccountId;
+          if (depositAcct) {
+            if (mongoose.Types.ObjectId.isValid(depositAcct)) {
+              depositCOAId = await ChartOfAccount.findById(depositAcct).then(a => a?._id).catch(() => null);
+            }
+            if (!depositCOAId) {
+              depositCOAId = await ChartOfAccount.findOne({
+                accountName: depositAcct,
+                ...(orgId    ? { orgId }    : {}),
+                ...(branchId ? { branchId } : {}),
+              }).then(a => a?._id).catch(() => null);
+            }
+          }
+
+          const txnDate = new Date();
+          const desc = `REVERSAL (Uncategorize) - PaymentReceived ${payment._id}`;
+          const amt = payment.amountReceived || payment.amount || 0;
+
+          // Cr Bank/deposit (reverses original Dr Bank)
+          if (depositCOAId) {
+            await postTransactionToCOA({
+              accountId: depositCOAId, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Payment', referenceId: payment._id,
+              referenceNumber: payment._id.toString(),
+              debit: 0, credit: amt,
+            });
+          }
+          // Dr AR (reverses original Cr AR)
+          if (arCOA) {
+            await postTransactionToCOA({
+              accountId: arCOA._id, orgId, branchId,
+              date: txnDate, description: desc,
+              referenceType: 'Payment', referenceId: payment._id,
+              referenceNumber: payment._id.toString(),
+              debit: amt, credit: 0,
+            });
+          }
+        } catch (e) {
+          console.error('⚠️ PaymentReceived COA reversal error:', e.message);
+        }
+      }
+
+      // ── REVERSE CUSTOMER UNUSED CREDITS ─────────────────────────────────
+      // DON'T delete payment here - check if it's a refund first!
       try {
-        const depositTo = payment.depositTo;
-        const amt       = parseFloat(payment.amountReceived || 0);
-        if (depositTo && amt > 0) {
-          if (mongoose.Types.ObjectId.isValid(depositTo)) {
-            await PaymentAccount.findByIdAndUpdate(depositTo,
-              { $inc: { currentBalance: -amt } });
-          } else {
-            await PaymentAccount.findOneAndUpdate(
-              { accountName: depositTo },
-              { $inc: { currentBalance: -amt } }
+        console.log('\n💰💰💰 [PAYMENT REFUND UNCATEGORIZE] START 💰💰💰');
+        console.log('🔍 [uncategorize] Checking if this is a Payment Refund...');
+        console.log('   categoryLabel:', txn.categoryLabel);
+        console.log('   linkedRecordType:', txn.linkedRecordType);
+        console.log('   payment._id:', payment._id);
+        console.log('   payment.paymentNumber:', payment.paymentNumber);
+        console.log('   payment.customerId:', payment.customerId);
+        
+        // Check if this is a Payment Refund (not a full payment deletion)
+        const isPaymentRefund = txn.categoryLabel === 'Payment Refund' || 
+                                txn.linkedRecordType === 'PaymentRefund';
+        
+        console.log('   isPaymentRefund:', isPaymentRefund);
+        
+        if (isPaymentRefund) {
+          console.log('\n✅ [uncategorize] This IS a Payment Refund - reversing refund (NOT deleting payment)');
+          
+          // For Payment Refund: DON'T delete the payment, just reverse the refund
+          // Restore amountInExcess and remove the refund entry
+          const refundAmount = parseFloat(txn.amount || 0);
+          
+          console.log('   refundAmount:', refundAmount);
+          
+          if (refundAmount > 0) {
+            // Restore amountInExcess on the payment
+            const newAmountRefunded = Math.max(0, (payment.amountRefunded || 0) - refundAmount);
+            const newAmountInExcess = (payment.amountInExcess || 0) + refundAmount;
+            
+            console.log('\n📊 [uncategorize] Payment amounts BEFORE reversal:');
+            console.log('   amountRefunded:', payment.amountRefunded || 0);
+            console.log('   amountInExcess:', payment.amountInExcess || 0);
+            console.log('\n📊 [uncategorize] Payment amounts AFTER reversal:');
+            console.log('   newAmountRefunded:', newAmountRefunded);
+            console.log('   newAmountInExcess:', newAmountInExcess);
+            
+            console.log('\n🔄 [uncategorize] Updating payment document...');
+            const updateResult = await PaymentReceived.findByIdAndUpdate(
+              payment._id,
+              {
+                $set: {
+                  amountRefunded: newAmountRefunded,
+                  amountInExcess: newAmountInExcess,
+                  updatedAt: new Date(),
+                },
+                // Remove the refund entry from the refunds array if it exists
+                $pull: { refunds: { amount: refundAmount } },
+              },
+              { new: true }
             );
+            
+            if (updateResult) {
+              console.log('✅ [uncategorize] Payment document updated successfully');
+              console.log('   Updated payment._id:', updateResult._id);
+              console.log('   Updated amountInExcess:', updateResult.amountInExcess);
+              console.log('   Updated amountRefunded:', updateResult.amountRefunded);
+            } else {
+              console.error('❌ [uncategorize] Payment update FAILED - payment not found!');
+            }
+            
+            console.log(`\n✅ [uncategorize] Payment ${payment.paymentNumber} refund reversed - amountInExcess restored to ${newAmountInExcess}`);
+            
+            // Restore unusedCredits to customer
+            if (payment.customerId) {
+              const BillingCustomer = mongoose.models.BillingCustomer
+                || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+              
+              const custId = mongoose.Types.ObjectId.isValid(payment.customerId)
+                ? new mongoose.Types.ObjectId(payment.customerId)
+                : payment.customerId;
+              
+              console.log(`\n🔄 [uncategorize] Restoring unusedCredits to customer ${custId}`);
+              console.log('   Amount to restore:', refundAmount);
+              
+              const customerBefore = await BillingCustomer.findById(custId);
+              console.log('   Customer unusedCredits BEFORE:', customerBefore?.unusedCredits || 0);
+              
+              const customerResult = await BillingCustomer.findOneAndUpdate(
+                { _id: custId },
+                { $inc: { unusedCredits: refundAmount } },
+                { new: true }
+              );
+              
+              if (customerResult) {
+                console.log('   Customer unusedCredits AFTER:', customerResult.unusedCredits || 0);
+                console.log(`✅ [uncategorize] Customer unusedCredits restored by +₹${refundAmount}`);
+              } else {
+                console.error('❌ [uncategorize] Customer update FAILED - customer not found!');
+              }
+            } else {
+              console.warn('⚠️ [uncategorize] No customerId on payment - skipping unusedCredits restore');
+            }
+            
+            console.log('\n💰💰💰 [PAYMENT REFUND UNCATEGORIZE] COMPLETE - Payment kept in database 💰💰💰\n');
+          } else {
+            console.warn('⚠️ [uncategorize] refundAmount is 0 or invalid - skipping reversal');
           }
-          console.log(`✅ PaymentAccount balance reversed: -₹${amt}`);
+        } else {
+          console.log('\n⚠️ [uncategorize] This is NOT a Payment Refund - deleting entire payment');
+          
+          // Standard payment deletion: delete the entire payment
+          console.log('🗑️ [uncategorize] Deleting payment document:', payment._id);
+          await PaymentReceived.deleteOne({ _id: payment._id });
+          console.log('✅ [uncategorize] Payment deleted');
+          
+          // Standard payment deletion logic
+          const BillingCustomer = mongoose.models.BillingCustomer
+            || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+
+          let creditDelta;
+          if (payment.paymentType === 'advance') {
+            // Advance: full netAmount was added to unusedCredits → reverse it
+            creditDelta = -(parseFloat(payment.netAmount || payment.amountReceived || 0));
+          } else {
+            // Normal payment: amountInExcess was the net credit contribution → reverse it
+            creditDelta = -(parseFloat(payment.amountInExcess || 0));
+          }
+
+          console.log('   creditDelta:', creditDelta);
+
+          if (creditDelta !== 0 && payment.customerId) {
+            const custId = mongoose.Types.ObjectId.isValid(payment.customerId)
+              ? new mongoose.Types.ObjectId(payment.customerId)
+              : payment.customerId;
+            await BillingCustomer.findOneAndUpdate(
+              { _id: custId },
+              { $inc: { unusedCredits: creditDelta } }
+            );
+            // Clamp to 0 — never go negative
+            await BillingCustomer.findOneAndUpdate(
+              { _id: custId, unusedCredits: { $lt: 0 } },
+              { $set: { unusedCredits: 0 } }
+            );
+            console.log(`✅ [uncategorize] Customer unusedCredits reversed by ${creditDelta} (type: ${payment.paymentType || 'payment'})`);
+          }
         }
       } catch (e) {
-        console.error('⚠️ PaymentAccount reverse error (PaymentReceived uncategorize):', e.message);
+        console.error('❌ [uncategorize] unusedCredits reversal error:', e.message);
+        console.error('   Stack:', e.stack);
       }
+      // ── END UNUSED CREDITS REVERSAL ──────────────────────────────────────
 
-      // Reverse COA entries — Dr deposit account / Cr AR
+      // Clean up any system-created ProviderTransaction linked to this payment
       try {
-        const arCOA = await ChartOfAccount.findOne({
-          accountName: 'Accounts Receivable',
+        await ProviderTransaction.deleteMany({
+          linkedRecordId:   payment._id,
+          linkedRecordType: 'PaymentReceived',
+          source:           'SYSTEM_ENTRY',
           ...(orgId ? { orgId } : {}),
-        }).lean();
-
-        let depositCOAId = null;
-        const depositAcct = payment.depositTo || payment.depositToAccount || payment.depositToAccountId;
-        if (depositAcct) {
-          if (mongoose.Types.ObjectId.isValid(depositAcct)) {
-            depositCOAId = await ChartOfAccount.findById(depositAcct).then(a => a?._id).catch(() => null);
-          }
-          if (!depositCOAId) {
-            depositCOAId = await ChartOfAccount.findOne({
-              accountName: depositAcct,
-              ...(orgId ? { orgId } : {}),
-            }).then(a => a?._id).catch(() => null);
-          }
-        }
-
-        const txnDate = new Date();
-        const desc = `REVERSAL (Uncategorize) - PaymentReceived ${payment._id}`;
-        const amt = payment.amountReceived || payment.amount || 0;
-
-        if (depositCOAId) {
-          await postTransactionToCOA({
-            accountId: depositCOAId, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Payment', referenceId: payment._id,
-            referenceNumber: payment._id.toString(),
-            debit: 0, credit: amt,
-          });
-        }
-        if (arCOA) {
-          await postTransactionToCOA({
-            accountId: arCOA._id, orgId,
-            date: txnDate, description: desc,
-            referenceType: 'Payment', referenceId: payment._id,
-            referenceNumber: payment._id.toString(),
-            debit: amt, credit: 0,
-          });
-        }
+        });
       } catch (e) {
-        console.error('⚠️ PaymentReceived COA reversal error:', e.message);
+        console.error('⚠️ PaymentReceived system ProviderTransaction cleanup error:', e.message);
       }
 
-      await PaymentReceived.deleteOne({ _id: payment._id });
       break;
     }
 
@@ -2304,6 +3285,158 @@ async function deleteLinkedRecord(txn, req) {
       // Do NOT delete the invoice/bill itself — only reverse the bank match
       break;
 
+    case 'VendorCredit': {
+      // Reverse the specific refund sub-doc from the vendor credit.
+      // txn.journalRef = refund sub-doc _id (set during vendor_credit_refund categorization)
+      // txn.linkedRecordId = vendor credit _id
+      try {
+        const VendorCredit = mongoose.models.VendorCredit
+          || mongoose.model('VendorCredit', new mongoose.Schema({}, { strict: false }), 'vendorcredits');
+
+        const credit = await VendorCredit.findOne({
+          _id: txn.linkedRecordId,
+          ...req.orgFilter,
+        });
+
+        if (credit) {
+          const refundId = txn.journalRef?.toString();
+
+          if (refundId && mongoose.Types.ObjectId.isValid(refundId)) {
+            // Remove the exact refund sub-doc by its _id
+            const before = credit.refunds.length;
+            credit.refunds = credit.refunds.filter(
+              r => r._id.toString() !== refundId
+            );
+            console.log(`[uncategorize] VendorCredit: removed ${before - credit.refunds.length} refund(s) by _id=${refundId}`);
+          } else {
+            // Fallback: remove the most recent refund matching the transaction amount
+            const txnAmt = txn.amount || 0;
+            const idx = credit.refunds.map(r => r.amount).lastIndexOf(txnAmt);
+            if (idx !== -1) {
+              credit.refunds.splice(idx, 1);
+              console.log(`[uncategorize] VendorCredit: removed refund by amount fallback idx=${idx}`);
+            }
+          }
+
+          // Recalculate balance
+          const totalUsed =
+            credit.applications.reduce((s, a) => s + (a.amount || 0), 0) +
+            credit.refunds.reduce((s, r) => s + (r.amount || 0), 0);
+          credit.appliedAmount = totalUsed;
+          credit.balanceAmount = credit.totalAmount - totalUsed;
+
+          // Restore status
+          if (credit.balanceAmount <= 0.01) {
+            credit.status        = 'CLOSED';
+            credit.balanceAmount = 0;
+          } else if (credit.appliedAmount > 0) {
+            credit.status = 'PARTIALLY_APPLIED';
+          } else {
+            credit.status = 'OPEN';
+          }
+
+          await credit.save();
+          console.log(`[uncategorize] VendorCredit ${credit.creditNumber} restored → status=${credit.status} balance=${credit.balanceAmount}`);
+        }
+      } catch (e) {
+        console.error('⚠️ VendorCredit refund reversal error:', e.message);
+      }
+      break;
+    }
+
+    case 'CreditNote': {
+      // Reverse the specific refund sub-doc from the credit note.
+      // txn.journalRef    = refund sub-doc _id (set during credit_note_refund categorization)
+      // txn.linkedRecordId = credit note _id
+      try {
+        const CreditNote = mongoose.models.CreditNote
+          || mongoose.model('CreditNote', new mongoose.Schema({}, { strict: false }), 'creditnotes');
+
+        const creditNote = await CreditNote.findOne({
+          _id: txn.linkedRecordId,
+          ...req.orgFilter,
+        });
+
+        if (creditNote) {
+          const refundId = txn.journalRef?.toString();
+
+          if (refundId && mongoose.Types.ObjectId.isValid(refundId)) {
+            // Remove the exact refund sub-doc by its _id
+            const before = creditNote.refunds.length;
+            creditNote.refunds = creditNote.refunds.filter(
+              r => r._id.toString() !== refundId
+            );
+            console.log(`[uncategorize] CreditNote: removed ${before - creditNote.refunds.length} refund(s) by _id=${refundId}`);
+          } else {
+            // Fallback: remove the most recent refund matching the transaction amount
+            const txnAmt = txn.amount || 0;
+            const idx = creditNote.refunds.map(r => r.amount).lastIndexOf(txnAmt);
+            if (idx !== -1) {
+              creditNote.refunds.splice(idx, 1);
+              console.log(`[uncategorize] CreditNote: removed refund by amount fallback idx=${idx}`);
+            }
+          }
+
+          // Recalculate creditUsed and creditBalance
+          const totalRefunded = creditNote.refunds.reduce((s, r) => s + (r.amount || 0), 0);
+          const totalApplied  = (creditNote.creditApplications || []).reduce((s, a) => s + (a.amount || 0), 0);
+          creditNote.creditUsed    = totalRefunded + totalApplied;
+          creditNote.creditBalance = creditNote.totalAmount - creditNote.creditUsed;
+
+          // Restore status
+          if (creditNote.creditBalance <= 0.01) {
+            creditNote.status        = 'CLOSED';
+            creditNote.creditBalance = 0;
+          } else if (creditNote.creditUsed > 0) {
+            creditNote.status = 'PARTIALLY_APPLIED';
+          } else {
+            creditNote.status = 'OPEN';
+          }
+
+          await creditNote.save();
+          console.log(`[uncategorize] CreditNote ${creditNote.creditNoteNumber} restored → status=${creditNote.status} balance=${creditNote.creditBalance}`);
+
+          // ── Restore Customer unusedCredits ────────────────────────────────────
+          // When refund is uncategorized, restore the credit to customer profile
+          try {
+            const Customer = mongoose.models.Customer
+              || mongoose.model('Customer', new mongoose.Schema({}, { strict: false }), 'customers');
+            
+            const refundAmount = txn.amount || 0;
+            console.log(`🔍 [uncategorize] Restoring customer unusedCredits: customerId=${creditNote.customerId}, amount=+₹${refundAmount}`);
+            
+            await Customer.findByIdAndUpdate(creditNote.customerId, {
+              $inc: { unusedCredits: refundAmount }
+            });
+            
+            console.log(`✅ [uncategorize] Customer unusedCredits restored: +₹${refundAmount}`);
+          } catch (custErr) {
+            console.error('⚠️ [uncategorize] Customer unusedCredits restore error:', custErr.message);
+          }
+
+          // ── Delete System-Created ProviderTransaction ─────────────────────────
+          // Clean up any duplicate system-created ProviderTransaction that was
+          // created during the refund (to prevent duplicate cash flow entries)
+          try {
+            const orgId = req.user?.orgId || null;
+            const deleted = await ProviderTransaction.deleteMany({
+              linkedRecordId:   creditNote._id,
+              linkedRecordType: 'CreditNote',
+              source:           'SYSTEM_ENTRY',
+              journalRef:       refundId,
+              ...(orgId ? { orgId } : {}),
+            });
+            console.log(`✅ [uncategorize] Deleted ${deleted.deletedCount} system-created ProviderTransaction(s) for CreditNote refund`);
+          } catch (ptErr) {
+            console.error('⚠️ [uncategorize] CreditNote system ProviderTransaction cleanup error:', ptErr.message);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ CreditNote refund reversal error:', e.message);
+      }
+      break;
+    }
+
     default:
       await Expense.deleteMany({ providerTransactionId: txn._id, ...orgFilter(req) });
       break;
@@ -2311,4 +3444,7 @@ async function deleteLinkedRecord(txn, req) {
 }
 
 module.exports = router;
+
+// Export recomputeClosingBalance so it can be used by other routes if needed
+module.exports.recomputeClosingBalance = recomputeClosingBalance;
 

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // BILLING CUSTOMERS - COMPLETE BACKEND (ZOHO BOOKS STYLE)
 // ============================================================================
 // File: routes/billing-customers.js
@@ -115,10 +115,10 @@ const customFieldSchema = new mongoose.Schema({
 
 const billingCustomerSchema = new mongoose.Schema({
 
-  // ── Identity ──────────────────────────────────────────────────────────────
+  // -- Identity --------------------------------------------------------------
   customerId: { type: String, unique: true, index: true },
 
-  // ── Basic ─────────────────────────────────────────────────────────────────
+  // -- Basic -----------------------------------------------------------------
   customerType: {
     type: String,
     required: true,
@@ -132,7 +132,7 @@ const billingCustomerSchema = new mongoose.Schema({
   customerDisplayName: { type: String, required: true, trim: true, index: true },
   companyName:         { type: String, trim: true },
 
-  // ── Contact ───────────────────────────────────────────────────────────────
+  // -- Contact ---------------------------------------------------------------
   primaryEmail:  { type: String, required: true, trim: true, lowercase: true, index: true },
   primaryPhone:  { type: String, required: true, index: true },
   workPhone:     { type: String, trim: true },
@@ -142,11 +142,11 @@ const billingCustomerSchema = new mongoose.Schema({
   facebook:      { type: String, trim: true },
   twitter:       { type: String, trim: true },
 
-  // ── Address ───────────────────────────────────────────────────────────────
+  // -- Address ---------------------------------------------------------------
   billingAddress:  { type: addressSchema, default: () => ({}) },
   shippingAddress: { type: addressSchema, default: () => ({}) },
 
-  // ── Tax Info (Zoho style) ─────────────────────────────────────────────────
+  // -- Tax Info (Zoho style) -------------------------------------------------
   gstNumber: {
     type: String, trim: true, uppercase: true, index: true,
     match: [/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$|^$/, 'Invalid GST format'],
@@ -173,7 +173,7 @@ const billingCustomerSchema = new mongoose.Schema({
   taxPreference:  { type: String, enum: ['Taxable', 'Tax Exempt', ''], default: 'Taxable' },
   exemptionReason:{ type: String, trim: true },
 
-  // ── Financials ────────────────────────────────────────────────────────────
+  // -- Financials ------------------------------------------------------------
   defaultCurrency: { type: String, default: 'INR' },
   openingBalance:  { type: Number, default: 0 },
   paymentTerms: {
@@ -183,18 +183,18 @@ const billingCustomerSchema = new mongoose.Schema({
   },
   creditLimit:   { type: Number, min: 0, default: 0 },
 
-  // ── Portal ────────────────────────────────────────────────────────────────
+  // -- Portal ----------------------------------------------------------------
   portalLanguage: { type: String, default: 'English' },
   portalEnabled:  { type: Boolean, default: false },
 
-  // ── Contact Persons ───────────────────────────────────────────────────────
+  // -- Contact Persons -------------------------------------------------------
   contactPersons: [contactPersonSchema],
 
-  // ── Remarks / Comments ────────────────────────────────────────────────────
+  // -- Remarks / Comments ----------------------------------------------------
   remarks:  { type: String, trim: true },
   comments: [commentSchema],
 
-  // ── Categorization (kept from your original) ──────────────────────────────
+  // -- Categorization (kept from your original) ------------------------------
   customerStatus: {
     type: String,
     required: true,
@@ -207,7 +207,7 @@ const billingCustomerSchema = new mongoose.Schema({
   salesTerritory: { type: String, default: '', index: true },
   tags: [{ type: String }],
 
-  // ── Rate Card / Contract ─────────────────────────────────────────────────
+  // -- Rate Card / Contract -------------------------------------------------
   rateCard:             { type: String },
   contractType:         { type: String },
   contractStartDate:    { type: Date },
@@ -215,7 +215,7 @@ const billingCustomerSchema = new mongoose.Schema({
   autoRenewal:          { type: Boolean, default: false },
   renewalNoticePeriod:  { type: Number, min: 0 },
 
-  // ── Payment / Billing ─────────────────────────────────────────────────────
+  // -- Payment / Billing -----------------------------------------------------
   preferredPaymentMethod: { type: String },
   securityDeposit:        { type: Number, min: 0 },
   securityDepositStatus:  { type: String, enum: ['Received', 'Pending', 'Refunded', ''], default: '' },
@@ -229,7 +229,7 @@ const billingCustomerSchema = new mongoose.Schema({
   invoiceDeliveryMethods: [{ type: String }],
   invoiceLanguage:     { type: String, default: 'English' },
 
-  // ── Vendor fields ─────────────────────────────────────────────────────────
+  // -- Vendor fields ---------------------------------------------------------
   vendorCommissionType:      { type: String },
   commissionRate:            { type: Number },
   fixedAmountPerTrip:        { type: Number },
@@ -245,7 +245,7 @@ const billingCustomerSchema = new mongoose.Schema({
   vendorPerformanceRating:   { type: Number, min: 0, max: 5, default: 0 },
   insuranceValidUntil:       { type: Date },
 
-  // ── Bank Details ──────────────────────────────────────────────────────────
+  // -- Bank Details ----------------------------------------------------------
   bankName:           { type: String, trim: true },
   bankAccountNumber:  { type: String, trim: true },
   ifscCode:           { type: String, trim: true, uppercase: true },
@@ -253,33 +253,37 @@ const billingCustomerSchema = new mongoose.Schema({
   branchName:         { type: String, trim: true },
   upiId:              { type: String, trim: true },
 
-  // ── Documents / Custom Fields ─────────────────────────────────────────────
+  // -- Documents / Custom Fields ---------------------------------------------
   uploadedDocuments: [uploadedDocumentSchema],
   customFields:      [customFieldSchema],
 
-  // ── Internal Notes ────────────────────────────────────────────────────────
+  // -- Internal Notes --------------------------------------------------------
   internalNotes:        { type: String, trim: true },
   customerInstructions: { type: String, trim: true },
   specialRequirements:  { type: String, trim: true },
 
-  // ── Stats (denormalized for speed) ────────────────────────────────────────
+  // -- Stats (denormalized for speed) ----------------------------------------
   totalRevenueGenerated:  { type: Number, default: 0 },
   totalTripsCompleted:    { type: Number, default: 0 },
   lastTransactionDate:    { type: Date },
 
-  // ── Org / Audit ───────────────────────────────────────────────────────────
+  // -- Unused Credits (excess payments not yet applied to invoices) ----------
+  unusedCredits: { type: Number, default: 0, min: 0 },
+
+  // -- Org / Audit -----------------------------------------------------------
   orgId:           { type: String, index: true, default: null },
+  branchId:        { type: String, index: true, default: null },
   createdBy:       { type: String, required: true },
   createdDate:     { type: Date, default: Date.now },
   lastModifiedBy:  { type: String },
   lastModifiedDate:{ type: Date },
 
-  // ── Soft delete ───────────────────────────────────────────────────────────
+  // -- Soft delete -----------------------------------------------------------
   isDeleted:  { type: Boolean, default: false },
   deletedAt:  { type: Date },
   deletedBy:  { type: String },
 
-  // ── Legacy flat address fields (kept for backward compat) ─────────────────
+  // -- Legacy flat address fields (kept for backward compat) -----------------
   addressLine1: { type: String },
   addressLine2: { type: String },
   city:         { type: String },
@@ -293,19 +297,19 @@ const billingCustomerSchema = new mongoose.Schema({
   industryType:         { type: String },
   companyRegistration:  { type: String },
   tanNumber:            { type: String },
-  taxRegistrationType:  { type: String },   // old field — kept
+  taxRegistrationType:  { type: String },   // old field � kept
   sameAsPrimaryAddress: { type: Boolean, default: true },
   blockBookingIfCreditExceeded: { type: Boolean, default: false },
 
 }, { timestamps: true, collection: 'billing-customers' });
 
-// ── Indexes ───────────────────────────────────────────────────────────────────
+// -- Indexes -------------------------------------------------------------------
 billingCustomerSchema.index({ customerType: 1, customerStatus: 1 });
 billingCustomerSchema.index({ salesTerritory: 1, customerStatus: 1 });
 billingCustomerSchema.index({ createdDate: -1 });
 billingCustomerSchema.index({ gstNumber: 1 }, { sparse: true });
 
-// ── Virtuals ──────────────────────────────────────────────────────────────────
+// -- Virtuals ------------------------------------------------------------------
 billingCustomerSchema.virtual('isActive').get(function () {
   return this.customerStatus === 'Active';
 });
@@ -313,7 +317,7 @@ billingCustomerSchema.virtual('fullName').get(function () {
   return [this.salutation, this.firstName, this.lastName].filter(Boolean).join(' ');
 });
 
-// ── Pre-save ──────────────────────────────────────────────────────────────────
+// -- Pre-save ------------------------------------------------------------------
 billingCustomerSchema.pre('save', async function () {
   if (!this.customerId) {
     const ts = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
@@ -342,7 +346,7 @@ if (mongoose.models.BillingCustomer) delete mongoose.models.BillingCustomer;
 const BillingCustomer = mongoose.model('BillingCustomer', billingCustomerSchema);
 
 // ============================================================================
-// HELPER — get Invoice model safely
+// HELPER � get Invoice model safely
 // ============================================================================
 function getInvoiceModel() {
   return mongoose.models.Invoice
@@ -353,7 +357,7 @@ function getInvoiceModel() {
 // CONTROLLERS
 // ============================================================================
 
-// GET /  — list with filters
+// GET /  � list with filters
 const getAllCustomers = async (req, res) => {
   try {
     const {
@@ -365,6 +369,7 @@ const getAllCustomers = async (req, res) => {
 
     const query = { isDeleted: false };
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     if (customerType)   query.customerType   = customerType;
     if (customerStatus) query.customerStatus = customerStatus;
     if (salesTerritory) query.salesTerritory = salesTerritory;
@@ -397,7 +402,8 @@ const getAllCustomers = async (req, res) => {
           $match: {
             customerId: { $in: customerIds },
             status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
+            ...(req.branchFilter || {}),
           },
         },
         {
@@ -409,19 +415,19 @@ const getAllCustomers = async (req, res) => {
       ]);
       receivablesAgg.forEach(r => { receivablesMap[r._id] = r.outstandingReceivables; });
     } catch (e) {
-      // Invoice collection may not exist yet — safe to ignore
+      // Invoice collection may not exist yet � safe to ignore
     }
 
     const customersWithReceivables = customers.map(c => ({
       ...c,
       outstandingReceivables: receivablesMap[c._id?.toString()] || 0,
-      unusedCredits: 0,
+      unusedCredits: c.unusedCredits || 0,
     }));
 
     let statistics = { totalCustomers: 0, activeCustomers: 0, inactiveCustomers: 0, blockedCustomers: 0 };
     if (skipStats !== 'true') {
       const stats = await BillingCustomer.aggregate([
-        { $match: { isDeleted: false, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) } },
+        { $match: { isDeleted: false, ...req.orgFilter, ...(req.branchFilter || {}) } },
         {
           $group: {
             _id: null,
@@ -450,7 +456,7 @@ const getAllCustomers = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ getAllCustomers:', error);
+    console.error('? getAllCustomers:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -458,16 +464,19 @@ const getAllCustomers = async (req, res) => {
 // GET /:id
 const getCustomerById = async (req, res) => {
   try {
-    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    const query = { _id: req.params.id, isDeleted: false };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
+    const customer = await BillingCustomer.findOne(query).lean();
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
     res.json({ success: true, data: customer });
   } catch (error) {
-    console.error('❌ getCustomerById:', error);
+    console.error('? getCustomerById:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// GET /:id/overview  — receivables + income chart data
+// GET /:id/overview  � receivables + income chart data
 const getCustomerOverview = async (req, res) => {
   try {
     const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
@@ -475,7 +484,7 @@ const getCustomerOverview = async (req, res) => {
 
     const Invoice = getInvoiceModel();
     let outstandingReceivables = 0;
-    let unusedCredits = 0;
+    let unusedCredits = customer.unusedCredits || 0;
     let monthlyIncome = [];
 
     if (Invoice) {
@@ -485,14 +494,14 @@ const getCustomerOverview = async (req, res) => {
           $match: {
             customerId: customer._id?.toString() || customer.customerId,
             status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
           },
         },
         { $group: { _id: null, total: { $sum: '$amountDue' } } },
       ]);
       outstandingReceivables = receivablesAgg[0]?.total || 0;
 
-      // Monthly income — last 6 months
+      // Monthly income � last 6 months
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
       sixMonthsAgo.setDate(1);
@@ -504,7 +513,7 @@ const getCustomerOverview = async (req, res) => {
             customerId: customer._id?.toString() || customer.customerId,
             invoiceDate: { $gte: sixMonthsAgo },
             status: { $nin: ['CANCELLED', 'VOID'] },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
           },
         },
         {
@@ -545,7 +554,7 @@ const getCustomerOverview = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ getCustomerOverview:', error);
+    console.error('? getCustomerOverview:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -562,7 +571,7 @@ const getCustomerTransactions = async (req, res) => {
     if (Invoice) {
       const invoices = await Invoice.find({
         customerId: { $in: [customer._id?.toString(), customer.customerId] },
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
       }).sort({ invoiceDate: -1 }).lean();
 
       // Invoices
@@ -599,7 +608,7 @@ const getCustomerTransactions = async (req, res) => {
 
     res.json({ success: true, data: transactions });
   } catch (error) {
-    console.error('❌ getCustomerTransactions:', error);
+    console.error('? getCustomerTransactions:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -614,25 +623,69 @@ const getCustomerMails = async (req, res) => {
     let mails = [];
 
     if (Invoice) {
+      const customerIdValues = [
+        customer._id?.toString(),
+        customer.customerId,
+      ].filter(Boolean);
+
+      const orConditions = [{ customerId: { $in: customerIdValues } }];
+      if (customer.primaryEmail) orConditions.push({ customerEmail: customer.primaryEmail });
+
       const invoices = await Invoice.find({
-        customerId: { $in: [customer._id?.toString(), customer.customerId] },
-        'emailsSent.0': { $exists: true },
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        $or: orConditions,
+        $or: [
+          { 'emailsSent.0': { $exists: true } },
+          { 'reminderLog.0': { $exists: true } },
+        ],
+        ...req.orgFilter,
       }).lean();
 
       for (const inv of invoices) {
+        // ── Email entries ──────────────────────────────────────────────────
         for (const email of (inv.emailsSent || [])) {
           mails.push({
             invoiceNumber: inv.invoiceNumber,
             invoiceId:     inv._id,
+            customerName:  inv.customerName  || customer.customerDisplayName || '',
             sentTo:        email.sentTo,
             sentAt:        email.sentAt,
             emailType:     email.emailType || 'invoice',
-            subject:       `Invoice ${inv.invoiceNumber} — ₹${inv.totalAmount?.toFixed(2)}`,
-            amount:        inv.totalAmount,
+            channel:       'email',
+            subject:       `Invoice ${inv.invoiceNumber} — ₹${(inv.totalAmount || 0).toFixed(2)}`,
+            amount:        inv.totalAmount || 0,
+            success:       true,
+            reminderType:  null,
+          });
+        }
+
+        // ── WhatsApp / reminder log entries ───────────────────────────────
+        for (const log of (inv.reminderLog || [])) {
+          mails.push({
+            invoiceNumber: inv.invoiceNumber,
+            invoiceId:     inv._id,
+            customerName:  inv.customerName  || customer.customerDisplayName || '',
+            customerPhone: inv.customerPhone || customer.primaryPhone || '',
+            sentTo:        log.recipientPhone || log.recipientEmail || '',
+            sentAt:        log.sentAt,
+            emailType:     log.channel === 'whatsapp' ? 'whatsapp' : 'reminder',
+            channel:       log.channel || 'email',
+            subject:       log.channel === 'whatsapp'
+              ? `WhatsApp ${log.type === 'predue' ? 'Pre-Due' : 'Overdue'} — Invoice ${inv.invoiceNumber}`
+              : `Reminder Email — Invoice ${inv.invoiceNumber}`,
+            amount:        inv.totalAmount || 0,
+            success:       log.success !== false,
+            failReason:    log.failReason || null,
+            reminderType:  log.type || 'overdue',
+            // Pass invoice data for message preview
+            amountDue:     inv.amountDue || 0,
+            dueDate:       inv.dueDate,
+            daysOverdue:   log.type === 'overdue'
+              ? String(Math.max(0, Math.floor((new Date(log.sentAt) - new Date(inv.dueDate)) / 86400000)))
+              : '0',
           });
         }
       }
+
       mails.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
     }
 
@@ -663,7 +716,7 @@ const getCustomerStatement = async (req, res) => {
         customerId: { $in: [customer._id?.toString(), customer.customerId] },
         invoiceDate: { $gte: from, $lte: to },
         status: { $nin: ['CANCELLED', 'VOID'] },
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
       }).sort({ invoiceDate: 1 }).lean();
 
       for (const inv of invoices) {
@@ -714,7 +767,7 @@ const getCustomerStatement = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ getCustomerStatement:', error);
+    console.error('? getCustomerStatement:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -734,7 +787,7 @@ const addComment = async (req, res) => {
 
     res.json({ success: true, data: customer.comments[customer.comments.length - 1] });
   } catch (error) {
-    console.error('❌ addComment:', error);
+    console.error('? addComment:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -753,21 +806,27 @@ const deleteComment = async (req, res) => {
   }
 };
 
-// POST /  — create
+// POST /  � create
 const createCustomer = async (req, res) => {
   try {
+    console.log('🔍 branchIds:', req.branchIds);
+    console.log('🔍 header:', req.headers['x-branch-ids']);
+    // req.branchIds is the array of selected branch IDs (set by finance_jwt middleware)
+    // Use the first selected branch ID as the customer's branch
+    const branchId = (req.branchIds && req.branchIds.length > 0) ? req.branchIds[0] : null;
     const customerData = {
       ...req.body,
       orgId:     req.user?.orgId || null,
+      branchId,
       createdBy: req.user?.email || req.user?.name || 'System',
       createdDate: new Date(),
     };
     const customer = new BillingCustomer(customerData);
     await customer.save();
-    console.log('✅ Customer created:', customer.customerId);
+    console.log('? Customer created:', customer.customerId);
     res.status(201).json({ success: true, message: 'Customer created successfully', data: customer.toSafeObject() });
   } catch (error) {
-    console.error('❌ createCustomer:', error);
+    console.error('? createCustomer:', error);
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({ success: false, error: 'Validation failed', message: errors.join(', ') });
@@ -780,7 +839,10 @@ const createCustomer = async (req, res) => {
 // PUT /:id
 const updateCustomer = async (req, res) => {
   try {
-    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    const query = { _id: req.params.id, isDeleted: false };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
+    const customer = await BillingCustomer.findOne(query);
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
     Object.assign(customer, req.body);
@@ -789,7 +851,7 @@ const updateCustomer = async (req, res) => {
     await customer.save();
     res.json({ success: true, message: 'Customer updated successfully', data: customer.toSafeObject() });
   } catch (error) {
-    console.error('❌ updateCustomer:', error);
+    console.error('? updateCustomer:', error);
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({ success: false, error: 'Validation failed', message: errors.join(', ') });
@@ -801,7 +863,10 @@ const updateCustomer = async (req, res) => {
 // DELETE /:id  — soft delete
 const deleteCustomer = async (req, res) => {
   try {
-    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false });
+    const query = { _id: req.params.id, isDeleted: false };
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
+    const customer = await BillingCustomer.findOne(query);
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
     customer.isDeleted = true;
     customer.deletedAt = new Date();
@@ -845,6 +910,7 @@ const getStatistics = async (req, res) => {
   try {
     const match = { isDeleted: false };
     if (req.user?.orgId) match.orgId = req.user.orgId;
+    Object.assign(match, req.branchFilter || {});
 
     const stats = await BillingCustomer.aggregate([
       { $match: match },
@@ -891,6 +957,7 @@ const bulkImportCustomers = async (req, res) => {
         data.createdBy  = req.user?.email || 'System';
         data.createdDate = new Date();
         data.orgId      = req.user?.orgId || null;
+        data.branchId   = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
         // Strip invalid optional regex fields
         ['panNumber', 'gstNumber', 'tanNumber'].forEach(f => {
@@ -915,7 +982,7 @@ const bulkImportCustomers = async (req, res) => {
   }
 };
 
-// GET /indian-states  — for dropdowns
+// GET /indian-states  � for dropdowns
 router.get('/indian-states', (req, res) => {
   res.json({ success: true, data: INDIAN_STATES });
 });
@@ -941,12 +1008,108 @@ router.put('/:id',  updateCustomer);
 router.delete('/:id', deleteCustomer);
 
 // Detail sub-routes
-router.get('/:id/overview',     getCustomerOverview);
-router.get('/:id/transactions', getCustomerTransactions);
-router.get('/:id/mails',        getCustomerMails);
-router.get('/:id/statement',    getCustomerStatement);
-router.post('/:id/comments',    addComment);
+router.get('/:id/overview',       getCustomerOverview);
+router.get('/:id/transactions',   getCustomerTransactions);
+router.get('/:id/mails',          getCustomerMails);
+router.get('/:id/statement',      getCustomerStatement);
+router.post('/:id/comments',      addComment);
 router.delete('/:id/comments/:commentId', deleteComment);
+
+// Unused credits
+router.get('/:id/unused-credits', async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+      ...req.orgFilter,
+    }).select('unusedCredits customerDisplayName').lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    res.json({ success: true, data: { unusedCredits: customer.unusedCredits || 0 } });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Advance register — all advance payments for a customer with utilization summary
+router.get('/:id/advance-register', async (req, res) => {
+  try {
+    const { getFinanceDb } = require('../config/database');
+    const { ObjectId } = require('mongodb');
+    const db = getFinanceDb();
+
+    const customer = await BillingCustomer.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+      ...req.orgFilter,
+    }).select('unusedCredits customerDisplayName primaryEmail').lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const custIdStr = customer._id.toString();
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+
+    // Fetch all advance payments for this customer
+    const advances = await db.collection('payments_received').find({
+      paymentType: 'advance',
+      $or: [{ customerId: custIdStr }, { customerId: customer._id }],
+      ...orgFilter,
+    }).sort({ createdAt: -1 }).toArray();
+
+    // For each advance, compute how much has been utilized
+    // Utilization = original netAmount - current contribution to unusedCredits
+    // We track this by looking at normal payments that had creditsApplied > 0
+    // and summing creditsApplied across all normal payments for this customer
+    const normalPayments = await db.collection('payments_received').find({
+      paymentType: { $ne: 'advance' },
+      creditsApplied: { $gt: 0 },
+      $or: [{ customerId: custIdStr }, { customerId: customer._id }],
+      ...orgFilter,
+    }).sort({ createdAt: 1 }).toArray();
+
+    // Build a simple utilization ledger: total credits consumed
+    const totalUtilized = normalPayments.reduce((s, p) => s + parseFloat(p.creditsApplied || 0), 0);
+    const totalAdvanced = advances.reduce((s, a) => s + parseFloat(a.netAmount || a.amountReceived || 0), 0);
+
+    const advanceList = advances.map(a => ({
+      id:             a._id,
+      paymentNumber:  a.paymentNumber,
+      date:           a.paymentDate,
+      amount:         parseFloat(a.amountReceived || 0),
+      bankCharges:    parseFloat(a.bankCharges || 0),
+      netAmount:      parseFloat(a.netAmount || a.amountReceived || 0),
+      paymentMode:    a.paymentMode,
+      reference:      a.reference || '',
+      notes:          a.notes || '',
+      status:         a.status || 'paid',
+      createdAt:      a.createdAt,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        customer: {
+          id:           customer._id,
+          name:         customer.customerDisplayName,
+          email:        customer.primaryEmail,
+          unusedCredits: customer.unusedCredits || 0,
+        },
+        summary: {
+          totalAdvanced,
+          totalUtilized,
+          availableBalance: customer.unusedCredits || 0,
+        },
+        advances: advanceList,
+        utilizationHistory: normalPayments.map(p => ({
+          id:            p._id,
+          paymentNumber: p.paymentNumber,
+          date:          p.paymentDate,
+          creditsApplied: parseFloat(p.creditsApplied || 0),
+          invoicePayments: p.invoicePayments || {},
+        })),
+      },
+    });
+  } catch (e) {
+    console.error('❌ advance-register error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 // Document upload
 router.post('/:id/upload-documents', upload.array('documents', 10), uploadDocuments);
@@ -955,4 +1118,4 @@ module.exports = router;
 module.exports.BillingCustomer = BillingCustomer;
 module.exports.INDIAN_STATES   = INDIAN_STATES;
 
-console.log('✅ Billing Customers module loaded (Zoho Books style)');      
+console.log('? Billing Customers module loaded (Zoho Books style)');      

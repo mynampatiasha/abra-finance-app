@@ -41,6 +41,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
   final ScrollController _vScroll  = ScrollController();
   final ScrollController _hScroll2 = ScrollController();
   final ScrollController _vScroll2 = ScrollController();
+  bool _isTableView = true;
 
   // ── Design tokens ──────────────────────────────────────────────────────────
   static const Color navyDark   = Color(0xFF0D1B3E);
@@ -776,18 +777,6 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.arrow_back_ios_new,
-                  color: Colors.white, size: 16),
-            ),
-          ),
-          const SizedBox(width: 14),
           const Icon(Icons.confirmation_number_outlined,
               color: Colors.white70, size: 20),
           const SizedBox(width: 8),
@@ -947,6 +936,8 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
           'Refresh', const Color(0xFF0EA5E9),
           _isLoading ? null : _fetchTickets,
         ),
+        const SizedBox(width: 8),
+        _buildViewToggle(),
       ]),
     ),
   );
@@ -1063,11 +1054,135 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
       const Center(child: CircularProgressIndicator(color: navyDark));
 
   Widget _buildBody() {
-    if (_filtered.isEmpty) return _emptyState();
     return Column(children: [
-      Expanded(child: _buildTable()),
-      _buildPagination(),
+      Expanded(child: _isTableView ? (_filtered.isEmpty ? _emptyState() : _buildTable()) : _buildTicketListView()),
+      if (!_isTableView || _filtered.isNotEmpty) _buildPagination(),
     ]);
+  }
+
+  // ── View Toggle ────────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.white.withOpacity(0.4)), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.white.withOpacity(0.3)),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? Colors.white.withOpacity(0.2) : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 15, color: Colors.white),
+            const SizedBox(width: 5),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal, color: Colors.white)),
+          ]),
+        ),
+      );
+
+  // ── List View ──────────────────────────────────────────────────────────────
+
+  Widget _buildTicketListView() {
+    final tickets = _paged;
+    final isRaised = _activeTab == 1;
+    
+    if (tickets.isEmpty) {
+      return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.inbox_outlined, size: 64, color: navyDark.withOpacity(0.18)),
+          const SizedBox(height: 12),
+          const Text('No tickets found', style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w600, color: Color(0xFF64748B))),
+          const SizedBox(height: 6),
+          const Text('Try adjusting your filters',
+              style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+        ]),
+      );
+    }
+    
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      itemCount: tickets.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) => _buildTicketListCard(tickets[i], isRaised),
+    );
+  }
+
+  Widget _buildTicketListCard(Map<String, dynamic> ticket, bool isRaised) {
+    final ticketNum = ticket['ticket_number'] ?? 'N/A';
+    final subject   = ticket['subject'] ?? 'No Subject';
+    final priority  = ticket['priority'] ?? 'medium';
+    final status    = ticket['status'] ?? 'Open';
+    final person    = isRaised
+        ? (ticket['assigned_to_name'] ?? 'Not Assigned')
+        : (ticket['name'] ?? ticket['created_by_name'] ?? 'System');
+    final personLabel = isRaised ? 'Assigned' : 'Raised by';
+
+    return GestureDetector(
+      onTap: () => _showDetailOverlay(ticket, isRaised),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(gradient: const LinearGradient(colors: [navyDark, navyMid]), borderRadius: BorderRadius.circular(20)),
+                child: Text(ticketNum, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
+              const SizedBox(width: 8),
+              _priorityBadge(priority),
+              const Spacer(),
+              _statusBadgeOnly(status),
+            ]),
+            const SizedBox(height: 10),
+            Text(subject, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: navyDark), maxLines: 2, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.person_outline, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Expanded(child: Text('$personLabel: $person', style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+              Icon(Icons.access_time, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(_fmtDate(ticket['created_at']), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              GestureDetector(
+                onTap: () => _share(ticket),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(color: accentBlue.withOpacity(0.10), borderRadius: BorderRadius.circular(8), border: Border.all(color: accentBlue.withOpacity(0.30))),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.share, size: 14, color: accentBlue),
+                    const SizedBox(width: 4),
+                    Text('Share', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: accentBlue)),
+                  ]),
+                ),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBadgeOnly(String status) {
+    final c = _sc(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: c.withOpacity(0.10), borderRadius: BorderRadius.circular(8), border: Border.all(color: c.withOpacity(0.35))),
+      child: Text(_sl(status), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c)),
+    );
   }
 
   // ==========================================================================

@@ -31,6 +31,7 @@ import '../app_top_bar.dart';
 import 'new_invoice.dart';
 import 'invoice_detail_page.dart';
 import 'new_recurring_invoice.dart';
+import 'reminder_settings_page.dart';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
 const Color _navy   = Color(0xFF1e3a8a);
@@ -93,6 +94,9 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ── Search ─────────────────────────────────────────────────────────────────
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+
+  // ── View mode ──────────────────────────────────────────────────────────────
+  bool _isTableView = true;
 
   // ── Scroll ─────────────────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
@@ -382,6 +386,86 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     );
   }
 
+  // ── Reminder pause/resume ─────────────────────────────────────────────────
+
+  Future<void> _pauseReminder(Invoice invoice) async {
+    try {
+      await InvoiceService.pauseReminder(invoice.id);
+      _snackSuccess('Reminders paused for ${invoice.invoiceNumber}');
+      _refreshData();
+    } catch (e) {
+      _snackError('Failed to pause reminders: $e');
+    }
+  }
+
+  Future<void> _resumeReminder(Invoice invoice) async {
+    try {
+      await InvoiceService.resumeReminder(invoice.id);
+      _snackSuccess('Reminders resumed for ${invoice.invoiceNumber}');
+      _refreshData();
+    } catch (e) {
+      _snackError('Failed to resume reminders: $e');
+    }
+  }
+
+  void _openReminderSettings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ReminderSettingsPage()),
+    );
+  }
+
+  // ── Manual Reminder ───────────────────────────────────────────────────────
+
+  Future<void> _sendManualReminder(Invoice invoice, String channel) async {
+    // Determine reminder type based on due date
+    final now = DateTime.now();
+    final dueDate = invoice.dueDate;
+    final isOverdue = dueDate.isBefore(now);
+    final reminderType = isOverdue ? 'overdue' : 'predue';
+
+    // Validate contact info
+    if (channel == 'email' && (invoice.customerEmail == null || invoice.customerEmail!.isEmpty)) {
+      _snackError('Customer email not available for this invoice');
+      return;
+    }
+    if (channel == 'whatsapp' && (invoice.customerPhone == null || invoice.customerPhone!.isEmpty)) {
+      _snackError('Customer phone not available for this invoice');
+      return;
+    }
+
+    try {
+      // Fetch preview
+      _snackSuccess('Loading reminder preview...');
+      final preview = await InvoiceService.previewManualReminder(
+        invoice.id, channel, reminderType,
+      );
+
+      if (!mounted) return;
+
+      // Show confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => _ManualReminderConfirmDialog(
+          invoice: invoice,
+          channel: channel,
+          reminderType: reminderType,
+          preview: preview,
+        ),
+      );
+
+      if (confirmed == true) {
+        // Send reminder
+        _snackSuccess('Sending ${channel == 'email' ? 'email' : 'WhatsApp'} reminder...');
+        await InvoiceService.sendManualReminder(invoice.id, channel, reminderType);
+        _snackSuccess('✅ ${channel == 'email' ? 'Email' : 'WhatsApp'} reminder sent successfully!');
+        _refreshData();
+      }
+    } catch (e) {
+      _snackError('Failed to send reminder: $e');
+    }
+  }
+
   // ── Export ─────────────────────────────────────────────────────────────────
 
   Future<void> _exportToExcel() async {
@@ -578,7 +662,9 @@ void _showImportDialog() {
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _invoices.isEmpty
                         ? SizedBox(height: 400, child: _buildEmptyState())
-                        : _buildInvoiceTable(),
+                        : _isTableView
+                            ? _buildInvoiceTable()
+                            : _buildInvoiceListView(),
             if (!_isLoading && _invoices.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -625,11 +711,15 @@ void _showImportDialog() {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog, tooltip: 'View Invoice Process', color: _blue, bg: _blue.withOpacity(0.10)),
     const Spacer(),
+    _buildViewToggle(),
+    const SizedBox(width: 12),
     _newInvoiceButton(),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
     const SizedBox(width: 8),
     _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
+    const SizedBox(width: 8),
+    _actionBtn('Reminders', Icons.notifications_active_outlined, _orange, _openReminderSettings),
   ]);
 
   Widget _topBarTablet() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -652,11 +742,15 @@ void _showImportDialog() {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(),
+      const SizedBox(width: 10),
       _newInvoiceButton(),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
       const SizedBox(width: 8),
       _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
+      const SizedBox(width: 8),
+      _actionBtn('Reminders', Icons.notifications_active_outlined, _orange, _openReminderSettings),
     ]),
   ]);
 
@@ -672,6 +766,8 @@ void _showImportDialog() {
     SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
+        _buildViewToggle(),
+        const SizedBox(width: 8),
         _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _selectFromDate),
         const SizedBox(width: 6),
         _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _selectToDate),
@@ -687,33 +783,16 @@ void _showImportDialog() {
         _compactBtn('Import', _purple, _showImportDialog),
         const SizedBox(width: 6),
         _compactBtn('Export', _green, _isLoading ? null : _exportToExcel),
+        const SizedBox(width: 6),
+        _compactBtn('Reminders', _orange, _openReminderSettings),
       ]),
     ),
   ]);
 
-  // ── New Invoice popup button ───────────────────────────────────────────────
+  // ── New Invoice button ────────────────────────────────────────────────────
   Widget _newInvoiceButton({bool compact = false}) {
-    return PopupMenuButton<String>(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      onSelected: (value) {
-        if (value == 'invoice') {
-          _openNewInvoice();
-        } else if (value == 'recurring') {
-          Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const NewRecurringInvoiceScreen()))
-              .then((result) { if (result == true) _refreshData(); });
-        }
-      },
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          value: 'invoice',
-          child: ListTile(leading: Icon(Icons.description, size: 20), title: Text('New Invoice'), contentPadding: EdgeInsets.zero),
-        ),
-        const PopupMenuItem(
-          value: 'recurring',
-          child: ListTile(leading: Icon(Icons.repeat, size: 20), title: Text('New Recurring Invoice'), contentPadding: EdgeInsets.zero),
-        ),
-      ],
+    return GestureDetector(
+      onTap: _openNewInvoice,
       child: Container(
         height: 42,
         padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: 11),
@@ -723,8 +802,6 @@ void _showImportDialog() {
           const SizedBox(width: 6),
           Text(compact ? 'New' : 'New Invoice',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-          const SizedBox(width: 4),
-          const Icon(Icons.arrow_drop_down, color: Colors.white, size: 16),
         ]),
       ),
     );
@@ -1127,8 +1204,12 @@ void _showImportDialog() {
                 case 'edit':         _openEditInvoice(invoice.id); break;
                 case 'mark_as_sent': await _markInvoiceAsSent(invoice); break;
                 case 'send':         await _sendInvoice(invoice); break;
+                case 'send_email_reminder':    await _sendManualReminder(invoice, 'email'); break;
+                case 'send_whatsapp_reminder': await _sendManualReminder(invoice, 'whatsapp'); break;
                 case 'download':     await _downloadInvoicePDF(invoice); break;
                 case 'ticket':       _raiseTicket(invoice); break;
+                case 'pause_reminder':  await _pauseReminder(invoice);  break;
+                case 'resume_reminder': await _resumeReminder(invoice); break;
                 case 'delete':       await _deleteInvoice(invoice); break;
               }
             },
@@ -1141,16 +1222,484 @@ void _showImportDialog() {
                 child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'send',
                 child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(value: 'send_email_reminder',
+                child: ListTile(leading: Icon(Icons.email_outlined, size: 17, color: _blue), title: Text('Send Email Reminder'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(value: 'send_whatsapp_reminder',
+                child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('Send WhatsApp Reminder'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'download',
                 child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'ticket',
                 child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(value: 'pause_reminder',
+                child: ListTile(leading: Icon(Icons.pause_circle_outline, size: 17, color: Color(0xFFE67E22)), title: Text('Pause Reminders'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(value: 'resume_reminder',
+                child: ListTile(leading: Icon(Icons.play_circle_outline, size: 17, color: Color(0xFF27AE60)), title: Text('Resume Reminders'), contentPadding: EdgeInsets.zero)),
               const PopupMenuItem(value: 'delete',
                 child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
             ],
           ),
         ]))),
       ],
+    );
+  }
+
+  // ── View toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(
+          icon: Icons.view_list_rounded,
+          label: 'List',
+          isSelected: !_isTableView,
+          onTap: () => setState(() => _isTableView = false),
+        ),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(
+          icon: Icons.table_chart_rounded,
+          label: 'Table',
+          isSelected: _isTableView,
+          onTap: () => setState(() => _isTableView = true),
+        ),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected ? Colors.white : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  // ── List View ─────────────────────────────────────────────────────────────
+
+  Widget _buildInvoiceListView() {
+    final filtered = _searchQuery.isEmpty
+        ? _invoices
+        : _invoices.where((inv) {
+            return inv.invoiceNumber.toLowerCase().contains(_searchQuery) ||
+                inv.customerName.toLowerCase().contains(_searchQuery) ||
+                (inv.orderNumber?.toLowerCase().contains(_searchQuery) ?? false);
+          }).toList();
+
+    if (filtered.isEmpty) {
+      return SizedBox(height: 400, child: _buildEmptyState());
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildInvoiceListCard(filtered[i]),
+      ),
+    );
+  }
+
+  Widget _buildInvoiceListCard(Invoice invoice) {
+    final isSelected = _selectedInvoices.contains(invoice.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200,
+          width: isSelected ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () => _viewInvoiceDetails(invoice),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Row 1: Checkbox + Invoice # + Status badge ──────────────
+              Row(
+                children: [
+                  Checkbox(
+                    value: isSelected,
+                    onChanged: (_) => _toggleSelection(invoice.id),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _openEditInvoice(invoice.id),
+                      child: Text(
+                        invoice.invoiceNumber,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: _navy,
+                          decoration: TextDecoration.underline,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildStatusBadge(invoice.status),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // ── Row 2: Customer avatar + name ───────────────────────────
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: _navy.withOpacity(0.10),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        invoice.customerName.isNotEmpty
+                            ? invoice.customerName[0].toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          color: _navy,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      invoice.customerName,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (invoice.orderNumber != null && invoice.orderNumber!.isNotEmpty)
+                    Text(
+                      'Order: ${invoice.orderNumber}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              const SizedBox(height: 10),
+              // ── Row 3: Dates ────────────────────────────────────────────
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Invoice Date',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                            const SizedBox(width: 4),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(invoice.invoiceDate),
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Due Date',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.event_outlined,
+                              size: 12,
+                              color: invoice.amountDue > 0 &&
+                                      invoice.dueDate.isBefore(DateTime.now())
+                                  ? _red
+                                  : Colors.grey[500],
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(invoice.dueDate),
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: invoice.amountDue > 0 &&
+                                        invoice.dueDate.isBefore(DateTime.now())
+                                    ? _red
+                                    : const Color(0xFF374151),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // ── Row 4: Amounts ──────────────────────────────────────────
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Total Amount',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '₹${invoice.totalAmount.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Balance Due',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '₹${invoice.amountDue.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: invoice.amountDue > 0 ? _red : _green,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── Action buttons ────────────────────────────────────
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Share
+                      Tooltip(
+                        message: 'Share',
+                        child: InkWell(
+                          onTap: () => _shareInvoice(invoice),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: _blue.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.share, size: 16, color: _blue),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // More actions
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        onSelected: (value) async {
+                          switch (value) {
+                            case 'view':
+                              _viewInvoiceDetails(invoice);
+                              break;
+                            case 'edit':
+                              _openEditInvoice(invoice.id);
+                              break;
+                            case 'mark_as_sent':
+                              await _markInvoiceAsSent(invoice);
+                              break;
+                            case 'send':
+                              await _sendInvoice(invoice);
+                              break;
+                            case 'send_email_reminder':
+                              await _sendManualReminder(invoice, 'email');
+                              break;
+                            case 'send_whatsapp_reminder':
+                              await _sendManualReminder(invoice, 'whatsapp');
+                              break;
+                            case 'download':
+                              await _downloadInvoicePDF(invoice);
+                              break;
+                            case 'ticket':
+                              _raiseTicket(invoice);
+                              break;
+                            case 'pause_reminder':
+                              await _pauseReminder(invoice);
+                              break;
+                            case 'resume_reminder':
+                              await _resumeReminder(invoice);
+                              break;
+                            case 'delete':
+                              await _deleteInvoice(invoice);
+                              break;
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'view',
+                            child: ListTile(
+                              leading: Icon(Icons.visibility_outlined, size: 17, color: _blue),
+                              title: Text('View Details'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: ListTile(
+                              leading: Icon(Icons.edit_outlined, size: 17, color: _navy),
+                              title: Text('Edit'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'mark_as_sent',
+                            child: ListTile(
+                              leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange),
+                              title: Text('Mark as Sent'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'send',
+                            child: ListTile(
+                              leading: Icon(Icons.send_outlined, size: 17, color: _green),
+                              title: Text('Send Email'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'send_email_reminder',
+                            child: ListTile(
+                              leading: Icon(Icons.email_outlined, size: 17, color: _blue),
+                              title: Text('Send Email Reminder'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'send_whatsapp_reminder',
+                            child: ListTile(
+                              leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)),
+                              title: Text('Send WhatsApp Reminder'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'download',
+                            child: ListTile(
+                              leading: Icon(Icons.download_outlined, size: 17, color: _purple),
+                              title: Text('Download PDF'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'ticket',
+                            child: ListTile(
+                              leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange),
+                              title: Text('Raise Ticket'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'pause_reminder',
+                            child: ListTile(
+                              leading: Icon(Icons.pause_circle_outline, size: 17, color: Color(0xFFE67E22)),
+                              title: Text('Pause Reminders'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'resume_reminder',
+                            child: ListTile(
+                              leading: Icon(Icons.play_circle_outline, size: 17, color: Color(0xFF27AE60)),
+                              title: Text('Resume Reminders'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: ListTile(
+                              leading: Icon(Icons.delete_outline, size: 17, color: Colors.red),
+                              title: Text('Delete', style: TextStyle(color: Colors.red)),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1597,6 +2146,529 @@ class InvoiceDetailsDialog extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Icon(Icons.description, color: Color(0xFF3498DB), size: 28),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(invoiceData['invoiceNumber'] ?? 'Unknown',
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
+              Text('Invoice Details', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+            ])),
+            _statusBadge(invoiceData['status'] ?? 'DRAFT'),
+            const SizedBox(width: 12),
+            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+          ]),
+          const SizedBox(height: 24),
+          Expanded(child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _detailRow('Customer', invoiceData['customerName'] ?? 'N/A'),
+              _detailRow('Email', invoiceData['customerEmail'] ?? 'N/A'),
+              _detailRow('Invoice Date', invoiceData['invoiceDate'] ?? 'N/A'),
+              _detailRow('Due Date', invoiceData['dueDate'] ?? 'N/A'),
+              _detailRow('Terms', invoiceData['terms'] ?? 'N/A'),
+              const SizedBox(height: 20),
+              const Text('Line Items', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              ...lineItems.map((item) => _lineItemCard(item)),
+              const SizedBox(height: 20),
+              _detailRow('Sub Total', '₹${invoiceData['subTotal']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('CGST', '₹${invoiceData['cgst']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('SGST', '₹${invoiceData['sgst']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('IGST', '₹${invoiceData['igst']?.toStringAsFixed(2) ?? '0.00'}'),
+              const Divider(),
+              _detailRow('Total Amount', '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}', isBold: true),
+              _detailRow('Amount Paid', '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('Balance Due', '₹${invoiceData['amountDue']?.toStringAsFixed(2) ?? '0.00'}', isBold: true),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  static Widget _detailRow(String label, String value, {bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14))),
+        Expanded(flex: 3, child: Text(value, style: TextStyle(fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
+      ]),
+    );
+  }
+
+  static Widget _lineItemCard(Map<String, dynamic> item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(item['itemDetails'] ?? 'Item', style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('Qty: ${item['quantity']} × ₹${item['rate']?.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          Text('₹${item['amount']?.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+        ]),
+      ]),
+    );
+  }
+
+  static Widget _statusBadge(String status) {
+    final Map<String, List<Color>> statusColors = {
+      'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+      'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+      'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+      'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+      'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
+      'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+      'CANCELLED':      [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+    };
+    final c = statusColors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
+      child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
+    );
+  }
+}
+
+// =============================================================================
+//  MANUAL REMINDER CONFIRMATION DIALOG
+// =============================================================================
+
+class _ManualReminderConfirmDialog extends StatelessWidget {
+  final Invoice invoice;
+  final String channel;
+  final String reminderType;
+  final Map<String, dynamic> preview;
+
+  const _ManualReminderConfirmDialog({
+    required this.invoice,
+    required this.channel,
+    required this.reminderType,
+    required this.preview,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmail = channel == 'email';
+    final isOverdue = reminderType == 'overdue';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 600,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isEmail
+                      ? [const Color(0xFF2980B9), const Color(0xFF3498DB)]
+                      : [const Color(0xFF1EAE5F), const Color(0xFF25D366)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isEmail ? Icons.email_outlined : Icons.chat,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Send ${isEmail ? 'Email' : 'WhatsApp'} Reminder',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Confirm before sending',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Invoice details
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0F4F8),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFDDE3EE)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.description_outlined, size: 18, color: _navy),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Invoice Details',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: _navy,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          _infoRow('Invoice #', invoice.invoiceNumber),
+                          _infoRow('Customer', invoice.customerName),
+                          _infoRow('Amount Due', '₹${invoice.amountDue.toStringAsFixed(2)}'),
+                          _infoRow('Due Date', DateFormat('dd MMM yyyy').format(invoice.dueDate)),
+                          _infoRow(
+                            'Reminder Type',
+                            isOverdue ? 'Overdue Reminder' : 'Pre-Due Reminder',
+                          ),
+                          if (isEmail)
+                            _infoRow('Send To', invoice.customerEmail ?? 'N/A')
+                          else
+                            _infoRow('Send To', invoice.customerPhone ?? 'N/A'),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Message preview
+                    Row(
+                      children: [
+                        Icon(
+                          isEmail ? Icons.preview_outlined : Icons.message_outlined,
+                          size: 18,
+                          color: _navy,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Message Preview',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: _navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    if (isEmail) ...[
+                      // Email subject
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDDE3EE)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Subject:',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              preview['subject'] ?? '',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Email body preview (truncated)
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDDE3EE)),
+                        ),
+                        child: SingleChildScrollView(
+                          child: Text(
+                            _stripHtml(preview['html'] ?? ''),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      // WhatsApp message
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDCF8C6),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            topRight: Radius.circular(12),
+                            bottomLeft: Radius.circular(2),
+                            bottomRight: Radius.circular(12),
+                          ),
+                          border: Border.all(color: const Color(0xFF25D366).withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _renderWhatsAppText(preview['message'] ?? ''),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF1F2937),
+                                height: 1.5,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                const Icon(Icons.attach_file, size: 14, color: Color(0xFF25D366)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Invoice PDF will be attached',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+
+                    // Warning note
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF4E6),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFFB84D).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, size: 18, color: Color(0xFFE67E22)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'This reminder will be sent immediately and logged in the invoice history.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Footer
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF7F9FC),
+                border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.grey[700],
+                        side: BorderSide(color: Colors.grey[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => Navigator.pop(context, true),
+                      icon: Icon(isEmail ? Icons.send : Icons.chat, size: 18),
+                      label: Text(
+                        'Send ${isEmail ? 'Email' : 'WhatsApp'}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isEmail ? const Color(0xFF2980B9) : const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _stripHtml(String html) {
+    return html
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .trim();
+  }
+
+  String _renderWhatsAppText(String text) {
+    // Simple rendering - just return the text as-is
+    // Bold markers (*text*) will be visible but that's intentional for preview
+    return text;
+  }
+}
+
+// Helper function for status badge (used by InvoiceDetailsDialog)
+Widget _statusBadge(String status) {
+  final Map<String, List<Color>> statusColors = {
+    'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+    'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+    'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+    'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+    'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
+    'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+    'CANCELLED':      [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+  };
+  final c = statusColors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
+    child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
+  );
+}
+
+// =============================================================================
+//  ENHANCED INVOICE DETAILS DIALOG (v2)
+// =============================================================================
+
+class InvoiceDetailsDialogV2 extends StatelessWidget {
+  final Map<String, dynamic> invoiceData;
+  const InvoiceDetailsDialogV2({Key? key, required this.invoiceData}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final lineItems = (invoiceData['lineItems'] as List?) ?? [];
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.9,
+        height: MediaQuery.of(context).size.height * 0.9,
+        padding: const EdgeInsets.all(24),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.receipt_long, color: Color(0xFF3498DB), size: 32),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(invoiceData['invoiceNumber'] ?? 'Unknown',

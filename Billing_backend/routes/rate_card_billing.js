@@ -396,7 +396,7 @@ async function generateBillingInvoicePDF(invoice) {
       let logoLoaded = false;
       for (const lp of logoCandidates) {
         if (fs.existsSync(lp)) {
-          try { doc.image(lp, 40, 35, { width: 120, fit: [120, 60] }); logoLoaded = true; break; }
+          try { doc.image(lp, 40, 35, { width: 72, height: 55, fit: [72, 55] }); logoLoaded = true; break; }
           catch (_) {}
         }
       }

@@ -2,8 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
-
-class VendorService {
+import '../finance_secure_storage.dart';
   static String get baseUrl => '${ApiConfig.baseUrl}/api/admin';
   
   // Get authentication token
@@ -20,9 +19,11 @@ class VendorService {
   // Get headers with authentication
   Future<Map<String, String>> _getHeaders() async {
     final token = await _getAuthToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'x-branch-ids': branchHdr,
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }

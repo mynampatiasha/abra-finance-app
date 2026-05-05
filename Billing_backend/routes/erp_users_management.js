@@ -52,7 +52,7 @@ router.post('/', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
     const db          = req.db;
     const orgId       = req.user.orgId;
     const orgName     = req.user.orgName;
-    const { name, email, phone, password, role = 'staff' } = req.body;
+    const { name, email, phone, password, role = 'staff', allowedBranches } = req.body;
 
     if (!name || !email || !phone || !password) {
       return res.status(400).json({ success: false, message: 'name, email, phone, password required' });
@@ -63,6 +63,11 @@ router.post('/', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: `role must be one of: ${allowedRoles.join(', ')}` });
     }
 
+    // allowedBranches: array of branchIds this user can access.
+    // Empty array or omitted = access to ALL branches (backward-compatible).
+    // Admins always get full access regardless of this field.
+    const branchAccess = Array.isArray(allowedBranches) ? allowedBranches : [];
+
     const existing = await db.collection('billing_users').findOne({ email: email.toLowerCase() });
 
     if (existing) {
@@ -71,10 +76,10 @@ router.post('/', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
       if (alreadyInOrg) {
         return res.status(409).json({ success: false, message: 'User already in this organization' });
       }
-      // Add them to this org
+      // Add them to this org with branch access
       await db.collection('billing_users').updateOne(
         { _id: existing._id },
-        { $push: { organizations: { orgId, orgName, role } } }
+        { $push: { organizations: { orgId, orgName, role, allowedBranches: branchAccess } } }
       );
       return res.json({ success: true, message: 'Existing user added to your organization' });
     }
@@ -89,7 +94,7 @@ router.post('/', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
       phone:         phone.trim(),
       status:        'active',
       permissions:   {},
-      organizations: [{ orgId, orgName, role }],
+      organizations: [{ orgId, orgName, role, allowedBranches: branchAccess }],
       createdAt:     now,
       updatedAt:     now,
       createdBy:     req.user.email,
@@ -119,7 +124,7 @@ router.put('/:id', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
     });
     if (!user) return res.status(404).json({ success: false, message: 'User not found in your org' });
 
-    const { name, phone, role, status, password } = req.body;
+    const { name, phone, role, status, password, allowedBranches } = req.body;
     const $set = { updatedAt: new Date() };
 
     if (name)   $set.name  = name.trim();
@@ -127,13 +132,17 @@ router.put('/:id', verifyFinanceJWT, requireOwnerOrAdmin, async (req, res) => {
     if (status) $set.status = status;
     if (password) $set.passwordHash = await hash(password);
 
-    // Update role inside this org only
+    // Update role and/or allowedBranches inside this org only
     const update = { $set };
     if (role) {
       update.$set['organizations.$[elem].role'] = role;
     }
+    if (allowedBranches !== undefined) {
+      // Pass empty array to remove branch restriction (grant all-branch access)
+      update.$set['organizations.$[elem].allowedBranches'] = Array.isArray(allowedBranches) ? allowedBranches : [];
+    }
 
-    const options = role
+    const options = (role || allowedBranches !== undefined)
       ? { arrayFilters: [{ 'elem.orgId': orgId }] }
       : {};
 

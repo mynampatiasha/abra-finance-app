@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 class ProjectService {
   static const String _base = '/api/finance/projects';
@@ -17,9 +18,11 @@ class ProjectService {
     final token = prefs.getString('finance_jwt_token') ??
         prefs.getString('jwt_token') ??
         prefs.getString('token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 

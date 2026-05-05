@@ -159,6 +159,9 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
         _selectedCustomerName = salesOrder.customerName;
         _selectedCustomerEmail = salesOrder.customerEmail;
         _selectedCustomerPhone = salesOrder.customerPhone;
+        _customerGSTIN         = salesOrder.customerGSTIN;
+        _customerPAN           = salesOrder.customerPAN;
+        _gstRegistrationType   = salesOrder.gstRegistrationType;
         _referenceNumberController.text = salesOrder.referenceNumber ?? '';
         _salesOrderDate = salesOrder.salesOrderDate;
         _expectedShipmentDate = salesOrder.expectedShipmentDate;

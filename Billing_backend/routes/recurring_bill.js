@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // RECURRING BILL - COMPLETE BACKEND
 // ============================================================================
 // File: routes/recurring_bill.js
@@ -128,7 +128,7 @@ let Bill;
 try {
   Bill = mongoose.model('Bill');
 } catch (error) {
-  console.error('⚠️ Bill model not found. Make sure bill.js is loaded before recurring_bill.js');
+  console.error('?? Bill model not found. Make sure bill.js is loaded before recurring_bill.js');
   throw new Error('Bill model must be loaded first');
 }
 
@@ -199,13 +199,15 @@ async function generateBillFromProfile(profile, userId = 'SYSTEM') {
       ? (typeof profile.vendorId === 'string' ? new mongoose.Types.ObjectId(profile.vendorId) : profile.vendorId)
       : null;
   } catch (err) {
-    console.error('⚠️ Invalid vendorId, setting to null:', profile.vendorId);
+    console.error('?? Invalid vendorId, setting to null:', profile.vendorId);
     vendorObjectId = null;
   }
 
   const bill = new Bill({
     billNumber,
     recurringProfileId: profile._id,
+    orgId,
+    branchId: profile.branchId || null,
     vendorId: vendorObjectId,
     vendorName: profile.vendorName,
     vendorEmail: profile.vendorEmail || '',
@@ -233,7 +235,7 @@ async function generateBillFromProfile(profile, userId = 'SYSTEM') {
 
  await bill.save();
 
-// ✅ COA Posting — same as bill.js POST route
+// ? COA Posting � same as bill.js POST route
 try {
   const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
@@ -254,7 +256,7 @@ try {
   const txnDate = new Date(bill.billDate);
 
   if (expenseId) await postTransactionToCOA({
-    accountId: expenseId, orgId: orgId, date: txnDate,
+    accountId: expenseId, orgId: orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Recurring Bill ${bill.billNumber} - ${profile.vendorName}`,
     referenceType: 'Bill', referenceId: bill._id,
     referenceNumber: bill.billNumber,
@@ -262,16 +264,16 @@ try {
   });
 
   if (apId) await postTransactionToCOA({
-    accountId: apId, orgId: orgId, date: txnDate,
+    accountId: apId, orgId: orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Recurring Bill ${bill.billNumber} - ${profile.vendorName}`,
     referenceType: 'Bill', referenceId: bill._id,
     referenceNumber: bill.billNumber,
     debit: 0, credit: bill.totalAmount,
   });
 
-  console.log(`✅ COA posted for recurring bill: ${bill.billNumber}`);
+  console.log(`? COA posted for recurring bill: ${bill.billNumber}`);
 } catch (coaErr) {
-  console.error('⚠️ COA error (recurring bill):', coaErr.message);
+  console.error('?? COA error (recurring bill):', coaErr.message);
 }
 
 
@@ -297,7 +299,7 @@ try {
 // ============================================================================
 
 cron.schedule('0 8 * * *', async () => {
-  console.log('🔄 Running recurring bills scheduler...');
+  console.log('?? Running recurring bills scheduler...');
   try {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
@@ -312,7 +314,7 @@ cron.schedule('0 8 * * *', async () => {
       ],
     });
 
-    console.log(`📋 Found ${dueProfiles.length} profiles due for bill generation`);
+    console.log(`?? Found ${dueProfiles.length} profiles due for bill generation`);
 
     let generated = 0;
     let errors = 0;
@@ -321,10 +323,10 @@ cron.schedule('0 8 * * *', async () => {
       try {
         await generateBillFromProfile(profile);
         generated++;
-        console.log(`✅ Generated bill for profile: ${profile.profileName}`);
+        console.log(`? Generated bill for profile: ${profile.profileName}`);
       } catch (err) {
         errors++;
-        console.error(`❌ Failed to generate bill for ${profile.profileName}:`, err.message);
+        console.error(`? Failed to generate bill for ${profile.profileName}:`, err.message);
       }
     }
 
@@ -337,9 +339,9 @@ cron.schedule('0 8 * * *', async () => {
       { $set: { status: 'OVERDUE' } }
     );
 
-    console.log(`✅ Scheduler done. Generated: ${generated}, Errors: ${errors}`);
+    console.log(`? Scheduler done. Generated: ${generated}, Errors: ${errors}`);
   } catch (err) {
-    console.error('❌ Scheduler error:', err);
+    console.error('? Scheduler error:', err);
   }
 });
 
@@ -450,7 +452,7 @@ const getRecurringBillById = async (req, res) => {
   try {
     const bill = await RecurringBill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!bill) {
       return res.status(404).json({ success: false, message: 'Recurring bill profile not found' });
@@ -518,6 +520,7 @@ const createRecurringBill = async (req, res) => {
       notes: notes || '',
       organizationId: req.user?.organizationId || '',
       orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user?.id || '',
     });
 
@@ -568,7 +571,7 @@ const updateRecurringBill = async (req, res) => {
     const totalAmount = subTotal - tdsAmount + tcsAmount + gstAmount;
 
     const updated = await RecurringBill.findOneAndUpdate(
-      { _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) },
+      { _id: req.params.id, ...req.orgFilter },
       {
         profileName, vendorId, vendorName,
         vendorEmail: vendorEmail || '',
@@ -606,7 +609,7 @@ const deleteRecurringBill = async (req, res) => {
   try {
     const deleted = await RecurringBill.findOneAndDelete({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Recurring bill profile not found' });
@@ -622,7 +625,7 @@ const pauseRecurringBill = async (req, res) => {
   try {
     const bill = await RecurringBill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!bill) return res.status(404).json({ success: false, message: 'Profile not found' });
     if (bill.status !== 'ACTIVE') {
@@ -641,7 +644,7 @@ const resumeRecurringBill = async (req, res) => {
   try {
     const bill = await RecurringBill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!bill) return res.status(404).json({ success: false, message: 'Profile not found' });
     if (bill.status !== 'PAUSED') {
@@ -659,7 +662,7 @@ const resumeRecurringBill = async (req, res) => {
 const stopRecurringBill = async (req, res) => {
   try {
     const bill = await RecurringBill.findOneAndUpdate(
-      { _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) },
+      { _id: req.params.id, ...req.orgFilter },
       { status: 'STOPPED' },
       { new: true }
     );
@@ -675,7 +678,7 @@ const generateManualBill = async (req, res) => {
   try {
     const profile = await RecurringBill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!profile) return res.status(404).json({ success: false, message: 'Profile not found' });
     if (profile.status === 'STOPPED') {
@@ -692,7 +695,7 @@ const generateManualBill = async (req, res) => {
       message: `Bill ${bill.billNumber} generated successfully`,
     });
   } catch (err) {
-    console.error('❌ Generate bill error:', err);
+    console.error('? Generate bill error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -702,7 +705,7 @@ const getChildBills = async (req, res) => {
   try {
     const profile = await RecurringBill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!profile) return res.status(404).json({ success: false, message: 'Profile not found' });
 
@@ -767,8 +770,7 @@ const bulkImportRecurringBills = async (req, res) => {
           totalAmount,
           paymentTerms: b.paymentTerms || 'Net 30',
           notes: b.notes || '',
-          orgId: req.user?.orgId || null,
-        });
+          orgId: req.user?.orgId || null,         });
 
         await recurring.save();
         successCount++;

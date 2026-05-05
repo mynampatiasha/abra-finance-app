@@ -15,7 +15,7 @@ const path = require('path');
 
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
-// ── PDF generator defined later in file (see generateVendorCreditPDF below) ──
+// -- PDF generator defined later in file (see generateVendorCreditPDF below) --
 
 async function getSystemAccountId(name, orgId = null) {
   try {
@@ -27,6 +27,54 @@ async function getSystemAccountId(name, orgId = null) {
     return acc ? acc._id : null;
   } catch (e) {
     console.error(`COA lookup error for "${name}":`, e.message);
+    return null;
+  }
+}
+
+// Looks up (or auto-creates) an expense/COGS account by name for vendor credit line items
+async function getVCExpenseAccountId(accountName, orgId = null) {
+  try {
+    const EXPENSE_TYPES = ['Expense', 'Other Expense', 'Cost Of Goods Sold', 'Equity'];
+
+    // Step 1: exact match on an expense-type account
+    let acc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $in: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id').lean();
+    if (acc) return acc._id;
+
+    // Step 1b: account exists but wrong type — skip COA post safely
+    const wrongTypeAcc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $nin: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id accountType').lean();
+    if (wrongTypeAcc) {
+      console.warn(`⚠️ VC COA: account "${accountName}" is type "${wrongTypeAcc.accountType}" — not an expense account. Skipping.`);
+      return null;
+    }
+
+    // Step 2: not found — auto-create as Expense type
+    console.log(`📝 VC COA: account "${accountName}" not found — creating automatically as Expense type...`);
+    const newAcc = await ChartOfAccount.create({
+      accountName:     accountName,
+      accountCode:     `EXP-${Date.now().toString().slice(-6)}`,
+      accountType:     'Expense',
+      orgId:           orgId,
+      accountSubType:  'Operating Expense',
+      description:     `${accountName} expenses`,
+      isSystemAccount: false,
+      isActive:        true,
+      openingBalance:  0,
+      currentBalance:  0,
+      currency:        'INR',
+      transactions:    [],
+    });
+    console.log(`✅ VC COA: auto-created account "${accountName}" → ID: ${newAcc._id}`);
+    return newAcc._id;
+  } catch (e) {
+    console.error(`COA lookup/create error for vendor credit expense account "${accountName}":`, e.message);
     return null;
   }
 }
@@ -84,7 +132,8 @@ const CreditRefundSchema = new mongoose.Schema({
 
 const VendorCreditSchema = new mongoose.Schema({
   orgId:        { type: String, index: true, default: null },
-  creditNumber: { type: String, unique: true, sparse: true },
+  branchId:     { type: String, index: true, default: null },
+  creditNumber: { type: String, sparse: true },
   vendorId:     { type: String, required: true },
   vendorName:   { type: String, required: true },
   vendorEmail:  { type: String, default: '' },
@@ -142,7 +191,7 @@ VendorCreditSchema.pre('save', async function () {
   if (!this.creditNumber) {
     const { generateNumber } = require('../utils/numberGenerator');
     this.creditNumber = await generateNumber(
-      mongoose.model('VendorCredit'), 'creditNumber', 'VC', this.orgId || null
+      mongoose.model('VendorCredit'), 'creditNumber', 'VC', this.orgId || null, this.branchId || null
     );
   }
 
@@ -201,6 +250,10 @@ VendorCreditSchema.pre('save', async function () {
   ) / 100;
 });
 
+// Index must be defined BEFORE mongoose.model() to take effect
+// Scoped by orgId + branchId + creditNumber to match the number generator's scope
+VendorCreditSchema.index({ orgId: 1, branchId: 1, creditNumber: 1 }, { unique: true, sparse: true });
+
 const VendorCredit = mongoose.models.VendorCredit ||
   mongoose.model('VendorCredit', VendorCreditSchema);
 
@@ -217,7 +270,7 @@ function errorResponse(res, message = 'Error', statusCode = 500, error = null) {
   return res.status(statusCode).json({ success: false, message, error: error?.message });
 }
 
-// ── Helpers shared with PDF ───────────────────────────────────────────────────
+// -- Helpers shared with PDF ---------------------------------------------------
 
 function formatVCAddress(addr) {
   if (!addr) return '';
@@ -280,7 +333,10 @@ function buildVCTaxSummaryBySlabs(credit) {
 // GET /api/vendor-credits/stats
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const [totalCredits, statusBreakdown, amounts] = await Promise.all([
       VendorCredit.countDocuments(orgFilter),
       VendorCredit.aggregate([
@@ -332,6 +388,7 @@ router.get('/', async (req, res) => {
 
     const filter = {};
     if (req.user?.orgId) filter.orgId = req.user.orgId;
+    Object.assign(filter, req.branchFilter || {});
 
     if (status) filter.status = status;
     if (vendorId) filter.vendorId = vendorId;
@@ -380,7 +437,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/vendor-credits/bulk-import  ← before any /:id routes
+// POST /api/vendor-credits/bulk-import  ? before any /:id routes
 router.post('/bulk-import', async (req, res) => {
   try {
     const { credits } = req.body;
@@ -407,7 +464,7 @@ router.post('/bulk-import', async (req, res) => {
         if (!data.items || data.items.length === 0)
           throw new Error('At least one item required');
 
-        // ✅ Auto-generate vendorId if missing
+        // ? Auto-generate vendorId if missing
         if (!data.vendorId) {
           data.vendorId = `imported_${data.vendorName
             .toLowerCase().replace(/\s+/g, '_')}`;
@@ -421,9 +478,43 @@ router.post('/bulk-import', async (req, res) => {
           applications:  [],
           refunds:       [],
           orgId:         req.user?.orgId || null,
+          branchId:      req.branchIds?.length > 0 ? req.branchIds[0] : null,
         });
 
         await credit.save();
+
+        // ── COA posting: debit AP, credit each line item's expense account ──
+        try {
+          const currentOrgId = req.user?.orgId || null;
+          const [apId, taxId, tdsPayableId, tdsReceivableId] = await Promise.all([
+            getSystemAccountId('Accounts Payable',   currentOrgId),
+            getSystemAccountId('Tax Payable',        currentOrgId),
+            getSystemAccountId('TDS Payable',        currentOrgId),
+            getSystemAccountId('TDS Receivable',     currentOrgId),
+          ]);
+          const txnDate = new Date(credit.creditDate || new Date());
+          const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+          const desc    = `Vendor Credit ${credit.creditNumber} - ${credit.vendorName}`;
+          // Dr AP
+          if (apId) await postTransactionToCOA({ accountId: apId, orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'VendorCredit', referenceId: credit._id, referenceNumber: credit.creditNumber, debit: credit.totalAmount, credit: 0 });
+          // Cr each line item's expense account
+          for (const item of credit.items) {
+            const accountName = item.account || 'Cost of Goods Sold';
+            const itemAccId = await getVCExpenseAccountId(accountName, currentOrgId);
+            if (itemAccId) await postTransactionToCOA({ accountId: itemAccId, orgId: currentOrgId, branchId, date: txnDate, description: `${desc} - ${item.itemDetails}`, referenceType: 'VendorCredit', referenceId: credit._id, referenceNumber: credit.creditNumber, debit: 0, credit: item.amount });
+          }
+          // Cr Tax Payable for GST reversal
+          if (taxId && (credit.cgst + credit.sgst) > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST reversal - ${desc}`, referenceType: 'VendorCredit', referenceId: credit._id, referenceNumber: credit.creditNumber, debit: 0, credit: credit.cgst + credit.sgst });
+          // Dr TDS Payable reversal
+          if (tdsPayableId    && credit.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TDS reversal - ${desc}`, referenceType: 'VendorCredit', referenceId: credit._id, referenceNumber: credit.creditNumber, debit: credit.tdsAmount, credit: 0 });
+          // Cr TDS Receivable reversal
+          if (tdsReceivableId && credit.tcsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TCS reversal - ${desc}`, referenceType: 'VendorCredit', referenceId: credit._id, referenceNumber: credit.creditNumber, debit: 0, credit: credit.tcsAmount });
+          console.log(`   ✅ COA posted for imported vendor credit: ${credit.creditNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (vendor credit bulk import row ${i + 1}):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
+
         created.push(credit);
         successCount++;
       } catch (e) {
@@ -449,7 +540,8 @@ router.get('/:id', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     }).lean();
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
     return successResponse(res, credit);
@@ -475,34 +567,55 @@ router.post('/', async (req, res) => {
       if (!item.rate     || item.rate     <= 0) return errorResponse(res, 'Item rate must be > 0', 400);
     }
 
-    const credit = new VendorCredit({
-      ...body,
-      orgId: req.user?.orgId || null,
-      balanceAmount: body.totalAmount || 0,
-      appliedAmount: 0,
-      applications:  [],
-      refunds:       [],
-    });
+    // Retry up to 5 times on duplicate creditNumber (race condition guard)
+    let credit;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { generateNumber } = require('../utils/numberGenerator');
+      const creditNumber = await generateNumber(
+        VendorCredit, 'creditNumber', 'VC',
+        req.user?.orgId || null,
+        req.branchIds?.length > 0 ? req.branchIds[0] : null
+      );
+      try {
+        credit = new VendorCredit({
+          ...body,
+          creditNumber,
+          orgId:        req.user?.orgId || null,
+          branchId:     req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          balanceAmount: body.totalAmount || 0,
+          appliedAmount: 0,
+          applications:  [],
+          refunds:       [],
+        });
+        await credit.save();
+        break; // success
+      } catch (saveErr) {
+        if (saveErr.code === 11000 && attempt < 4) {
+          console.warn(`[VendorCredit] Duplicate creditNumber ${creditNumber}, retrying (attempt ${attempt + 1})...`);
+          continue;
+        }
+        throw saveErr;
+      }
+    }
 
-    await credit.save();
-
-    // ✅ COA: Debit AP + Credit COGS (reversal of bill)
-// ✅ COA: Full breakdown with GST + TDS + TCS
+    // ? COA: Debit AP + Credit COGS (reversal of bill)
+// ? COA: Full breakdown with GST + TDS + TCS
 try {
   const currentOrgId = req.user?.orgId || null;
-  const [apId, cogsId, taxId, tdsPayableId, tdsReceivableId] = await Promise.all([
+  const [apId, taxId, tdsPayableId, tdsReceivableId] = await Promise.all([
     getSystemAccountId('Accounts Payable', currentOrgId),
-    getSystemAccountId('Cost of Goods Sold', currentOrgId),
     getSystemAccountId('Tax Payable', currentOrgId),
     getSystemAccountId('TDS Payable', currentOrgId),
     getSystemAccountId('TDS Receivable', currentOrgId),
   ]);
   const txnDate = new Date(credit.creditDate);
+  const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
-  // Debit AP — reduces what we owe vendor
+  // Debit AP � reduces what we owe vendor
   if (apId) await postTransactionToCOA({
     accountId:       apId,
     orgId:           currentOrgId,
+    branchId,
     date:            txnDate,
     description:     `Vendor Credit ${credit.creditNumber} - ${credit.vendorName}`,
     referenceType:   'VendorCredit',
@@ -512,23 +625,31 @@ try {
     credit:          0,
   });
 
-  // Credit COGS — reversal of cost
-  if (cogsId) await postTransactionToCOA({
-    accountId:       cogsId,
-    orgId:           currentOrgId,
-    date:            txnDate,
-    description:     `Vendor Credit ${credit.creditNumber} - ${credit.vendorName}`,
-    referenceType:   'VendorCredit',
-    referenceId:     credit._id,
-    referenceNumber: credit.creditNumber,
-    debit:           0,
-    credit:          credit.subTotal || credit.totalAmount,
-  });
+  // Credit each line item's expense account (reversal of original bill debit)
+  for (const item of credit.items) {
+    const accountName = item.account || 'Cost of Goods Sold';
+    const itemAccId = await getVCExpenseAccountId(accountName, currentOrgId);
+    if (itemAccId) {
+      await postTransactionToCOA({
+        accountId:       itemAccId,
+        orgId:           currentOrgId,
+        branchId,
+        date:            txnDate,
+        description:     `Vendor Credit ${credit.creditNumber} - ${credit.vendorName} - ${item.itemDetails}`,
+        referenceType:   'VendorCredit',
+        referenceId:     credit._id,
+        referenceNumber: credit.creditNumber,
+        debit:           0,
+        credit:          item.amount,
+      });
+    }
+  }
 
   // Credit Tax Payable for GST reversal
   if (taxId && (credit.cgst + credit.sgst) > 0) await postTransactionToCOA({
     accountId:       taxId,
     orgId:           currentOrgId,
+    branchId,
     date:            txnDate,
     description:     `GST reversal - Vendor Credit ${credit.creditNumber}`,
     referenceType:   'VendorCredit',
@@ -542,6 +663,7 @@ try {
   if (tdsPayableId && credit.tdsAmount > 0) await postTransactionToCOA({
     accountId:       tdsPayableId,
     orgId:           currentOrgId,
+    branchId,
     date:            txnDate,
     description:     `TDS reversal - Vendor Credit ${credit.creditNumber}`,
     referenceType:   'VendorCredit',
@@ -555,6 +677,7 @@ try {
   if (tdsReceivableId && credit.tcsAmount > 0) await postTransactionToCOA({
     accountId:       tdsReceivableId,
     orgId:           currentOrgId,
+    branchId,
     date:            txnDate,
     description:     `TCS reversal - Vendor Credit ${credit.creditNumber}`,
     referenceType:   'VendorCredit',
@@ -569,7 +692,7 @@ console.log(`✅ COA posted for vendor credit: ${credit.creditNumber}`);
   console.error('⚠️ COA error (vendor credit create):', coaErr.message);
 }
 
-    // ✅ AUTO-APPLY TO BILL if billId is provided at creation time
+    // ? AUTO-APPLY TO BILL if billId is provided at creation time
     if (body.billId) {
       try {
         const Bill = mongoose.models.Bill ||
@@ -597,9 +720,9 @@ console.log(`✅ COA posted for vendor credit: ${credit.creditNumber}`);
           });
 
           await bill.save();
-          console.log(`✅ Bill ${bill.billNumber} auto-updated to ${bill.status}`);
+          console.log(`? Bill ${bill.billNumber} auto-updated to ${bill.status}`);
 
-          // ✅ Update credit status
+          // ? Update credit status
           credit.appliedAmount = creditAmount;
           credit.balanceAmount = credit.totalAmount - creditAmount;
           credit.applications.push({
@@ -617,14 +740,14 @@ console.log(`✅ COA posted for vendor credit: ${credit.creditNumber}`);
           }
 
           await credit.save();
-          console.log(`✅ Vendor Credit ${credit.creditNumber} status → ${credit.status}`);
+          console.log(`? Vendor Credit ${credit.creditNumber} status ? ${credit.status}`);
         }
       } catch (billErr) {
-        console.error('⚠️ Bill auto-apply error:', billErr.message);
+        console.error('?? Bill auto-apply error:', billErr.message);
       }
     }
 
-    // ✅ Re-fetch to return latest status
+    // ? Re-fetch to return latest status
     const finalCredit = await VendorCredit.findById(credit._id).lean();
     return successResponse(res, finalCredit, 'Vendor credit created', 201);
   } catch (err) {
@@ -640,7 +763,8 @@ router.put('/:id', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
 
@@ -673,43 +797,52 @@ router.put('/:id/void', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
     if (credit.status === 'CLOSED') return errorResponse(res, 'Cannot void a closed credit', 400);
 
     const currentOrgId = req.user?.orgId || null;
 
-    // ── Reverse COA entries ───────────────────────────────────────────────
+    // -- Reverse COA entries: credit each line item's expense account, debit AP ----
     try {
-      const [apId, cogsId] = await Promise.all([
+      const [apId] = await Promise.all([
         getSystemAccountId('Accounts Payable', currentOrgId),
-        getSystemAccountId('Cost of Goods Sold', currentOrgId),
       ]);
       const txnDate = new Date();
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
       if (apId) await postTransactionToCOA({
-        accountId: apId, orgId: currentOrgId, date: txnDate,
+        accountId: apId, orgId: currentOrgId,
+        branchId,
+        date: txnDate,
         description: `Reversal - Vendor Credit ${credit.creditNumber} voided`,
         referenceType: 'VendorCredit', referenceId: credit._id,
         referenceNumber: credit.creditNumber,
         debit: 0, credit: credit.totalAmount,
       });
 
-      if (cogsId) await postTransactionToCOA({
-        accountId: cogsId, orgId: currentOrgId, date: txnDate,
-        description: `Reversal - Vendor Credit ${credit.creditNumber} voided`,
-        referenceType: 'VendorCredit', referenceId: credit._id,
-        referenceNumber: credit.creditNumber,
-        debit: credit.subTotal || credit.totalAmount, credit: 0,
-      });
+      for (const item of credit.items) {
+        const accountName = item.account || 'Cost of Goods Sold';
+        const itemAccId = await getVCExpenseAccountId(accountName, currentOrgId);
+        if (itemAccId) await postTransactionToCOA({
+          accountId: itemAccId, orgId: currentOrgId,
+          branchId,
+          date: txnDate,
+          description: `Reversal - Vendor Credit ${credit.creditNumber} voided - ${item.itemDetails}`,
+          referenceType: 'VendorCredit', referenceId: credit._id,
+          referenceNumber: credit.creditNumber,
+          debit: item.amount, credit: 0,
+        });
+      }
 
       console.log(`✅ COA reversed for voided vendor credit: ${credit.creditNumber}`);
     } catch (coaErr) {
       console.error('⚠️ COA reversal error:', coaErr.message);
     }
 
-    // ── Reverse bill applications ─────────────────────────────────────────
+    // -- Reverse bill applications -----------------------------------------
     if (credit.applications && credit.applications.length > 0) {
       const Bill = mongoose.models.Bill ||
         mongoose.model('Bill', new mongoose.Schema({}, { strict: false }));
@@ -734,9 +867,9 @@ router.put('/:id/void', async (req, res) => {
             .filter(vc => vc.creditId?.toString() !== credit._id.toString());
 
           await bill.save();
-          console.log(`✅ Bill ${bill.billNumber} reversed after void`);
+          console.log(`? Bill ${bill.billNumber} reversed after void`);
         } catch (billErr) {
-          console.error(`⚠️ Bill reversal error:`, billErr.message);
+          console.error(`?? Bill reversal error:`, billErr.message);
         }
       }
     }
@@ -754,7 +887,8 @@ router.put('/:id/mark-as-sent', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
     if (credit.status === 'VOID') return errorResponse(res, 'Cannot mark a voided credit as sent', 400);
@@ -771,7 +905,8 @@ router.post('/:id/apply', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
 
@@ -784,7 +919,7 @@ router.post('/:id/apply', async (req, res) => {
     if (!amount || amount <= 0) return errorResponse(res, 'Amount must be greater than 0', 400);
     if (amount > credit.balanceAmount + 0.01) {
       return errorResponse(res,
-        `Amount exceeds available balance (₹${credit.balanceAmount.toFixed(2)})`, 400);
+        `Amount exceeds available balance (?${credit.balanceAmount.toFixed(2)})`, 400);
     }
 
     credit.applications.push({
@@ -807,7 +942,7 @@ router.post('/:id/apply', async (req, res) => {
     }
 
     await credit.save();
-    // ✅ Auto-update bill status when credit is applied
+    // ? Auto-update bill status when credit is applied
 if (billId) {
   try {
     const Bill = mongoose.models.Bill ||
@@ -827,14 +962,14 @@ if (billId) {
       }
 
       await bill.save();
-      console.log(`✅ Bill ${billNumber} status updated to ${bill.status}`);
+      console.log(`? Bill ${billNumber} status updated to ${bill.status}`);
     }
   } catch (billErr) {
-    console.error('⚠️ Bill status update error:', billErr.message);
+    console.error('?? Bill status update error:', billErr.message);
   }
 }
 
-    // ✅ COA: Debit AP — credit applied reduces AP balance
+    // ? COA: Debit AP � credit applied reduces AP balance
     try {
       const apId = await getSystemAccountId('Accounts Payable', req.user?.orgId || null);
       const txnDate = new Date();
@@ -842,6 +977,7 @@ if (billId) {
       if (apId) await postTransactionToCOA({
         accountId:       apId,
         orgId:           req.user?.orgId || null,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Vendor Credit ${credit.creditNumber} applied to Bill ${billNumber}`,
         referenceType:   'VendorCredit',
@@ -851,9 +987,9 @@ if (billId) {
         credit:          0,
       });
 
-      console.log(`✅ COA posted for vendor credit application: ${credit.creditNumber}`);
+      console.log(`? COA posted for vendor credit application: ${credit.creditNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA error (vendor credit apply):', coaErr.message);
+      console.error('?? COA error (vendor credit apply):', coaErr.message);
     }
 
     return successResponse(res, credit, `Credit applied to bill ${billNumber}`);
@@ -866,7 +1002,8 @@ router.post('/:id/refund', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
 
@@ -878,7 +1015,7 @@ router.post('/:id/refund', async (req, res) => {
     if (!amount || amount <= 0) return errorResponse(res, 'Amount must be greater than 0', 400);
     if (amount > credit.balanceAmount + 0.01) {
       return errorResponse(res,
-        `Amount exceeds available balance (₹${credit.balanceAmount.toFixed(2)})`, 400);
+        `Amount exceeds available balance (?${credit.balanceAmount.toFixed(2)})`, 400);
     }
 
     credit.refunds.push({
@@ -903,7 +1040,7 @@ router.post('/:id/refund', async (req, res) => {
 
     await credit.save();
 
-    // ✅ COA: Debit AP + Credit Undeposited Funds (cash back to you)
+    // ? COA: Debit AP + Credit Undeposited Funds (cash back to you)
     try {
       const [apId, bankId] = await Promise.all([
         getSystemAccountId('Accounts Payable', req.user?.orgId || null),
@@ -914,6 +1051,7 @@ router.post('/:id/refund', async (req, res) => {
       if (apId) await postTransactionToCOA({
         accountId:       apId,
         orgId:           req.user?.orgId || null,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Vendor Credit ${credit.creditNumber} refund`,
         referenceType:   'VendorCredit',
@@ -926,6 +1064,7 @@ router.post('/:id/refund', async (req, res) => {
       if (bankId) await postTransactionToCOA({
         accountId:       bankId,
         orgId:           req.user?.orgId || null,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Vendor Credit ${credit.creditNumber} refund`,
         referenceType:   'VendorCredit',
@@ -935,17 +1074,23 @@ router.post('/:id/refund', async (req, res) => {
         credit:          parseFloat(amount),
       });
 
-      console.log(`✅ COA posted for vendor credit refund: ${credit.creditNumber}`);
+      console.log(`? COA posted for vendor credit refund: ${credit.creditNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA error (vendor credit refund):', coaErr.message);
+      console.error('?? COA error (vendor credit refund):', coaErr.message);
     }
 
-    return successResponse(res, credit, 'Refund recorded successfully');
+    // Return the credit AND the new refund sub-doc _id so the frontend
+    // can store it as journalRef for precise reversal on uncategorize.
+    const newRefund = credit.refunds[credit.refunds.length - 1];
+    return successResponse(res, {
+      ...credit.toObject(),
+      refundId: newRefund?._id?.toString() || null,
+    }, 'Refund recorded successfully');
   } catch (err) {
     return errorResponse(res, 'Failed to record refund', 500, err);
   }
 });
-// TEMP FIX ROUTE — remove after use
+// TEMP FIX ROUTE � remove after use
 router.post('/fix-bill/:billId', async (req, res) => {
   try {
     const Bill = mongoose.models.Bill ||
@@ -984,13 +1129,24 @@ router.get('/:id/pdf', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!credit) return res.status(404).json({ success: false, message: 'Vendor credit not found' });
-    const pdfInfo = await generateVendorCreditPDF(credit, req.user?.orgId);
+    const pdfInfo = await generateVendorCreditPDF(credit, req.user?.orgId, credit.branchId || null);
     res.download(pdfInfo.filepath, `VendorCredit-${credit.creditNumber}.pdf`);
   } catch (error) {
     console.error('Error generating vendor credit PDF:', error);
@@ -998,7 +1154,7 @@ router.get('/:id/pdf', async (req, res) => {
   }
 });
 
-// ── PDF Generator for Vendor Credit ──────────────────────────────────────────
+// -- PDF Generator for Vendor Credit ------------------------------------------
 
 function numberToWords(n) {
   const a = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
@@ -1017,7 +1173,7 @@ function numberToWords(n) {
   return s.trim();
 }
 
-const generateVendorCreditPDF = async (credit, orgId = null) => {
+const generateVendorCreditPDF = async (credit, orgId = null, branchId = null) => {
   return new Promise(async (resolve, reject) => {
     try {
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'vendor-credits');
@@ -1026,7 +1182,7 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
       const filename = `vendor-credit-${credit.creditNumber || credit._id}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      // Fetch org details
+      // Fetch org details — branch-aware
       let orgName  = 'Your Company';
       let orgGST   = '';
       let orgAddr  = '';
@@ -1034,9 +1190,9 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
       let orgPhone = '';
       let orgData  = null;
       try {
-        const OrgModel = mongoose.models.Organization ||
-          mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        orgData = await OrgModel.findOne({ orgId }).lean();
+        const { getEffectiveOrgData } = require('./branches');
+        const db = mongoose.connection.db;
+        if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
         if (orgData) {
           orgName  = orgData.orgName   || orgName;
           orgGST   = orgData.gstNumber || '';
@@ -1051,7 +1207,12 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
       doc.pipe(stream);
 
       const pageW    = 515;
-      const logoPath = getOrgLogoPath(orgId);
+      let   logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getOrgLogoPath(orgId);
       let   logoLoaded = false;
       const textX    = logoPath ? 126 : 50;
 
@@ -1063,14 +1224,21 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
 
       if (logoPath) {
         try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); logoLoaded = true; }
-        catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+        catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold').text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
-      doc.fontSize(7).fillColor('#444444').font('Helvetica').text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
+      doc.fontSize(7).fillColor('#444444').font('Helvetica').text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let contactY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+      let contactY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, contactY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold').text('VENDOR CREDIT NOTE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
       doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold').text(credit.creditNumber || 'N/A', 380, 52, { width: 170, align: 'right' });
@@ -1080,27 +1248,38 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
         doc.text(`Against Bill: ${credit.billNumber}`, 380, 82, { width: 170, align: 'right' });
       }
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`✓ ${(credit.status || 'OPEN').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+         .text(`? ${(credit.status || 'OPEN').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
-      // ── META GRID: Vendor | Ship To | Credit Details ──────────────────────
-      const metaY  = 132;
+      // -- META GRID: Vendor | Ship To | Credit Details ----------------------
+      const metaY  = Math.max(132, contactY + 8);
       const colW   = pageW / 3;
-      const metaH  = 90;
       const billingStr = formatVCAddress(credit.billingAddress);
       const shipStr    = formatVCAddress(credit.shippingAddress);
+
+      // Dynamic box height
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _vendorNameH = doc.heightOfString(credit.vendorName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const _gstH  = credit.vendorGSTIN ? 10 : 0;
+      const metaH  = Math.max(90, 18 + _vendorNameH + 2 + _addrH + _gstH + 10);
 
       // Col 1: Vendor / Bill To
       const billX = 40;
       doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text('VENDOR', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
-      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(credit.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(credit.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const vendorNameH = doc.heightOfString(credit.vendorName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + vendorNameH + 2;
       if (billingStr) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (credit.vendorGSTIN) {
-        const addrLineCount = billingStr ? Math.ceil(billingStr.length / 35) : 0;
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(`GSTIN: ${credit.vendorGSTIN}`, billX + 8, metaY + 30 + (addrLineCount * 9), { width: colW - 16 });
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000')
+           .text(`GSTIN: ${credit.vendorGSTIN}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16 });
       }
 
       // Col 2: Ship To
@@ -1125,7 +1304,7 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
 
       let tableStartY = metaY + metaH + 12;
 
-      // ── ITEMS TABLE ───────────────────────────────────────────────────────
+      // -- ITEMS TABLE -------------------------------------------------------
       const isInterState = credit.isInterState;
       const cols = {
         num:     { x: 40,  w: 16  },
@@ -1177,7 +1356,7 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '—';
+          : '�';
 
         doc.fontSize(7).fillColor('#000000');
         doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
@@ -1199,7 +1378,7 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
         rowY += rowH;
       });
 
-      // ── TOTALS ────────────────────────────────────────────────────────────
+      // -- TOTALS ------------------------------------------------------------
       const totalsX = 315;
       const totalsW = 240;
       let totalsY   = rowY + 12;
@@ -1259,21 +1438,51 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
       const authBoxX     = 555 - signBoxW;
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30).lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _vcSigRelPath = orgData?.digitalSignaturePath;
+      const _vcSigSize    = 200;
+      let   _vcActualSigH = _vcSigSize;
+      if (_vcSigRelPath) {
+        try {
+          const _vcSigAbs = path.join(__dirname, '..', _vcSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_vcSigAbs)) {
+            let _vcW = _vcSigSize, _vcH = _vcSigSize;
+            try {
+              const _vcBuf = fs.readFileSync(_vcSigAbs);
+              const _vcExt = path.extname(_vcSigAbs).toLowerCase();
+              if (_vcExt === '.png' && _vcBuf.length > 24) { _vcW = _vcBuf.readUInt32BE(16); _vcH = _vcBuf.readUInt32BE(20); }
+              else if ((_vcExt === '.jpg' || _vcExt === '.jpeg') && _vcBuf.length > 4) {
+                let _vci = 2;
+                while (_vci < _vcBuf.length - 8) {
+                  if (_vcBuf[_vci] === 0xFF && _vcBuf[_vci+1] >= 0xC0 && _vcBuf[_vci+1] <= 0xC3) { _vcH = _vcBuf.readUInt16BE(_vci+5); _vcW = _vcBuf.readUInt16BE(_vci+7); break; }
+                  _vci += 2 + _vcBuf.readUInt16BE(_vci + 2);
+                }
+              }
+            } catch (_) {}
+            const _vcScale = Math.min(_vcSigSize / _vcW, _vcSigSize / _vcH);
+            _vcActualSigH  = Math.round(_vcH * _vcScale);
+            const _vcActualSigW = Math.round(_vcW * _vcScale);
+            doc.image(_vcSigAbs, authBoxX + (signBoxW - _vcActualSigW) / 2, signSectionY + 10, { width: _vcActualSigW, height: _vcActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _vcSigLineY = signSectionY + 10 + _vcActualSigH + 14;
+      doc.moveTo(authBoxX, _vcSigLineY).lineTo(authBoxX + signBoxW, _vcSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _vcSigLineY + 3, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${credit.creditNumber}`, 40, footY + 6, { width: pageW / 2 });
+         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${credit.creditNumber}`, 40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
       stream.on('finish', () => {
-        console.log(`✅ Vendor Credit PDF generated: ${filename} | Logo: ${logoLoaded ? 'YES' : 'NO'}`);
+        console.log(`? Vendor Credit PDF generated: ${filename} | Logo: ${logoLoaded ? 'YES' : 'NO'}`);
         resolve({ filename, filepath });
       });
       stream.on('error', reject);
@@ -1286,11 +1495,11 @@ const generateVendorCreditPDF = async (credit, orgId = null) => {
 // GET /api/vendor-credits/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const credit = await VendorCredit.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const credit = await VendorCredit.findOne({ _id: req.params.id, ...req.orgFilter, ...(req.branchFilter || {}) });
     if (!credit) return res.status(404).json({ success: false, error: 'Vendor credit not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
     const orgName  = org?.orgName  || '';
     const orgGST   = org?.gstNumber || '';
     const orgPhone = org?.phone    || '';
@@ -1300,8 +1509,8 @@ router.get('/:id/email-preview', async (req, res) => {
     const isInterState = credit.isInterState;
 
     const taxRows = taxSlabs.map(s => isInterState
-      ? `<tr><td>IGST @${s.gstRate}%</td><td>₹${(s.igst||0).toFixed(2)}</td></tr>`
-      : `<tr><td>CGST @${s.gstRate/2}%</td><td>₹${(s.cgst||0).toFixed(2)}</td></tr><tr><td>SGST @${s.gstRate/2}%</td><td>₹${(s.sgst||0).toFixed(2)}</td></tr>`
+      ? `<tr><td>IGST @${s.gstRate}%</td><td>Rs.${(s.igst||0).toFixed(2)}</td></tr>`
+      : `<tr><td>CGST @${s.gstRate/2}%</td><td>Rs.${(s.cgst||0).toFixed(2)}</td></tr><tr><td>SGST @${s.gstRate/2}%</td><td>Rs.${(s.sgst||0).toFixed(2)}</td></tr>`
     ).join('');
 
     const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Vendor Credit ${credit.creditNumber}</title>
@@ -1321,27 +1530,27 @@ ${credit.placeOfSupply ? `<tr><td>Place of Supply</td><td>${credit.placeOfSupply
 </table>
 <div class="st">Amount Summary</div>
 <table class="d">
-<tr><td>Subtotal</td><td>₹${(credit.subTotal||0).toFixed(2)}</td></tr>
+<tr><td>Subtotal</td><td>Rs.${(credit.subTotal||0).toFixed(2)}</td></tr>
 ${taxRows}
-${(credit.tdsAmount||0) > 0 ? `<tr><td>TDS Deducted</td><td>-₹${credit.tdsAmount.toFixed(2)}</td></tr>` : ''}
-<tr class="tr"><td>Credit Amount</td><td>₹${credit.totalAmount.toFixed(2)}</td></tr>
-<tr><td>Balance Available</td><td>₹${credit.balanceAmount.toFixed(2)}</td></tr>
+${(credit.tdsAmount||0) > 0 ? `<tr><td>TDS Deducted</td><td>-Rs.${credit.tdsAmount.toFixed(2)}</td></tr>` : ''}
+<tr class="tr"><td>Credit Amount</td><td>Rs.${credit.totalAmount.toFixed(2)}</td></tr>
+<tr><td>Balance Available</td><td>Rs.${credit.balanceAmount.toFixed(2)}</td></tr>
 </table>
 ${credit.notes ? `<div class="st">Notes</div><p style="font-size:12px;line-height:1.7;color:#444;">${credit.notes}</p>` : ''}
 </div>
 <div class="footer"><strong>${orgName}</strong><br>${orgGST ? 'GST: ' + orgGST + ' | ' : ''}${orgPhone ? 'Ph: ' + orgPhone + ' | ' : ''}${orgEmail}</div>
 </div></body></html>`;
-    res.json({ success: true, data: { subject: `Vendor Credit Note ${credit.creditNumber} — ₹${credit.totalAmount.toFixed(2)}`, html, to: credit.vendorEmail } });
+    res.json({ success: true, data: { subject: `Vendor Credit Note ${credit.creditNumber} - Rs.${credit.totalAmount.toFixed(2)}`, html, to: credit.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview — save custom email content
+// PATCH /:id/email-preview � save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const credit = await VendorCredit.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const credit = await VendorCredit.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
     if (to !== undefined)      credit.set('customEmailTo',      to);
     if (subject !== undefined) credit.set('customEmailSubject', subject);
@@ -1358,7 +1567,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!credit) return errorResponse(res, 'Vendor credit not found', 404);
     if (credit.status === 'CLOSED') {
@@ -1367,18 +1576,16 @@ router.delete('/:id', async (req, res) => {
 
     const currentOrgId = req.user?.orgId || null;
 
-    // ── STEP 1: Reverse COA entries ──────────────────────────────────────
+    // -- STEP 1: Reverse COA entries: credit each line item's expense account, debit AP --
     try {
-      const [apId, cogsId] = await Promise.all([
-        getSystemAccountId('Accounts Payable', currentOrgId),
-        getSystemAccountId('Cost of Goods Sold', currentOrgId),
-      ]);
+      const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
       const txnDate = new Date();
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
       if (apId) await postTransactionToCOA({
         accountId:       apId,
-        orgId:           currentOrgId,
-        date:            txnDate,
+        orgId: currentOrgId, date: txnDate,
+        branchId,
         description:     `Reversal - Vendor Credit ${credit.creditNumber} deleted`,
         referenceType:   'VendorCredit',
         referenceId:     credit._id,
@@ -1387,24 +1594,28 @@ router.delete('/:id', async (req, res) => {
         credit:          credit.totalAmount,
       });
 
-      if (cogsId) await postTransactionToCOA({
-        accountId:       cogsId,
-        orgId:           currentOrgId,
-        date:            txnDate,
-        description:     `Reversal - Vendor Credit ${credit.creditNumber} deleted`,
-        referenceType:   'VendorCredit',
-        referenceId:     credit._id,
-        referenceNumber: credit.creditNumber,
-        debit:           credit.subTotal || credit.totalAmount,
-        credit:          0,
-      });
+      for (const item of credit.items) {
+        const accountName = item.account || 'Cost of Goods Sold';
+        const itemAccId = await getVCExpenseAccountId(accountName, currentOrgId);
+        if (itemAccId) await postTransactionToCOA({
+          accountId:       itemAccId,
+          orgId: currentOrgId, date: txnDate,
+          branchId,
+          description:     `Reversal - Vendor Credit ${credit.creditNumber} deleted - ${item.itemDetails}`,
+          referenceType:   'VendorCredit',
+          referenceId:     credit._id,
+          referenceNumber: credit.creditNumber,
+          debit:           item.amount,
+          credit:          0,
+        });
+      }
 
       console.log(`✅ COA reversed for deleted vendor credit: ${credit.creditNumber}`);
     } catch (coaErr) {
       console.error('⚠️ COA reversal error:', coaErr.message);
     }
 
-    // ── STEP 2: Reverse bill applications ────────────────────────────────
+    // -- STEP 2: Reverse bill applications --------------------------------
     if (credit.applications && credit.applications.length > 0) {
       const Bill = mongoose.models.Bill ||
         mongoose.model('Bill', new mongoose.Schema({}, { strict: false }));
@@ -1432,14 +1643,14 @@ router.delete('/:id', async (req, res) => {
             .filter(vc => vc.creditId?.toString() !== credit._id.toString());
 
           await bill.save();
-          console.log(`✅ Bill ${bill.billNumber} reversed — status: ${bill.status}`);
+          console.log(`? Bill ${bill.billNumber} reversed � status: ${bill.status}`);
         } catch (billErr) {
-          console.error(`⚠️ Bill reversal error for ${app.billId}:`, billErr.message);
+          console.error(`?? Bill reversal error for ${app.billId}:`, billErr.message);
         }
       }
     }
 
-    // ── STEP 3: Delete the credit ─────────────────────────────────────────
+    // -- STEP 3: Delete the credit -----------------------------------------
     await credit.deleteOne();
     return successResponse(res, null, 'Vendor credit deleted and all entries reversed');
   } catch (err) {
@@ -1448,12 +1659,12 @@ router.delete('/:id', async (req, res) => {
 });
 
 // GET /api/vendor-credits/:id/vendor-phone
-// Looks up vendor phone directly from DB — no need to store it on the credit
+// Looks up vendor phone directly from DB � no need to store it on the credit
 router.get('/:id/vendor-phone', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).select('vendorId vendorName');
     if (!credit) {
       return res.status(404).json({ success: false, message: 'Credit not found' });

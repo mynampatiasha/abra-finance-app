@@ -67,6 +67,9 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
   bool    _isLoading   = true;
   String? _errorMessage;
 
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── filters ───────────────────────────────────────────────────────────────
   String   _selectedStatus = 'All';
   DateTime? _fromDate;
@@ -718,7 +721,7 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _bills.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _bills.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -766,6 +769,7 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_rounded, _showLifecycle, tooltip: 'View Process', color: _blue, bg: _blue.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Profile', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -794,6 +798,7 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Profile', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -812,6 +817,7 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 6),
       Stack(children: [
         _iconBtn(Icons.filter_list, _showFilterDialog, color: _hasFilters ? _navy : const Color(0xFF7F8C8D), bg: _hasFilters ? _navy.withOpacity(0.08) : const Color(0xFFF1F1F1)),
         if (_hasFilters) Positioned(right: 4, top: 4, child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: _navy, shape: BoxShape.circle))),
@@ -999,6 +1005,184 @@ class _RecurringBillsListPageState extends State<RecurringBillsListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    if (_bills.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _bills.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildListCard(_bills[i]),
+      ),
+    );
+  }
+
+  Widget _buildListCard(RecurringBill b) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RecurringBillDetailPage(bill: b))),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Row 1: Profile name + Status
+              Row(children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _openEdit(b),
+                    child: Text(b.profileName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _statusBadge(b.status),
+              ]),
+              const SizedBox(height: 10),
+              // Row 2: Vendor avatar + name + email
+              Row(children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(b.vendorName.isNotEmpty ? b.vendorName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(b.vendorName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis),
+                  if (b.vendorEmail.isNotEmpty)
+                    Text(b.vendorEmail, style: TextStyle(fontSize: 12, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
+                ])),
+              ]),
+              const SizedBox(height: 10),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              const SizedBox(height: 10),
+              // Row 3: Frequency + Next Bill Date
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Frequency', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Text('Every ${b.repeatEvery} ${b.repeatUnit}(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Next Bill Date', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(DateFormat('dd MMM yyyy').format(b.nextBillDate), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                  ]),
+                ])),
+              ]),
+              const SizedBox(height: 10),
+              // Row 4: Amount + Generated + Actions
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Text('₹${b.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Generated', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  InkWell(
+                    onTap: () => _viewChildBills(b),
+                    child: Text('${b.totalBillsGenerated} bill(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _blue, decoration: TextDecoration.underline)),
+                  ),
+                ])),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _shareBill(b),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    itemBuilder: (_) => [
+                      _menuItem('view',     Icons.visibility,                  const Color(0xFF3D8EFF), 'View Details'),
+                      _menuItem('edit',     Icons.edit_outlined,               _navy,   'Edit'),
+                      _menuItem('generate', Icons.add_circle_outline,          _green,  'Generate Bill'),
+                      _menuItem('child',    Icons.list_alt_outlined,           _navy,   'View Child Bills'),
+                      _menuItem('ticket',   Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                      if (b.status == 'ACTIVE')
+                        _menuItem('pause',  Icons.pause_outlined,              _orange, 'Pause'),
+                      if (b.status == 'PAUSED')
+                        _menuItem('resume', Icons.play_arrow_outlined,         _green,  'Resume'),
+                      _menuItem('stop',     Icons.stop_outlined,               _orange, 'Stop', textColor: _orange),
+                      _menuItem('delete',   Icons.delete_outline,              _red,    'Delete', textColor: _red),
+                    ],
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'view':     Navigator.push(context, MaterialPageRoute(builder: (_) => RecurringBillDetailPage(bill: b))); break;
+                        case 'edit':     _openEdit(b);        break;
+                        case 'generate': _generate(b);        break;
+                        case 'child':    _viewChildBills(b);  break;
+                        case 'ticket':   _raiseTicket(b);     break;
+                        case 'pause':    _pause(b);            break;
+                        case 'resume':   _resume(b);           break;
+                        case 'stop':     _stop(b);             break;
+                        case 'delete':   _delete(b);           break;
+                      }
+                    },
+                  ),
+                ]),
+              ]),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

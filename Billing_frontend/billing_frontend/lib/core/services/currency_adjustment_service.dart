@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 // ============================================================================
 // MODELS
@@ -225,9 +226,11 @@ class CurrencyAdjustmentService {
     final keys  = ['jwt_token','token','auth_token','accessToken','access_token'];
     String token = '';
     for (final k in keys) { token = prefs.getString(k) ?? ''; if (token.isNotEmpty) break; }
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept':       'application/json',
+      'x-branch-ids': branchHdr,
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }

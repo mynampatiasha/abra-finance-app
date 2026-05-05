@@ -88,7 +88,6 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
 
   // ── Invoice header ─────────────────────────────────────────────────────────
   DateTime _invoiceDate    = DateTime.now();
-  String   _selectedTerms = 'Net 30';
   DateTime? _dueDate;
   String?  _salesperson;
   String   _currency = 'INR';
@@ -141,7 +140,6 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   double _totalAmount           = 0;
   List<TaxSlab> _taxSlabs       = [];
 
-  final List<String> _termsOptions = ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
   final List<String> _currencies   = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
 
   // ==========================================================================
@@ -151,7 +149,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   @override
   void initState() {
     super.initState();
-    _calculateDueDate();
+    _dueDate = _invoiceDate.add(const Duration(days: 30));
     _addNewItem();
     _loadOrgState();
     _loadPaymentAccounts();
@@ -196,11 +194,6 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   // ==========================================================================
   // CALCULATIONS
   // ==========================================================================
-
-  void _calculateDueDate() {
-    final days = { 'Due on Receipt': 0, 'Net 15': 15, 'Net 30': 30, 'Net 45': 45, 'Net 60': 60 };
-    _dueDate = _invoiceDate.add(Duration(days: days[_selectedTerms] ?? 30));
-  }
 
   void _recalculateAllItemTax() {
     for (final item in _items) { item.recalculateTax(isInterState: _isInterState); }
@@ -312,7 +305,6 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
         _orderNumberController.text    = invoice.orderNumber ?? '';
         _referenceNumberController.text= invoice.referenceNumber;
         _invoiceDate              = invoice.invoiceDate;
-        _selectedTerms            = invoice.terms;
         _dueDate                  = invoice.dueDate;
         _salesperson              = invoice.salesperson;
         _currency                 = invoice.currency;
@@ -490,7 +482,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       'orderNumber': _orderNumberController.text.trim(),
       'referenceNumber': _referenceNumberController.text.trim(),
       'currency': _currency, 'invoiceDate': _invoiceDate.toIso8601String(),
-      'terms': _selectedTerms, 'dueDate': _dueDate?.toIso8601String(),
+      'terms': 'Custom', 'dueDate': _dueDate?.toIso8601String(),
       'salesperson': _salesperson, 'subject': _subjectController.text.trim(),
       'items': validItems.map((item) {
         final json = item.toJson();
@@ -757,30 +749,55 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
         final dateField = InkWell(
           onTap: () async {
             final date = await showDatePicker(context: context, initialDate: _invoiceDate, firstDate: DateTime(2020), lastDate: DateTime(2030));
-            if (date != null) setState(() { _invoiceDate = date; _calculateDueDate(); });
+            if (date != null) setState(() {
+              // Shift due date by the same offset to keep the gap
+              final gap = _dueDate != null ? _dueDate!.difference(_invoiceDate).inDays : 30;
+              _invoiceDate = date;
+              _dueDate = date.add(Duration(days: gap > 0 ? gap : 30));
+            });
           },
           child: InputDecorator(decoration: InputDecoration(labelText: 'Invoice Date *', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.calendar_today)),
             child: Text(DateFormat('dd MMM yyyy').format(_invoiceDate))),
         );
-        final currencyField = DropdownButtonFormField<String>(value: _currency,
-          decoration: InputDecoration(labelText: 'Currency', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.currency_rupee)),
-          items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-          onChanged: (v) => setState(() => _currency = v!));
-        return isWide ? Row(children: [Expanded(child: dateField), const SizedBox(width: 16), Expanded(child: currencyField)])
-            : Column(children: [dateField, const SizedBox(height: 16), currencyField]);
+        return isWide
+            ? Row(children: [Expanded(child: dateField)])
+            : dateField;
       }),
       const SizedBox(height: 16),
       LayoutBuilder(builder: (ctx, cs) {
         final isWide = cs.maxWidth > 600;
-        final termsField = DropdownButtonFormField<String>(value: _selectedTerms,
-          decoration: InputDecoration(labelText: 'Payment Terms *', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.payment)),
-          items: _termsOptions.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-          onChanged: (v) => setState(() { _selectedTerms = v!; _calculateDueDate(); }));
-        final dueDateField = InputDecorator(
-          decoration: InputDecoration(labelText: 'Due Date', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.event), filled: true, fillColor: Colors.grey[50]),
-          child: Text(_dueDate != null ? DateFormat('dd MMM yyyy').format(_dueDate!) : '-', style: const TextStyle(fontWeight: FontWeight.w500)));
-        return isWide ? Row(children: [Expanded(child: termsField), const SizedBox(width: 16), Expanded(child: dueDateField)])
-            : Column(children: [termsField, const SizedBox(height: 16), dueDateField]);
+        final dueDateField = InkWell(
+          onTap: () async {
+            final date = await showDatePicker(
+              context: context,
+              initialDate: _dueDate ?? _invoiceDate.add(const Duration(days: 30)),
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2035),
+            );
+            if (date != null) setState(() => _dueDate = date);
+          },
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Due Date *',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              prefixIcon: const Icon(Icons.event),
+            ),
+            child: Text(
+              _dueDate != null ? DateFormat('dd MMM yyyy').format(_dueDate!) : 'Select due date',
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: _dueDate != null ? null : Colors.grey[600],
+              ),
+            ),
+          ),
+        );
+        final currencyField2 = DropdownButtonFormField<String>(value: _currency,
+          decoration: InputDecoration(labelText: 'Currency', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.currency_rupee)),
+          items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+          onChanged: (v) => setState(() => _currency = v!));
+        return isWide
+            ? Row(children: [Expanded(child: dueDateField), const SizedBox(width: 16), Expanded(child: currencyField2)])
+            : Column(children: [dueDateField, const SizedBox(height: 16), currencyField2]);
       }),
       const SizedBox(height: 16),
       TextFormField(controller: _subjectController,
@@ -1561,7 +1578,6 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                         }
                         if (customer.placeOfSupply.isNotEmpty) { _placeOfSupply = customer.placeOfSupply; }
                         else if (customer.billingAddress.state.isNotEmpty) { _placeOfSupply = customer.billingAddress.state; }
-                        if (_termsOptions.contains(customer.paymentTerms)) { _selectedTerms = customer.paymentTerms; _calculateDueDate(); }
                         if (customer.defaultCurrency.isNotEmpty && _currencies.contains(customer.defaultCurrency)) { _currency = customer.defaultCurrency; }
                       });
                       _updateInterState();

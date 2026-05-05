@@ -59,6 +59,7 @@ class VendorData {
   final String status;
   final String type;
   final DateTime createdDate;
+  final double unusedCredits;
 
   VendorData({
     required this.id,
@@ -69,6 +70,7 @@ class VendorData {
     required this.status,
     required this.type,
     required this.createdDate,
+    this.unusedCredits = 0.0,
   });
 
   factory VendorData.fromJson(Map<String, dynamic> json) {
@@ -83,6 +85,7 @@ class VendorData {
       createdDate: json['createdDate'] != null
           ? DateTime.parse(json['createdDate'])
           : DateTime.now(),
+      unusedCredits: (json['unusedCredits'] ?? 0).toDouble(),
     );
   }
 }
@@ -105,6 +108,9 @@ class _VendorsListPageState extends State<VendorsListPage> {
   Map<String, dynamic>? _statistics;
   bool    _isLoading    = true;
   String? _errorMessage;
+
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
 
   // ── filters ───────────────────────────────────────────────────────────────
   String _quickFilter  = 'All Vendors';
@@ -471,7 +477,7 @@ class _VendorsListPageState extends State<VendorsListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -508,6 +514,8 @@ class _VendorsListPageState extends State<VendorsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(),
+    const SizedBox(width: 12),
     _actionBtn('New Vendor', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -529,6 +537,8 @@ class _VendorsListPageState extends State<VendorsListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(),
+      const SizedBox(width: 10),
       _actionBtn('New Vendor', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -552,6 +562,8 @@ class _VendorsListPageState extends State<VendorsListPage> {
           bg: _showAdvanced ? _navy.withOpacity(0.08) : const Color(0xFFF1F1F1)),
       const SizedBox(width: 6),
       _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh),
+      const SizedBox(width: 6),
+      _buildViewToggle(),
       const SizedBox(width: 6),
       _compactBtn('Import', _purple, _isLoading ? null : _handleImport),
       const SizedBox(width: 6),
@@ -782,6 +794,146 @@ class _VendorsListPageState extends State<VendorsListPage> {
     );
   }
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    height: 42,
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(10),
+      color: Colors.white,
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? _navy : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.grey[600])),
+        ]),
+      ),
+    );
+  }
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    final items = _pageItems;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: items.asMap().entries.map((e) => _buildVendorCard(e.key, e.value)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildVendorCard(int index, VendorData v) {
+    final isSel = _selectedRows.contains(index);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Row 1: checkbox + name + status badge
+          Row(children: [
+            Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), activeColor: _navy),
+            const SizedBox(width: 6),
+            Expanded(child: InkWell(
+              onTap: () => _viewDetails(v),
+              child: Text(v.name, style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 15, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+            )),
+            _statusBadge(v.status),
+          ]),
+          const SizedBox(height: 8),
+          // Row 2: company + type
+          Row(children: [
+            const Icon(Icons.business_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(v.companyName.isNotEmpty ? v.companyName : '-', style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: _navy.withOpacity(0.06), borderRadius: BorderRadius.circular(6)),
+              child: Text(v.type, style: const TextStyle(color: _navy, fontSize: 11, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          // Row 3: email + phone
+          Row(children: [
+            const Icon(Icons.email_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(v.email.isNotEmpty ? v.email : '-', style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.phone_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Text(v.phoneNumber.isNotEmpty ? v.phoneNumber : '-', style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+          ]),
+          const Divider(height: 16),
+          // Unused Credits row (only show if > 0)
+          if (v.unusedCredits > 0) ...[
+            Row(children: [
+              const Icon(Icons.account_balance_wallet_outlined, size: 14, color: Color(0xFF27AE60)),
+              const SizedBox(width: 5),
+              Text('Unused Credits:', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 6),
+              Text(
+                '₹${v.unusedCredits.toStringAsFixed(2)}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF27AE60), fontWeight: FontWeight.w600),
+              ),
+            ]),
+            const Divider(height: 16),
+          ],
+          // Actions row
+          Row(children: [
+            InkWell(
+              onTap: () => _shareVendor(v),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(width: 32, height: 32, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              itemBuilder: (_) => [
+                _menuItem('view',   Icons.visibility_outlined,          _blue,   'View Details'),
+                _menuItem('edit',   Icons.edit_outlined,                _navy,   'Edit'),
+                _menuItem('ticket', Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                _menuItem('delete', Icons.delete_outline,               _red,    'Delete', textColor: _red),
+              ],
+              onSelected: (val) {
+                switch (val) {
+                  case 'view':   _viewDetails(v);   break;
+                  case 'edit':   _openEdit(v);      break;
+                  case 'ticket': _raiseTicket(v);   break;
+                  case 'delete': _deleteVendor(v);  break;
+                }
+              },
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   // ── table ─────────────────────────────────────────────────────────────────
 
   Widget _buildTable() {
@@ -817,6 +969,7 @@ class _VendorsListPageState extends State<VendorsListPage> {
                     const DataColumn(label: SizedBox(width: 120, child: Text('PHONE'))),
                     const DataColumn(label: SizedBox(width: 130, child: Text('TYPE'))),
                     const DataColumn(label: SizedBox(width: 110, child: Text('STATUS'))),
+                    const DataColumn(label: SizedBox(width: 130, child: Text('UNUSED CREDITS'))),
                     const DataColumn(label: SizedBox(width: 150, child: Text('ACTIONS'))),
                   ],
                   rows: items.asMap().entries.map((e) => _buildRow(e.key, e.value)).toList(),
@@ -870,6 +1023,21 @@ class _VendorsListPageState extends State<VendorsListPage> {
 
         // Status
         DataCell(SizedBox(width: 110, child: _statusBadge(v.status))),
+
+        // Unused Credits
+        DataCell(SizedBox(width: 130, child: v.unusedCredits > 0
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF27AE60).withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '₹${v.unusedCredits.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Color(0xFF27AE60), fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              )
+            : Text('-', style: TextStyle(fontSize: 13, color: Colors.grey[400])))),
 
         // Actions
         DataCell(SizedBox(width: 150, child: Row(children: [

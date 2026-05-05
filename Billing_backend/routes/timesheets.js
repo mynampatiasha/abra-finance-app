@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// TIMESHEETS BACKEND — UPDATED (Complete with Submit workflow + COA + Reports)
+// ============================================================================
+// TIMESHEETS BACKEND � UPDATED (Complete with Submit workflow + COA + Reports)
 // ============================================================================
 // File: backend/routes/timesheets.js
 // ============================================================================
@@ -9,7 +9,7 @@ const router     = express.Router();
 const { ObjectId } = require('mongodb');
 const { verifyFinanceJWT } = require('../middleware/finance_jwt');
 
-// ── auto-number ────────────────────────────────────────────────────────────────
+// -- auto-number ----------------------------------------------------------------
 async function nextTimesheetNumber(db, orgId) {
   const docs = await db.collection('timesheets')
     .find({ orgId, entryNumber: { $regex: '^TS\\d' } }, { projection: { entryNumber: 1 } })
@@ -22,7 +22,7 @@ async function nextTimesheetNumber(db, orgId) {
   return `TS${String(max + 1).padStart(6, '0')}`;
 }
 
-// ── COA helper ─────────────────────────────────────────────────────────────────
+// -- COA helper -----------------------------------------------------------------
 async function postUnbilledRevenue(db, orgId, { hours, hourlyRate, entryNumber, projectName, entryId, date, reverse = false }) {
   try {
     const amount = hours * (hourlyRate || 0);
@@ -67,8 +67,9 @@ async function postUnbilledRevenue(db, orgId, { hours, hourlyRate, entryNumber, 
 router.get('/stats', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const { projectId } = req.query;
-    const baseQuery = { orgId };
+    const baseQuery = { orgId, ...branchFilter };
     if (projectId) baseQuery.projectId = projectId;
 
     const [total, unbilled, submitted, approved, billed, rejected] = await Promise.all([
@@ -92,14 +93,14 @@ router.get('/stats', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// GET /weekly-summary — group by day of week
+// GET /weekly-summary � group by day of week
 // =============================================================================
 router.get('/weekly-summary', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
     const { projectId, fromDate, toDate } = req.query;
 
-    // Default to current week Mon–Sun
+    // Default to current week Mon�Sun
     const now = new Date();
     const dayOfWeek = now.getDay(); // 0=Sun
     const monday = new Date(now);
@@ -150,8 +151,9 @@ router.get('/weekly-summary', verifyFinanceJWT, async (req, res) => {
 router.get('/staff-utilization', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const { fromDate, toDate } = req.query;
-    const query = { orgId };
+    const query = { orgId, ...branchFilter };
     if (fromDate || toDate) {
       query.date = {};
       if (fromDate) query.date.$gte = new Date(fromDate);
@@ -181,7 +183,7 @@ router.get('/staff-utilization', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// GET /unbilled-report — approved entries not yet billed
+// GET /unbilled-report � approved entries not yet billed
 // =============================================================================
 router.get('/unbilled-report', verifyFinanceJWT, async (req, res) => {
   try {
@@ -213,13 +215,14 @@ router.get('/unbilled-report', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// GET / — list
+// GET / � list
 // =============================================================================
 router.get('/', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const { status, projectId, userId, isBillable, search, page = 1, limit = 20, fromDate, toDate } = req.query;
-    const query = { orgId };
+    const query = { orgId, ...branchFilter };
     if (status)    query.status    = status;
     if (projectId) query.projectId = projectId;
     if (userId)    query.userId    = userId;
@@ -251,8 +254,9 @@ router.get('/', verifyFinanceJWT, async (req, res) => {
 router.get('/by-project/:projectId', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const { status } = req.query;
-    const query = { orgId, projectId: req.params.projectId };
+    const query = { orgId, ...branchFilter, projectId: req.params.projectId };
     if (status) query.status = status;
     const entries = await db.collection('timesheets').find(query).sort({ date: -1 }).toArray();
     const totalHours    = entries.reduce((s, e) => s + e.hours, 0);
@@ -274,11 +278,12 @@ router.get('/:id', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// POST / — create time entry
+// POST / � create time entry
 // =============================================================================
 router.post('/', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const {
       projectId, projectName, taskId, taskName,
       userId, userName, userEmail,
@@ -296,7 +301,7 @@ router.post('/', verifyFinanceJWT, async (req, res) => {
     const status = submitForApproval ? 'Submitted' : 'Unbilled';
 
     const doc = {
-      entryNumber, orgId,
+      entryNumber, orgId, branchId: branchFilter.branchId || null,
       projectId, projectName:  projectName  || project.projectName || '',
       taskId:    taskId    || '', taskName:  taskName   || '',
       userId:    userId    || '', userName:  userName   || '',
@@ -336,7 +341,7 @@ router.post('/', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// PUT /:id — update
+// PUT /:id � update
 // =============================================================================
 router.put('/:id', verifyFinanceJWT, async (req, res) => {
   try {
@@ -359,7 +364,7 @@ router.put('/:id', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// PATCH /:id/submit — submit for approval
+// PATCH /:id/submit � submit for approval
 // =============================================================================
 router.patch('/:id/submit', verifyFinanceJWT, async (req, res) => {
   try {
@@ -506,11 +511,12 @@ router.delete('/:id', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// POST /import — bulk import
+// POST /import � bulk import
 // =============================================================================
 router.post('/import', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
+    const branchFilter = req.branchFilter || {};
     const { timesheets = [] } = req.body;
     if (!timesheets.length) return res.status(400).json({ success: false, message: 'No timesheets provided' });
     let successCount = 0, failedCount = 0; const errors = [];
@@ -522,7 +528,7 @@ router.post('/import', verifyFinanceJWT, async (req, res) => {
         const entryNumber = await nextTimesheetNumber(db, orgId);
         const now = new Date();
         await db.collection('timesheets').insertOne({
-          entryNumber, orgId,
+          entryNumber, orgId, branchId: branchFilter.branchId || null,
           projectId:   t.projectId,   projectName: t.projectName || '',
           taskId:      t.taskId || '', taskName:    t.taskName || '',
           userId:      t.userId || '', userName:    t.userName || '',
@@ -549,7 +555,7 @@ router.post('/import', verifyFinanceJWT, async (req, res) => {
 router.get('/export/all', verifyFinanceJWT, async (req, res) => {
   try {
     const db = req.db; const orgId = req.user.orgId;
-    const query = { orgId };
+    const query = { orgId, ...branchFilter };
     if (req.query.status)    query.status    = req.query.status;
     if (req.query.projectId) query.projectId = req.query.projectId;
     const timesheets = await db.collection('timesheets').find(query).sort({ date: -1 }).toArray();

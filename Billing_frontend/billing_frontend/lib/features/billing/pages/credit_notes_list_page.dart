@@ -96,6 +96,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // ── View toggle ────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── Scroll ─────────────────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
@@ -873,7 +876,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _creditNotes.isEmpty
                         ? SizedBox(height: 400, child: _buildEmptyState())
-                        : _buildCreditNoteTable(),
+                        : _isTableView ? _buildCreditNoteTable() : _buildCreditNoteListView(),
             if (!_isLoading && _creditNotes.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -942,6 +945,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
         tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Credit Note', Icons.add_rounded, _navy, _openNewCreditNote),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
@@ -990,6 +994,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       ]),
       const SizedBox(height: 10),
       Row(children: [
+        _buildViewToggle(), const SizedBox(width: 10),
         _actionBtn(
             'New Credit Note', Icons.add_rounded, _navy, _openNewCreditNote),
         const SizedBox(width: 8),
@@ -1022,6 +1027,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: [
+          _buildViewToggle(), const SizedBox(width: 8),
           _dateChip(
             label: _fromDate != null
                 ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
@@ -1427,6 +1433,176 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 ),
               ],
             ),
+    );
+  }
+
+  // ── View toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── List View ─────────────────────────────────────────────────────────────
+
+  Widget _buildCreditNoteListView() {
+    final filtered = _searchQuery.isEmpty
+        ? _creditNotes
+        : _creditNotes.where((cn) =>
+            cn.creditNoteNumber.toLowerCase().contains(_searchQuery) ||
+            cn.customerName.toLowerCase().contains(_searchQuery) ||
+            (cn.referenceNumber?.toLowerCase().contains(_searchQuery) ?? false)).toList();
+
+    if (filtered.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildCreditNoteListCard(filtered[i]),
+      ),
+    );
+  }
+
+  Widget _buildCreditNoteListCard(CreditNote cn) {
+    final isSelected = _selectedCreditNotes.contains(cn.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreditNoteDetailPage(creditNoteId: cn.id))).then((r) { if (r == true) _refreshData(); }),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Row 1: Checkbox + Credit Note # + Status
+            Row(children: [
+              Checkbox(
+                value: isSelected,
+                onChanged: (_) => _toggleSelection(cn.id),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(
+                onTap: () => _openEditCreditNote(cn.id),
+                child: Text(cn.creditNoteNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+              )),
+              const SizedBox(width: 8),
+              _buildStatusBadge(cn.status),
+            ]),
+            const SizedBox(height: 10),
+            // Row 2: Customer avatar + name
+            Row(children: [
+              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(cn.customerName.isNotEmpty ? cn.customerName[0].toUpperCase() : '?',
+                      style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(cn.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              if (cn.referenceNumber != null && cn.referenceNumber!.isNotEmpty)
+                Text('Ref: ${cn.referenceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+            const SizedBox(height: 8),
+            // Row 3: Date + Reason
+            Row(children: [
+              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(DateFormat('dd MMM yyyy').format(cn.creditNoteDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Expanded(child: Text(cn.reason, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            // Row 4: Amount + Balance + Actions
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Total Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${cn.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Balance', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${cn.creditBalance.toStringAsFixed(2)}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: cn.creditBalance > 0 ? _green : Colors.grey[400])),
+              ])),
+              // Actions
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(
+                  onTap: () => _shareCreditNote(cn),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.share, size: 16, color: _blue)),
+                )),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (value) async {
+                    switch (value) {
+                      case 'view': Navigator.push(context, MaterialPageRoute(builder: (_) => CreditNoteDetailPage(creditNoteId: cn.id))).then((r) { if (r == true) _refreshData(); }); break;
+                      case 'edit': _openEditCreditNote(cn.id); break;
+                      case 'mark_as_sent': await _markCreditNoteAsSent(cn); break;
+                      case 'send': await _sendCreditNote(cn); break;
+                      case 'download': await _downloadCreditNotePDF(cn); break;
+                      case 'apply': await _showApplyCreditDialog(cn); break;
+                      case 'whatsapp': await _whatsAppCreditNote(cn); break;
+                      case 'ticket': _raiseTicket(cn); break;
+                      case 'delete': await _deleteCreditNote(cn); break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'mark_as_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'send', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'download', child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'apply', child: ListTile(leading: Icon(Icons.check_circle_outline, size: 17, color: _green), title: Text('Apply Credit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

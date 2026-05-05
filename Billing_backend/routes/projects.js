@@ -1,5 +1,5 @@
 ﻿// ============================================================================
-// PROJECTS BACKEND — UPDATED (Timer + Dashboard + Task fields + Clone)
+// PROJECTS BACKEND � UPDATED (Timer + Dashboard + Task fields + Clone)
 // ============================================================================
 // File: backend/routes/projects.js
 // ============================================================================
@@ -9,10 +9,11 @@ const router     = express.Router();
 const { ObjectId } = require('mongodb');
 const { verifyFinanceJWT } = require('../middleware/finance_jwt');
 
-// ── COA helper ────────────────────────────────────────────────────────────────
+// -- COA helper ----------------------------------------------------------------
 async function postTransactionToCOA(db, orgId, {
   accountName, accountType, transactionDate, description,
   referenceType, referenceId, referenceNumber, debit = 0, credit = 0,
+  branchId = null,
 }) {
   try {
     const coa = await db.collection('chart_of_accounts').findOne({ orgId, accountName, isActive: true });
@@ -22,7 +23,7 @@ async function postTransactionToCOA(db, orgId, {
       { $inc: { closingBalance: debit - credit }, $set: { updatedAt: new Date() } }
     );
     await db.collection('account_transactions').insertOne({
-      orgId, accountId: coa._id, accountName, accountType,
+      orgId, branchId, accountId: coa._id, accountName, accountType,
       date: new Date(transactionDate),
       description, referenceType, referenceId, referenceNumber,
       debit, credit, createdAt: new Date(),
@@ -30,7 +31,7 @@ async function postTransactionToCOA(db, orgId, {
   } catch (err) { console.error('COA post error (projects):', err.message); }
 }
 
-// ── seed COA accounts ─────────────────────────────────────────────────────────
+// -- seed COA accounts ---------------------------------------------------------
 async function seedProjectCOAAccounts(db, orgId) {
   const accounts = [
     { accountName: 'Unbilled Revenue',    accountType: 'Income', accountCode: 'INC-UNBILLED', isSystemAccount: true },
@@ -42,7 +43,7 @@ async function seedProjectCOAAccounts(db, orgId) {
     if (!exists) {
       await db.collection('chart_of_accounts').insertOne({
         ...acc, orgId,
-        description: `System account — ${acc.accountName}`,
+        description: `System account � ${acc.accountName}`,
         currency: 'INR', openingBalance: 0, closingBalance: 0,
         isActive: true, createdAt: new Date(), updatedAt: new Date(),
       });
@@ -50,7 +51,7 @@ async function seedProjectCOAAccounts(db, orgId) {
   }
 }
 
-// ── auto-number ───────────────────────────────────────────────────────────────
+// -- auto-number ---------------------------------------------------------------
 async function nextProjectNumber(db, orgId) {
   const docs = await db.collection('projects')
     .find({ orgId, projectNumber: { $regex: '^PROJ\\d' } }, { projection: { projectNumber: 1 } })
@@ -63,7 +64,7 @@ async function nextProjectNumber(db, orgId) {
   return `PROJ${String(max + 1).padStart(6, '0')}`;
 }
 
-// ── billing amount calculator ─────────────────────────────────────────────────
+// -- billing amount calculator -------------------------------------------------
 function calcBillableAmount(project, entries) {
   switch (project.billingMethod) {
     case 'Fixed Cost': return project.fixedAmount || 0;
@@ -88,25 +89,25 @@ function calcBillableAmount(project, entries) {
 // =============================================================================
 router.get('/stats', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     await seedProjectCOAAccounts(db, orgId);
     const [total, active, completed, inactive, onHold] = await Promise.all([
-      db.collection('projects').countDocuments({ orgId }),
+      db.collection('projects').countDocuments({ orgId, ...branchFilter }),
       db.collection('projects').countDocuments({ orgId, status: 'Active' }),
       db.collection('projects').countDocuments({ orgId, status: 'Completed' }),
       db.collection('projects').countDocuments({ orgId, status: 'Inactive' }),
       db.collection('projects').countDocuments({ orgId, status: 'On Hold' }),
     ]);
     const billableAgg = await db.collection('timesheets').aggregate([
-      { $match: { orgId, isBillable: true, status: { $in: ['Approved', 'Billed'] } } },
+      { $match: { orgId, ...branchFilter, isBillable: true, status: { $in: ['Approved', 'Billed'] } } },
       { $group: { _id: null, totalHours: { $sum: '$hours' } } },
     ]).toArray();
     const unbilledAgg = await db.collection('timesheets').aggregate([
-      { $match: { orgId, isBillable: true, status: 'Approved' } },
+      { $match: { orgId, ...branchFilter, isBillable: true, status: 'Approved' } },
       { $group: { _id: null, totalHours: { $sum: '$hours' } } },
     ]).toArray();
     // Active timers count
-    const activeTimers = await db.collection('timers').countDocuments({ orgId, status: 'running' });
+    const activeTimers = await db.collection('timers').countDocuments({ orgId, ...branchFilter, status: 'running' });
     res.json({ success: true, data: {
       total, active, completed, inactive, onHold,
       totalBillableHours: billableAgg[0]?.totalHours || 0,
@@ -117,13 +118,13 @@ router.get('/stats', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// GET / — list
+// GET / � list
 // =============================================================================
 router.get('/', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     const { status, billingMethod, customerId, search, page = 1, limit = 20, fromDate, toDate } = req.query;
-    const query = { orgId };
+    const query = { orgId, ...branchFilter };
     if (status)        query.status        = status;
     if (billingMethod) query.billingMethod = billingMethod;
     if (customerId)    query.customerId    = customerId;
@@ -156,16 +157,16 @@ router.get('/', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// GET /:id/dashboard — project dashboard data
+// GET /:id/dashboard � project dashboard data
 // =============================================================================
 router.get('/:id/dashboard', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
     // All timesheet entries for this project
-    const entries = await db.collection('timesheets').find({ orgId, projectId: req.params.id }).toArray();
+    const entries = await db.collection('timesheets').find({ orgId, ...branchFilter, projectId: req.params.id }).toArray();
     const approvedEntries = entries.filter(e => e.status === 'Approved' && e.isBillable);
     const billedEntries   = entries.filter(e => e.status === 'Billed');
 
@@ -243,25 +244,25 @@ router.get('/:id/dashboard', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.get('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const tsAgg = await db.collection('timesheets').aggregate([
       { $match: { orgId, projectId: req.params.id } },
       { $group: { _id: '$status', hours: { $sum: '$hours' }, count: { $sum: 1 } } },
     ]).toArray();
     project.timesheetSummary = tsAgg;
-    project.activeTimerCount = await db.collection('timers').countDocuments({ orgId, projectId: req.params.id, status: 'running' });
+    project.activeTimerCount = await db.collection('timers').countDocuments({ orgId, ...branchFilter, projectId: req.params.id, status: 'running' });
     res.json({ success: true, data: project });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // =============================================================================
-// POST / — create
+// POST / � create
 // =============================================================================
 router.post('/', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     await seedProjectCOAAccounts(db, orgId);
     const {
       projectName, customerId, customerName, customerEmail, customerPhone,
@@ -311,6 +312,7 @@ router.post('/', verifyFinanceJWT, async (req, res) => {
       })),
       notes: notes || '', termsAndConditions: termsAndConditions || '',
       totalLoggedHours: 0, totalBilledAmount: 0, invoicesGenerated: [],
+      orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user.email, createdAt: now, updatedAt: now,
     };
     const result = await db.collection('projects').insertOne(doc);
@@ -320,12 +322,12 @@ router.post('/', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// PUT /:id — update
+// PUT /:id � update
 // =============================================================================
 router.put('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const existing = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const existing = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!existing) return res.status(404).json({ success: false, message: 'Project not found' });
     const $set = { updatedAt: new Date() };
     const fields = ['projectName','customerId','customerName','customerEmail','customerPhone',
@@ -369,13 +371,13 @@ router.put('/:id', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.patch('/:id/status', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     const { status } = req.body;
     const validStatuses = ['Active','Inactive','Completed','On Hold'];
     if (!validStatuses.includes(status))
       return res.status(400).json({ success: false, message: `status must be one of: ${validStatuses.join(', ')}` });
     const result = await db.collection('projects').updateOne(
-      { _id: new ObjectId(req.params.id), orgId }, { $set: { status, updatedAt: new Date() } }
+      { _id: new ObjectId(req.params.id), orgId, ...branchFilter }, { $set: { status, updatedAt: new Date() } }
     );
     if (result.matchedCount === 0) return res.status(404).json({ success: false, message: 'Project not found' });
     res.json({ success: true, message: `Project status updated to ${status}` });
@@ -383,13 +385,13 @@ router.patch('/:id/status', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// PATCH /:id/task/:taskId/status — update single task status
+// PATCH /:id/task/:taskId/status � update single task status
 // =============================================================================
 router.patch('/:id/task/:taskId/status', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     const { status, completionPercent } = req.body;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const tasks = (project.tasks || []).map(t => {
       if (t.taskId === req.params.taskId) {
@@ -411,18 +413,19 @@ router.patch('/:id/task/:taskId/status', verifyFinanceJWT, async (req, res) => {
 });
 
 // =============================================================================
-// POST /:id/clone — clone a project
+// POST /:id/clone � clone a project
 // =============================================================================
 router.post('/:id/clone', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const projectNumber = await nextProjectNumber(db, orgId);
     const now = new Date();
     const { _id, ...rest } = project;
     const cloned = {
       ...rest,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       projectNumber,
       projectName: `Copy of ${project.projectName}`,
       status: 'Active',
@@ -445,8 +448,8 @@ router.post('/:id/clone', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.get('/:id/unbilled-hours', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const entries = await db.collection('timesheets').find({
       orgId, projectId: req.params.id, isBillable: true, status: 'Approved',
@@ -462,8 +465,8 @@ router.get('/:id/unbilled-hours', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     const entries = await db.collection('timesheets').find({
       orgId, projectId: req.params.id, isBillable: true, status: 'Approved',
@@ -474,11 +477,11 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
     let lineItems = []; let subTotal = 0;
     if (project.billingMethod === 'Fixed Cost') {
       subTotal = project.fixedAmount || 0;
-      lineItems = [{ itemDetails: `${project.projectName} — Fixed Price`, quantity: 1, rate: subTotal, discount: 0, discountType: 'percentage', amount: subTotal }];
+      lineItems = [{ itemDetails: `${project.projectName} � Fixed Price`, quantity: 1, rate: subTotal, discount: 0, discountType: 'percentage', amount: subTotal }];
     } else if (project.billingMethod === 'Based on Project Hours') {
       const totalHours = entries.reduce((s, e) => s + e.hours, 0);
       const amount = totalHours * (project.hourlyRate || 0); subTotal = amount;
-      lineItems = [{ itemDetails: `${project.projectName} — ${totalHours.toFixed(2)} hrs @ ₹${project.hourlyRate}/hr`, quantity: totalHours, rate: project.hourlyRate || 0, discount: 0, discountType: 'percentage', amount }];
+      lineItems = [{ itemDetails: `${project.projectName} � ${totalHours.toFixed(2)} hrs @ ?${project.hourlyRate}/hr`, quantity: totalHours, rate: project.hourlyRate || 0, discount: 0, discountType: 'percentage', amount }];
     } else if (project.billingMethod === 'Based on Task Hours') {
       const taskMap = {};
       for (const e of entries) {
@@ -489,7 +492,7 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
       }
       for (const [, t] of Object.entries(taskMap)) {
         const amount = t.hours * t.rate; subTotal += amount;
-        lineItems.push({ itemDetails: `${t.name} — ${t.hours.toFixed(2)} hrs @ ₹${t.rate}/hr`, quantity: t.hours, rate: t.rate, discount: 0, discountType: 'percentage', amount });
+        lineItems.push({ itemDetails: `${t.name} � ${t.hours.toFixed(2)} hrs @ ?${t.rate}/hr`, quantity: t.hours, rate: t.rate, discount: 0, discountType: 'percentage', amount });
       }
     } else if (project.billingMethod === 'Based on Staff Hours') {
       const staffMap = {};
@@ -501,7 +504,7 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
       }
       for (const [, s] of Object.entries(staffMap)) {
         const amount = s.hours * s.rate; subTotal += amount;
-        lineItems.push({ itemDetails: `${s.name} — ${s.hours.toFixed(2)} hrs @ ₹${s.rate}/hr`, quantity: s.hours, rate: s.rate, discount: 0, discountType: 'percentage', amount });
+        lineItems.push({ itemDetails: `${s.name} � ${s.hours.toFixed(2)} hrs @ ?${s.rate}/hr`, quantity: s.hours, rate: s.rate, discount: 0, discountType: 'percentage', amount });
       }
     }
 
@@ -522,6 +525,7 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
     const dueDate = new Date(now); dueDate.setDate(dueDate.getDate() + 30);
     const invoice = {
       invoiceNumber: invNum, orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       customerId: project.customerId, customerName: project.customerName,
       customerEmail: project.customerEmail, customerPhone: project.customerPhone || '',
       projectId: req.params.id, projectNumber: project.projectNumber,
@@ -544,10 +548,10 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
       { $inc: { totalBilledAmount: totalAmount, totalLoggedHours: 0 }, $push: { invoicesGenerated: invResult.insertedId.toString() }, $set: { updatedAt: now } }
     );
     // COA: Debit AR, Credit Project Revenue, reverse Unbilled Revenue
-    await postTransactionToCOA(db, orgId, { accountName: 'Accounts Receivable', accountType: 'Asset', transactionDate: now, description: `Invoice ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: totalAmount, credit: 0 });
-    await postTransactionToCOA(db, orgId, { accountName: 'Project Revenue', accountType: 'Income', transactionDate: now, description: `Invoice ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: 0, credit: subTotal });
+    await postTransactionToCOA(db, orgId, { accountName: 'Accounts Receivable', accountType: 'Asset', transactionDate: now, description: `Invoice ${invNum} � ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: totalAmount, credit: 0 });
+    await postTransactionToCOA(db, orgId, { accountName: 'Project Revenue', accountType: 'Income', transactionDate: now, description: `Invoice ${invNum} � ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: 0, credit: subTotal });
     // Reverse Unbilled Revenue for billed entries
-    await postTransactionToCOA(db, orgId, { accountName: 'Unbilled Revenue', accountType: 'Income', transactionDate: now, description: `Reversal on billing — ${invNum} — ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: subTotal, credit: 0 });
+    await postTransactionToCOA(db, orgId, { accountName: 'Unbilled Revenue', accountType: 'Income', transactionDate: now, description: `Reversal on billing � ${invNum} � ${project.projectName}`, referenceType: 'Invoice', referenceId: invResult.insertedId.toString(), referenceNumber: invNum, debit: subTotal, credit: 0 });
     res.status(201).json({ success: true, message: `Invoice ${invNum} generated successfully`, data: { invoiceId: invResult.insertedId, invoiceNumber: invNum, totalAmount, entriesBilled: entries.length } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -557,8 +561,8 @@ router.post('/:id/generate-invoice', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.delete('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId });
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const project = await db.collection('projects').findOne({ _id: new ObjectId(req.params.id), orgId, ...branchFilter });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     if (project.invoicesGenerated?.length > 0)
       return res.status(400).json({ success: false, message: 'Cannot delete project with generated invoices. Close the project instead.' });
@@ -574,7 +578,7 @@ router.delete('/:id', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.post('/import', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
     await seedProjectCOAAccounts(db, orgId);
     const { projects = [] } = req.body;
     if (!projects.length) return res.status(400).json({ success: false, message: 'No projects provided' });
@@ -587,7 +591,9 @@ router.post('/import', verifyFinanceJWT, async (req, res) => {
         const projectNumber = await nextProjectNumber(db, orgId);
         const now = new Date();
         await db.collection('projects').insertOne({
-          projectNumber, orgId, projectName: p.projectName,
+          projectNumber, orgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          projectName: p.projectName,
           customerId: p.customerId || '', customerName: p.customerName || '',
           customerEmail: p.customerEmail || '', customerPhone: p.customerPhone || '',
           description: p.description || '', billingMethod: p.billingMethod,
@@ -612,8 +618,8 @@ router.post('/import', verifyFinanceJWT, async (req, res) => {
 // =============================================================================
 router.get('/export/all', verifyFinanceJWT, async (req, res) => {
   try {
-    const db = req.db; const orgId = req.user.orgId;
-    const query = { orgId };
+    const db = req.db; const orgId = req.user.orgId; const branchFilter = req.branchFilter || {};
+    const query = { orgId, ...branchFilter };
     if (req.query.status)        query.status        = req.query.status;
     if (req.query.billingMethod) query.billingMethod = req.query.billingMethod;
     const projects = await db.collection('projects').find(query).sort({ createdAt: -1 }).toArray();

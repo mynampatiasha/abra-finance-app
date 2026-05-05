@@ -7,6 +7,8 @@
 
 import 'package:flutter/material.dart';
 import '../../../../core/services/item_billing_service.dart';
+import '../../../../core/services/billing_vendors_service.dart';
+import 'new_vendor.dart';
 
 // ── Navy palette (matches new_vendor_credit.dart exactly) ─────────────────
 const Color _navyDark   = Color(0xFF0D1B3E);
@@ -41,7 +43,8 @@ class _NewItemBillingState extends State<NewItemBilling> {
   bool    _isPurchasable   = true;
   String  _salesAccount    = 'Sales';
   String  _purchaseAccount = 'Cost of Goods Sold';
-  String? _selectedVendor;
+  String? _selectedVendorId;
+  String? _selectedVendorName;
 
   // ── Loading states (unchanged) ───────────────────────────────────────────
   bool _isLoading = false;
@@ -51,7 +54,6 @@ class _NewItemBillingState extends State<NewItemBilling> {
   final List<String> _units            = ['pcs','dz','kg','ltr','box','carton','unit','hour'];
   final List<String> _salesAccounts    = ['Sales','Service Revenue','Other Income'];
   final List<String> _purchaseAccounts = ['Cost of Goods Sold','Purchases','Direct Expenses'];
-  List<Map<String, dynamic>> _vendors  = [];
 
   // ── initState / dispose (unchanged) ──────────────────────────────────────
 
@@ -77,13 +79,6 @@ class _NewItemBillingState extends State<NewItemBilling> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      try {
-        final vendors = await _service.fetchVendors();
-        setState(() => _vendors = vendors);
-      } catch (e) {
-        print('⚠️ Error loading vendors: $e');
-        setState(() => _vendors = []);
-      }
       if (widget.itemToEdit != null) {
         _populateFormWithData(widget.itemToEdit!);
       }
@@ -103,21 +98,25 @@ class _NewItemBillingState extends State<NewItemBilling> {
     _purchaseDescriptionController.text = data['purchaseDescription'] ?? '';
 
     String? vendorId;
+    String? vendorName;
     if (data['preferredVendor'] != null) {
       if (data['preferredVendor'] is String) {
         vendorId = data['preferredVendor'] as String;
       } else if (data['preferredVendor'] is Map) {
-        vendorId = (data['preferredVendor'] as Map)['_id']?.toString();
+        vendorId   = (data['preferredVendor'] as Map)['_id']?.toString();
+        vendorName = (data['preferredVendor'] as Map)['vendorName']?.toString()
+                  ?? (data['preferredVendor'] as Map)['name']?.toString();
       }
     }
 
     setState(() {
-      _itemType        = data['type'] ?? 'Goods';
-      _isSellable      = data['isSellable'] ?? true;
-      _isPurchasable   = data['isPurchasable'] ?? true;
-      _salesAccount    = data['salesAccount'] ?? 'Sales';
-      _purchaseAccount = data['purchaseAccount'] ?? 'Cost of Goods Sold';
-      _selectedVendor  = vendorId;
+      _itemType          = data['type'] ?? 'Goods';
+      _isSellable        = data['isSellable'] ?? true;
+      _isPurchasable     = data['isPurchasable'] ?? true;
+      _salesAccount      = data['salesAccount'] ?? 'Sales';
+      _purchaseAccount   = data['purchaseAccount'] ?? 'Cost of Goods Sold';
+      _selectedVendorId  = vendorId;
+      _selectedVendorName = vendorName;
     });
   }
 
@@ -137,7 +136,7 @@ class _NewItemBillingState extends State<NewItemBilling> {
         'costPrice':           _isPurchasable ? double.tryParse(_costPriceController.text) : null,
         'purchaseAccount':     _isPurchasable ? _purchaseAccount : null,
         'purchaseDescription': _isPurchasable ? _purchaseDescriptionController.text.trim() : null,
-        'preferredVendor':     _selectedVendor,
+        'preferredVendor':     _selectedVendorId,
       };
       String result;
       if (widget.itemToEdit != null) {
@@ -168,190 +167,119 @@ class _NewItemBillingState extends State<NewItemBilling> {
           behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 4)));
   }
 
-  // ── Vendor selector & add vendor dialogs (unchanged logic) ────────────────
+  // ── Vendor selector (matches new_vendor_credit.dart exactly) ────────────
 
   Future<void> _showVendorSelector() async {
-    final TextEditingController searchController = TextEditingController();
-    List<Map<String, dynamic>> filteredVendors = _vendors;
+    final searchCtrl = TextEditingController();
+    List<BillingVendor> vendors = [];
+    List<BillingVendor> filtered = [];
+    bool loading = true;
+    String? error;
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+          if (loading && vendors.isEmpty) {
+            BillingVendorsService.getAllVendors(
+              sortBy: 'vendorName',
+              sortOrder: 'asc',
+              limit: 1000,
+            ).then((result) {
+              if (result['success'] == true) {
+                final list = (result['data']['vendors'] as List)
+                    .map((j) => BillingVendor.fromJson(j))
+                    .toList();
+                setS(() { vendors = list; filtered = list; loading = false; });
+              } else {
+                setS(() { error = result['message']; loading = false; });
+              }
+            }).catchError((e) => setS(() { error = e.toString(); loading = false; }));
+          }
+
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: Row(children: [
-              const Text('Select Vendor', style: TextStyle(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await _showAddVendorDialog();
-                },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Vendor'),
-                style: TextButton.styleFrom(foregroundColor: _navyAccent),
-              ),
-            ]),
+            title: const Text('Select Vendor'),
             content: SizedBox(
-              width: 400,
-              height: 300,
+              width: 480,
+              height: 400,
               child: Column(children: [
                 TextField(
-                  controller: searchController,
+                  controller: searchCtrl,
                   decoration: InputDecoration(
                     hintText: 'Search vendors...',
                     prefixIcon: const Icon(Icons.search),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  onChanged: (value) {
-                    setDialogState(() {
-                      filteredVendors = value.isEmpty
-                          ? _vendors
-                          : _vendors.where((vendor) =>
-                              (vendor['name'] ?? '').toLowerCase().contains(value.toLowerCase())).toList();
+                  onChanged: (v) {
+                    setS(() {
+                      filtered = v.isEmpty
+                          ? vendors
+                          : vendors.where((vd) =>
+                              vd.vendorName.toLowerCase().contains(v.toLowerCase()) ||
+                              vd.email.toLowerCase().contains(v.toLowerCase())).toList();
                     });
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Expanded(
-                  child: filteredVendors.isEmpty
-                      ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(Icons.business, size: 48, color: Colors.grey[400]),
-                          const SizedBox(height: 8),
-                          Text(_vendors.isEmpty ? 'No vendors yet' : 'No vendors found',
-                              style: TextStyle(color: Colors.grey[600])),
-                          const SizedBox(height: 16),
-                          if (_vendors.isEmpty)
-                            ElevatedButton.icon(
-                              onPressed: () async { Navigator.pop(context); await _showAddVendorDialog(); },
-                              icon: const Icon(Icons.add, size: 18),
-                              label: const Text('Add Your First Vendor'),
-                              style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
-                            ),
-                        ]))
-                      : ListView.builder(
-                          itemCount: filteredVendors.length,
-                          itemBuilder: (context, index) {
-                            final vendor = filteredVendors[index];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: _navyAccent,
-                                child: Text((vendor['name'] ?? 'V')[0].toUpperCase(),
-                                    style: const TextStyle(color: Colors.white)),
-                              ),
-                              title: Text(vendor['name'] ?? ''),
-                              subtitle: vendor['email'] != null ? Text(vendor['email']) : null,
-                              onTap: () {
-                                setState(() => _selectedVendor = vendor['_id']);
-                                Navigator.pop(context);
-                              },
-                            );
-                          },
-                        ),
+                  child: loading
+                      ? const Center(child: CircularProgressIndicator())
+                      : error != null
+                          ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
+                          : filtered.isEmpty
+                              ? const Center(child: Text('No vendors found'))
+                              : ListView.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (_, i) {
+                                    final v = filtered[i];
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: _navyAccent,
+                                        child: Text(v.vendorName[0].toUpperCase(),
+                                            style: const TextStyle(color: Colors.white)),
+                                      ),
+                                      title: Text(v.vendorName),
+                                      subtitle: Text(v.email),
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedVendorId   = v.id;
+                                          _selectedVendorName = v.vendorName;
+                                        });
+                                        Navigator.pop(ctx);
+                                      },
+                                    );
+                                  },
+                                ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => NewVendorPage()),
+                      );
+                      if (result != null && result is Map<String, dynamic>) {
+                        setState(() {
+                          _selectedVendorId   = result['_id']?.toString();
+                          _selectedVendorName = result['vendorName']?.toString() ?? result['name']?.toString();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add New Vendor'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyAccent,
+                      side: const BorderSide(color: _navyAccent),
+                    ),
+                  ),
                 ),
               ]),
             ),
             actions: [
-              TextButton(
-                onPressed: () { setState(() => _selectedVendor = null); Navigator.pop(context); },
-                child: const Text('Clear Selection'),
-              ),
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _showAddVendorDialog() async {
-    final formKey        = GlobalKey<FormState>();
-    final nameController    = TextEditingController();
-    final emailController   = TextEditingController();
-    final phoneController   = TextEditingController();
-    final addressController = TextEditingController();
-    bool isCreating = false;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Text('Add New Vendor', style: TextStyle(fontWeight: FontWeight.bold)),
-            content: SizedBox(
-              width: 400,
-              child: Form(
-                key: formKey,
-                child: SingleChildScrollView(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    TextFormField(
-                      controller: nameController,
-                      decoration: InputDecoration(labelText: 'Vendor Name *',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                          prefixIcon: const Icon(Icons.business)),
-                      validator: (value) => (value == null || value.trim().isEmpty) ? 'Vendor name is required' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: InputDecoration(labelText: 'Email',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                          prefixIcon: const Icon(Icons.email)),
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: phoneController,
-                      decoration: InputDecoration(labelText: 'Phone',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                          prefixIcon: const Icon(Icons.phone)),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: addressController,
-                      decoration: InputDecoration(labelText: 'Address',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                          prefixIcon: const Icon(Icons.location_on)),
-                      maxLines: 2,
-                    ),
-                  ]),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: isCreating ? null : () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: isCreating ? null : () async {
-                  if (!formKey.currentState!.validate()) return;
-                  setDialogState(() => isCreating = true);
-                  try {
-                    final vendorData = {
-                      'name': nameController.text.trim(),
-                      if (emailController.text.trim().isNotEmpty) 'email': emailController.text.trim(),
-                      if (phoneController.text.trim().isNotEmpty) 'phone': phoneController.text.trim(),
-                      if (addressController.text.trim().isNotEmpty) 'address': addressController.text.trim(),
-                    };
-                    final vendor = await _service.createVendor(vendorData);
-                    await _loadData();
-                    setState(() => _selectedVendor = vendor['_id']);
-                    Navigator.pop(context);
-                    _showSuccessSnackBar('Vendor "${vendor['name']}" added successfully');
-                  } catch (e) {
-                    setDialogState(() => isCreating = false);
-                    _showErrorSnackBar('Failed to create vendor: $e');
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
-                child: isCreating
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Add Vendor'),
-              ),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ],
           );
         },
@@ -671,13 +599,6 @@ class _NewItemBillingState extends State<NewItemBilling> {
   // ── Vendor dropdown (unchanged logic) ─────────────────────────────────────
 
   Widget _buildVendorDropdown() {
-    final vendorName = _selectedVendor != null
-        ? (_vendors.firstWhere(
-            (v) => v['_id'] == _selectedVendor,
-            orElse: () => {'name': 'Unknown'},
-          )['name'] ?? 'Unknown')
-        : null;
-
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _fieldLabel('Preferred Vendor'),
       const SizedBox(height: 8),
@@ -691,19 +612,26 @@ class _NewItemBillingState extends State<NewItemBilling> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(children: [
-            Icon(Icons.business_outlined, size: 18, color: vendorName != null ? _navyAccent : Colors.grey[500]),
+            Icon(Icons.business_outlined, size: 18,
+                color: _selectedVendorName != null ? _navyAccent : Colors.grey[500]),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                vendorName ?? 'Select vendor (optional)',
+                _selectedVendorName ?? 'Select vendor (optional)',
                 style: TextStyle(
-                  color: vendorName != null ? _navyDark : Colors.grey[600],
-                  fontWeight: vendorName != null ? FontWeight.w500 : FontWeight.normal,
+                  color: _selectedVendorName != null ? _navyDark : Colors.grey[600],
+                  fontWeight: _selectedVendorName != null ? FontWeight.w500 : FontWeight.normal,
                   fontSize: 14,
                 ),
               ),
             ),
-            Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
+            if (_selectedVendorName != null)
+              GestureDetector(
+                onTap: () => setState(() { _selectedVendorId = null; _selectedVendorName = null; }),
+                child: Icon(Icons.close, size: 18, color: Colors.grey[500]),
+              )
+            else
+              Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
           ]),
         ),
       ),

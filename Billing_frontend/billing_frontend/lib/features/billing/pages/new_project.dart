@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/finance_secure_storage.dart';
 import '../../../../core/services/project_service.dart';
 import '../../../../core/services/billing_customers_service.dart';
 import '../../../../app/config/api_config.dart';
@@ -76,10 +77,18 @@ class _NewProjectScreenState extends State<NewProjectScreen> {
   Future<void> _loadStaff() async {
     setState(() => _loadingStaff = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
-      final res   = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/finance/users'), headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'});
-      final body  = json.decode(res.body) as Map<String, dynamic>;
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final res       = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/finance/users'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'x-branch-ids': branchHdr,
+        },
+      );
+      final body = json.decode(res.body) as Map<String, dynamic>;
       if (body['success'] == true) {
         setState(() { _availableStaff = List<Map<String, dynamic>>.from(body['data'] ?? []); _loadingStaff = false; });
       } else { setState(() => _loadingStaff = false); }

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // PURCHASE ORDER SYSTEM - COMPLETE BACKEND
 // ============================================================================
 // File: backend/routes/purchase_order.js
@@ -66,7 +66,7 @@ function getLogoPath(orgId = null) {
   return CACHED_LOGO_PATH;
 }
 
-// ✅ COA Helper
+// ? COA Helper
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
 async function getSystemAccountId(name, orgId = null) {
@@ -83,6 +83,54 @@ async function getSystemAccountId(name, orgId = null) {
   }
 }
 
+// Looks up (or auto-creates) an expense/COGS account by name for PO line items
+async function getPOExpenseAccountId(accountName, orgId = null) {
+  try {
+    const EXPENSE_TYPES = ['Expense', 'Other Expense', 'Cost Of Goods Sold', 'Equity'];
+
+    // Step 1: exact match on an expense-type account
+    let acc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $in: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id').lean();
+    if (acc) return acc._id;
+
+    // Step 1b: account exists but wrong type — skip COA post safely
+    const wrongTypeAcc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $nin: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id accountType').lean();
+    if (wrongTypeAcc) {
+      console.warn(`⚠️ PO COA: account "${accountName}" is type "${wrongTypeAcc.accountType}" — not an expense account. Skipping.`);
+      return null;
+    }
+
+    // Step 2: not found — auto-create as Expense type
+    console.log(`📝 PO COA: account "${accountName}" not found — creating automatically as Expense type...`);
+    const newAcc = await ChartOfAccount.create({
+      accountName:     accountName,
+      accountCode:     `EXP-${Date.now().toString().slice(-6)}`,
+      accountType:     'Expense',
+      orgId:           orgId,
+      accountSubType:  'Operating Expense',
+      description:     `${accountName} expenses`,
+      isSystemAccount: false,
+      isActive:        true,
+      openingBalance:  0,
+      currentBalance:  0,
+      currency:        'INR',
+      transactions:    [],
+    });
+    console.log(`✅ PO COA: auto-created account "${accountName}" → ID: ${newAcc._id}`);
+    return newAcc._id;
+  } catch (e) {
+    console.error(`COA lookup/create error for PO expense account "${accountName}":`, e.message);
+    return null;
+  }
+}
+
 // ============================================================================
 // MONGOOSE SCHEMAS
 // ============================================================================
@@ -90,6 +138,7 @@ async function getSystemAccountId(name, orgId = null) {
 // Purchase Order Schema
 const purchaseOrderSchema = new mongoose.Schema({
   orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   purchaseOrderNumber: {
     type: String,
     required: true,
@@ -260,7 +309,7 @@ const purchaseOrderSchema = new mongoose.Schema({
   createdBy: { type: String, required: true },
   updatedBy: String,
 
-  // Custom email fields — saved when user edits email preview before sending
+  // Custom email fields � saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -273,7 +322,7 @@ purchaseOrderSchema.pre('save', async function () {
   if (!this.purchaseOrderNumber) {
     const { generateNumber } = require('../utils/numberGenerator');
     this.purchaseOrderNumber = await generateNumber(
-      mongoose.model('PurchaseOrder'), 'purchaseOrderNumber', 'PO', this.orgId || null
+      mongoose.model('PurchaseOrder'), 'purchaseOrderNumber', 'PO', this.orgId || null, this.branchId || null
     );
   }
 
@@ -332,7 +381,7 @@ purchaseOrderSchema.pre('save', async function () {
   ) / 100;
 });
 
-purchaseOrderSchema.index({ orgId: 1, purchaseOrderNumber: 1 }, { unique: true });
+purchaseOrderSchema.index({ orgId: 1, branchId: 1, purchaseOrderNumber: 1 }, { unique: true });
 purchaseOrderSchema.index({ status: 1, expectedDeliveryDate: 1 });
 purchaseOrderSchema.index({ createdAt: -1 });
 
@@ -374,16 +423,15 @@ function formatPOAddress(addr) {
     .filter(Boolean).join(', ');
 }
 
-async function getPOOrgData(orgId) {
+async function getPOOrgData(orgId, branchId = null) {
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({
-        orgId: String, orgName: String, gstNumber: String,
-        address: String, email: String, phone: String, state: String,
-      }), 'organizations');
-    return await OrgModel.findOne({ orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    if (!db) return null;
+    return await getEffectiveOrgData(orgId, branchId, db);
   } catch (e) {
-    console.warn('⚠️ Could not fetch org data:', e.message);
+    console.warn('Could not fetch org data:', e.message);
     return null;
   }
 }
@@ -406,9 +454,9 @@ function numberToWords(n) {
   return s.trim();
 }
 
-async function generatePONumber(orgId = null) {
+async function generatePONumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(PurchaseOrder, 'purchaseOrderNumber', 'PO', orgId);
+  return generateNumber(PurchaseOrder, 'purchaseOrderNumber', 'PO', orgId, branchId);
 }
 
 function calcItemAmount(item) {
@@ -431,10 +479,10 @@ function getCreator(req) {
 // PDF GENERATION
 // ============================================================================
 
-async function generatePurchaseOrderPDF(po, orgId) {
+async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log('📄 Starting PDF generation for PO:', po.purchaseOrderNumber);
+      console.log('Starting PDF generation for PO:', po.purchaseOrderNumber);
 
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'purchase-orders');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -444,9 +492,7 @@ async function generatePurchaseOrderPDF(po, orgId) {
 
       let orgName = 'Your Company', orgGST = '', orgAddr = '', orgEmail = '', orgPhone = '', orgData = null;
       try {
-        const OrgModel = mongoose.models.Organization ||
-          mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        orgData = await OrgModel.findOne({ orgId }).lean();
+        orgData = await getPOOrgData(orgId, branchId);
         if (orgData) {
           orgName  = orgData.orgName    || orgName;
           orgGST   = orgData.gstNumber  || '';
@@ -454,15 +500,20 @@ async function generatePurchaseOrderPDF(po, orgId) {
           orgEmail = orgData.email      || '';
           orgPhone = orgData.phone      || '';
         }
-      } catch (e) { console.warn('⚠️ Org fetch failed:', e.message); }
+      } catch (e) { console.warn('Org fetch failed:', e.message); }
 
       const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
       const pageW = 515;
 
-      // ── Header (white background, invoice style) ────────────────────────────
-      const logoPath = getLogoPath(orgId);
+      // -- Header (white background, invoice style) ----------------------------
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getLogoPath(orgId);
       let logoLoaded = false;
 
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
@@ -475,16 +526,23 @@ async function generatePurchaseOrderPDF(po, orgId) {
 
       if (logoPath) {
         try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); logoLoaded = true; }
-        catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+        catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let cY = textStartY + 26;
-      contactLines.forEach(l => { doc.text(l, textX, cY, { width: 240 }); cY += 9; });
+      let cY = subtitleY + 12;
+      contactLines.forEach(l => {
+        doc.text(l, textX, cY, { width: 240 });
+        const lineH = doc.heightOfString(l, { width: 240 });
+        cY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('PURCHASE ORDER', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -493,32 +551,45 @@ async function generatePurchaseOrderPDF(po, orgId) {
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(po.purchaseOrderDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`${(po.status || 'DRAFT').replace(/_/g,' ')}${po.expectedDeliveryDate ? ' · Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}`, 380, 92, { width: 170, align: 'right' });
+         .text(`${(po.status || 'DRAFT').replace(/_/g,' ')}${po.expectedDeliveryDate ? ' � Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}`, 380, 92, { width: 170, align: 'right' });
 
-      // ── Meta boxes — 3-column invoice style ──────────────────────────────────
-      const metaY = 132;
+      // -- Meta boxes � 3-column invoice style ----------------------------------
+      const metaY = Math.max(132, cY + 8);
       const colW  = pageW / 3;
-      const metaH = 90;
 
       // Col 1: Vendor / Bill To
       const billX = 40;
+      const ba = po.billingAddress || {};
+      const baLine = [ba.street, ba.city, ba.state, ba.zip].filter(Boolean).join(', ');
+
+      // Dynamic box height
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _vendorNameH = doc.heightOfString(po.vendorName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _baH  = baLine ? doc.heightOfString(baLine, { width: colW - 16 }) : 0;
+      const _gstH = po.vendorGSTIN ? 10 : 0;
+      const metaH = Math.max(90, 18 + _vendorNameH + 2 + _baH + _gstH + 10);
+
       doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('VENDOR / BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-         .text(po.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
-      const ba = po.billingAddress || {};
-      const baLine = [ba.street, ba.city, ba.state, ba.zip].filter(Boolean).join(', ');
+         .text(po.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const vendorNameH = doc.heightOfString(po.vendorName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + vendorNameH + 2;
       if (baLine) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(baLine, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(baLine, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       } else if (po.vendorEmail) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(po.vendorEmail, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(po.vendorEmail, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (po.vendorGSTIN) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(`GSTIN: ${po.vendorGSTIN}`, billX + 8, metaY + 40, { width: colW - 16, ellipsis: true });
+        doc.fontSize(7).font('Helvetica');
+        const addrH = baLine ? doc.heightOfString(baLine, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000')
+           .text(`GSTIN: ${po.vendorGSTIN}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16, ellipsis: true });
       }
 
       // Col 2: Ship To / Delivery Address
@@ -557,7 +628,7 @@ async function generatePurchaseOrderPDF(po, orgId) {
 
       let tableStartY = metaY + metaH + 12;
 
-      // ── Items table — invoice style columns ──────────────────────────────────
+      // -- Items table � invoice style columns ----------------------------------
       const cols = {
         num:    { x: 40,  w: 16  },
         desc:   { x: 56,  w: 130 },
@@ -600,7 +671,7 @@ async function generatePurchaseOrderPDF(po, orgId) {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '—';
+          : '�';
         const taxable = item.taxableAmount || 0;
         const gstRate = item.itemGstRate || 0;
         const cellY   = rowY + vPad;
@@ -620,7 +691,7 @@ async function generatePurchaseOrderPDF(po, orgId) {
         rowY += rowH;
       });
 
-      // ── Totals ───────────────────────────────────────────────────────────────
+      // -- Totals ---------------------------------------------------------------
       const totalsX = 315, totalsW = 240, labelX = totalsX, amountX = totalsX + totalsW;
       let totalsY = rowY + 12;
       const tRow = (label, amount, bold = false) => {
@@ -670,26 +741,56 @@ async function generatePurchaseOrderPDF(po, orgId) {
       const authBoxX     = 555 - signBoxW;
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30).lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _poSigRelPath = orgData?.digitalSignaturePath;
+      const _poSigSize    = 200;
+      let   _poActualSigH = _poSigSize;
+      if (_poSigRelPath) {
+        try {
+          const _poSigAbs = path.join(__dirname, '..', _poSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_poSigAbs)) {
+            let _poW = _poSigSize, _poH = _poSigSize;
+            try {
+              const _poBuf = fs.readFileSync(_poSigAbs);
+              const _poExt = path.extname(_poSigAbs).toLowerCase();
+              if (_poExt === '.png' && _poBuf.length > 24) { _poW = _poBuf.readUInt32BE(16); _poH = _poBuf.readUInt32BE(20); }
+              else if ((_poExt === '.jpg' || _poExt === '.jpeg') && _poBuf.length > 4) {
+                let _poi = 2;
+                while (_poi < _poBuf.length - 8) {
+                  if (_poBuf[_poi] === 0xFF && _poBuf[_poi+1] >= 0xC0 && _poBuf[_poi+1] <= 0xC3) { _poH = _poBuf.readUInt16BE(_poi+5); _poW = _poBuf.readUInt16BE(_poi+7); break; }
+                  _poi += 2 + _poBuf.readUInt16BE(_poi + 2);
+                }
+              }
+            } catch (_) {}
+            const _poScale = Math.min(_poSigSize / _poW, _poSigSize / _poH);
+            _poActualSigH  = Math.round(_poH * _poScale);
+            const _poActualSigW = Math.round(_poW * _poScale);
+            doc.image(_poSigAbs, authBoxX + (signBoxW - _poActualSigW) / 2, signSectionY + 10, { width: _poActualSigW, height: _poActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _poSigLineY = signSectionY + 10 + _poActualSigH + 14;
+      doc.moveTo(authBoxX, _poSigLineY).lineTo(authBoxX + signBoxW, _poSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _poSigLineY + 3, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${po.purchaseOrderNumber}`, 40, footY + 6, { width: pageW / 2 });
+         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${po.purchaseOrderNumber}`, 40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
       stream.on('finish', () => {
-        console.log(`✅ PO PDF generated: ${filename}`);
+        console.log(`? PO PDF generated: ${filename}`);
         resolve({ filename, filepath, relativePath: `/uploads/purchase-orders/${filename}` });
       });
       stream.on('error', reject);
     } catch (error) {
-      console.error('❌ PO PDF generation error:', error);
+      console.error('? PO PDF generation error:', error);
       reject(error);
     }
   });
@@ -709,21 +810,19 @@ const emailTransporter = nodemailer.createTransport({
   }
 });
 
-async function sendPurchaseOrderEmail(po, pdfPath, orgId) {
+async function sendPurchaseOrderEmail(po, pdfPath, orgId, branchId = null) {
   let orgName  = '';
   let orgGST   = '';
   let orgPhone = '';
   let orgEmail = '';
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId }).lean();
+    const org = await getPOOrgData(orgId, branchId);
     orgName  = org?.orgName   || '';
     orgGST   = org?.gstNumber || '';
     orgPhone = org?.phone     || '';
     orgEmail = org?.email     || '';
   } catch (e) {
-    console.warn('⚠️ Could not fetch org details for PO email:', e.message);
+    console.warn('Could not fetch org details for PO email:', e.message);
   }
 
   const itemsHtml = po.items.map(item => `
@@ -841,7 +940,7 @@ async function sendPurchaseOrderEmail(po, pdfPath, orgId) {
   return emailTransporter.sendMail({
     from: `"${orgName} - Purchase" <${process.env.SMTP_USER}>`,
     to: po.vendorEmail,
-    subject: `Purchase Order ${po.purchaseOrderNumber} — Rs. ${po.totalAmount.toFixed(2)}`,
+    subject: `Purchase Order ${po.purchaseOrderNumber} � Rs. ${po.totalAmount.toFixed(2)}`,
     html: emailHtml,
     attachments: [{
       filename: `PO-${po.purchaseOrderNumber}.pdf`,
@@ -917,7 +1016,7 @@ router.post('/vendors', async (req, res) => {
     const vendor = new Vendor(data);
     await vendor.save();
 
-    console.log(`✅ Vendor created: ${vendor.vendorName}`);
+    console.log(`? Vendor created: ${vendor.vendorName}`);
     res.status(201).json({ success: true, message: 'Vendor created', data: vendor });
   } catch (error) {
     console.error('Error creating vendor:', error);
@@ -932,7 +1031,10 @@ router.post('/vendors', async (req, res) => {
 // GET /api/purchase-orders/stats
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const [
       total,
       draft,
@@ -976,6 +1078,7 @@ router.get('/', async (req, res) => {
 
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     if (status) query.status = status;
     if (fromDate || toDate) {
       query.purchaseOrderDate = {};
@@ -1020,7 +1123,8 @@ router.get('/:id', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
     res.json({ success: true, data: po });
@@ -1050,7 +1154,7 @@ router.post('/', async (req, res) => {
 
     // Generate PO number
     if (!data.purchaseOrderNumber) {
-      data.purchaseOrderNumber = await generatePONumber(req.user?.orgId || null);
+      data.purchaseOrderNumber = await generatePONumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     }
 
     // Calculate item amounts
@@ -1063,46 +1167,56 @@ router.post('/', async (req, res) => {
 
     data.createdBy = getCreator(req);
     data.orgId = req.user?.orgId || null;
+    data.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     const po = new PurchaseOrder(data);
     await po.save();
-// ✅ COA: Debit Expense + Credit Accounts Payable + TDS + TCS
+// ✅ COA: Debit each line item's expense account + Credit AP + GST Input Credit + TDS/TCS
 try {
   const currentOrgId = req.user?.orgId || null;
-  const [expenseId, apId, taxId, tdsPayableId, tdsReceivableId] = await Promise.all([
-    getSystemAccountId('Cost of Goods Sold', currentOrgId),
+  const [apId, gstInputId, tdsPayableId, tdsReceivableId] = await Promise.all([
     getSystemAccountId('Accounts Payable', currentOrgId),
-    getSystemAccountId('Tax Payable', currentOrgId),
+    getSystemAccountId('GST Input Credit', currentOrgId),
     getSystemAccountId('TDS Payable', currentOrgId),
     getSystemAccountId('TDS Receivable', currentOrgId),
   ]);
   const txnDate = new Date(po.purchaseOrderDate);
+  const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
-  if (expenseId) await postTransactionToCOA({
-    accountId: expenseId, orgId: currentOrgId, date: txnDate,
-    description: `PO ${po.purchaseOrderNumber} - ${po.vendorName}`,
-    referenceType: 'Bill', referenceId: po._id,
-    referenceNumber: po.purchaseOrderNumber,
-    debit: po.subTotal, credit: 0
-  });
+  // Debit each line item to its own expense account
+  for (const item of po.items) {
+    const accountName = item.account || 'Cost of Goods Sold';
+    const itemAccId = await getPOExpenseAccountId(accountName, currentOrgId);
+    if (itemAccId) {
+      await postTransactionToCOA({
+        accountId: itemAccId, orgId: currentOrgId, branchId, date: txnDate,
+        description: `PO ${po.purchaseOrderNumber} - ${po.vendorName} - ${item.itemDetails || item.description || ''}`,
+        referenceType: 'Bill', referenceId: po._id,
+        referenceNumber: po.purchaseOrderNumber,
+        debit: item.amount, credit: 0
+      });
+    }
+  }
 
+  // Credit Accounts Payable for full PO total
   if (apId) await postTransactionToCOA({
-    accountId: apId, orgId: currentOrgId, date: txnDate,
+    accountId: apId, orgId: currentOrgId, branchId, date: txnDate,
     description: `PO ${po.purchaseOrderNumber} - ${po.vendorName}`,
     referenceType: 'Bill', referenceId: po._id,
     referenceNumber: po.purchaseOrderNumber,
     debit: 0, credit: po.totalAmount
   });
 
-  if (taxId && (po.cgst + po.sgst) > 0) await postTransactionToCOA({
-    accountId: taxId, orgId: currentOrgId, date: txnDate,
-    description: `GST on PO ${po.purchaseOrderNumber}`,
+  // Debit GST Input Credit (input tax credit — asset, not Tax Payable)
+  if (gstInputId && (po.cgst + po.sgst) > 0) await postTransactionToCOA({
+    accountId: gstInputId, orgId: currentOrgId, branchId, date: txnDate,
+    description: `GST Input Credit on PO ${po.purchaseOrderNumber}`,
     referenceType: 'Bill', referenceId: po._id,
     referenceNumber: po.purchaseOrderNumber,
     debit: po.cgst + po.sgst, credit: 0
   });
 
   if (tdsPayableId && po.tdsAmount > 0) await postTransactionToCOA({
-    accountId: tdsPayableId, orgId: currentOrgId, date: txnDate,
+    accountId: tdsPayableId, orgId: currentOrgId, branchId, date: txnDate,
     description: `TDS on PO ${po.purchaseOrderNumber}`,
     referenceType: 'Bill', referenceId: po._id,
     referenceNumber: po.purchaseOrderNumber,
@@ -1110,7 +1224,7 @@ try {
   });
 
   if (tdsReceivableId && po.tcsAmount > 0) await postTransactionToCOA({
-    accountId: tdsReceivableId, orgId: currentOrgId, date: txnDate,
+    accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate,
     description: `TCS on PO ${po.purchaseOrderNumber}`,
     referenceType: 'Bill', referenceId: po._id,
     referenceNumber: po.purchaseOrderNumber,
@@ -1122,7 +1236,7 @@ try {
   console.error('⚠️ COA post error (PO create):', coaErr.message);
 }
 
-    console.log(`✅ Purchase order created: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order created: ${po.purchaseOrderNumber}`);
     res.status(201).json({ success: true, message: 'Purchase order created', data: po });
   } catch (error) {
     console.error('Error creating PO:', error);
@@ -1135,7 +1249,8 @@ router.put('/:id', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1159,7 +1274,7 @@ router.put('/:id', async (req, res) => {
     Object.assign(po, updates);
     await po.save();
 
-    console.log(`✅ Purchase order updated: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order updated: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase order updated', data: po });
   } catch (error) {
     console.error('Error updating PO:', error);
@@ -1167,12 +1282,13 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// POST /api/purchase-orders/:id/issue - Issue PO (DRAFT → ISSUED)
+// POST /api/purchase-orders/:id/issue - Issue PO (DRAFT ? ISSUED)
 router.post('/:id/issue', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1187,10 +1303,36 @@ router.post('/:id/issue', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase order issued: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order issued: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase order issued', data: po });
   } catch (error) {
     console.error('Error issuing PO:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PATCH /api/purchase-orders/:id/mark-as-sent — mark as ISSUED without sending email
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const po = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    });
+    if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
+
+    if (!['DRAFT'].includes(po.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark a ${po.status} purchase order as sent` });
+    }
+
+    po.status    = 'ISSUED';
+    po.updatedBy = getCreator(req);
+    await po.save();
+
+    console.log(`✅ Purchase order marked as sent (no email): ${po.purchaseOrderNumber}`);
+    res.json({ success: true, message: 'Purchase order marked as sent', data: po });
+  } catch (error) {
+    console.error('Error marking PO as sent:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1200,20 +1342,29 @@ router.post('/:id/send', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
+
+    // If vendorEmail not stored on PO, try to fetch it from the Vendor record
+    if (!po.vendorEmail && po.vendorId) {
+      const vendor = await Vendor.findById(po.vendorId);
+      if (vendor && vendor.vendorEmail) {
+        po.vendorEmail = vendor.vendorEmail;
+      }
+    }
 
     if (!po.vendorEmail) {
       return res.status(400).json({
         success: false,
-        error: 'Vendor email is required to send purchase order'
+        error: 'Vendor email is required to send purchase order. Please update the vendor\'s email address.'
       });
     }
 
     // Generate PDF if not exists
     if (!po.pdfPath || !fs.existsSync(po.pdfPath)) {
-      const pdfInfo = await generatePurchaseOrderPDF(po, req.user?.orgId);
+      const pdfInfo = await generatePurchaseOrderPDF(po, req.user?.orgId, po.branchId || null);
       po.pdfPath = pdfInfo.filepath;
       po.pdfGeneratedAt = new Date();
     }
@@ -1240,7 +1391,7 @@ router.post('/:id/send', async (req, res) => {
       });
     } else {
       // Send email
-      await sendPurchaseOrderEmail(po, po.pdfPath, req.user?.orgId);
+      await sendPurchaseOrderEmail(po, po.pdfPath, req.user?.orgId, po.branchId || null);
     }
 
     // Update status to ISSUED if still DRAFT
@@ -1257,7 +1408,7 @@ router.post('/:id/send', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase order sent: ${po.purchaseOrderNumber} to ${po.vendorEmail}`);
+    console.log(`? Purchase order sent: ${po.purchaseOrderNumber} to ${po.vendorEmail}`);
     res.json({ success: true, message: 'Purchase order sent successfully', data: po });
   } catch (error) {
     console.error('Error sending PO:', error);
@@ -1270,7 +1421,8 @@ router.post('/:id/receive', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1335,7 +1487,7 @@ router.post('/:id/receive', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase receive recorded for: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase receive recorded for: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase receive recorded', data: po });
   } catch (error) {
     console.error('Error recording receive:', error);
@@ -1348,7 +1500,8 @@ router.post('/:id/convert-to-bill', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1390,6 +1543,7 @@ router.post('/:id/convert-to-bill', async (req, res) => {
       status: 'OPEN',
       createdBy: getCreator(req),
       orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
     };
 
     // Try to create bill via Bill model if available
@@ -1399,7 +1553,7 @@ router.post('/:id/convert-to-bill', async (req, res) => {
       savedBill = new BillModel(billData);
       await savedBill.save();
     } catch (billModelError) {
-      // Bill model may not be available — create a raw document
+      // Bill model may not be available � create a raw document
       const dynamicBillSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
       let DynamicBill;
       try {
@@ -1426,7 +1580,7 @@ router.post('/:id/convert-to-bill', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase order converted to bill: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order converted to bill: ${po.purchaseOrderNumber}`);
     res.json({
       success: true,
       message: 'Purchase order converted to bill successfully',
@@ -1461,7 +1615,8 @@ router.post('/:id/cancel', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1476,7 +1631,7 @@ router.post('/:id/cancel', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase order cancelled: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order cancelled: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase order cancelled', data: po });
   } catch (error) {
     console.error('Error cancelling PO:', error);
@@ -1489,7 +1644,8 @@ router.post('/:id/close', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1504,7 +1660,7 @@ router.post('/:id/close', async (req, res) => {
     po.updatedBy = getCreator(req);
     await po.save();
 
-    console.log(`✅ Purchase order closed: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order closed: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase order closed', data: po });
   } catch (error) {
     console.error('Error closing PO:', error);
@@ -1523,19 +1679,29 @@ router.get('/:id/pdf', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
-    if (!po.pdfPath || !fs.existsSync(po.pdfPath)) {
-      const pdfInfo = await generatePurchaseOrderPDF(po, req.user?.orgId);
-      po.pdfPath = pdfInfo.filepath;
-      po.pdfGeneratedAt = new Date();
-      await po.save();
-    }
+    // Always regenerate so logo/org changes are reflected immediately
+    const pdfInfo = await generatePurchaseOrderPDF(po, req.user?.orgId, po.branchId || null);
+    po.pdfPath = pdfInfo.filepath;
+    po.pdfGeneratedAt = new Date();
+    await po.save();
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="PO-${po.purchaseOrderNumber}.pdf"`);
@@ -1546,15 +1712,50 @@ router.get('/:id/pdf', async (req, res) => {
   }
 });
 
+// GET /api/purchase-orders/:id/download-url
+router.get('/:id/download-url', async (req, res) => {
+  try {
+    const po = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
+    });
+    
+    if (!po) {
+      return res.status(404).json({ success: false, error: 'Purchase order not found' });
+    }
+    
+    // Generate PDF if not exists
+    if (!po.pdfPath || !fs.existsSync(po.pdfPath)) {
+      const pdfInfo = await generatePurchaseOrderPDF(po, req.user?.orgId);
+      po.pdfPath = pdfInfo.filepath;
+      po.pdfGeneratedAt = new Date();
+      await po.save();
+    }
+    
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const downloadUrl = `${baseUrl}/uploads/purchase-orders/${path.basename(po.pdfPath)}`;
+    
+    res.json({
+      success: true,
+      downloadUrl: downloadUrl,
+      filename: `PO-${po.purchaseOrderNumber}.pdf`
+    });
+  } catch (error) {
+    console.error('Error generating PDF URL:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/purchase-orders/:id/email-preview
 // GET /api/purchase-orders/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const po = await PurchaseOrder.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const po = await PurchaseOrder.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
     const orgName  = org?.orgName    || '';
     const orgGST   = org?.gstNumber  || '';
     const orgPhone = org?.phone      || '';
@@ -1638,17 +1839,17 @@ router.get('/:id/email-preview', async (req, res) => {
 </div>
 </body>
 </html>`;
-    res.json({ success: true, data: { subject: `Purchase Order ${po.purchaseOrderNumber} — Rs.${(po.totalAmount || 0).toFixed(2)}`, html, to: po.vendorEmail } });
+    res.json({ success: true, data: { subject: `Purchase Order ${po.purchaseOrderNumber} � Rs.${(po.totalAmount || 0).toFixed(2)}`, html, to: po.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview — save custom email content
+// PATCH /:id/email-preview � save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const po = await PurchaseOrder.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const po = await PurchaseOrder.findOne({ _id: req.params.id, ...req.orgFilter, ...(req.branchFilter || {}) });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
     if (to !== undefined)      po.customEmailTo      = to;
     if (subject !== undefined) po.customEmailSubject = subject;
@@ -1665,7 +1866,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const po = await PurchaseOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!po) return res.status(404).json({ success: false, error: 'Purchase order not found' });
 
@@ -1677,7 +1879,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     await po.deleteOne();
-    console.log(`✅ Purchase order deleted: ${po.purchaseOrderNumber}`);
+    console.log(`? Purchase order deleted: ${po.purchaseOrderNumber}`);
     res.json({ success: true, message: 'Purchase order deleted' });
   } catch (error) {
     console.error('Error deleting PO:', error);
@@ -1708,7 +1910,7 @@ router.post('/bulk-import', async (req, res) => {
 
         // Generate PO number if not provided
         if (!poData.purchaseOrderNumber) {
-          poData.purchaseOrderNumber = await generatePONumber(req.user?.orgId || null);
+          poData.purchaseOrderNumber = await generatePONumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         }
 
         // Handle vendorId
@@ -1716,7 +1918,8 @@ router.post('/bulk-import', async (req, res) => {
 
         // Set creator
         poData.createdBy = creator;
-        poData.orgId = req.user?.orgId || null;
+        poData.orgId    = req.user?.orgId || null;
+        poData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
         // Build basic items if not provided
         if (!poData.items || poData.items.length === 0) {
@@ -1732,6 +1935,36 @@ router.post('/bulk-import', async (req, res) => {
 
         const po = new PurchaseOrder(poData);
         await po.save();
+
+        // ── COA posting: debit each line item's expense account, credit AP ──
+        try {
+          const currentOrgId = req.user?.orgId || null;
+          const [apId, gstInputId, tdsPayableId, tdsReceivableId] = await Promise.all([
+            getSystemAccountId('Accounts Payable',   currentOrgId),
+            getSystemAccountId('GST Input Credit',   currentOrgId),
+            getSystemAccountId('TDS Payable',         currentOrgId),
+            getSystemAccountId('TDS Receivable',      currentOrgId),
+          ]);
+          const txnDate = new Date(po.purchaseOrderDate || new Date());
+          const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+          for (const item of po.items) {
+            const accountName = item.account || 'Cost of Goods Sold';
+            const itemAccId = await getPOExpenseAccountId(accountName, currentOrgId);
+            if (itemAccId) {
+              await postTransactionToCOA({ accountId: itemAccId, orgId: currentOrgId, branchId, date: txnDate, description: `PO ${po.purchaseOrderNumber} - ${po.vendorName} - ${item.itemDetails || item.description || ''}`, referenceType: 'Bill', referenceId: po._id, referenceNumber: po.purchaseOrderNumber, debit: item.amount, credit: 0 });
+            }
+          }
+          if (apId) await postTransactionToCOA({ accountId: apId, orgId: currentOrgId, branchId, date: txnDate, description: `PO ${po.purchaseOrderNumber} - ${po.vendorName}`, referenceType: 'Bill', referenceId: po._id, referenceNumber: po.purchaseOrderNumber, debit: 0, credit: po.totalAmount });
+          if (gstInputId && (po.cgst + po.sgst) > 0) await postTransactionToCOA({ accountId: gstInputId, orgId: currentOrgId, branchId, date: txnDate, description: `GST Input Credit on PO ${po.purchaseOrderNumber}`, referenceType: 'Bill', referenceId: po._id, referenceNumber: po.purchaseOrderNumber, debit: po.cgst + po.sgst, credit: 0 });
+          if (tdsPayableId    && po.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TDS on PO ${po.purchaseOrderNumber}`, referenceType: 'Bill', referenceId: po._id, referenceNumber: po.purchaseOrderNumber, debit: 0, credit: po.tdsAmount });
+          if (tdsReceivableId && po.tcsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TCS on PO ${po.purchaseOrderNumber}`, referenceType: 'Bill', referenceId: po._id, referenceNumber: po.purchaseOrderNumber, debit: po.tcsAmount, credit: 0 });
+          console.log(`   ✅ COA posted for imported PO: ${po.purchaseOrderNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (PO bulk import row ${i + 1}):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
+
         successCount++;
       } catch (e) {
         failedCount++;
@@ -1739,7 +1972,7 @@ router.post('/bulk-import', async (req, res) => {
       }
     }
 
-    console.log(`✅ Bulk import: ${successCount} success, ${failedCount} failed`);
+    console.log(`? Bulk import: ${successCount} success, ${failedCount} failed`);
 
     res.json({
       success: true,

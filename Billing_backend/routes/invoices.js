@@ -43,6 +43,7 @@ const multer = require('multer');
 
 // ✅ COA Helper
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+const { sendMail } = require('../utils/mailer');
 
 async function getSystemAccountId(name, orgId = null) {
   try {
@@ -219,8 +220,9 @@ const invoiceItemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const invoiceSchema = new mongoose.Schema({
-  invoiceNumber: { type: String, required: true, unique: true, index: true },
+  invoiceNumber: { type: String, required: true, index: true },
   orgId:         { type: String, index: true, default: null },
+  branchId:      { type: String, index: true, default: null },
 
   // ── Customer ────────────────────────────────────────────────────────────────
   customerId:    { type: String, required: true },
@@ -248,8 +250,8 @@ const invoiceSchema = new mongoose.Schema({
   invoiceDate:     { type: Date, required: true, default: Date.now },
   terms: {
     type: String,
-    enum: ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'],
-    default: 'Net 30',
+    enum: ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60', 'Custom'],
+    default: 'Custom',
   },
   dueDate:    { type: Date, required: true },
   salesperson: String,
@@ -342,6 +344,23 @@ const invoiceSchema = new mongoose.Schema({
     sentAt:    Date,
     emailType: { type: String, enum: ['invoice','reminder','payment_receipt'] },
   }],
+
+  // ── Reminder Automation Fields ────────────────────────────────────────────
+  reminderPaused:     { type: Boolean, default: false },
+  reminderPausedBy:   { type: String,  default: null  },
+  reminderPausedAt:   { type: Date,    default: null  },
+  reminderCount:      { type: Number,  default: 0     },
+  lastReminderSentAt: { type: Date,    default: null  },
+  reminderLog: [{
+    sentAt:         { type: Date   },
+    channel:        { type: String, enum: ['email', 'whatsapp'] },
+    type:           { type: String, enum: ['overdue', 'predue'], default: 'overdue' },
+    success:        { type: Boolean },
+    failReason:     { type: String  },
+    recipientEmail: { type: String  },
+    recipientPhone: { type: String  },
+  }],
+
   pdfPath:        String,
   pdfGeneratedAt: Date,
   createdBy:      { type: String, required: true },
@@ -456,11 +475,16 @@ invoiceSchema.pre('save', async function () {
     this.status = 'PAID';
   }
   if (this.status !== 'PAID' && this.status !== 'DRAFT' &&
-      this.status !== 'CANCELLED' && this.dueDate < new Date()) {
-    this.status = 'OVERDUE';
+      this.status !== 'CANCELLED' && this.status !== 'SENT') {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    if (this.dueDate < todayStart) {
+      this.status = 'OVERDUE';
+    }
   }
 });
 
+invoiceSchema.index({ orgId: 1, branchId: 1, invoiceNumber: 1 }, { unique: true });
 invoiceSchema.index({ customerId: 1, invoiceDate: -1 });
 invoiceSchema.index({ status: 1, dueDate: 1 });
 invoiceSchema.index({ createdAt: -1 });
@@ -488,9 +512,9 @@ function numberToWords(n) {
   return s.trim();
 }
 
-async function generateInvoiceNumber(orgId = null) {
+async function generateInvoiceNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(Invoice, 'invoiceNumber', 'INV', orgId);
+  return generateNumber(Invoice, 'invoiceNumber', 'INV', orgId, branchId);
 }
 
 function calculateDueDate(invoiceDate, terms) {
@@ -517,15 +541,15 @@ function calculateItemAmount(item) {
   return Math.round(amount * 100) / 100;
 }
 
-// ── NEW: Get org data (shared helper for PDF + email + org-state route) ────────
-async function getOrgData(orgId) {
+// ── Get org data — branch-aware (branch fields override org fields) ───────────
+// Uses getEffectiveOrgData from branches.js so all PDF routes share one helper.
+const { getEffectiveOrgData } = require('./branches');
+
+async function getOrgData(orgId, branchId = null) {
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({
-        orgId: String, orgName: String, gstNumber: String,
-        address: String, email: String, phone: String, state: String,
-      }), 'organizations');
-    return await OrgModel.findOne({ orgId }).lean();
+    const db = mongoose.connection.db;
+    if (!db) return null;
+    return await getEffectiveOrgData(orgId, branchId, db);
   } catch (e) {
     console.warn('⚠️ Could not fetch org data:', e.message);
     return null;
@@ -614,7 +638,7 @@ function getPaymentInfo(invoice, org) {
 // PDF GENERATION — ZOHO BOOKS STYLE (original structure + new GST columns)
 // ============================================================================
 
-async function generateInvoicePDF(invoice, orgId) {
+async function generateInvoicePDF(invoice, orgId, branchId = null) {
   return new Promise(async (resolve, reject) => {
     try {
       console.log('📄 Starting PDF generation for invoice:', invoice.invoiceNumber);
@@ -625,7 +649,7 @@ async function generateInvoicePDF(invoice, orgId) {
       const filename = `invoice-${invoice.invoiceNumber}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      // ── Fetch org details from DB (original) ────────────────────────────────
+      // ── Fetch org details from DB (branch-aware) ────────────────────────────
       let orgName  = 'Your Company';
       let orgGST   = '';
       let orgAddr  = '';
@@ -634,7 +658,7 @@ async function generateInvoicePDF(invoice, orgId) {
       let orgState = '';
       let orgData  = null;
       try {
-        orgData  = await getOrgData(orgId);
+        orgData  = await getOrgData(orgId, branchId);
         if (orgData) {
           orgName  = orgData.orgName  || orgName;
           orgGST   = orgData.gstNumber || '';
@@ -654,7 +678,12 @@ async function generateInvoicePDF(invoice, orgId) {
       // ═══════════════════════════════════════════════════════════════════════
       // HEADER — white background, black text
       // ═══════════════════════════════════════════════════════════════════════
-      const logoPath = getOrgLogoPath(orgId || null);
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getOrgLogoPath(orgId || null);
       let logoLoaded = false;
 
       const textX = logoPath ? 126 : 50;
@@ -662,7 +691,6 @@ async function generateInvoicePDF(invoice, orgId) {
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail]
         .filter(Boolean);
 
-      // Calculate total text block height for vertical centering of logo
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
@@ -678,12 +706,23 @@ async function generateInvoicePDF(invoice, orgId) {
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      // Measure actual height of org name so subtitle never overlaps a wrapped name
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
 
       doc.fontSize(7).fillColor('#000000');
-      let contactY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+      let contactY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, contactY, { width: 240 });
+        // Measure actual rendered height so the next line never overlaps
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
+      });
+
+
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('TAX INVOICE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -697,11 +736,18 @@ async function generateInvoicePDF(invoice, orgId) {
       // ═══════════════════════════════════════════════════════════════════════
       // META GRID — Single row: Bill To | Ship To | Invoice Details
       // ═══════════════════════════════════════════════════════════════════════
-      const metaY    = 132;
+      const metaY    = Math.max(132, contactY + 8);  // dynamic: clears header text, min 132
       const colW     = pageW / 3;   // three equal columns
       const billingStr = formatAddress(invoice.billingAddress);
       const shipStr    = formatAddress(invoice.shippingAddress);
-      const metaH      = 90;  // fixed taller height to fit name + address + GSTIN comfortably
+
+      // Calculate Bill To box height dynamically so nothing gets clipped
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _custNameH = doc.heightOfString(invoice.customerName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _addrH  = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const _gstH   = invoice.customerGSTIN ? 10 : 0;
+      const metaH   = Math.max(90, 18 + _custNameH + 2 + _addrH + _gstH + 10);
 
       // ── Col 1: Bill To ──────────────────────────────────────────────────
       const billX = 40;
@@ -709,17 +755,20 @@ async function generateInvoicePDF(invoice, orgId) {
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-         .text(invoice.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+         .text(invoice.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      // Measure customer name height so address starts below it, never overlapping
+      doc.fontSize(9).font('Helvetica-Bold');
+      const custNameH = doc.heightOfString(invoice.customerName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + custNameH + 2;
       if (billingStr) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (invoice.customerGSTIN) {
-        const billingStr = formatAddress(invoice.billingAddress);
-        // estimate lines used by address text
-        const addrLineCount = billingStr ? Math.ceil(billingStr.length / 35) : 0;
-        const gstY = metaY + 30 + (addrLineCount * 9);
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        const gstY  = billAddrY + addrH + 2;
+        doc.fillColor('#000000')
            .text(`GSTIN: ${invoice.customerGSTIN}`, billX + 8, gstY, { width: colW - 16 });
       }
 
@@ -904,6 +953,19 @@ async function generateInvoicePDF(invoice, orgId) {
       const payInfo = getPaymentInfo(invoice, orgData);
       let notesY    = wordsY + 28;
 
+      // ── Page-break helper: if Y is too close to the bottom, add a new page ─
+      const PAGE_BOTTOM = 720; // safe bottom margin (A4 usable ~760, leave room for footer)
+      const ensureSpace = (currentY, neededHeight = 20) => {
+        if (currentY + neededHeight > PAGE_BOTTOM) {
+          doc.addPage();
+          return 40; // reset to top margin
+        }
+        return currentY;
+      };
+
+      // Make sure the payment section itself starts on a page with enough room
+      notesY = ensureSpace(notesY, 80);
+
       if (payInfo.bankAccount || payInfo.upiId) {
         doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
            .text('PAYMENT DETAILS', 40, notesY, { characterSpacing: 0.8 });
@@ -912,6 +974,7 @@ async function generateInvoicePDF(invoice, orgId) {
 
         let py = notesY + 14;
         const payLine = (label, val) => {
+          py = ensureSpace(py, 14); // add page if this line would overflow
           doc.fontSize(7.5).fillColor('#5e6e84').font('Helvetica-Bold')
              .text(`${label}:`, 40, py, { continued: true });
           doc.fillColor('#000000').font('Helvetica').text(` ${val}`);
@@ -922,6 +985,46 @@ async function generateInvoicePDF(invoice, orgId) {
         if (payInfo.ifscCode)      payLine('IFSC Code',      payInfo.ifscCode);
         if (payInfo.bankName)      payLine('Bank Name',      payInfo.bankName);
         if (payInfo.upiId)         payLine('UPI ID',         payInfo.upiId);
+
+        // ── QR Code — same proportional rendering as digital signature ──────
+        const qrRelPath = payInfo.qrCodePath;
+        if (qrRelPath) {
+          try {
+            const qrAbsPath = path.join(__dirname, '..', qrRelPath.replace(/^\//, ''));
+            if (fs.existsSync(qrAbsPath)) {
+              const qrMaxSize = 80; // square cap — same logic as signature
+              let qrW = qrMaxSize, qrH = qrMaxSize;
+              try {
+                const buf = fs.readFileSync(qrAbsPath);
+                const ext = path.extname(qrAbsPath).toLowerCase();
+                if (ext === '.png' && buf.length > 24) {
+                  qrW = buf.readUInt32BE(16);
+                  qrH = buf.readUInt32BE(20);
+                } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+                  let i = 2;
+                  while (i < buf.length - 8) {
+                    if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
+                      qrH = buf.readUInt16BE(i + 5);
+                      qrW = buf.readUInt16BE(i + 7);
+                      break;
+                    }
+                    i += 2 + buf.readUInt16BE(i + 2);
+                  }
+                }
+              } catch (_) {}
+              const scale       = Math.min(qrMaxSize / qrW, qrMaxSize / qrH);
+              const renderedW   = Math.round(qrW * scale);
+              const renderedH   = Math.round(qrH * scale);
+              doc.image(qrAbsPath, 40, py, { width: renderedW, height: renderedH });
+              doc.fontSize(6.5).fillColor('#5e6e84').font('Helvetica')
+                 .text('Scan to Pay', 40, py + renderedH + 2, { width: renderedW, align: 'center' });
+              py += renderedH + 14;
+            }
+          } catch (qrErr) {
+            console.warn('⚠️ Could not render QR code:', qrErr.message);
+          }
+        }
+
         notesY = py + 8;
       }
 
@@ -968,11 +1071,59 @@ async function generateInvoicePDF(invoice, orgId) {
 
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      // Render digital signature image — centered, large square so round stamps show fully
+      const sigRelPath = orgData?.digitalSignaturePath;
+      const sigImgSize = 200;
+      const sigImgX    = authBoxX + (signBoxW - sigImgSize) / 2;
+      let actualSigH   = sigImgSize;
+      if (sigRelPath) {
+        try {
+          const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(sigAbsPath)) {
+            // Read image dimensions from buffer to calculate exact rendered height
+            let imgW = sigImgSize, imgH = sigImgSize;
+            try {
+              const buf = fs.readFileSync(sigAbsPath);
+              // JPEG: dimensions at offset 0xFFD8 marker chain
+              // PNG:  width at bytes 16-19, height at 20-23
+              const ext = path.extname(sigAbsPath).toLowerCase();
+              if (ext === '.png' && buf.length > 24) {
+                imgW = buf.readUInt32BE(16);
+                imgH = buf.readUInt32BE(20);
+              } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+                let i = 2;
+                while (i < buf.length - 8) {
+                  if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
+                    imgH = buf.readUInt16BE(i + 5);
+                    imgW = buf.readUInt16BE(i + 7);
+                    break;
+                  }
+                  i += 2 + buf.readUInt16BE(i + 2);
+                }
+              }
+            } catch (_) {}
+            const scale      = Math.min(sigImgSize / imgW, sigImgSize / imgH);
+            actualSigH       = Math.round(imgH * scale);
+            const actualSigW = Math.round(imgW * scale);
+            const centeredX  = authBoxX + (signBoxW - actualSigW) / 2;
+            doc.image(sigAbsPath, centeredX, signSectionY + 10, {
+              width:  actualSigW,
+              height: actualSigH,
+            });
+          }
+        } catch (sigErr) {
+          console.warn('⚠️ Could not render digital signature:', sigErr.message);
+        }
+      }
+
+      // Line sits exactly 14pt (~0.5cm) below the actual rendered image
+      const sigLineY = signSectionY + 10 + actualSigH + 14;
+      doc.moveTo(authBoxX, sigLineY)
+         .lineTo(authBoxX + signBoxW, sigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, sigLineY + 3, { width: signBoxW, align: 'center' });
 
       // Footer (original)
       const footY = 760;
@@ -1003,20 +1154,12 @@ async function generateInvoicePDF(invoice, orgId) {
 // New: tax summary by slab in HTML, Place of Supply, Reference # in details
 // ============================================================================
 
-const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
-  tls: { rejectUnauthorized: false }
-});
-
-async function sendInvoiceEmail(invoice, pdfPath, orgId) {
+async function sendInvoiceEmail(invoice, pdfPath, orgId, branchId = null) {
   console.log('📧 Sending invoice email to:', invoice.customerEmail);
 
   let orgData = null;
   try {
-    orgData = await getOrgData(orgId);
+    orgData = await getOrgData(orgId, branchId);
   } catch (_) {}
 
   const paymentInfo  = getPaymentInfo(invoice, orgData);
@@ -1230,17 +1373,24 @@ Accounts Team
     ]
   };
 
-  const result = await emailTransporter.sendMail(mailOptions);
+  const result = await sendMail({
+    orgId, branchId, db: require('mongoose').connection.db,
+    to:          mailOptions.to,
+    subject:     mailOptions.subject,
+    html:        mailOptions.html,
+    text:        mailOptions.text,
+    attachments: mailOptions.attachments,
+  });
   console.log('✅ Email sent:', result.messageId);
   return result;
 }
 
 // ── sendPaymentReceiptEmail (ORIGINAL — full rich HTML preserved) ─────────────
-async function sendPaymentReceiptEmail(invoice, payment, orgId = null) {
+async function sendPaymentReceiptEmail(invoice, payment, orgId = null, branchId = null) {
   console.log('📧 Preparing payment receipt email to:', invoice.customerEmail);
   let orgData = null;
   try {
-    orgData = await getOrgData(orgId);
+    orgData = await getOrgData(orgId, branchId);
   } catch (_) {}
   const orgName    = orgData?.orgName   || 'Accounts Team';
   const orgGST     = orgData?.gstNumber || '';
@@ -1312,11 +1462,11 @@ async function sendPaymentReceiptEmail(invoice, payment, orgId = null) {
 </html>`;
 
   console.log('   📤 Sending payment receipt email...');
-  const result = await emailTransporter.sendMail({
-    from:    `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
+  const result = await sendMail({
+    orgId, branchId, db: require('mongoose').connection.db,
     to:      invoice.customerEmail,
     subject: `✅ Payment Receipt - Invoice ${invoice.invoiceNumber}`,
-    html:    emailHtml
+    html:    emailHtml,
   });
   console.log('   ✅ Payment receipt sent! Message ID:', result.messageId);
   return result;
@@ -1348,11 +1498,11 @@ router.get('/org-state', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     console.log('🔍 req.user full object:', JSON.stringify(req.user));
-    console.log('🔍 orgId from token:', req.user?.orgId);
-    console.log('🔍 query being used:', JSON.stringify({ orgId: req.user?.orgId }));
+    console.log('🔍 orgFilter:', JSON.stringify(req.orgFilter));
+    console.log('🔍 query being used:', JSON.stringify({ ...req.orgFilter, ...(req.branchFilter || {}) }));
 
     const { status, customerId, fromDate, toDate, page = 1, limit = 20 } = req.query;
-    const query = { orgId: req.user?.orgId };
+    const query = { ...req.orgFilter, ...(req.branchFilter || {}) };
     if (status)     query.status = status;
     if (customerId) query.customerId = customerId;
     if (fromDate || toDate) {
@@ -1374,7 +1524,7 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const stats = await Invoice.aggregate([
-      { $match: { orgId: req.user?.orgId } },
+      { $match: { orgId: req.user?.orgId, ...(req.branchFilter || {}) } },
       { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } }
     ]);
     const overallStats = { totalInvoices: 0, totalRevenue: 0, totalPaid: 0, totalDue: 0, byStatus: {} };
@@ -1469,7 +1619,7 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
         const crypto      = require('crypto');
         const customerId  = `CUST-${crypto.createHash('md5').update(customerEmail).digest('hex').substring(0,12)}`;
         const invoiceData = {
-          invoiceNumber:  await generateInvoiceNumber(req.user?.orgId || null),
+          invoiceNumber:  await generateInvoiceNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null),
           customerId, customerName, customerEmail,
           orderNumber:    orderNumber || undefined,
           invoiceDate, terms, dueDate,
@@ -1485,9 +1635,34 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
           status,
           createdBy:      req.user?.email || req.user?.uid || 'bulk-import',
           orgId:          req.user?.orgId || null,
+          branchId:       req.branchIds?.length > 0 ? req.branchIds[0] : null,
         };
         const invoice = new Invoice(invoiceData);
         await invoice.save();
+
+        // ── COA posting (same as regular create) ─────────────────────────────
+        try {
+          const currentOrgId = req.user?.orgId || null;
+          const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+            getSystemAccountId('Accounts Receivable', currentOrgId),
+            getSystemAccountId('Sales',               currentOrgId),
+            getSystemAccountId('Tax Payable',          currentOrgId),
+            getSystemAccountId('TDS Receivable',       currentOrgId),
+            getSystemAccountId('TDS Payable',          currentOrgId),
+          ]);
+          const txnDate = new Date(invoice.invoiceDate);
+          const desc    = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
+          if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+          if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+          if (taxId    && invoice.totalTax  > 0) await postTransactionToCOA({ accountId: taxId,           orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`,                    referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0,                  credit: invoice.totalTax  });
+          if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+          if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+          console.log(`   ✅ COA posted for imported invoice: ${invoice.invoiceNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (invoice import row ${rowNum}):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
+
         results.imported++;
         console.log(`   ✅ Row ${rowNum}: imported invoice ${invoice.invoiceNumber}`);
       } catch (rowErr) {
@@ -1507,7 +1682,7 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
 // ── GET /:id (original) ───────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     res.json({ success: true, data: invoice });
   } catch (error) {
@@ -1521,7 +1696,7 @@ router.post('/', async (req, res) => {
   try {
     const invoiceData = req.body;
     if (!invoiceData.customerId) invoiceData.customerId = `CUST-${Date.now()}`;
-    if (!invoiceData.invoiceNumber) invoiceData.invoiceNumber = await generateInvoiceNumber(req.user?.orgId || null);
+    if (!invoiceData.invoiceNumber) invoiceData.invoiceNumber = await generateInvoiceNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     if (!invoiceData.dueDate) {
       invoiceData.dueDate = calculateDueDate(invoiceData.invoiceDate || new Date(), invoiceData.terms || 'Net 30');
     }
@@ -1539,6 +1714,7 @@ router.post('/', async (req, res) => {
     }
     invoiceData.createdBy = req.user?.email || req.user?.uid || 'system';
     invoiceData.orgId     = req.user?.orgId || null;
+    invoiceData.branchId  = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     const invoice = new Invoice(invoiceData);
     await invoice.save();
 
@@ -1553,11 +1729,11 @@ router.post('/', async (req, res) => {
         getSystemAccountId('TDS Payable',          currentOrgId),
       ]);
       const txnDate = new Date(invoice.invoiceDate);
-      if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
-      if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
-      if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
-      if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
-      if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+      if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+      if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+      if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
+      if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+      if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
       console.log(`✅ COA posted for invoice: ${invoice.invoiceNumber}`);
     } catch (coaErr) { console.error('⚠️ COA post error (invoice create):', coaErr.message); }
 
@@ -1584,7 +1760,7 @@ router.post('/', async (req, res) => {
 // ── PUT /:id (original) ───────────────────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (invoice.status === 'PAID') return res.status(400).json({ success: false, error: 'Cannot edit paid invoices' });
     const updates = req.body;
@@ -1592,7 +1768,10 @@ router.put('/:id', async (req, res) => {
       updates.items = updates.items.map(item => ({ ...item, taxableAmount: calculateItemAmount(item), amount: calculateItemAmount(item) }));
     }
     if (updates.terms && updates.terms !== invoice.terms) {
-      updates.dueDate = calculateDueDate(updates.invoiceDate || invoice.invoiceDate, updates.terms);
+      // Only auto-calculate dueDate for preset terms; 'Custom' uses the sent dueDate as-is
+      if (updates.terms !== 'Custom') {
+        updates.dueDate = calculateDueDate(updates.invoiceDate || invoice.invoiceDate, updates.terms);
+      }
     }
     updates.updatedBy = req.user?.email || req.user?.uid || 'system';
     Object.assign(invoice, updates);
@@ -1608,11 +1787,11 @@ router.put('/:id', async (req, res) => {
 // ── POST /:id/send (original) ─────────────────────────────────────────────────
 router.post('/:id/send', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     let pdfInfo;
     if (!invoice.pdfPath || !fs.existsSync(invoice.pdfPath)) {
-      pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId);
+      pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId, invoice.branchId);
       invoice.pdfPath = pdfInfo.filepath;
       invoice.pdfGeneratedAt = new Date();
     }
@@ -1621,10 +1800,17 @@ router.post('/:id/send', async (req, res) => {
     const customHtml    = invoice.customEmailHtml;
     const sendTo        = customTo || invoice.customerEmail;
     if (customHtml) {
-      const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST || 'smtp.gmail.com', port: parseInt(process.env.SMTP_PORT || '587'), secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
-      await transporter.sendMail({ from: `"Accounts" <${process.env.SMTP_USER}>`, to: sendTo, subject: customSubject || `Invoice ${invoice.invoiceNumber} — Rs.${invoice.totalAmount.toFixed(2)}`, html: customHtml, attachments: [{ filename: `Invoice-${invoice.invoiceNumber}.pdf`, path: invoice.pdfPath }] });
+      await sendMail({
+        orgId:    req.user?.orgId,
+        branchId: invoice.branchId,
+        db:       require('mongoose').connection.db,
+        to:       sendTo,
+        subject:  customSubject || `Invoice ${invoice.invoiceNumber} — Rs.${invoice.totalAmount.toFixed(2)}`,
+        html:     customHtml,
+        attachments: [{ filename: `Invoice-${invoice.invoiceNumber}.pdf`, path: invoice.pdfPath }],
+      });
     } else {
-      await sendInvoiceEmail(invoice, invoice.pdfPath, req.user?.orgId);
+      await sendInvoiceEmail(invoice, invoice.pdfPath, req.user?.orgId, invoice.branchId);
     }
     if (invoice.status === 'DRAFT') invoice.status = 'SENT';
     invoice.emailsSent.push({ sentTo: sendTo, sentAt: new Date(), emailType: 'invoice' });
@@ -1640,7 +1826,7 @@ router.post('/:id/send', async (req, res) => {
 // ── PATCH /:id/mark-as-sent — mark invoice as SENT without sending email ──────
 router.patch('/:id/mark-as-sent', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (['PAID', 'CANCELLED'].includes(invoice.status)) {
       return res.status(400).json({ success: false, error: `Cannot mark a ${invoice.status} invoice as sent` });
@@ -1659,7 +1845,7 @@ router.patch('/:id/mark-as-sent', async (req, res) => {
 // ── POST /:id/payment (original) ──────────────────────────────────────────────
 router.post('/:id/payment', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     const { amount, paymentDate, paymentMethod, referenceNumber, notes } = req.body;
     if (!amount || amount <= 0) return res.status(400).json({ success: false, error: 'Invalid payment amount' });
@@ -1684,11 +1870,11 @@ router.post('/:id/payment', async (req, res) => {
         getSystemAccountId('Accounts Receivable', currentOrgId),
       ]);
       const txnDate = new Date(payment.paymentDate);
-      if (cashId) await postTransactionToCOA({ accountId: cashId, orgId: currentOrgId, date: txnDate, description: `Payment received - ${invoice.invoiceNumber}`, referenceType: 'Payment', referenceId: payment.paymentId, referenceNumber: invoice.invoiceNumber, debit: payment.amount, credit: 0 });
-      if (arId)   await postTransactionToCOA({ accountId: arId,   orgId: currentOrgId, date: txnDate, description: `Payment received - ${invoice.invoiceNumber}`, referenceType: 'Payment', referenceId: payment.paymentId, referenceNumber: invoice.invoiceNumber, debit: 0, credit: payment.amount });
+      if (cashId) await postTransactionToCOA({ accountId: cashId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Payment received - ${invoice.invoiceNumber}`, referenceType: 'Payment', referenceId: payment.paymentId, referenceNumber: invoice.invoiceNumber, debit: payment.amount, credit: 0 });
+      if (arId)   await postTransactionToCOA({ accountId: arId,   orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Payment received - ${invoice.invoiceNumber}`, referenceType: 'Payment', referenceId: payment.paymentId, referenceNumber: invoice.invoiceNumber, debit: 0, credit: payment.amount });
       console.log(`✅ COA posted for payment on: ${invoice.invoiceNumber}`);
     } catch (coaErr) { console.error('⚠️ COA post error (invoice payment):', coaErr.message); }
-    try { await sendPaymentReceiptEmail(invoice, payment, req.user?.orgId); }
+    try { await sendPaymentReceiptEmail(invoice, payment, req.user?.orgId, invoice.branchId); }
     catch (emailError) { console.warn('Failed to send payment receipt email:', emailError.message); }
     console.log(`✅ Payment recorded: ${invoice.invoiceNumber} - Rs.${amount}`);
     res.json({ success: true, message: 'Payment recorded successfully', data: { invoice, payment } });
@@ -1706,11 +1892,21 @@ router.get('/:id/pdf', async (req, res) => {
       req.user  = jwt.verify(req.query.token, process.env.FINANCE_JWT_SECRET || process.env.JWT_SECRET);
     } catch (e) { return res.status(401).json({ success: false, message: 'Invalid token' }); }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     // ✅ Always regenerate so the latest org logo is embedded
-    const pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId);
+    const pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId, invoice.branchId);
     invoice.pdfPath        = pdfInfo.filepath;
     invoice.pdfGeneratedAt = new Date();
     await invoice.save();
@@ -1724,10 +1920,10 @@ router.get('/:id/pdf', async (req, res) => {
 // ── GET /:id/download-url (original) ─────────────────────────────────────────
 router.get('/:id/download-url', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (!invoice.pdfPath || !fs.existsSync(invoice.pdfPath)) {
-      const pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId);
+      const pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId, invoice.branchId);
       invoice.pdfPath = pdfInfo.filepath;
       invoice.pdfGeneratedAt = new Date();
       await invoice.save();
@@ -1744,9 +1940,9 @@ router.get('/:id/download-url', async (req, res) => {
 // ── GET /:id/email-preview (original structure + new Zoho fields) ─────────────
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
-    const org         = await getOrgData(req.user?.orgId);
+    const org         = await getOrgData(req.user?.orgId, invoice.branchId);
     const paymentInfo = getPaymentInfo(invoice, org);
     const taxSlabs    = buildTaxSummaryBySlabs(invoice);
     const isInterState= invoice.isInterState;
@@ -1819,7 +2015,7 @@ router.get('/:id/email-preview', async (req, res) => {
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (to      !== undefined) invoice.customEmailTo      = to;
     if (subject !== undefined) invoice.customEmailSubject = subject;
@@ -1835,7 +2031,7 @@ router.patch('/:id/email-preview', async (req, res) => {
 // ── DELETE /:id (original) ────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (invoice.status !== 'DRAFT') return res.status(400).json({ success: false, error: 'Only draft invoices can be deleted' });
 
@@ -1856,7 +2052,7 @@ router.delete('/:id', async (req, res) => {
 
       // REVERSE: Cr Accounts Receivable (was Dr on create)
       if (arId) await postTransactionToCOA({
-        accountId: arId, orgId: currentOrgId, date: txnDate,
+        accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
         description: desc,
         referenceType: 'Invoice', referenceId: invoice._id,
         referenceNumber: invoice.invoiceNumber,
@@ -1865,7 +2061,7 @@ router.delete('/:id', async (req, res) => {
 
       // REVERSE: Dr Sales (was Cr on create)
       if (salesId) await postTransactionToCOA({
-        accountId: salesId, orgId: currentOrgId, date: txnDate,
+        accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
         description: desc,
         referenceType: 'Invoice', referenceId: invoice._id,
         referenceNumber: invoice.invoiceNumber,
@@ -1874,7 +2070,7 @@ router.delete('/:id', async (req, res) => {
 
       // REVERSE: Dr Tax Payable (was Cr on create)
       if (taxId && invoice.totalTax > 0) await postTransactionToCOA({
-        accountId: taxId, orgId: currentOrgId, date: txnDate,
+        accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
         description: desc,
         referenceType: 'Invoice', referenceId: invoice._id,
         referenceNumber: invoice.invoiceNumber,
@@ -1883,7 +2079,7 @@ router.delete('/:id', async (req, res) => {
 
       // REVERSE: Cr TDS Receivable (was Dr on create)
       if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({
-        accountId: tdsReceivableId, orgId: currentOrgId, date: txnDate,
+        accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
         description: desc,
         referenceType: 'Invoice', referenceId: invoice._id,
         referenceNumber: invoice.invoiceNumber,
@@ -1892,7 +2088,7 @@ router.delete('/:id', async (req, res) => {
 
       // REVERSE: Dr TCS Payable (was Cr on create)
       if (tcsPayableId && invoice.tcsAmount > 0) await postTransactionToCOA({
-        accountId: tcsPayableId, orgId: currentOrgId, date: txnDate,
+        accountId: tcsPayableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
         description: desc,
         referenceType: 'Invoice', referenceId: invoice._id,
         referenceNumber: invoice.invoiceNumber,
@@ -2005,4 +2201,482 @@ function getCol(row, ...names) {
   return null;
 }
 
+// ── PATCH /:id/pause-reminder — manually pause reminders for this invoice ────
+router.patch('/:id/pause-reminder', async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne({
+      _id: req.params.id,
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
+    });
+    if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
+    invoice.reminderPaused   = true;
+    invoice.reminderPausedBy = req.user?.email || req.user?.uid || 'system';
+    invoice.reminderPausedAt = new Date();
+    await invoice.save();
+    console.log(`⏸ Reminders paused for invoice: ${invoice.invoiceNumber}`);
+    res.json({ success: true, message: 'Reminders paused for this invoice', data: invoice });
+  } catch (error) {
+    console.error('Error pausing reminder:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── PATCH /:id/resume-reminder — resume reminders for this invoice ───────────
+router.patch('/:id/resume-reminder', async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne({
+      _id: req.params.id,
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
+    });
+    if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
+    invoice.reminderPaused   = false;
+    invoice.reminderPausedBy = null;
+    invoice.reminderPausedAt = null;
+    await invoice.save();
+    console.log(`▶️  Reminders resumed for invoice: ${invoice.invoiceNumber}`);
+    res.json({ success: true, message: 'Reminders resumed for this invoice', data: invoice });
+  } catch (error) {
+    console.error('Error resuming reminder:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── GET /:id/reminder-log — get reminder history for this invoice ─────────────
+router.get('/:id/reminder-log', async (req, res) => {
+  try {
+    const invoice = await Invoice.findOne(
+      { _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) },
+      { reminderLog: 1, reminderCount: 1, reminderPaused: 1, reminderPausedBy: 1, reminderPausedAt: 1, lastReminderSentAt: 1, invoiceNumber: 1 },
+    ).lean();
+    if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
+    res.json({
+      success: true,
+      data: invoice.reminderLog || [],
+      meta: {
+        reminderCount:      invoice.reminderCount      || 0,
+        reminderPaused:     invoice.reminderPaused     || false,
+        reminderPausedBy:   invoice.reminderPausedBy   || null,
+        reminderPausedAt:   invoice.reminderPausedAt   || null,
+        lastReminderSentAt: invoice.lastReminderSentAt || null,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching reminder log:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── POST /api/finance/invoices/:id/send-manual-reminder ──────────────────────
+// Send a manual reminder (email or WhatsApp) for a specific invoice
+// ═══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/send-manual-reminder', async (req, res) => {
+  console.log('\n📧 MANUAL REMINDER SEND');
+  try {
+    const { channel, type } = req.body; // channel: 'email' | 'whatsapp', type: 'overdue' | 'predue'
+    
+    if (!channel || !['email', 'whatsapp'].includes(channel)) {
+      return res.status(400).json({ success: false, error: 'Invalid channel. Must be email or whatsapp.' });
+    }
+    
+    if (!type || !['overdue', 'predue'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'Invalid type. Must be overdue or predue.' });
+    }
+
+    const invoice = await Invoice.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.id),
+      ...req.orgFilter,
+      ...req.branchFilter,
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    // Load reminder settings
+    const ReminderSettings = mongoose.connection.db.collection('reminder_settings');
+    const settings = await ReminderSettings.findOne({ orgId: invoice.orgId, branchId: invoice.branchId })
+      || await ReminderSettings.findOne({ orgId: invoice.orgId, branchId: null })
+      || {};
+
+    // Fetch effective org/branch data upfront so companyName is correct for all channels
+    const { getEffectiveOrgData } = require('./branches');
+    const effectiveData = await getEffectiveOrgData(invoice.orgId, invoice.branchId, req.db);
+
+    const now = new Date();
+    const logEntry = { sentAt: now, channel, type, success: false };
+
+    // ── Send Email ──────────────────────────────────────────────────────────
+    if (channel === 'email') {
+      if (!invoice.customerEmail) {
+        return res.status(400).json({ success: false, error: 'Customer email not found' });
+      }
+
+      // Build email content (reuse logic from reminderScheduler.js)
+      const { buildOverdueEmailHtml, buildPreDueEmailHtml } = require('../jobs/reminderScheduler');
+      
+      const vars = {
+        invoiceNumber: invoice.invoiceNumber,
+        customerName:  invoice.customerName,
+        amount:        invoice.total?.toFixed(2) || '0.00',
+        amountDue:     invoice.amountDue?.toFixed(2) || '0.00',
+        dueDate:       invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString('en-IN') : 'N/A',
+        companyName:   effectiveData?.orgName || invoice.orgName || 'Our Company',
+        orgPhone:      effectiveData?.phone || '',
+        orgEmail:      effectiveData?.email || '',
+        upiId:         effectiveData?.upiId || '',
+        daysOverdue:   type === 'overdue' ? Math.max(0, Math.floor((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(new Date(invoice.dueDate).getFullYear(), new Date(invoice.dueDate).getMonth(), new Date(invoice.dueDate).getDate())) / 86400000)) : 0,
+        daysBefore:    type === 'predue' ? Math.max(0, Math.floor((Date.UTC(new Date(invoice.dueDate).getFullYear(), new Date(invoice.dueDate).getMonth(), new Date(invoice.dueDate).getDate()) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000)) : 0,
+      };
+
+      const subject = type === 'overdue'
+        ? (settings.emailSubjectTemplate || `Payment Reminder: Invoice ${vars.invoiceNumber} is Overdue`)
+        : (settings.emailSubjectPreDue   || `Upcoming Payment: Invoice ${vars.invoiceNumber} Due Soon`);
+
+      const html = type === 'overdue'
+        ? buildOverdueEmailHtml(vars)
+        : buildPreDueEmailHtml(vars);
+
+      // Generate PDF attachment
+      const pdfBuffer = await generateInvoicePDF(invoice._id.toString(), req.db);
+      const attachments = [{
+        filename: `Invoice-${invoice.invoiceNumber}.pdf`,
+        content:  pdfBuffer,
+      }];
+
+      await sendMail({
+        orgId:    invoice.orgId,
+        branchId: invoice.branchId,
+        db:       req.db,
+        to:       invoice.customerEmail,
+        cc:       (Array.isArray(settings.ccEmails) && settings.ccEmails.length > 0)
+                    ? settings.ccEmails.filter(e => e && e.trim()).join(',')
+                    : undefined,
+        subject,
+        html,
+        attachments,
+      });
+
+      logEntry.success = true;
+      logEntry.recipientEmail = invoice.customerEmail;
+      console.log(`✅ Manual email reminder sent — ${invoice.invoiceNumber} → ${invoice.customerEmail}`);
+    }
+
+    // ── Send WhatsApp ───────────────────────────────────────────────────────
+    if (channel === 'whatsapp') {
+      if (!invoice.customerPhone) {
+        return res.status(400).json({ success: false, error: 'Customer phone not found' });
+      }
+
+      // Credentials are saved in branches/organizations collection via Finance Profile
+      // Try effectiveData first, then fall back to direct DB lookup on branch/org
+      const { decrypt } = require('../utils/encryption');
+
+      // Direct DB lookup as fallback — covers cases where effectiveData missed the branch
+      const directBranch = invoice.branchId
+        ? await req.db.collection('branches').findOne({ branchId: invoice.branchId })
+        : null;
+      const directOrg = await req.db.collection('organizations').findOne({ orgId: invoice.orgId });
+
+      // Pick credentials: branch wins over org, effectiveData wins over direct lookup
+      const rawPhoneNumberId =
+        effectiveData?.whatsappMetaPhoneNumberId ||
+        directBranch?.whatsappMetaPhoneNumberId  ||
+        directOrg?.whatsappMetaPhoneNumberId;
+
+      const rawAccessToken =
+        effectiveData?.whatsappMetaAccessToken ||
+        directBranch?.whatsappMetaAccessToken  ||
+        directOrg?.whatsappMetaAccessToken;
+
+      const phoneNumberId = rawPhoneNumberId;
+      let accessToken = rawAccessToken;
+
+      if (accessToken) {
+        try { accessToken = decrypt(accessToken); } catch (_) { /* already plain text */ }
+      }
+
+      console.log('🔍 final phoneNumberId:', phoneNumberId, '| accessToken exists:', !!accessToken);
+
+      if (!phoneNumberId || !accessToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'WhatsApp credentials not configured. Please configure in Finance Profile → WhatsApp Automation.',
+        });
+      }
+
+      // Build WhatsApp message
+      const { buildOverdueWhatsAppMessage, buildPreDueWhatsAppMessage } = require('../jobs/reminderScheduler');
+      
+      const vars = {
+        customerName:  invoice.customerName,
+        invoiceNumber: invoice.invoiceNumber,
+        companyName:   effectiveData?.orgName || invoice.orgName || 'Our Company',
+        amountDue:     invoice.amountDue?.toFixed(2) || '0.00',
+        dueDate:       invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString('en-IN') : 'N/A',
+        daysOverdue:   type === 'overdue' ? Math.max(0, Math.floor((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(new Date(invoice.dueDate).getFullYear(), new Date(invoice.dueDate).getMonth(), new Date(invoice.dueDate).getDate())) / 86400000)) : 0,
+        daysBefore:    type === 'predue' ? Math.max(0, Math.floor((Date.UTC(new Date(invoice.dueDate).getFullYear(), new Date(invoice.dueDate).getMonth(), new Date(invoice.dueDate).getDate()) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000)) : 0,
+        orgPhone:      effectiveData?.phone || effectiveData?.whatsappNumber || '',
+        upiId:         effectiveData?.upiId || '',
+      };
+
+      const message = type === 'overdue'
+        ? buildOverdueWhatsAppMessage(vars)
+        : buildPreDueWhatsAppMessage(vars);
+
+      // Format phone number
+      let phone = String(invoice.customerPhone).replace(/[^\d]/g, '');
+      if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
+
+      // Generate PDF — pass invoice object + orgId + branchId (correct signature)
+      const pdfInfo = await generateInvoicePDF(invoice, invoice.orgId, invoice.branchId);
+      const pdfPath = pdfInfo.filepath;
+
+      // Also copy to temp with a unique name so concurrent requests don't collide
+      const tempDir  = path.join(__dirname, '..', 'uploads', 'temp');
+      const tempPath = path.join(tempDir, `invoice-${invoice.invoiceNumber}-${Date.now()}.pdf`);
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+      fs.copyFileSync(pdfPath, tempPath);
+
+      // Send via Meta Cloud API with document
+      const https = require('https');
+      const FormData = require('form-data');
+      
+      // First, upload the PDF to WhatsApp
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('file', fs.createReadStream(tempPath), {
+        filename: `Invoice-${invoice.invoiceNumber}.pdf`,
+        contentType: 'application/pdf',
+      });
+
+      const uploadResult = await new Promise((resolve, reject) => {
+        const request = https.request({
+          hostname: 'graph.facebook.com',
+          port: 443,
+          path: `/v18.0/${phoneNumberId}/media`,
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            ...form.getHeaders(),
+          },
+        }, (response) => {
+          let data = '';
+          response.on('data', (chunk) => { data += chunk; });
+          response.on('end', () => {
+            try {
+              resolve({ statusCode: response.statusCode, body: JSON.parse(data) });
+            } catch (e) {
+              reject(new Error('Invalid JSON response from media upload'));
+            }
+          });
+        });
+        request.on('error', (error) => reject(error));
+        form.pipe(request);
+      });
+
+      if (uploadResult.statusCode !== 200 || !uploadResult.body.id) {
+        try { fs.unlinkSync(tempPath); } catch (_) {}
+        return res.status(500).json({ 
+          success: false, 
+          error: `Failed to upload PDF to WhatsApp: ${uploadResult.body.error?.message || 'Unknown error'}` 
+        });
+      }
+
+      const mediaId = uploadResult.body.id;
+
+      // Now send the message with document
+      const postData = JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'document',
+        document: {
+          id: mediaId,
+          caption: message,
+          filename: `Invoice-${invoice.invoiceNumber}.pdf`,
+        },
+      });
+
+      const sendResult = await new Promise((resolve, reject) => {
+        const request = https.request({
+          hostname: 'graph.facebook.com',
+          port: 443,
+          path: `/v18.0/${phoneNumberId}/messages`,
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+        }, (response) => {
+          let data = '';
+          response.on('data', (chunk) => { data += chunk; });
+          response.on('end', () => {
+            try {
+              resolve({ statusCode: response.statusCode, body: JSON.parse(data) });
+            } catch (e) {
+              reject(new Error('Invalid JSON response'));
+            }
+          });
+        });
+        request.on('error', (error) => reject(error));
+        request.write(postData);
+        request.end();
+      });
+
+      // Cleanup temp file
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+
+      if (sendResult.statusCode === 200 && sendResult.body.messages) {
+        logEntry.success = true;
+        logEntry.recipientPhone = `+${phone}`;
+        logEntry.whatsappMessageId = sendResult.body.messages[0]?.id;
+        console.log(`✅ Manual WhatsApp reminder sent — ${invoice.invoiceNumber} → +${phone}`);
+      } else {
+        logEntry.failReason = sendResult.body.error?.message || 'Unknown WhatsApp error';
+        console.error(`❌ WhatsApp send failed:`, sendResult.body);
+        return res.status(500).json({ 
+          success: false, 
+          error: `WhatsApp send failed: ${logEntry.failReason}` 
+        });
+      }
+    }
+
+    // Update invoice reminder log
+    await Invoice.updateOne(
+      { _id: invoice._id },
+      {
+        $push: { reminderLog: logEntry },
+        $inc:  { reminderCount: 1 },
+        $set:  { lastReminderSentAt: now },
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `${channel === 'email' ? 'Email' : 'WhatsApp'} reminder sent successfully`,
+      data: { logEntry },
+    });
+
+  } catch (error) {
+    console.error('❌ Manual reminder send error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── POST /api/finance/invoices/:id/preview-manual-reminder ───────────────────
+// Preview the reminder message before sending (for confirmation dialog)
+// ═══════════════════════════════════════════════════════════════════════════════
+router.post('/:id/preview-manual-reminder', async (req, res) => {
+  console.log('\n👁️  MANUAL REMINDER PREVIEW');
+  try {
+    const { channel, type } = req.body;
+
+    if (!channel || !['email', 'whatsapp'].includes(channel)) {
+      return res.status(400).json({ success: false, error: 'Invalid channel' });
+    }
+
+    if (!type || !['overdue', 'predue'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'Invalid type' });
+    }
+
+    const invoice = await Invoice.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.id),
+      ...req.orgFilter,
+      ...req.branchFilter,
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    // Load reminder settings
+    const ReminderSettings = mongoose.connection.db.collection('reminder_settings');
+    const settings = await ReminderSettings.findOne({ orgId: invoice.orgId, branchId: invoice.branchId })
+      || await ReminderSettings.findOne({ orgId: invoice.orgId, branchId: null })
+      || {};
+
+    // Fetch effective org/branch data upfront so companyName is correct for all channels
+    const { getEffectiveOrgData } = require('./branches');
+    const effectiveData = await getEffectiveOrgData(invoice.orgId, invoice.branchId, req.db);
+
+    const now = new Date();
+    const due = invoice.dueDate ? new Date(invoice.dueDate) : null;
+
+    // Calendar-day-accurate overdue count (timezone-safe)
+    const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const dueUTC   = due ? Date.UTC(due.getFullYear(), due.getMonth(), due.getDate()) : todayUTC;
+
+    const vars = {
+      invoiceNumber: invoice.invoiceNumber,
+      customerName:  invoice.customerName,
+      amount:        invoice.total?.toFixed(2) || '0.00',
+      amountDue:     invoice.amountDue?.toFixed(2) || '0.00',
+      dueDate:       due ? due.toLocaleDateString('en-IN') : 'N/A',
+      companyName:   effectiveData?.orgName || invoice.orgName || 'Our Company',
+      orgPhone:      effectiveData?.phone || effectiveData?.whatsappNumber || '',
+      upiId:         effectiveData?.upiId || '',
+      daysOverdue:   type === 'overdue' ? Math.max(0, Math.floor((todayUTC - dueUTC) / 86400000)) : 0,
+      daysBefore:    type === 'predue'  ? Math.max(0, Math.floor((dueUTC - todayUTC) / 86400000)) : 0,
+    };
+
+    if (channel === 'email') {
+      const { buildOverdueEmailHtml, buildPreDueEmailHtml } = require('../jobs/reminderScheduler');
+
+      const subject = type === 'overdue'
+        ? (settings.emailSubjectTemplate || `Payment Reminder: Invoice ${vars.invoiceNumber} is Overdue`)
+        : (settings.emailSubjectPreDue   || `Upcoming Payment: Invoice ${vars.invoiceNumber} Due Soon`);
+
+      const html = type === 'overdue'
+        ? buildOverdueEmailHtml(vars)
+        : buildPreDueEmailHtml(vars);
+
+      return res.json({
+        success: true,
+        data: {
+          channel,
+          type,
+          recipient: invoice.customerEmail || 'No email on file',
+          subject,
+          html,
+          invoiceNumber: invoice.invoiceNumber,
+          customerName:  invoice.customerName,
+        },
+      });
+    }
+
+    if (channel === 'whatsapp') {
+      const { buildOverdueWhatsAppMessage, buildPreDueWhatsAppMessage } = require('../jobs/reminderScheduler');
+
+      const message = type === 'overdue'
+        ? buildOverdueWhatsAppMessage(vars)
+        : buildPreDueWhatsAppMessage(vars);
+
+      let phone = String(invoice.customerPhone || '').replace(/[^\d]/g, '');
+      if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
+
+      return res.json({
+        success: true,
+        data: {
+          channel,
+          type,
+          recipient:     phone ? `+${phone}` : 'No phone on file',
+          message,
+          invoiceNumber: invoice.invoiceNumber,
+          customerName:  invoice.customerName,
+          pdfAttached:   true,
+        },
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Manual reminder preview error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
+module.exports.generateInvoicePDF = generateInvoicePDF;

@@ -39,6 +39,7 @@ const Color _green  = Color(0xFF27AE60);
 const Color _blue   = Color(0xFF2980B9);
 const Color _orange = Color(0xFFE67E22);
 const Color _red    = Color(0xFFE74C3C);
+const Color _teal   = Color(0xFF16A085);
 
 // ─── stat card data ───────────────────────────────────────────────────────────
 class _StatCardData {
@@ -70,6 +71,9 @@ class _BillListPageState extends State<BillListPage> {
   BillStats?  _stats;
   bool    _isLoading    = true;
   String? _errorMessage;
+
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
 
   // ── filters ───────────────────────────────────────────────────────────────
   String    _selectedStatus = 'All';
@@ -206,6 +210,20 @@ class _BillListPageState extends State<BillListPage> {
       _showSuccess('Bill submitted successfully');
       _loadAll();
     } catch (e) { _showError('Failed to submit: $e'); }
+  }
+
+  Future<void> _markBillAsSent(Bill bill) async {
+    final ok = await _confirmDialog(
+      title: 'Mark as Sent',
+      message: 'Mark bill ${bill.billNumber} as Sent (Open) without sending an email?',
+      confirmLabel: 'Mark as Sent', confirmColor: _teal,
+    );
+    if (ok != true) return;
+    try {
+      await BillService.markAsSent(bill.id);
+      _showSuccess('Bill marked as sent');
+      _loadAll();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
   }
 
   Future<void> _void(Bill bill) async {
@@ -556,7 +574,7 @@ class _BillListPageState extends State<BillListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _bills.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _bills.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -597,6 +615,7 @@ class _BillListPageState extends State<BillListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree, _showLifecycleDialog, tooltip: 'View Process', color: _red, bg: _red.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Bill', Icons.add_rounded, _red, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -626,6 +645,7 @@ class _BillListPageState extends State<BillListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Bill', Icons.add_rounded, _red, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -646,6 +666,7 @@ class _BillListPageState extends State<BillListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 6),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
@@ -844,6 +865,191 @@ class _BillListPageState extends State<BillListPage> {
     );
   }
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _red : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    if (_bills.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _bills.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildListCard(_bills[i]),
+      ),
+    );
+  }
+
+  Widget _buildListCard(Bill bill) {
+    final isOverdue = bill.amountDue > 0 && bill.dueDate.isBefore(DateTime.now());
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _viewDetails(bill),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Row 1: Bill # + Status
+              Row(children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _openEdit(bill.id),
+                    child: Text(bill.billNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _red, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _statusBadge(bill.status),
+              ]),
+              const SizedBox(height: 10),
+              // Row 2: Vendor avatar + name + email
+              Row(children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(color: _red.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(bill.vendorName.isNotEmpty ? bill.vendorName[0].toUpperCase() : '?', style: const TextStyle(color: _red, fontWeight: FontWeight.bold, fontSize: 13))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(bill.vendorName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis),
+                  if (bill.vendorEmail != null && bill.vendorEmail!.isNotEmpty)
+                    Text(bill.vendorEmail!, style: TextStyle(fontSize: 12, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
+                ])),
+                if (bill.purchaseOrderNumber != null && bill.purchaseOrderNumber!.isNotEmpty)
+                  Text('PO: ${bill.purchaseOrderNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              ]),
+              const SizedBox(height: 10),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              const SizedBox(height: 10),
+              // Row 3: Dates
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Bill Date', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(DateFormat('dd MMM yyyy').format(bill.billDate), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                  ]),
+                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Due Date', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.event_outlined, size: 12, color: isOverdue ? _red : Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(DateFormat('dd MMM yyyy').format(bill.dueDate), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isOverdue ? _red : const Color(0xFF374151))),
+                  ]),
+                ])),
+              ]),
+              const SizedBox(height: 10),
+              // Row 4: Amounts + Actions
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Total Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Text('₹${bill.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Amount Due', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Text('₹${bill.amountDue.toStringAsFixed(2)}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: bill.amountDue > 0 ? _red : _green)),
+                ])),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _share(bill),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    itemBuilder: (_) => [
+                      _menuItem('view',    Icons.visibility_outlined,           _blue,   'View Details'),
+                      _menuItem('edit',    Icons.edit_outlined,                 _navy,   'Edit'),
+                      if (bill.status == 'DRAFT')
+                        _menuItem('submit',    Icons.send_outlined,             _green,  'Submit Bill'),
+                      if (bill.status == 'DRAFT')
+                        _menuItem('mark_sent', Icons.mark_email_read_outlined,  _teal,   'Mark as Sent'),
+                      if (['OPEN','PARTIALLY_PAID','OVERDUE'].contains(bill.status))
+                        _menuItem('payment', Icons.payment,                     _green,  'Record Payment'),
+                      _menuItem('pdf',     Icons.download_outlined,             _blue,   'Download PDF'),
+                      if (bill.status != 'PAID' && bill.status != 'VOID')
+                        _menuItem('void',  Icons.block_outlined,                _orange, 'Void Bill'),
+                      _menuItem('ticket',  Icons.confirmation_number_outlined,  _orange, 'Raise Ticket'),
+                      if (bill.status == 'DRAFT')
+                        _menuItem('delete', Icons.delete_outline,               _red,    'Delete', textColor: _red),
+                    ],
+                    onSelected: (v) async {
+                      switch (v) {
+                        case 'view':      _viewDetails(bill);               break;
+                        case 'edit':      _openEdit(bill.id);               break;
+                        case 'submit':    _submit(bill);                    break;
+                        case 'mark_sent': _markBillAsSent(bill);            break;
+                        case 'payment':   _showRecordPaymentDialog(bill);   break;
+                        case 'pdf':       _downloadPDF(bill);               break;
+                        case 'void':      _void(bill);                      break;
+                        case 'ticket':    _raiseTicket(bill);               break;
+                        case 'delete':    _delete(bill);                    break;
+                      }
+                    },
+                  ),
+                ]),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── table ─────────────────────────────────────────────────────────────────
 
   Widget _buildTable() {
@@ -969,7 +1175,9 @@ class _BillListPageState extends State<BillListPage> {
               _menuItem('view',    Icons.visibility_outlined,           _blue,   'View Details'),
               _menuItem('edit',    Icons.edit_outlined,                 _navy,   'Edit'),
               if (bill.status == 'DRAFT')
-                _menuItem('submit', Icons.send_outlined,                _green,  'Submit Bill'),
+                _menuItem('submit',    Icons.send_outlined,             _green,  'Submit Bill'),
+              if (bill.status == 'DRAFT')
+                _menuItem('mark_sent', Icons.mark_email_read_outlined,  _teal,   'Mark as Sent'),
               if (['OPEN','PARTIALLY_PAID','OVERDUE'].contains(bill.status))
                 _menuItem('payment', Icons.payment,                     _green,  'Record Payment'),
               _menuItem('pdf',     Icons.download_outlined,             _blue,   'Download PDF'),
@@ -981,14 +1189,15 @@ class _BillListPageState extends State<BillListPage> {
             ],
             onSelected: (v) async {
               switch (v) {
-                case 'view':    _viewDetails(bill);                 break;
-                case 'edit':    _openEdit(bill.id);                 break;
-                case 'submit':  _submit(bill);                      break;
-                case 'payment': _showRecordPaymentDialog(bill);     break;
-                case 'pdf':     _downloadPDF(bill);                 break;
-                case 'void':    _void(bill);                        break;
-                case 'ticket':  _raiseTicket(bill);                 break;
-                case 'delete':  _delete(bill);                      break;
+                case 'view':      _viewDetails(bill);               break;
+                case 'edit':      _openEdit(bill.id);               break;
+                case 'submit':    _submit(bill);                    break;
+                case 'mark_sent': _markBillAsSent(bill);            break;
+                case 'payment':   _showRecordPaymentDialog(bill);   break;
+                case 'pdf':       _downloadPDF(bill);               break;
+                case 'void':      _void(bill);                      break;
+                case 'ticket':    _raiseTicket(bill);               break;
+                case 'delete':    _delete(bill);                    break;
               }
             },
           ),

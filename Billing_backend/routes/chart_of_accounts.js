@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// CHART OF ACCOUNTS — BACKEND
+// ============================================================================
+// CHART OF ACCOUNTS � BACKEND
 // ============================================================================
 // File: backend/routes/chart_of_accounts.js
 // Express routes + MongoDB model + Controller logic
@@ -17,7 +17,8 @@ const path      = require('path');
 // ============================================================================
 
 const chartOfAccountSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId:    { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   accountCode: {
     type: String,
     trim: true,
@@ -115,7 +116,8 @@ const ChartOfAccount = mongoose.models.ChartOfAccount
 // ============================================================================
 
 const accountTransactionSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId:    { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   accountId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ChartOfAccount',
@@ -135,7 +137,7 @@ const accountTransactionSchema = new mongoose.Schema({
   },
   referenceType: {
     type: String,
-    enum: ['Invoice', 'Bill', 'Payment', 'Journal', 'Expense', 'Credit Note', 'Vendor Credit', 'Opening Balance', 'VendorCredit', 'PaymentMade'],
+    enum: ['Invoice', 'Bill', 'Payment', 'Journal', 'Expense', 'CreditNote', 'Credit Note', 'Vendor Credit', 'Opening Balance', 'VendorCredit', 'PaymentMade', 'PaymentRefund'],
     required: true,
   },
   referenceId: {
@@ -174,7 +176,7 @@ const AccountTransaction = mongoose.models.AccountTransaction
   || mongoose.model('AccountTransaction', accountTransactionSchema);
 
 // ============================================================================
-// HELPER — Auto generate account code
+// HELPER � Auto generate account code
 // ============================================================================
 
 async function generateAccountCode(accountType, orgId = null) {
@@ -205,40 +207,54 @@ async function generateAccountCode(accountType, orgId = null) {
 // SEED DEFAULT SYSTEM ACCOUNTS (call once on startup if needed)
 // ============================================================================
 
-async function seedSystemAccounts(orgId = null) {
+async function seedSystemAccounts(orgId = null, branchId = null) {
   const systemAccounts = [
-    { accountCode: '1100', accountName: 'Accounts Receivable',        accountType: 'Accounts Receivable',     accountSubType: 'Accounts Receivable',    isSystemAccount: true, description: 'Money owed to you by customers' },
-    { accountCode: '2100', accountName: 'Accounts Payable',           accountType: 'Accounts Payable',        accountSubType: 'Accounts Payable',       isSystemAccount: true, description: 'Money you owe to vendors' },
-    { accountCode: '1010', accountName: 'Petty Cash',                 accountType: 'Cash',                    accountSubType: 'Cash',                   isSystemAccount: true, description: 'Cash on hand' },
-    { accountCode: '1020', accountName: 'Undeposited Funds',          accountType: 'Cash',                    accountSubType: 'Cash',                   isSystemAccount: true, description: 'Payments not yet deposited' },
-    { accountCode: '1301', accountName: 'Inventory Asset',            accountType: 'Stock',                   accountSubType: 'Stock',                  isSystemAccount: true, description: 'Value of goods in stock' },
-    { accountCode: '2200', accountName: 'Opening Balance Adjustments',accountType: 'Other Current Liability', accountSubType: 'Other Current Liability',isSystemAccount: true },
-    { accountCode: '3010', accountName: 'Opening Balance Offset',     accountType: 'Equity',                  accountSubType: 'Equity',                 isSystemAccount: true },
-    { accountCode: '3020', accountName: 'Retained Earnings',          accountType: 'Equity',                  accountSubType: 'Equity',                 isSystemAccount: true, description: 'Accumulated profits' },
-    { accountCode: '4010', accountName: 'Sales',                      accountType: 'Income',                  accountSubType: 'Income',                 isSystemAccount: true, description: 'Revenue from sales' },
-    { accountCode: '5010', accountName: 'Cost of Goods Sold',         accountType: 'Cost Of Goods Sold',      accountSubType: 'Cost Of Goods Sold',     isSystemAccount: true, description: 'Direct cost of goods sold' },
-    { accountCode: '2300', accountName: 'Tax Payable',                accountType: 'Other Current Liability', accountSubType: 'Other Current Liability',isSystemAccount: true, description: 'GST/Tax collected but not yet remitted' },
-    { accountCode: '1400', accountName: 'TDS Receivable',             accountType: 'Other Current Asset',     accountSubType: 'Other Current Asset',    isSystemAccount: true },
-    { accountCode: '2310', accountName: 'TDS Payable',                accountType: 'Other Current Liability', accountSubType: 'Other Current Liability',isSystemAccount: true },
+    { accountCode: '1100', accountName: 'Accounts Receivable',         accountType: 'Accounts Receivable',     accountSubType: 'Accounts Receivable',     isSystemAccount: true, description: 'Money owed to you by customers' },
+    { accountCode: '2100', accountName: 'Accounts Payable',            accountType: 'Accounts Payable',        accountSubType: 'Accounts Payable',        isSystemAccount: true, description: 'Money you owe to vendors' },
+    { accountCode: '1010', accountName: 'Petty Cash',                  accountType: 'Cash',                    accountSubType: 'Cash',                    isSystemAccount: true, description: 'Cash on hand' },
+    { accountCode: '1020', accountName: 'Undeposited Funds',           accountType: 'Cash',                    accountSubType: 'Cash',                    isSystemAccount: true, description: 'Payments not yet deposited' },
+    { accountCode: '1301', accountName: 'Inventory Asset',             accountType: 'Stock',                   accountSubType: 'Stock',                   isSystemAccount: true, description: 'Value of goods in stock' },
+    { accountCode: '2200', accountName: 'Opening Balance Adjustments', accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true },
+    { accountCode: '3010', accountName: 'Opening Balance Offset',      accountType: 'Equity',                  accountSubType: 'Equity',                  isSystemAccount: true },
+    { accountCode: '3020', accountName: 'Retained Earnings',           accountType: 'Equity',                  accountSubType: 'Equity',                  isSystemAccount: true, description: 'Accumulated profits' },
+    { accountCode: '4010', accountName: 'Sales',                       accountType: 'Income',                  accountSubType: 'Income',                  isSystemAccount: true, description: 'Revenue from sales' },
+    { accountCode: '5010', accountName: 'Cost of Goods Sold',          accountType: 'Cost Of Goods Sold',      accountSubType: 'Cost Of Goods Sold',      isSystemAccount: true, description: 'Direct cost of goods sold' },
+    { accountCode: '2300', accountName: 'Tax Payable',                 accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true, description: 'GST/Tax collected but not yet remitted' },
+    { accountCode: '1400', accountName: 'TDS Receivable',              accountType: 'Other Current Asset',     accountSubType: 'Other Current Asset',     isSystemAccount: true },
+    { accountCode: '1410', accountName: 'Advance to Vendor',           accountType: 'Other Current Asset',     accountSubType: 'Other Current Asset',     isSystemAccount: true, description: 'Advance payments made to vendors' },
+    { accountCode: '2400', accountName: 'Advance from Customer',       accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true, description: 'Advance payments received from customers' },
+    { accountCode: '2310', accountName: 'TDS Payable',                 accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true },
   ];
 
   let created = 0;
   for (const acc of systemAccounts) {
-    const exists = await ChartOfAccount.findOne({ accountName: acc.accountName, isSystemAccount: true, orgId: orgId });
+    // ✅ FIX: Check by orgId AND branchId together so each branch gets its own set
+    const exists = await ChartOfAccount.findOne({
+      accountName:     acc.accountName,
+      isSystemAccount: true,
+      orgId:           orgId,
+      branchId:        branchId,
+    });
     if (!exists) {
-      await ChartOfAccount.create({ ...acc, isActive: true, createdBy: 'system', orgId: orgId });
+      await ChartOfAccount.create({
+        ...acc,
+        isActive:  true,
+        createdBy: 'system',
+        orgId:     orgId,
+        branchId:  branchId,
+      });
       created++;
     }
   }
-  if (created > 0) console.log(`✅ System accounts seeded: ${created} created`);
-  else console.log('✅ System accounts already present');
+  if (created > 0) console.log(`✅ System accounts seeded: ${created} created for org=${orgId} branch=${branchId}`);
+  else console.log(`✅ System accounts already present for org=${orgId} branch=${branchId}`);
 }
 
-// Seed on module load
- seedSystemAccounts().catch(console.error);
+// ✅ FIX: Do NOT seed at module load — seeding is now done at org/branch creation
+// seedSystemAccounts is called from finance_auth.js and branches.js instead
 
 // ============================================================================
-// MIDDLEWARE — authenticate (reuse from your project)
+// MIDDLEWARE � authenticate (reuse from your project)
 // ============================================================================
 // Replace with your actual authenticate middleware
 const { verifyFinanceJWT } = require('../middleware/finance_jwt');
@@ -248,7 +264,7 @@ const authenticate = verifyFinanceJWT;
 // ROUTES
 // ============================================================================
 
-// ── POST /seed (trigger system account seeding) ───────────────────────────────
+// -- POST /seed (trigger system account seeding) -------------------------------
 router.post('/seed', authenticate, async (req, res) => {
   try {
     await seedSystemAccounts(req.user?.orgId || null);
@@ -259,18 +275,21 @@ router.post('/seed', authenticate, async (req, res) => {
   }
 });
 
-// ── GET /stats ────────────────────────────────────────────────────────────────
+// -- GET /stats ----------------------------------------------------------------
 router.get('/stats', authenticate, async (req, res) => {
   try {
 const orgFilter = req.user?.orgId
   ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
   : {};
+// ✅ Scope stats to selected branch(es)
+const branchFilter = (req.branchFilter && Object.keys(req.branchFilter).length > 0) ? req.branchFilter : {};
+const scopedFilter = { ...orgFilter, ...branchFilter };
 const [total, active, inactive, byType] = await Promise.all([
-  ChartOfAccount.countDocuments(orgFilter),
-  ChartOfAccount.countDocuments({ ...orgFilter, isActive: true }),
-  ChartOfAccount.countDocuments({ ...orgFilter, isActive: false }),
+  ChartOfAccount.countDocuments(scopedFilter),
+  ChartOfAccount.countDocuments({ ...scopedFilter, isActive: true }),
+  ChartOfAccount.countDocuments({ ...scopedFilter, isActive: false }),
   ChartOfAccount.aggregate([
-    { $match: orgFilter },
+    { $match: scopedFilter },
     { $group: { _id: '$accountType', count: { $sum: 1 } } }
   ]),
 ]);
@@ -287,7 +306,7 @@ const [total, active, inactive, byType] = await Promise.all([
   }
 });
 
-// ── GET / (list) ──────────────────────────────────────────────────────────────
+// -- GET / (list) --------------------------------------------------------------
 router.get('/', authenticate, async (req, res) => {
   try {
     const { accountType, isActive, search, page = 1, limit = 200 } = req.query;
@@ -295,6 +314,10 @@ router.get('/', authenticate, async (req, res) => {
     const query = {};
     if (req.user?.orgId) {
       query.$or = [{ orgId: req.user.orgId }, { orgId: null }];
+    }
+    // ✅ Scope to selected branch(es) — prevents showing accounts from other branches
+    if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
+      Object.assign(query, req.branchFilter);
     }
     if (accountType && accountType !== 'All') {
       // Support broad category matching
@@ -367,7 +390,7 @@ router.get('/', authenticate, async (req, res) => {
 
 
 
-// ── GET /:id/transactions ─────────────────────────────────────────────────────
+// -- GET /:id/transactions -----------------------------------------------------
 router.get('/:id/transactions', authenticate, async (req, res) => {
   try {
     const { fromDate, toDate } = req.query;
@@ -381,6 +404,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
 
     const query = { accountId: req.params.id };
     if (req.user?.orgId) query.$or = [{ orgId: req.user.orgId }, { orgId: null }];
+    Object.assign(query, req.branchFilter || {}); // ✅ Fix 4: scope ledger to branch
     if (fromDate || toDate) {
       query.date = {};
       if (fromDate) query.date.$gte = new Date(fromDate);
@@ -388,7 +412,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     }
 
     const txns = await AccountTransaction.find(query)
-      .sort({ date: 1 })   // ← sort ASCENDING to calculate running balance
+      .sort({ date: 1 })   // ? sort ASCENDING to calculate running balance
       .limit(500)
       .lean();
 
@@ -405,7 +429,7 @@ router.get('/:id/transactions', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// ── GET /:id ──────────────────────────────────────────────────────────────────
+// -- GET /:id ------------------------------------------------------------------
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({
@@ -416,7 +440,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const txnCount = await AccountTransaction.countDocuments({
       accountId: account._id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     res.json({ success: true, data: { ...account, id: account._id, transactionCount: txnCount } });
   } catch (err) {
@@ -424,7 +448,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// ── POST /:id/opening-balance ─────────────────────────────────────────────────
+// -- POST /:id/opening-balance -------------------------------------------------
 router.post('/:id/opening-balance', authenticate, async (req, res) => {
   try {
     const { amount, balanceType, date } = req.body;
@@ -442,20 +466,22 @@ router.post('/:id/opening-balance', authenticate, async (req, res) => {
     account.updatedBy      = req.user?.email || 'system';
     await account.save();
 
-    // ✅ DELETE old opening balance transaction if exists (for re-save)
+    // ? DELETE old opening balance transaction if exists (for re-save)
     await AccountTransaction.deleteOne({
       accountId: account._id,
       referenceType: 'Opening Balance',
       ...(orgId ? { orgId } : {}),
+      ...(req.branchFilter || {}), // ✅ Fix 5: scope deleteOne to branch
     });
 
-    // ✅ CREATE new AccountTransaction record
+    // ? CREATE new AccountTransaction record
     const debit  = balanceType === 'Dr' ? Number(amount) : 0;
     const credit = balanceType === 'Cr' ? Number(amount) : 0;
 
     await AccountTransaction.create({
       accountId:       account._id,
       orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, // ✅ Fix 5: carry branchId
       date:            date ? new Date(date) : new Date(),
       description:     'Opening Balance',
       referenceType:   'Opening Balance',
@@ -466,14 +492,14 @@ router.post('/:id/opening-balance', authenticate, async (req, res) => {
       balance:         debit - credit,
     });
 
-    console.log(`✅ Opening Balance posted: ${account.accountName} ${balanceType} ₹${amount}`);
+    console.log(`? Opening Balance posted: ${account.accountName} ${balanceType} ?${amount}`);
     res.json({ success: true, message: 'Opening balance saved successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ── POST / (create) ───────────────────────────────────────────────────────────
+// -- POST / (create) -----------------------------------------------------------
 router.post('/', authenticate, async (req, res) => {
   try {
     const data = req.body;
@@ -481,7 +507,7 @@ router.post('/', authenticate, async (req, res) => {
     // Check duplicate name
     const existing = await ChartOfAccount.findOne({
       accountName: { $regex: `^${data.accountName}$`, $options: 'i' },
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (existing) {
       return res.status(400).json({ success: false, message: `Account "${data.accountName}" already exists` });
@@ -496,30 +522,30 @@ router.post('/', authenticate, async (req, res) => {
     if (data.parentAccountId) {
       const parent = await ChartOfAccount.findOne({
         _id: data.parentAccountId,
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
       }).lean();
       if (parent) data.parentAccountName = parent.accountName;
     }
 
     const account = await ChartOfAccount.create({
       ...data,
-      orgId: req.user?.orgId || null,
+      orgId: req.user?.orgId || null, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user?.email || 'system',
     });
 
-    console.log(`✅ Account created: ${account.accountName} (${account.accountCode})`);
+    console.log(`? Account created: ${account.accountName} (${account.accountCode})`);
     res.status(201).json({ success: true, message: 'Account created successfully', data: { ...account.toObject(), id: account._id } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ── PUT /:id (update) ─────────────────────────────────────────────────────────
+// -- PUT /:id (update) ---------------------------------------------------------
 router.put('/:id', authenticate, async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
 
@@ -537,7 +563,7 @@ router.put('/:id', authenticate, async (req, res) => {
       if (req.body.parentAccountId) {
         const parent = await ChartOfAccount.findOne({
           _id: req.body.parentAccountId,
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          ...req.orgFilter,
         }).lean();
         if (parent) account.parentAccountName = parent.accountName;
       } else if (req.body.parentAccountId === null) {
@@ -554,12 +580,12 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-// ── PATCH /:id/toggle-active ──────────────────────────────────────────────────
+// -- PATCH /:id/toggle-active --------------------------------------------------
 router.patch('/:id/toggle-active', authenticate, async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
     if (account.isSystemAccount) return res.status(400).json({ success: false, message: 'Cannot deactivate system accounts' });
@@ -574,19 +600,19 @@ router.patch('/:id/toggle-active', authenticate, async (req, res) => {
   }
 });
 
-// ── DELETE /:id ───────────────────────────────────────────────────────────────
+// -- DELETE /:id ---------------------------------------------------------------
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
     if (account.isSystemAccount) return res.status(400).json({ success: false, message: 'System accounts cannot be deleted' });
 
     const txnCount = await AccountTransaction.countDocuments({
       accountId: account._id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (txnCount > 0) return res.status(400).json({ success: false, message: `Cannot delete account with ${txnCount} transactions` });
 
@@ -597,7 +623,7 @@ router.delete('/:id', authenticate, async (req, res) => {
   }
 });
 
-// ── POST /import (bulk import) ────────────────────────────────────────────────
+// -- POST /import (bulk import) ------------------------------------------------
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 router.post('/import', authenticate, upload.single('file'), async (req, res) => {
@@ -614,7 +640,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
         // Check duplicate
         const existing = await ChartOfAccount.findOne({
           accountName: { $regex: `^${item.accountName}$`, $options: 'i' },
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          ...req.orgFilter,
         });
         if (existing) {
           errors.push(`Row ${i + 2}: Account "${item.accountName}" already exists`);
@@ -631,7 +657,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
         if (item.parentAccountName && item.parentAccountName.trim()) {
           const parent = await ChartOfAccount.findOne({
             accountName: { $regex: `^${item.parentAccountName}$`, $options: 'i' },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
           }).lean();
           if (parent) {
             item.parentAccountId   = parent._id;
@@ -658,28 +684,35 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
 });
 
 // ============================================================================
-// EXPORT helper — post a journal entry to COA (used by other modules)
+// EXPORT helper � post a journal entry to COA (used by other modules)
 // ============================================================================
 // Call this from manual_journal.js, bills.js, invoices.js etc.
 
-async function postTransactionToCOA({ accountId, orgId = null, date, description, referenceType, referenceId, referenceNumber, debit = 0, credit = 0 }) {
+async function postTransactionToCOA({ accountId, orgId = null, branchId = null, date, description, referenceType, referenceId, referenceNumber, debit = 0, credit = 0 }) {
   try {
-    // Get current balance
-    const lastTxn = await AccountTransaction.findOne({
-      accountId,
-      ...(orgId ? { orgId } : {}),
-    }).sort({ date: -1, createdAt: -1 }).lean();
-    const prevBalance = lastTxn ? lastTxn.balance : 0;
-    const newBalance  = prevBalance + debit - credit;
+    // Calculate balance scoped to this branch (or org-wide if no branchId)
+    // This ensures each branch has its own accurate running balance
+    const balanceMatchFilter = {
+      accountId: new mongoose.Types.ObjectId(accountId.toString()),
+      ...(branchId ? { branchId } : {}),
+    };
+    const agg = await AccountTransaction.aggregate([
+      { $match: balanceMatchFilter },
+      { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+    ]);
+    const totalDebit  = (agg[0]?.totalDebit  || 0) + debit;
+    const totalCredit = (agg[0]?.totalCredit || 0) + credit;
+    const newBalance  = totalDebit - totalCredit;
 
     await AccountTransaction.create({
-      accountId, orgId, date, description, referenceType, referenceId, referenceNumber,
+      accountId, orgId, branchId, date, description, referenceType, referenceId, referenceNumber,
       debit, credit, balance: newBalance,
     });
 
-    // Update account closing balance
+    // Update closingBalance on ChartOfAccount (org-wide aggregate for backward compat)
+    // Per-branch balance is always derived via AccountTransaction aggregation with branchId filter
     await ChartOfAccount.findByIdAndUpdate(accountId, {
-      closingBalance: Math.abs(newBalance),
+      closingBalance: newBalance,
       balanceType: newBalance >= 0 ? 'Dr' : 'Cr',
     });
   } catch (err) {

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // RECURRING INVOICE ROUTES - Complete Backend Implementation
 // ============================================================================
 // File: backend/routes/recurring-invoice.js
@@ -290,7 +290,7 @@ async function generateInvoiceNumber(orgId = null) {
 
 async function generateChildInvoice(profile) {
   try {
-    console.log(`🔄 Generating invoice for profile: ${profile.profileName}`);
+    console.log(`?? Generating invoice for profile: ${profile.profileName}`);
     
     // Generate invoice number
     const invoiceNumber = await generateInvoiceNumber(profile.orgId || null);
@@ -344,9 +344,9 @@ async function generateChildInvoice(profile) {
     const invoice = new Invoice(invoiceData);
     await invoice.save();
     
-    console.log(`✅ Invoice created: ${invoice.invoiceNumber}`);
+    console.log(`? Invoice created: ${invoice.invoiceNumber}`);
 
-    // ✅ COA Posting
+    // ? COA Posting
     try {
       const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
@@ -360,8 +360,7 @@ async function generateChildInvoice(profile) {
       // Debit Accounts Receivable
       if (arId) await postTransactionToCOA({
         accountId:       arId,
-        orgId:           profileOrgId,
-        date:            invoiceDate,
+        orgId:           profileOrgId,         date:            invoiceDate,
         description:     `Recurring Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
         referenceType:   'Invoice',
         referenceId:     invoice._id,
@@ -373,8 +372,7 @@ async function generateChildInvoice(profile) {
       // Credit Sales
       if (salesId) await postTransactionToCOA({
         accountId:       salesId,
-        orgId:           profileOrgId,
-        date:            invoiceDate,
+        orgId:           profileOrgId,         date:            invoiceDate,
         description:     `Recurring Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
         referenceType:   'Invoice',
         referenceId:     invoice._id,
@@ -386,8 +384,7 @@ async function generateChildInvoice(profile) {
       // Credit Tax Payable
       if (taxId && gstAmount > 0) await postTransactionToCOA({
         accountId:       taxId,
-        orgId:           profileOrgId,
-        date:            invoiceDate,
+        orgId:           profileOrgId,         date:            invoiceDate,
         description:     `GST on Recurring Invoice ${invoice.invoiceNumber}`,
         referenceType:   'Invoice',
         referenceId:     invoice._id,
@@ -396,10 +393,10 @@ async function generateChildInvoice(profile) {
         credit:          cgst + sgst,
       });
 
-      console.log(`✅ COA posted for recurring invoice: ${invoice.invoiceNumber}`);
+      console.log(`? COA posted for recurring invoice: ${invoice.invoiceNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA post error (recurring invoice):', coaErr.message);
-      // Non-critical — invoice is already saved
+      console.error('?? COA post error (recurring invoice):', coaErr.message);
+      // Non-critical � invoice is already saved
     }
     
     // Update profile
@@ -417,13 +414,13 @@ async function generateChildInvoice(profile) {
     // Check if we should stop (max occurrences reached)
     if (profile.maxOccurrences && profile.totalInvoicesGenerated >= profile.maxOccurrences) {
       profile.status = 'STOPPED';
-      console.log(`🛑 Profile stopped: Max occurrences (${profile.maxOccurrences}) reached`);
+      console.log(`?? Profile stopped: Max occurrences (${profile.maxOccurrences}) reached`);
     }
     
     // Check if we should stop (end date reached)
     if (profile.endDate && profile.nextInvoiceDate > profile.endDate) {
       profile.status = 'STOPPED';
-      console.log(`🛑 Profile stopped: End date reached`);
+      console.log(`?? Profile stopped: End date reached`);
     }
     
     await profile.save();
@@ -432,16 +429,16 @@ async function generateChildInvoice(profile) {
     if (profile.invoiceCreationMode === 'auto_send') {
       try {
         await sendInvoiceEmail(invoice);
-        console.log(`📧 Invoice emailed to: ${invoice.customerEmail}`);
+        console.log(`?? Invoice emailed to: ${invoice.customerEmail}`);
       } catch (emailError) {
-        console.error(`❌ Email failed:`, emailError.message);
+        console.error(`? Email failed:`, emailError.message);
       }
     }
     
     return invoice;
     
   } catch (error) {
-    console.error(`❌ Error generating child invoice:`, error);
+    console.error(`? Error generating child invoice:`, error);
     throw error;
   }
 }
@@ -468,12 +465,12 @@ const DEFAULT_PAYMENT = require('../config/payment-defaults');
 // Send invoice email for recurring invoices
 async function sendInvoiceEmail(invoice) {
   try {
-    // Fetch org details from DB
+    // Fetch org details — branch-aware
     let orgData = null;
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-      orgData = await OrgModel.findOne({ orgId: invoice.orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(invoice.orgId, invoice.branchId || null, db);
     } catch (_) {}
 
     const orgName  = orgData?.orgName   || 'Billing Team';
@@ -527,7 +524,7 @@ async function sendInvoiceEmail(invoice) {
       ${orgGST   ? `<p style="margin: 4px 0 0 0; opacity: 0.8; font-size: 12px;">GST: ${orgGST}</p>`   : ''}
       ${orgPhone ? `<p style="margin: 4px 0 0 0; opacity: 0.8; font-size: 12px;">${orgPhone}</p>`       : ''}
       ${orgEmail ? `<p style="margin: 4px 0 0 0; opacity: 0.8; font-size: 12px;">${orgEmail}</p>`       : ''}
-      <div class="recurring-badge">🔄 RECURRING INVOICE</div>
+      <div class="recurring-badge">?? RECURRING INVOICE</div>
     </div>
     
     <div class="content">
@@ -562,32 +559,32 @@ async function sendInvoiceEmail(invoice) {
       </div>
       
       <div class="warning-box">
-        <strong>⚠️ Payment Instructions:</strong><br>
+        <strong>?? Payment Instructions:</strong><br>
         Please make the payment before <strong>${new Date(invoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong> to avoid late fees.
       </div>
       
       <div class="payment-section">
-        <h3 style="color: #2c3e50; margin-top: 0; text-align: center;">💳 Payment Methods</h3>
+        <h3 style="color: #2c3e50; margin-top: 0; text-align: center;">?? Payment Methods</h3>
         
         <!-- Bank Transfer -->
         <div class="payment-method">
-          <h4>🏦 Option 1: Bank Transfer / NEFT / RTGS / IMPS</h4>
+          <h4>?? Option 1: Bank Transfer / NEFT / RTGS / IMPS</h4>
           <div class="payment-detail-item"><strong>Account Holder:</strong> ${paymentInfo.accountHolder || 'Abra Fleet Management'}</div>
           <div class="payment-detail-item"><strong>Account Number:</strong> ${paymentInfo.bankAccount || 'Not provided'}</div>
           <div class="payment-detail-item"><strong>IFSC Code:</strong> ${paymentInfo.ifscCode || 'Not provided'}</div>
           <div class="payment-detail-item"><strong>Bank Name:</strong> ${paymentInfo.bankName || 'Not provided'}</div>
           <div style="margin-top: 10px; padding: 10px; background: #e8f4f8; border-radius: 5px; font-size: 13px;">
-            💡 <strong>Note:</strong> Please mention invoice number <strong>${invoice.invoiceNumber}</strong> in payment remarks
+            ?? <strong>Note:</strong> Please mention invoice number <strong>${invoice.invoiceNumber}</strong> in payment remarks
           </div>
         </div>
         
         <!-- UPI Payment -->
         ${paymentInfo.upiId ? `
         <div class="payment-method">
-          <h4>📱 Option 2: UPI Payment</h4>
+          <h4>?? Option 2: UPI Payment</h4>
           <div class="payment-detail-item"><strong>UPI ID:</strong> <span style="color: #3498DB; font-weight: bold;">${paymentInfo.upiId}</span></div>
           <div style="margin-top: 10px; padding: 10px; background: #e8f4f8; border-radius: 5px; font-size: 13px;">
-            💡 Pay instantly using Google Pay, PhonePe, Paytm, or any UPI app
+            ?? Pay instantly using Google Pay, PhonePe, Paytm, or any UPI app
           </div>
         </div>
         ` : ''}
@@ -595,40 +592,40 @@ async function sendInvoiceEmail(invoice) {
         <!-- Cash/Cheque -->
         ${paymentInfo.officeAddress ? `
         <div class="payment-method">
-          <h4>💵 Option 3: Cash / Cheque Payment</h4>
+          <h4>?? Option 3: Cash / Cheque Payment</h4>
           <div class="payment-detail-item"><strong>Visit Office:</strong></div>
           <div style="padding: 10px; background: #f8f9fa; border-radius: 5px; margin-top: 5px;">
             ${paymentInfo.officeAddress}
           </div>
           <div style="margin-top: 10px; padding: 10px; background: #e8f4f8; border-radius: 5px; font-size: 13px;">
-            💡 Cheques should be drawn in favor of "<strong>${paymentInfo.accountHolder || 'Abra Fleet Management'}</strong>"
+            ?? Cheques should be drawn in favor of "<strong>${paymentInfo.accountHolder || 'Abra Fleet Management'}</strong>"
           </div>
         </div>
         ` : ''}
         
         <!-- Payment Proof -->
         <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-          <strong>📸 Important:</strong> Please share payment proof after making the payment:
+          <strong>?? Important:</strong> Please share payment proof after making the payment:
           <ul style="margin: 10px 0;">
-            ${orgEmail ? `<li>📧 Email: ${orgEmail}</li>` : ''}
-            ${orgPhone ? `<li>📞 WhatsApp: ${orgPhone}</li>` : ''}
+            ${orgEmail ? `<li>?? Email: ${orgEmail}</li>` : ''}
+            ${orgPhone ? `<li>?? WhatsApp: ${orgPhone}</li>` : ''}
           </ul>
         </div>
       </div>
       
       <div style="text-align: center; margin: 30px 0;">
         <p style="background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #1976d2;">
-          <strong>🔄 This is a recurring invoice</strong><br>
+          <strong>?? This is a recurring invoice</strong><br>
           <span style="font-size: 14px; color: #666;">You will receive this invoice automatically based on your subscription schedule.</span>
         </p>
       </div>
       
       <div style="background: white; padding: 20px; border-radius: 8px; margin-top: 20px;">
-        <h3 style="color: #2c3e50; margin-top: 0;">📞 Need Help?</h3>
+        <h3 style="color: #2c3e50; margin-top: 0;">?? Need Help?</h3>
         <p>If you have any questions about this invoice or your recurring billing, please contact us:</p>
         <ul style="list-style: none; padding: 0;">
-          ${orgEmail ? `<li style="padding: 5px 0;">📧 Email: ${orgEmail}</li>` : ''}
-          ${orgPhone ? `<li style="padding: 5px 0;">📞 Phone: ${orgPhone}</li>` : ''}
+          ${orgEmail ? `<li style="padding: 5px 0;">?? Email: ${orgEmail}</li>` : ''}
+          ${orgPhone ? `<li style="padding: 5px 0;">?? Phone: ${orgPhone}</li>` : ''}
           </ul>
       </div>
     </div>
@@ -648,16 +645,16 @@ async function sendInvoiceEmail(invoice) {
     const mailOptions = {
       from: `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
       to: invoice.customerEmail,
-      subject: `🔄 Recurring Invoice ${invoice.invoiceNumber} - Rs.${invoice.totalAmount.toFixed(2)}`,
+      subject: `?? Recurring Invoice ${invoice.invoiceNumber} - Rs.${invoice.totalAmount.toFixed(2)}`,
       html: emailHtml
     };
     
     await emailTransporter.sendMail(mailOptions);
-    console.log(`✅ Recurring invoice email sent successfully to: ${invoice.customerEmail}`);
+    console.log(`? Recurring invoice email sent successfully to: ${invoice.customerEmail}`);
     return true;
     
   } catch (error) {
-    console.error(`❌ Failed to send recurring invoice email:`, error);
+    console.error(`? Failed to send recurring invoice email:`, error);
     throw error;
   }
 }
@@ -667,7 +664,7 @@ async function sendInvoiceEmail(invoice) {
 // ============================================================================
 
 cron.schedule('0 6 * * *', async () => {
-  console.log('🔄 Running recurring invoice cron job...');
+  console.log('?? Running recurring invoice cron job...');
   
   try {
     const today = new Date();
@@ -679,31 +676,31 @@ cron.schedule('0 6 * * *', async () => {
       nextInvoiceDate: { $lte: today }
     });
     
-    console.log(`📋 Found ${profiles.length} profiles ready for invoice generation`);
+    console.log(`?? Found ${profiles.length} profiles ready for invoice generation`);
     
     for (const profile of profiles) {
       try {
         await generateChildInvoice(profile);
       } catch (error) {
-        console.error(`❌ Failed to generate invoice for profile ${profile.profileName}:`, error);
+        console.error(`? Failed to generate invoice for profile ${profile.profileName}:`, error);
         
         // If suspendOnFailure is enabled, pause the profile
         if (profile.suspendOnFailure) {
           profile.status = 'PAUSED';
           await profile.save();
-          console.log(`⏸️  Profile paused due to failure: ${profile.profileName}`);
+          console.log(`??  Profile paused due to failure: ${profile.profileName}`);
         }
       }
     }
     
-    console.log('✅ Recurring invoice cron job completed');
+    console.log('? Recurring invoice cron job completed');
     
   } catch (error) {
-    console.error('❌ Cron job error:', error);
+    console.error('? Cron job error:', error);
   }
 });
 
-console.log('⏰ Recurring invoice cron job scheduled (daily at 6 AM)');
+console.log('? Recurring invoice cron job scheduled (daily at 6 AM)');
 
 // ============================================================================
 // API ROUTES
@@ -715,7 +712,7 @@ router.get('/', async (req, res) => {
     const { status, customerId, page = 1, limit = 20 } = req.query;
     
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
     
     if (status) query.status = status;
     if (customerId) query.customerId = customerId;
@@ -730,7 +727,7 @@ router.get('/', async (req, res) => {
     
     const total = await RecurringInvoice.countDocuments(query);
     
-    console.log(`📋 Retrieved ${profiles.length} recurring invoice profiles`);
+    console.log(`?? Retrieved ${profiles.length} recurring invoice profiles`);
     
     res.json({
       success: true,
@@ -751,7 +748,7 @@ router.get('/', async (req, res) => {
 // GET /api/invoices/recurring/stats - Get statistics
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
     const stats = await RecurringInvoice.aggregate([
       { $match: orgFilter },
       {
@@ -795,7 +792,7 @@ router.get('/:id', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -825,6 +822,7 @@ router.post('/', async (req, res) => {
     // Set creator
     profileData.createdBy = req.user?.email || req.user?.uid || 'system';
     profileData.orgId = req.user?.orgId || null;
+    profileData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     
     // Set next invoice date if not provided
     if (!profileData.nextInvoiceDate) {
@@ -838,7 +836,7 @@ router.post('/', async (req, res) => {
     const profile = new RecurringInvoice(profileData);
     await profile.save();
     
-    console.log(`✅ Recurring invoice profile created: ${profile.profileName}`);
+    console.log(`? Recurring invoice profile created: ${profile.profileName}`);
     
     res.status(201).json({
       success: true,
@@ -856,7 +854,7 @@ router.put('/:id', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -878,7 +876,7 @@ router.put('/:id', async (req, res) => {
     Object.assign(profile, updates);
     await profile.save();
     
-    console.log(`✅ Recurring invoice profile updated: ${profile.profileName}`);
+    console.log(`? Recurring invoice profile updated: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -896,7 +894,7 @@ router.post('/:id/pause', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -907,7 +905,7 @@ router.post('/:id/pause', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`⏸️  Recurring invoice profile paused: ${profile.profileName}`);
+    console.log(`??  Recurring invoice profile paused: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -925,7 +923,7 @@ router.post('/:id/resume', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -936,7 +934,7 @@ router.post('/:id/resume', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`▶️  Recurring invoice profile resumed: ${profile.profileName}`);
+    console.log(`??  Recurring invoice profile resumed: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -954,7 +952,7 @@ router.post('/:id/stop', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -965,7 +963,7 @@ router.post('/:id/stop', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`🛑 Recurring invoice profile stopped: ${profile.profileName}`);
+    console.log(`?? Recurring invoice profile stopped: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -983,7 +981,7 @@ router.post('/:id/generate', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -992,7 +990,7 @@ router.post('/:id/generate', async (req, res) => {
     
     const invoice = await generateChildInvoice(profile);
     
-    console.log(`✅ Manual invoice generated: ${invoice.invoiceNumber}`);
+    console.log(`? Manual invoice generated: ${invoice.invoiceNumber}`);
     
     res.json({
       success: true,
@@ -1023,7 +1021,7 @@ router.get('/:id/child-invoices', verifyToken, async (req, res) => {
     
     const profile = await RecurringInvoice.findOne({
       _id: id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -1061,7 +1059,7 @@ router.get('/:id/child-invoices', verifyToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error fetching child invoices:', error);
+    console.error('? Error fetching child invoices:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1074,7 +1072,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const profile = await RecurringInvoice.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId, ...(req.branchFilter || {})
     });
     
     if (!profile) {
@@ -1083,7 +1081,7 @@ router.delete('/:id', async (req, res) => {
     
     await profile.deleteOne();
     
-    console.log(`✅ Recurring invoice profile deleted: ${profile.profileName}`);
+    console.log(`? Recurring invoice profile deleted: ${profile.profileName}`);
     
     res.json({
       success: true,

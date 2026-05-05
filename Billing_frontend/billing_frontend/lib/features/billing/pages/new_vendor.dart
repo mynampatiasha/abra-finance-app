@@ -325,16 +325,6 @@ class _NewVendorPageState extends State<NewVendorPage>
       _snack('Vendor Display Name is required', error: true);
       return;
     }
-    if (_emailCtrl.text.trim().isEmpty) {
-      _tabController.animateTo(0);
-      _snack('Email is required', error: true);
-      return;
-    }
-    if (_workPhoneCtrl.text.trim().isEmpty) {
-      _tabController.animateTo(0);
-      _snack('Phone number is required', error: true);
-      return;
-    }
 
     setState(() => _isSaving = true);
     try {
@@ -643,21 +633,21 @@ class _NewVendorPageState extends State<NewVendorPage>
             _displayNameField(),
             const SizedBox(height: 16),
 
-            // Email (required)
+            // Email (optional)
             _field('Email', _emailCtrl,
-                hint: 'email@example.com', required: true,
+                hint: 'email@example.com',
                 keyboard: TextInputType.emailAddress),
             const SizedBox(height: 16),
 
             // Work Phone + Mobile
             wide
                 ? Row(children: [
-                    Expanded(child: _field('Phone Number', _workPhoneCtrl, hint: 'Work phone', required: true, keyboard: TextInputType.phone)),
+                    Expanded(child: _field('Phone Number', _workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone)),
                     const SizedBox(width: 12),
                     Expanded(child: _field('Alternate Phone', _mobileCtrl, hint: 'Mobile / alternate', keyboard: TextInputType.phone)),
                   ])
                 : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    _field('Phone Number', _workPhoneCtrl, hint: 'Work phone', required: true, keyboard: TextInputType.phone),
+                    _field('Phone Number', _workPhoneCtrl, hint: 'Work phone', keyboard: TextInputType.phone),
                     const SizedBox(height: 12),
                     _field('Alternate Phone', _mobileCtrl, hint: 'Mobile / alternate', keyboard: TextInputType.phone),
                   ]),

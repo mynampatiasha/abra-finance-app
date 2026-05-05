@@ -16,8 +16,9 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 
-// ✅ COA Helper
+// ? COA Helper
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+const { sendMail } = require('../utils/mailer');
 
 async function getSystemAccountId(name, orgId = null) {
   try {
@@ -33,13 +34,62 @@ async function getSystemAccountId(name, orgId = null) {
   }
 }
 
+// Looks up (or auto-creates) an expense/COGS account by name — mirrors expenses.js getExpenseAccountId
+async function getBillExpenseAccountId(accountName, orgId = null) {
+  try {
+    const EXPENSE_TYPES = ['Expense', 'Other Expense', 'Cost Of Goods Sold', 'Equity'];
+
+    // Step 1: exact match on an expense-type account
+    let acc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $in: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id').lean();
+    if (acc) return acc._id;
+
+    // Step 1b: account exists but is the wrong type — skip COA post safely
+    const wrongTypeAcc = await ChartOfAccount.findOne({
+      accountName: { $regex: `^${accountName}$`, $options: 'i' },
+      accountType: { $nin: EXPENSE_TYPES },
+      ...(orgId ? { orgId } : {}),
+    }).select('_id accountType').lean();
+    if (wrongTypeAcc) {
+      console.warn(`⚠️ Bill COA: account "${accountName}" is type "${wrongTypeAcc.accountType}" — not an expense account. Skipping.`);
+      return null;
+    }
+
+    // Step 2: not found — auto-create as Expense type
+    console.log(`📝 Bill COA: account "${accountName}" not found — creating automatically as Expense type...`);
+    const newAcc = await ChartOfAccount.create({
+      accountName:     accountName,
+      accountCode:     `EXP-${Date.now().toString().slice(-6)}`,
+      accountType:     'Expense',
+      orgId:           orgId,
+      accountSubType:  'Operating Expense',
+      description:     `${accountName} expenses`,
+      isSystemAccount: false,
+      isActive:        true,
+      openingBalance:  0,
+      currentBalance:  0,
+      currency:        'INR',
+      transactions:    [],
+    });
+    console.log(`✅ Bill COA: auto-created account "${accountName}" → ID: ${newAcc._id}`);
+    return newAcc._id;
+  } catch (e) {
+    console.error(`COA lookup/create error for bill expense account "${accountName}":`, e.message);
+    return null;
+  }
+}
+
 // ============================================================================
 // MONGOOSE MODELS
 // ============================================================================
 
 // Bill Schema - mirrors Zoho Books Bill structure
 const billSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId    : { type: String, index: true, default: null },
+  branchId : { type: String, index: true, default: null },
   billNumber: {
     type: String,
     required: true,
@@ -93,6 +143,16 @@ const billSchema = new mongoose.Schema({
       required: true
     },
     account: String,           // Expense account (e.g., Office Supplies)
+    // ── GST / HSN fields (mirrors invoices.js) ──────────────────────────────
+    hsnCode:      { type: String, default: '' },
+    sacCode:      { type: String, default: '' },
+    unit:         { type: String, default: 'Nos' },
+    taxableAmount:{ type: Number, default: 0 },
+    itemGstRate:  { type: Number, default: 0 },
+    cgstAmount:   { type: Number, default: 0 },
+    sgstAmount:   { type: Number, default: 0 },
+    igstAmount:   { type: Number, default: 0 },
+    // ── Original fields ──────────────────────────────────────────────────────
     quantity: {
       type: Number,
       required: true,
@@ -209,12 +269,13 @@ const billSchema = new mongoose.Schema({
 
   // Vendor Credits Applied
   vendorCreditsApplied: [{
-    creditId: mongoose.Schema.Types.ObjectId,
-    amount: Number,
-    appliedDate: Date
+    creditId:      mongoose.Schema.Types.ObjectId,
+    paymentNumber: String,
+    amount:        Number,
+    appliedDate:   Date,
   }],
 
-  // ── Currency & Exchange Rate ─────────────────────────────────────────────
+  // -- Currency & Exchange Rate ---------------------------------------------
   currency: {
     type: String,
     default: 'INR',
@@ -232,7 +293,7 @@ const billSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  // ── End Currency Fields ──────────────────────────────────────────────────
+  // -- End Currency Fields --------------------------------------------------
 
   // Recurring Bill Settings
   isRecurring: {
@@ -275,20 +336,53 @@ const billSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Pre-save middleware to calculate amounts
+// Pre-save middleware to calculate amounts — per-item GST (mirrors invoices.js)
 billSchema.pre('save', function() {
-  this.subTotal = this.items.reduce((sum, item) => sum + item.amount, 0);
-  this.tdsAmount = (this.subTotal * this.tdsRate) / 100;
-  this.tcsAmount = (this.subTotal * this.tcsRate) / 100;
-  const gstBase   = this.subTotal - this.tdsAmount + this.tcsAmount;
-  const gstAmount = (gstBase * this.gstRate) / 100;
-  this.cgst        = gstAmount / 2;
-  this.sgst        = gstAmount / 2;
-  this.igst        = 0;
-  this.totalAmount = this.subTotal - this.tdsAmount + this.tcsAmount + gstAmount;
-  this.amountDue   = this.totalAmount - this.amountPaid;
+  // ── 1. Per-item taxable + GST calculation ──────────────────────────────────
+  let subTotal = 0;
+  let totalCGST = 0, totalSGST = 0, totalIGST = 0;
+
+  for (const item of this.items) {
+    // taxable = qty × rate − discount
+    let taxable = (item.quantity || 0) * (item.rate || 0);
+    if (item.discount > 0) {
+      taxable = item.discountType === 'percentage'
+        ? taxable - (taxable * item.discount / 100)
+        : taxable - item.discount;
+    }
+    taxable = Math.round(taxable * 100) / 100;
+    item.taxableAmount = taxable;
+
+    const gstRate = item.itemGstRate || 0;
+    item.cgstAmount = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
+    item.sgstAmount = item.cgstAmount;
+    item.igstAmount = 0;
+
+    item.amount = Math.round((taxable + item.cgstAmount + item.sgstAmount) * 100) / 100;
+
+    subTotal   += taxable;
+    totalCGST  += item.cgstAmount;
+    totalSGST  += item.sgstAmount;
+  }
+
+  this.subTotal = Math.round(subTotal * 100) / 100;
+  this.cgst     = Math.round(totalCGST * 100) / 100;
+  this.sgst     = Math.round(totalSGST * 100) / 100;
+  this.igst     = 0;
+
+  // ── 2. TDS / TCS ───────────────────────────────────────────────────────────
+  this.tdsAmount = Math.round(this.subTotal * (this.tdsRate || 0) / 100 * 100) / 100;
+  this.tcsAmount = Math.round(this.subTotal * (this.tcsRate || 0) / 100 * 100) / 100;
+
+  // ── 3. Grand total ─────────────────────────────────────────────────────────
+  const totalTax = this.cgst + this.sgst;
+  this.totalAmount = Math.round(
+    (this.subTotal - this.tdsAmount + this.tcsAmount + totalTax) * 100
+  ) / 100;
+  this.amountDue  = Math.round((this.totalAmount - (this.amountPaid || 0)) * 100) / 100;
   this.baseCurrencyAmount = this.totalAmount * (this.exchangeRate || 1);
 
+  // ── 4. Status logic ────────────────────────────────────────────────────────
   if (this.status !== 'DRAFT' && this.status !== 'VOID' && this.status !== 'CANCELLED') {
     if (this.amountPaid === 0) {
       this.status = 'OPEN';
@@ -304,7 +398,7 @@ billSchema.pre('save', function() {
 });
 
 // Indexes for performance
-billSchema.index({ orgId: 1, billNumber: 1 }, { unique: true });
+billSchema.index({ orgId: 1, branchId: 1, billNumber: 1 }, { unique: true });
 billSchema.index({ vendorId: 1, billDate: -1 });
 billSchema.index({ status: 1, dueDate: 1 });
 billSchema.index({ createdAt: -1 });
@@ -481,9 +575,9 @@ const RecurringBillProfile = mongoose.models.RecurringBillProfile || mongoose.mo
 // ============================================================================
 
 // Generate unique bill number
-async function generateBillNumber(orgId = null) {
+async function generateBillNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(Bill, 'billNumber', 'BILL', orgId);
+  return generateNumber(Bill, 'billNumber', 'BILL', orgId, branchId);
 }
 
 // Calculate due date based on payment terms
@@ -531,149 +625,378 @@ function numberToWords(n) {
 }
 
 // ============================================================================
-// PDF GENERATION (invoices.js style)
+// ORG LOGO HELPER (mirrors invoices.js getOrgLogoPath)
+// ============================================================================
+function getBillOrgLogoPath(orgId) {
+  if (orgId) {
+    const orgLogoDir = path.join(__dirname, '..', 'uploads', 'org-logos');
+    if (fs.existsSync(orgLogoDir)) {
+      try {
+        const files = fs.readdirSync(orgLogoDir);
+        const match = files.find(f => f.startsWith(`org-${orgId}-`));
+        if (match) {
+          const fullPath = path.join(orgLogoDir, match);
+          const stats    = fs.statSync(fullPath);
+          if (stats.isFile() && stats.size > 0) return fullPath;
+        }
+      } catch (_) {}
+    }
+  }
+  const fallbacks = [
+    path.join(__dirname, '..', 'assets', 'abra.jpeg'),
+    path.join(__dirname, '..', 'assets', 'abra.jpg'),
+    path.join(__dirname, '..', 'assets', 'abra.png'),
+  ];
+  for (const p of fallbacks) {
+    try { if (fs.existsSync(p)) return p; } catch (_) {}
+  }
+  return null;
+}
+
+// ============================================================================
+// PDF GENERATION — mirrors invoices.js exactly
 // ============================================================================
 
-async function generateBillPDF(bill, orgId) {
+async function generateBillPDF(bill, orgId, branchId = null) {
   return new Promise(async (resolve, reject) => {
     try {
+      console.log('PDF generation for bill:', bill.billNumber);
+
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'bills');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
       const filename = `bill-${bill.billNumber}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      let orgName = 'Your Company', orgGST = '', orgAddr = '', orgEmail = '', orgPhone = '', orgData = null;
+      let orgName = 'Your Company', orgGST = '', orgAddr = '', orgEmail = '', orgPhone = '';
+      let orgData = null;
       try {
-        const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        orgData = await OrgModel.findOne({ orgId }).lean();
-        if (orgData) { orgName = orgData.orgName || orgName; orgGST = orgData.gstNumber || ''; orgAddr = orgData.address || ''; orgEmail = orgData.email || ''; orgPhone = orgData.phone || ''; }
-      } catch (e) {}
+        const { getEffectiveOrgData } = require('./branches');
+        const db = mongoose.connection.db;
+        if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
+        if (orgData) {
+          orgName = orgData.orgName   || orgName;
+          orgGST  = orgData.gstNumber || '';
+          orgAddr = orgData.address   || '';
+          orgEmail= orgData.email     || '';
+          orgPhone= orgData.phone     || '';
+        }
+      } catch (e) { console.warn('Could not fetch org details:', e.message); }
 
-      const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+      const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
       const pageW = 515;
 
-      // Header
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
+      // HEADER - white background, black text (same as invoices.js)
+      // ── Resolve logo: 1) orgData.logoUrl from DB, 2) org-logos folder, 3) fallback ──
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getBillOrgLogoPath(orgId || null);
       let logoLoaded = false;
-      const logoPath = (() => { try { const d = path.join(__dirname, '..', 'uploads', 'org-logos'); if (fs.existsSync(d)) { const f = fs.readdirSync(d).find(x => x.startsWith(`org-${orgId}-`)); if (f) return path.join(d, f); } } catch (_) {} const fb = [path.join(__dirname,'..','assets','abra.jpeg'),path.join(__dirname,'..','assets','abra.jpg'),path.join(__dirname,'..','assets','abra.png')]; for (const p of fb) { try { if (fs.existsSync(p)) return p; } catch (_) {} } return null; })();
-      if (logoPath) { try { doc.image(logoPath, 44, 35, { width: 75, height: 60, fit: [75, 60] }); logoLoaded = true; } catch (e) {} }
-      const textX = logoLoaded ? 126 : 50;
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold').text(orgName.toUpperCase(), textX, 40, { width: 200 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('BILLING & FINANCE', textX, 56, { width: 200, characterSpacing: 1 });
-      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let cY = 68; contactLines.forEach(l => { doc.text(l, textX, cY, { width: 240 }); cY += 9; });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold').text('BILL', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(18).fillColor('#ffffff').font('Helvetica-Bold').text(bill.billNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica').text(`Date: ${new Date(bill.billDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold').text(`Due: ${new Date(bill.dueDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })} · ${(bill.status || 'DRAFT').replace(/_/g,' ')}`, 380, 92, { width: 170, align: 'right' });
 
-      // Meta boxes
-      const metaY = 132, metaBoxW = pageW / 2;
-      const metas = [
-        { label: 'Bill From', val: bill.vendorName || 'N/A', sub: [bill.billingAddress?.street, bill.billingAddress?.city, bill.vendorEmail, bill.vendorPhone].filter(Boolean).join(' | ') },
-        { label: 'Bill Details', val: `Due: ${new Date(bill.dueDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`, sub: `Terms: ${bill.paymentTerms || 'Net 30'}${bill.purchaseOrderNumber ? ' | PO: ' + bill.purchaseOrderNumber : ''}` },
-      ];
-      metas.forEach((m, i) => {
-        const bx = 40 + i * metaBoxW;
-        doc.rect(bx, metaY, metaBoxW, 46).fillAndStroke('#f7f9fc', '#dde4ef');
-        doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text(m.label.toUpperCase(), bx + 8, metaY + 7, { width: metaBoxW - 16, characterSpacing: 0.8 });
-        doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(m.val, bx + 8, metaY + 18, { width: metaBoxW - 16, ellipsis: true });
-        doc.fontSize(7).fillColor('#000000').font('Helvetica').text(m.sub, bx + 8, metaY + 30, { width: metaBoxW - 16, ellipsis: true });
+      const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY  = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH = 55;
+      const logoY = logoCenterY - (logoH / 2);
+      const textX = logoPath ? 126 : 50;
+
+      if (logoPath) {
+        try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); logoLoaded = true; }
+        catch (e) { console.warn('Logo load failed:', e.message); }
+      }
+
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
+      doc.fontSize(7).fillColor('#000000');
+      let cY = subtitleY + 12;
+      contactLines.forEach(l => {
+        doc.text(l, textX, cY, { width: 240 });
+        const lineH = doc.heightOfString(l, { width: 240 });
+        cY += Math.max(lineH, 9) + 1;
       });
 
-      // Items table
-      const tableY = metaY + 58;
-      doc.rect(40, tableY, pageW, 22).fill('#0f1e3d');
-      doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
-      doc.text('#', 48, tableY + 7, { width: 20 }); doc.text('DESCRIPTION', 72, tableY + 7, { width: 200 });
-      doc.text('QTY', 275, tableY + 7, { width: 60, align: 'center' }); doc.text('RATE', 340, tableY + 7, { width: 80, align: 'right' }); doc.text('AMOUNT', 420, tableY + 7, { width: 90, align: 'right' });
-      let rowY = tableY + 22;
-      bill.items.forEach((item, idx) => {
-        const rowH = 24;
-        doc.rect(40, rowY, pageW, rowH).fill(idx % 2 === 0 ? '#ffffff' : '#f7f9fc');
-        doc.rect(40, rowY, pageW, rowH).lineWidth(1.5).strokeColor('#000000').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold').text(String(idx + 1), 48, rowY + 8, { width: 20 });
-        doc.font('Helvetica').text(item.itemDetails || 'N/A', 72, rowY + 8, { width: 200, ellipsis: true });
-        doc.text(String(item.quantity || 0), 275, rowY + 8, { width: 60, align: 'center' });
-        doc.text(`Rs.${(item.rate || 0).toFixed(2)}`, 340, rowY + 8, { width: 80, align: 'right' });
-        doc.font('Helvetica-Bold').text(`Rs.${(item.amount || 0).toFixed(2)}`, 420, rowY + 8, { width: 90, align: 'right' });
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+         .text('BILL', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+         .text(bill.billNumber, 380, 52, { width: 170, align: 'right' });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`Date: ${new Date(bill.billDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+         .text(`${(bill.status || 'DRAFT').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+
+      // META GRID - 3 columns (same as invoices.js)
+      const metaY = Math.max(132, cY + 8);
+      const colW = pageW / 3;
+
+      const billingStr = [bill.billingAddress?.street, bill.billingAddress?.city,
+                          bill.billingAddress?.state, bill.billingAddress?.pincode]
+                         .filter(Boolean).join(', ');
+
+      // Dynamic box height based on vendor name + address content
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _vendorNameH = doc.heightOfString(bill.vendorName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _billAddrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const _billGstH  = bill.vendorGSTIN ? 10 : 0;
+      const metaH = Math.max(90, 18 + _vendorNameH + 2 + _billAddrH + _billGstH + 10);
+
+      // Col 1: Bill From
+      const billX = 40;
+      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('BILL FROM', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(bill.vendorName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const vendorNameH = doc.heightOfString(bill.vendorName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + vendorNameH + 2;
+      if (billingStr) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
+      }
+      if (bill.vendorGSTIN) {
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000').text(`GSTIN: ${bill.vendorGSTIN}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16, ellipsis: true });
+      }
+
+      // Col 2: Bill To (our org)
+      const shipX = 40 + colW;
+      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('BILL TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+      if (orgAddr) doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(orgAddr, shipX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+
+      // Col 3: Bill Details
+      const detX = 40 + colW * 2;
+      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('BILL DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`Bill #: ${bill.billNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(`Due: ${new Date(bill.dueDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`, detX + 8, metaY + 29, { width: colW - 16 });
+      doc.text(`Terms: ${bill.paymentTerms || 'Net 30'}`, detX + 8, metaY + 39, { width: colW - 16 });
+      if (bill.purchaseOrderNumber)
+        doc.text(`PO #: ${bill.purchaseOrderNumber}`, detX + 8, metaY + 49, { width: colW - 16 });
+
+      let tableStartY = metaY + metaH + 12;
+
+      // ITEMS TABLE - same columns as invoices.js
+      const isInterState = bill.isInterState || false;
+      const cols = {
+        num:     { x: 40,  w: 16  }, desc:    { x: 56,  w: 90  },
+        hsn:     { x: 146, w: 44  }, unit:    { x: 190, w: 24  },
+        qty:     { x: 214, w: 24  }, rate:    { x: 238, w: 36  },
+        disc:    { x: 274, w: 26  }, taxable: { x: 300, w: 38  },
+        gst:     { x: 338, w: 24  }, tax1:    { x: 362, w: 46  },
+        tax2:    { x: 408, w: 46  }, amount:  { x: 454, w: 61  },
+      };
+
+      doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+      doc.text('#',       cols.num.x  + 2, tableStartY + 7, { width: cols.num.w });
+      doc.text('ITEM',    cols.desc.x + 2, tableStartY + 7, { width: cols.desc.w });
+      doc.text('HSN/SAC', cols.hsn.x  + 2, tableStartY + 7, { width: cols.hsn.w });
+      doc.text('UNIT',    cols.unit.x + 2, tableStartY + 7, { width: cols.unit.w });
+      doc.text('QTY',     cols.qty.x  + 2, tableStartY + 7, { width: cols.qty.w,     align: 'center' });
+      doc.text('RATE',    cols.rate.x + 2, tableStartY + 7, { width: cols.rate.w,    align: 'right' });
+      doc.text('DISC',    cols.disc.x + 2, tableStartY + 7, { width: cols.disc.w,    align: 'right' });
+      doc.text('TAXABLE', cols.taxable.x+2,tableStartY + 7, { width: cols.taxable.w, align: 'right' });
+      doc.text('GST%',    cols.gst.x  + 2, tableStartY + 7, { width: cols.gst.w,     align: 'center' });
+      if (isInterState) {
+        doc.text('IGST',  cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
+      } else {
+        doc.text('CGST',  cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w, align: 'right' });
+        doc.text('SGST',  cols.tax2.x + 2, tableStartY + 7, { width: cols.tax2.w, align: 'right' });
+      }
+      doc.text('AMOUNT',  cols.amount.x+2, tableStartY + 7, { width: cols.amount.w, align: 'right' });
+
+      let rowY = tableStartY + 20;
+      (bill.items || []).forEach((item, idx) => {
+        const descText  = item.itemDetails || 'N/A';
+        const descWidth = cols.desc.w - 4;
+        const vPad      = 8;
+        doc.font('Helvetica').fontSize(7);
+        const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
+        const rowH  = Math.max(20, descH + vPad * 2);
+
+        doc.rect(40, rowY, 515, rowH).fill(idx % 2 === 0 ? '#ffffff' : '#f7f9fc');
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+        const hsnSac  = item.hsnCode || item.sacCode || '';
+        const discStr = item.discount > 0
+          ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`) : '-';
+        const taxable = item.taxableAmount || 0;
+        const gstRate = item.itemGstRate   || 0;
+        const cellY   = rowY + vPad;
+
+        doc.fontSize(7).fillColor('#000000');
+        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
+        doc.font('Helvetica').text(descText, cols.desc.x + 2, cellY, { width: descWidth, lineGap: 1 });
+        doc.text(hsnSac,                           cols.hsn.x  + 2, cellY, { width: cols.hsn.w - 2,  ellipsis: true });
+        doc.text(item.unit || 'Nos',               cols.unit.x + 2, cellY, { width: cols.unit.w });
+        doc.text(String(item.quantity || 0),       cols.qty.x  + 2, cellY, { width: cols.qty.w,     align: 'center' });
+        doc.text(`${(item.rate||0).toFixed(2)}`,   cols.rate.x + 2, cellY, { width: cols.rate.w,    align: 'right' });
+        doc.text(discStr,                          cols.disc.x + 2, cellY, { width: cols.disc.w,    align: 'right' });
+        doc.text(`${taxable.toFixed(2)}`,          cols.taxable.x+2, cellY, { width: cols.taxable.w, align: 'right' });
+        doc.text(`${gstRate}%`,                    cols.gst.x  + 2, cellY, { width: cols.gst.w,     align: 'center' });
+        if (isInterState) {
+          doc.text(`${(item.igstAmount||0).toFixed(2)}`, cols.tax1.x + 2, cellY, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
+        } else {
+          doc.text(`${(item.cgstAmount||0).toFixed(2)}`, cols.tax1.x + 2, cellY, { width: cols.tax1.w, align: 'right' });
+          doc.text(`${(item.sgstAmount||0).toFixed(2)}`, cols.tax2.x + 2, cellY, { width: cols.tax2.w, align: 'right' });
+        }
+        doc.font('Helvetica-Bold')
+           .text(`${(item.amount||0).toFixed(2)}`, cols.amount.x + 2, cellY, { width: cols.amount.w, align: 'right' });
         rowY += rowH;
       });
 
-      // Totals
-      const totalsX = 355, totalsW = 200, labelX = totalsX, amountX = totalsX + totalsW;
-      let totalsY = rowY + 16;
+      // TOTALS - identical to invoices.js
+      const totalsX = 315, totalsW = 240;
+      const summaryY = rowY + 12;
+      let totalsY = summaryY;
+      const labelX = totalsX, amountX = totalsX + totalsW;
+
       const tRow = (label, amount, bold = false) => {
-        doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, labelX, totalsY, { width: 120 });
-        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica').text(amount, labelX + 120, totalsY, { width: 80, align: 'right' });
-        doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11).lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
+        doc.fontSize(8).fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(label, labelX, totalsY, { width: 140 });
+        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
+        doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11)
+           .lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
         totalsY += 14;
       };
+
       tRow('Subtotal:', `Rs. ${(bill.subTotal || 0).toFixed(2)}`);
-      if (bill.cgst > 0) tRow(`CGST (${bill.gstRate / 2}%):`, `Rs. ${bill.cgst.toFixed(2)}`);
-      if (bill.sgst > 0) tRow(`SGST (${bill.gstRate / 2}%):`, `Rs. ${bill.sgst.toFixed(2)}`);
-      if (bill.igst > 0) tRow(`IGST (${bill.gstRate}%):`, `Rs. ${bill.igst.toFixed(2)}`);
-      if (bill.tdsAmount > 0) tRow('TDS Deducted:', `- Rs. ${bill.tdsAmount.toFixed(2)}`);
-      if (bill.tcsAmount > 0) tRow('TCS Collected:', `Rs. ${bill.tcsAmount.toFixed(2)}`);
+      if (isInterState) {
+        if ((bill.igst || bill.totalIGST || 0) > 0) tRow('IGST:', `Rs. ${(bill.igst || bill.totalIGST || 0).toFixed(2)}`);
+      } else {
+        if ((bill.cgst || bill.totalCGST || 0) > 0) tRow('CGST:', `Rs. ${(bill.cgst || bill.totalCGST || 0).toFixed(2)}`);
+        if ((bill.sgst || bill.totalSGST || 0) > 0) tRow('SGST:', `Rs. ${(bill.sgst || bill.totalSGST || 0).toFixed(2)}`);
+      }
+      if ((bill.tdsAmount || 0) > 0) tRow('TDS Deducted:',  `- Rs. ${bill.tdsAmount.toFixed(2)}`);
+      if ((bill.tcsAmount || 0) > 0) tRow('TCS Collected:', `Rs. ${bill.tcsAmount.toFixed(2)}`);
+
       totalsY += 4;
       doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
       doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica').text('Grand Total', labelX + 6, totalsY + 7);
-      doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold').text(`Rs. ${(bill.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
+      doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
+         .text(`Rs. ${(bill.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
       totalsY += 32;
-      if (bill.amountPaid > 0) { tRow('Amount Paid:', `Rs. ${bill.amountPaid.toFixed(2)}`); tRow('Balance Due:', `Rs. ${(bill.amountDue || 0).toFixed(2)}`, true); }
 
-      // Amount in words
-      const wordsY = totalsY + 8;
-      doc.rect(40, wordsY, pageW, 18).fill('#f0fdf4');
-      doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold').text(`In Words: ${numberToWords(Math.round(bill.totalAmount || 0))} Only`, 48, wordsY + 5, { width: pageW - 16 });
-
-      // Notes
-      if (bill.notes) {
-        const nY = wordsY + 28;
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold').text('NOTES', 40, nY, { characterSpacing: 0.8 });
-        doc.moveTo(40, nY + 9).lineTo(555, nY + 9).lineWidth(0.5).strokeColor('#dde4ef').stroke();
-        doc.fontSize(8).fillColor('#000000').font('Helvetica').text(bill.notes, 40, nY + 14, { width: pageW });
+      if ((bill.amountPaid || 0) > 0) {
+        tRow('Amount Paid:', `Rs. ${bill.amountPaid.toFixed(2)}`);
+        tRow('Balance Due:', `Rs. ${(bill.amountDue || 0).toFixed(2)}`, true);
       }
 
-      // T&C
+      // Amount in words
+      const wordsY = Math.max(summaryY, totalsY) + 8;
+      doc.rect(40, wordsY, pageW, 18).fill('#f0fdf4');
+      doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold')
+         .text(`In Words: ${numberToWords(Math.round(bill.totalAmount || 0))} Only`, 48, wordsY + 5, { width: pageW - 16 });
+
+      // Bottom section: Notes (left) + Signatory (right) - same as invoices.js
+      const bottomSectionY = wordsY + 28;
+      const signBoxW = 220, authBoxX = 555 - signBoxW;
+      let notesY = bottomSectionY;
+
+      if (bill.notes) {
+        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold').text('NOTES', 40, notesY, { characterSpacing: 0.8 });
+        doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        doc.fontSize(8).fillColor('#000000').font('Helvetica').text(bill.notes, 40, notesY + 14, { width: pageW });
+        notesY += 40;
+      }
+
       if (bill.termsAndConditions) {
-        const tcY = 660;
+        const tcY = notesY + 6;
         doc.rect(40, tcY, pageW, 14).fill('#f9f9f9').stroke();
         doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold').text('TERMS & CONDITIONS', 48, tcY + 3, { characterSpacing: 0.8 });
         doc.fontSize(7).fillColor('#000000').font('Helvetica').text(bill.termsAndConditions, 48, tcY + 16, { width: pageW - 16 });
       }
 
+      // AUTHORIZED SIGNATORY - identical to invoices.js
+      const signSectionY = bottomSectionY;
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+
+      const sigRelPath = orgData && orgData.digitalSignaturePath;
+      const sigImgSize = 200;
+      let actualSigH   = sigImgSize;
+      if (sigRelPath) {
+        try {
+          const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(sigAbsPath)) {
+            let imgW = sigImgSize, imgH = sigImgSize;
+            try {
+              const buf = fs.readFileSync(sigAbsPath);
+              const ext = path.extname(sigAbsPath).toLowerCase();
+              if (ext === '.png' && buf.length > 24) {
+                imgW = buf.readUInt32BE(16); imgH = buf.readUInt32BE(20);
+              } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+                let i = 2;
+                while (i < buf.length - 8) {
+                  if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
+                    imgH = buf.readUInt16BE(i + 5); imgW = buf.readUInt16BE(i + 7); break;
+                  }
+                  i += 2 + buf.readUInt16BE(i + 2);
+                }
+              }
+            } catch (_) {}
+            const scale      = Math.min(sigImgSize / imgW, sigImgSize / imgH);
+            actualSigH       = Math.round(imgH * scale);
+            const actualSigW = Math.round(imgW * scale);
+            doc.image(sigAbsPath, authBoxX + (signBoxW - actualSigW) / 2, signSectionY + 10, { width: actualSigW, height: actualSigH });
+          }
+        } catch (sigErr) { console.warn('Could not render digital signature:', sigErr.message); }
+      }
+
+      const sigLineY = signSectionY + 10 + actualSigH + 14;
+      doc.moveTo(authBoxX, sigLineY).lineTo(authBoxX + signBoxW, sigLineY).lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+         .text('Authorized Signatory', authBoxX, sigLineY + 3, { width: signBoxW, align: 'center' });
+
       // Footer
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica').text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${bill.billNumber}`, 40, footY + 6, { width: pageW / 2 });
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
+         .text(`${orgName} - ${orgGST ? 'GSTIN: ' + orgGST + ' - ' : ''}${bill.billNumber}`, 40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
-      stream.on('finish', () => { resolve({ filename, filepath, relativePath: `/uploads/bills/${filename}` }); });
+      stream.on('finish', () => {
+        console.log(`Bill PDF generated: ${filename} | Logo: ${logoLoaded ? 'YES' : 'NO'}`);
+        resolve({ filename, filepath, relativePath: `/uploads/bills/${filename}` });
+      });
       stream.on('error', reject);
-    } catch (error) { reject(error); }
+    } catch (error) {
+      console.error('Bill PDF generation error:', error);
+      reject(error);
+    }
   });
 }
-// ============================================================================
 // EMAIL SERVICE
 // ============================================================================
 
-const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
-});
-
-async function sendBillEmail(bill, pdfPath, orgId) {
+async function sendBillEmail(bill, pdfPath, orgId, branchId = null) {
   let orgName = '', orgGST = '', orgPhone = '', orgEmail = '', orgData = null;
   try {
-    const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    orgData = await OrgModel.findOne({ orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
     if (orgData) { orgName = orgData.orgName || ''; orgGST = orgData.gstNumber || ''; orgPhone = orgData.phone || ''; orgEmail = orgData.email || ''; }
   } catch (e) {}
 
@@ -749,29 +1072,29 @@ async function sendBillEmail(bill, pdfPath, orgId) {
 </body>
 </html>`;
 
-  return emailTransporter.sendMail({
-    from: `"Accounts" <${process.env.SMTP_USER}>`,
-    to: bill.vendorEmail || process.env.BILLING_EMAIL || process.env.SMTP_USER,
-    subject: `Bill ${bill.billNumber} — Rs.${(bill.totalAmount || 0).toFixed(2)}`,
-    html: emailHtml,
-    attachments: [{ filename: `Bill-${bill.billNumber}.pdf`, path: pdfPath }]
+  return sendMail({
+    orgId, branchId, db: mongoose.connection.db,
+    to:          bill.vendorEmail || process.env.BILLING_EMAIL || process.env.SMTP_USER,
+    subject:     `Bill ${bill.billNumber} — Rs.${(bill.totalAmount || 0).toFixed(2)}`,
+    html:        emailHtml,
+    attachments: [{ filename: `Bill-${bill.billNumber}.pdf`, path: pdfPath }],
   });
 }
-async function sendPaymentConfirmationEmail(bill, payment, orgId = null) {
+async function sendPaymentConfirmationEmail(bill, payment, orgId = null, branchId = null) {
   let orgName  = '';
   let orgGST   = '';
   let orgPhone = '';
   let orgEmail = '';
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(orgId, branchId, db) : null;
     orgName  = org?.orgName   || '';
     orgGST   = org?.gstNumber || '';
     orgPhone = org?.phone     || '';
     orgEmail = org?.email     || '';
   } catch (e) {
-    console.warn('⚠️ Could not fetch org details for payment email:', e.message);
+    console.warn('Could not fetch org details for payment email:', e.message);
   }
 
   const emailHtml = `<!DOCTYPE html>
@@ -813,22 +1136,22 @@ async function sendPaymentConfirmationEmail(bill, payment, orgId = null) {
   </div>
   <div class="body">
     <div class="success-badge">
-      <h2>✅ Payment of ₹${payment.amount.toFixed(2)} recorded</h2>
-      <p>For Bill: ${bill.billNumber} — ${bill.vendorName}</p>
+      <h2>? Payment of ?${payment.amount.toFixed(2)} recorded</h2>
+      <p>For Bill: ${bill.billNumber} � ${bill.vendorName}</p>
     </div>
 
     <div class="section-title">Payment Details</div>
     <table class="detail">
       <tr><td>Bill Number</td>    <td>${bill.billNumber}</td></tr>
       <tr><td>Vendor</td>         <td>${bill.vendorName}</td></tr>
-      <tr><td>Amount Paid</td>    <td>₹${payment.amount.toFixed(2)}</td></tr>
+      <tr><td>Amount Paid</td>    <td>?${payment.amount.toFixed(2)}</td></tr>
       <tr><td>Payment Date</td>   <td>${new Date(payment.paymentDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td></tr>
       <tr><td>Payment Mode</td>   <td>${payment.paymentMode}</td></tr>
       ${payment.referenceNumber ? `<tr><td>Reference</td><td>${payment.referenceNumber}</td></tr>` : ''}
-      <tr class="balance-row"><td>Remaining Balance</td><td>₹${bill.amountDue.toFixed(2)}</td></tr>
+      <tr class="balance-row"><td>Remaining Balance</td><td>?${bill.amountDue.toFixed(2)}</td></tr>
     </table>
 
-    ${bill.amountDue <= 0 ? `<div class="paid-badge">🎉 Bill Fully Paid — Thank You!</div>` : ''}
+    ${bill.amountDue <= 0 ? `<div class="paid-badge">?? Bill Fully Paid � Thank You!</div>` : ''}
   </div>
   <div class="footer">
     <strong>${orgName}</strong><br>
@@ -840,11 +1163,11 @@ async function sendPaymentConfirmationEmail(bill, payment, orgId = null) {
 </body>
 </html>`;
 
-  return emailTransporter.sendMail({
-    from: `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
-    to: process.env.BILLING_EMAIL || process.env.SMTP_USER,
-    subject: `Payment Recorded — ${bill.billNumber} — ₹${payment.amount.toFixed(2)}`,
-    html: emailHtml
+  return sendMail({
+    orgId, branchId, db: mongoose.connection.db,
+    to:      process.env.BILLING_EMAIL || process.env.SMTP_USER,
+    subject: `Payment Recorded — ${bill.billNumber} — Rs.${payment.amount.toFixed(2)}`,
+    html:    emailHtml,
   });
 }
 
@@ -858,6 +1181,7 @@ router.get('/', async (req, res) => {
     const { status, vendorId, fromDate, toDate, search, page = 1, limit = 20 } = req.query;
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
 
     if (status && status !== 'All') query.status = status;
     if (vendorId) query.vendorId = vendorId;
@@ -894,7 +1218,10 @@ router.get('/', async (req, res) => {
 // GET /api/bills/stats
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const stats = await Bill.aggregate([
       { $match: orgFilter },
       { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } }
@@ -1095,7 +1422,8 @@ router.get('/:id', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
     res.json({ success: true, data: bill });
@@ -1121,7 +1449,7 @@ router.post('/', async (req, res) => {
       : new mongoose.Types.ObjectId();
 
     if (!body.billNumber) {
-      body.billNumber = await generateBillNumber(req.user?.orgId || null);
+      body.billNumber = await generateBillNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     }
 
     if (!body.dueDate) {
@@ -1131,28 +1459,39 @@ router.post('/', async (req, res) => {
     body.items = body.items.map(item => ({ ...item, amount: calculateItemAmount(item) }));
     body.createdBy = req.user?.email || req.user?.uid || 'system';
     body.orgId = req.user?.orgId || null;
+    body.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     body.amountPaid = 0;
 
     const bill = new Bill(body);
     await bill.save();
 
-    // ✅ COA: Debit Expense Account + Credit Accounts Payable
+    // ✅ COA: Debit each line item's expense account + Credit Accounts Payable
     try {
       const currentOrgId = req.user?.orgId || null;
-      const [apId, expenseId] = await Promise.all([
-        getSystemAccountId('Accounts Payable', currentOrgId),
-        getSystemAccountId('Cost of Goods Sold', currentOrgId),
-      ]);
+      const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
       const txnDate = new Date(bill.billDate);
-      if (expenseId) await postTransactionToCOA({
-        accountId: expenseId, orgId: currentOrgId, date: txnDate,
-        description: `Bill created - ${bill.billNumber} - ${bill.vendorName}`,
-        referenceType: 'Bill', referenceId: bill._id,
-        referenceNumber: bill.billNumber,
-        debit: bill.subTotal, credit: 0
-      });
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+      // Debit each line item to its own expense account
+      for (const item of bill.items) {
+        const accountName = item.account || 'Cost of Goods Sold';
+        const itemAccId = await getBillExpenseAccountId(accountName, currentOrgId);
+        if (itemAccId) {
+          await postTransactionToCOA({
+            accountId: itemAccId, orgId: currentOrgId, branchId, date: txnDate,
+            description: `Bill created - ${bill.billNumber} - ${bill.vendorName} - ${item.itemDetails}`,
+            referenceType: 'Bill', referenceId: bill._id,
+            referenceNumber: bill.billNumber,
+            debit: item.amount, credit: 0
+          });
+        } else {
+          console.warn(`⚠️ COA: Could not resolve expense account "${accountName}" for bill line item`);
+        }
+      }
+
+      // Credit Accounts Payable once for the full bill total
       if (apId) await postTransactionToCOA({
-        accountId: apId, orgId: currentOrgId, date: txnDate,
+        accountId: apId, orgId: currentOrgId, branchId, date: txnDate,
         description: `Bill created - ${bill.billNumber} - ${bill.vendorName}`,
         referenceType: 'Bill', referenceId: bill._id,
         referenceNumber: bill.billNumber,
@@ -1163,7 +1502,7 @@ router.post('/', async (req, res) => {
       console.error('⚠️ COA post error (bill create):', coaErr.message);
     }
 
-    console.log(`✅ Bill created: ${bill.billNumber}`);
+    console.log(`? Bill created: ${bill.billNumber}`);
     res.status(201).json({ success: true, message: 'Bill created successfully', data: bill });
   } catch (error) {
     console.error('Error creating bill:', error);
@@ -1179,7 +1518,8 @@ router.put('/:id', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
@@ -1215,7 +1555,8 @@ router.post('/:id/submit', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
@@ -1232,20 +1573,151 @@ router.post('/:id/submit', async (req, res) => {
   }
 });
 
+// PATCH /api/bills/:id/mark-as-sent — mark as OPEN without sending email
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const bill = await Bill.findOne({
+      _id: req.params.id,
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    });
+    if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
+
+    if (!['DRAFT', 'OPEN'].includes(bill.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark a ${bill.status} bill as sent` });
+    }
+
+    // Already OPEN — nothing to do, return success idempotently
+    if (bill.status === 'OPEN') {
+      return res.json({ success: true, message: 'Bill already marked as sent', data: bill });
+    }
+
+    bill.status    = 'OPEN';
+    bill.updatedBy = req.user?.email || req.user?.uid || 'system';
+    await bill.save();
+
+    console.log(`✅ Bill marked as sent (no email): ${bill.billNumber}`);
+    res.json({ success: true, message: 'Bill marked as sent', data: bill });
+  } catch (error) {
+    console.error('Error marking bill as sent:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST /api/bills/:id/void - Void a bill
 router.post('/:id/void', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
     if (bill.status === 'PAID') {
       return res.status(400).json({ success: false, error: 'Cannot void a paid bill' });
     }
+    if (bill.status === 'VOID') {
+      return res.status(400).json({ success: false, error: 'Bill is already voided' });
+    }
 
-    bill.status = 'VOID';
+    const currentOrgId = req.user?.orgId || null;
+    const branchId     = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const txnDate      = new Date();
+
+    // ── STEP 1: Reverse COA entries from bill creation ──────────────────────
+    // Creation posted: Dr Expense accounts / Cr Accounts Payable
+    // Void reversal:   Cr Expense accounts / Dr Accounts Payable
+    try {
+      const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+
+      // Cr each line item's expense account (reverses the original Dr)
+      for (const item of bill.items || []) {
+        const accountName = item.account || 'Cost of Goods Sold';
+        const itemAccId   = await getBillExpenseAccountId(accountName, currentOrgId);
+        if (itemAccId && item.amount > 0) {
+          await postTransactionToCOA({
+            accountId:       itemAccId,
+            orgId:           currentOrgId,
+            branchId,
+            date:            txnDate,
+            description:     `VOID - Bill ${bill.billNumber} - ${bill.vendorName} - ${item.itemDetails}`,
+            referenceType:   'Bill',
+            referenceId:     bill._id,
+            referenceNumber: bill.billNumber,
+            debit:           0,
+            credit:          item.amount,   // reverses original Dr
+          });
+        }
+      }
+
+      // Dr Accounts Payable (reverses the original Cr)
+      if (apId && bill.totalAmount > 0) {
+        await postTransactionToCOA({
+          accountId:       apId,
+          orgId:           currentOrgId,
+          branchId,
+          date:            txnDate,
+          description:     `VOID - Bill ${bill.billNumber} - ${bill.vendorName}`,
+          referenceType:   'Bill',
+          referenceId:     bill._id,
+          referenceNumber: bill.billNumber,
+          debit:           bill.totalAmount,  // reverses original Cr
+          credit:          0,
+        });
+      }
+
+      console.log(`✅ COA reversed for voided bill: ${bill.billNumber}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA reversal error on void:', coaErr.message);
+    }
+
+    // ── STEP 2: If partially paid, reverse payment COA entries too ──────────
+    if (bill.amountPaid > 0) {
+      try {
+        const apId   = await getSystemAccountId('Accounts Payable', currentOrgId);
+        const cashId = await getSystemAccountId('Undeposited Funds', currentOrgId);
+
+        // Reverse: Cr AP / Dr Undeposited Funds (undoes the payment posting)
+        if (apId && bill.amountPaid > 0) {
+          await postTransactionToCOA({
+            accountId:       apId,
+            orgId:           currentOrgId,
+            branchId,
+            date:            txnDate,
+            description:     `VOID - Payment reversal for Bill ${bill.billNumber}`,
+            referenceType:   'Bill',
+            referenceId:     bill._id,
+            referenceNumber: bill.billNumber,
+            debit:           0,
+            credit:          bill.amountPaid,
+          });
+        }
+        if (cashId && bill.amountPaid > 0) {
+          await postTransactionToCOA({
+            accountId:       cashId,
+            orgId:           currentOrgId,
+            branchId,
+            date:            txnDate,
+            description:     `VOID - Payment reversal for Bill ${bill.billNumber}`,
+            referenceType:   'Bill',
+            referenceId:     bill._id,
+            referenceNumber: bill.billNumber,
+            debit:           bill.amountPaid,
+            credit:          0,
+          });
+        }
+        console.log(`✅ Payment COA reversed for voided bill: ${bill.billNumber} (₹${bill.amountPaid})`);
+      } catch (payErr) {
+        console.error('⚠️ Payment COA reversal error on void:', payErr.message);
+      }
+    }
+
+    // ── STEP 3: Void the bill ────────────────────────────────────────────────
+    bill.status    = 'VOID';
+    bill.amountPaid = 0;
+    bill.amountDue  = 0;
+    bill.payments   = [];
     await bill.save();
 
     res.json({ success: true, message: 'Bill voided successfully', data: bill });
@@ -1259,19 +1731,20 @@ router.post('/:id/send', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
     let pdfInfo;
     if (!bill.pdfPath || !fs.existsSync(bill.pdfPath)) {
-      pdfInfo = await generateBillPDF(bill, req.user?.orgId);
+      pdfInfo = await generateBillPDF(bill, req.user?.orgId, bill.branchId || null);
       bill.pdfPath = pdfInfo.filepath;
       bill.pdfGeneratedAt = new Date();
     }
 
     try {
-      await sendBillEmail(bill, bill.pdfPath, req.user?.orgId);
+      await sendBillEmail(bill, bill.pdfPath, req.user?.orgId, bill.branchId || null);
     } catch (emailErr) {
       console.warn('Email send failed:', emailErr.message);
     }
@@ -1290,7 +1763,8 @@ router.post('/:id/payment', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
@@ -1301,7 +1775,7 @@ router.post('/:id/payment', async (req, res) => {
     }
 
     if (bill.amountDue < amount) {
-      return res.status(400).json({ success: false, error: `Payment exceeds due amount (₹${bill.amountDue.toFixed(2)})` });
+      return res.status(400).json({ success: false, error: `Payment exceeds due amount (?${bill.amountDue.toFixed(2)})` });
     }
 
     const payment = {
@@ -1320,7 +1794,7 @@ router.post('/:id/payment', async (req, res) => {
     await bill.save();
 
 
-    // ✅ COA: Debit Accounts Payable + Credit Undeposited Funds
+    // ? COA: Debit Accounts Payable + Credit Undeposited Funds
 try {
   const currentOrgId = req.user?.orgId || null;
   const [apId, cashId] = await Promise.all([
@@ -1329,26 +1803,26 @@ try {
   ]);
   const txnDate = new Date(payment.paymentDate);
   if (apId) await postTransactionToCOA({
-    accountId: apId, orgId: currentOrgId, date: txnDate,
+    accountId: apId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Payment made - ${bill.billNumber}`,
     referenceType: 'Payment', referenceId: payment.paymentId,
     referenceNumber: bill.billNumber,
     debit: payment.amount, credit: 0
   });
   if (cashId) await postTransactionToCOA({
-    accountId: cashId, orgId: currentOrgId, date: txnDate,
+    accountId: cashId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Payment made - ${bill.billNumber}`,
     referenceType: 'Payment', referenceId: payment.paymentId,
     referenceNumber: bill.billNumber,
     debit: 0, credit: payment.amount
   });
-  console.log(`✅ COA posted for payment on: ${bill.billNumber}`);
+  console.log(`? COA posted for payment on: ${bill.billNumber}`);
 } catch (coaErr) {
-  console.error('⚠️ COA post error (bill payment):', coaErr.message);
+  console.error('?? COA post error (bill payment):', coaErr.message);
 }
 
     try {
-      await sendPaymentConfirmationEmail(bill, payment, req.user?.orgId || null);
+      await sendPaymentConfirmationEmail(bill, payment, req.user?.orgId || null, bill.branchId || null);
     } catch (emailErr) {
       console.warn('Payment email failed:', emailErr.message);
     }
@@ -1364,12 +1838,13 @@ router.get('/:id/pdf', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
     if (!bill.pdfPath || !fs.existsSync(bill.pdfPath)) {
-      const pdfInfo = await generateBillPDF(bill, req.user?.orgId);
+      const pdfInfo = await generateBillPDF(bill, req.user?.orgId, bill.branchId || null);
       bill.pdfPath = pdfInfo.filepath;
       bill.pdfGeneratedAt = new Date();
       await bill.save();
@@ -1386,7 +1861,8 @@ router.post('/:id/clone', async (req, res) => {
   try {
     const sourceBill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!sourceBill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
@@ -1401,8 +1877,9 @@ router.post('/:id/clone', async (req, res) => {
     cloneData.status = 'DRAFT';
     cloneData.billDate = new Date();
     cloneData.dueDate = calculateDueDate(new Date(), cloneData.paymentTerms);
-    cloneData.billNumber = await generateBillNumber(req.user?.orgId || null);
+    cloneData.billNumber = await generateBillNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     cloneData.orgId = req.user?.orgId || null;
+    cloneData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     cloneData.createdBy = req.user?.email || req.user?.uid || 'system';
     cloneData.amountPaid = 0;
 
@@ -1418,11 +1895,11 @@ router.post('/:id/clone', async (req, res) => {
 // GET /api/bills/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const bill = await Bill.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const bill = await Bill.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
     const orgName = org?.orgName || '';
     const orgGST  = org?.gstNumber || '';
     const orgPhone = org?.phone || '';
@@ -1445,27 +1922,27 @@ router.get('/:id/email-preview', async (req, res) => {
 </table>
 <div class="st">Amount Summary</div>
 <table class="d">
-<tr><td>Subtotal</td><td>₹${bill.subTotal.toFixed(2)}</td></tr>
-${bill.cgst > 0 ? `<tr><td>CGST</td><td>₹${bill.cgst.toFixed(2)}</td></tr>` : ''}
-${bill.sgst > 0 ? `<tr><td>SGST</td><td>₹${bill.sgst.toFixed(2)}</td></tr>` : ''}
-<tr class="tr"><td>Total Amount</td><td>₹${bill.totalAmount.toFixed(2)}</td></tr>
-${bill.amountDue > 0 ? `<tr><td style="color:#b91c1c">Balance Due</td><td style="color:#b91c1c">₹${bill.amountDue.toFixed(2)}</td></tr>` : ''}
+<tr><td>Subtotal</td><td>Rs.${bill.subTotal.toFixed(2)}</td></tr>
+${bill.cgst > 0 ? `<tr><td>CGST</td><td>Rs.${bill.cgst.toFixed(2)}</td></tr>` : ''}
+${bill.sgst > 0 ? `<tr><td>SGST</td><td>Rs.${bill.sgst.toFixed(2)}</td></tr>` : ''}
+<tr class="tr"><td>Total Amount</td><td>Rs.${bill.totalAmount.toFixed(2)}</td></tr>
+${bill.amountDue > 0 ? `<tr><td style="color:#b91c1c">Balance Due</td><td style="color:#b91c1c">Rs.${bill.amountDue.toFixed(2)}</td></tr>` : ''}
 </table>
 ${bill.notes ? `<div class="st">Notes</div><p style="font-size:12px;line-height:1.7;color:#444;">${bill.notes}</p>` : ''}
 </div>
 <div class="footer"><strong>${orgName}</strong><br>${orgGST ? 'GST: ' + orgGST + ' | ' : ''}${orgPhone ? 'Ph: ' + orgPhone + ' | ' : ''}${orgEmail}</div>
 </div></body></html>`;
-    res.json({ success: true, data: { subject: `Bill ${bill.billNumber} — ₹${bill.totalAmount.toFixed(2)}`, html, to: bill.vendorEmail } });
+    res.json({ success: true, data: { subject: `Bill ${bill.billNumber} - Rs.${bill.totalAmount.toFixed(2)}`, html, to: bill.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview — save custom email content
+// PATCH /:id/email-preview � save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const bill = await Bill.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const bill = await Bill.findOne({ _id: req.params.id, ...req.orgFilter, ...(req.branchFilter || {}) });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
     if (to !== undefined)      bill.set('customEmailTo',      to);
     if (subject !== undefined) bill.set('customEmailSubject', subject);
@@ -1477,12 +1954,267 @@ router.patch('/:id/email-preview', async (req, res) => {
   }
 });
 
+// ============================================================================
+// APPLY VENDOR CREDITS (ADVANCE) TO BILL — Zoho Books style
+// ============================================================================
+
+// GET /api/finance/bills/:id/available-credits
+// Returns all ADVANCE payments for this bill's vendor that still have unused balance
+router.get('/:id/available-credits', async (req, res) => {
+  try {
+    const bill = await Bill.findOne({
+      _id: req.params.id,
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    }).lean();
+    if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
+
+    const PaymentMade = mongoose.models.PaymentMade ||
+      mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }));
+
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+      : {};
+
+    const advances = await PaymentMade.find({
+      vendorId: bill.vendorId,
+      paymentType: 'ADVANCE',
+      ...orgFilter,
+      ...(req.branchFilter || {}),
+    }).sort({ paymentDate: -1 }).lean();
+
+    const available = advances
+      .map(a => ({
+        _id:            a._id,
+        paymentNumber:  a.paymentNumber,
+        paymentDate:    a.paymentDate,
+        paymentMode:    a.paymentMode,
+        amount:         a.totalAmount || a.amount || 0,
+        amountApplied:  a.amountApplied || 0,
+        amountUnused:   a.amountUnused != null
+          ? a.amountUnused
+          : Math.max(0, (a.totalAmount || a.amount || 0) - (a.amountApplied || 0)),
+        status:         a.status,
+        referenceNumber: a.referenceNumber || '',
+        notes:          a.notes || '',
+      }))
+      .filter(a => a.amountUnused > 0.001);
+
+    res.json({ success: true, data: available, amountDue: bill.amountDue });
+  } catch (err) {
+    console.error('Error fetching available credits:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/finance/bills/:id/apply-credits
+// Body: { advanceId, amount }
+// Accounting: Dr Accounts Payable / Cr Advance to Vendor
+router.post('/:id/apply-credits', async (req, res) => {
+  try {
+    const { advanceId, amount } = req.body;
+    if (!advanceId || !amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'advanceId and a positive amount are required' });
+    }
+    const applyAmt = parseFloat(amount);
+
+    const bill = await Bill.findOne({
+      _id: req.params.id,
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    });
+    if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
+
+    if (!['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].includes(bill.status)) {
+      return res.status(400).json({ success: false, error: `Cannot apply credits to a bill with status ${bill.status}` });
+    }
+    if (applyAmt > bill.amountDue + 0.001) {
+      return res.status(400).json({ success: false, error: `Amount (₹${applyAmt}) exceeds amount due (₹${bill.amountDue.toFixed(2)})` });
+    }
+
+    const PaymentMade = mongoose.models.PaymentMade ||
+      mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }));
+
+    const advance = await PaymentMade.findById(advanceId);
+    if (!advance) return res.status(404).json({ success: false, error: 'Advance payment not found' });
+
+    const unused = advance.amountUnused != null
+      ? advance.amountUnused
+      : Math.max(0, (advance.totalAmount || advance.amount || 0) - (advance.amountApplied || 0));
+
+    if (applyAmt > unused + 0.001) {
+      return res.status(400).json({ success: false, error: `Amount exceeds available advance balance (₹${unused.toFixed(2)})` });
+    }
+
+    // ── 1. Update Bill ────────────────────────────────────────────────────────
+    bill.vendorCreditsApplied = bill.vendorCreditsApplied || [];
+    bill.vendorCreditsApplied.push({
+      creditId:    advance._id,
+      amount:      applyAmt,
+      appliedDate: new Date(),
+      paymentNumber: advance.paymentNumber,
+    });
+    bill.amountPaid += applyAmt;
+    // amountDue is recalculated by pre-save
+    await bill.save();
+
+    // ── 2. Update Advance (PaymentMade) ───────────────────────────────────────
+    advance.amountApplied = (advance.amountApplied || 0) + applyAmt;
+    advance.amountUnused  = Math.max(0, unused - applyAmt);
+    advance.billsApplied  = advance.billsApplied || [];
+    advance.billsApplied.push({
+      billId:        bill._id,
+      billNumber:    bill.billNumber,
+      amountApplied: applyAmt,
+      appliedDate:   new Date(),
+    });
+    // Update status
+    if (advance.amountUnused < 0.001) {
+      advance.status = 'APPLIED';
+    } else {
+      advance.status = 'PARTIALLY_APPLIED';
+    }
+    await advance.save();
+
+    // ── 3. COA Postings ───────────────────────────────────────────────────────
+    // Dr Accounts Payable (reduces liability — we owe less)
+    // Cr Advance to Vendor  (reduces asset — advance is consumed)
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const branchId     = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+      const txnDate      = new Date();
+      const desc         = `Vendor advance applied to ${bill.billNumber} (${advance.paymentNumber})`;
+
+      const [apId, advId] = await Promise.all([
+        getSystemAccountId('Accounts Payable', currentOrgId),
+        getSystemAccountId('Advance to Vendor', currentOrgId),
+      ]);
+
+      if (apId) await postTransactionToCOA({
+        accountId: apId, orgId: currentOrgId, branchId, date: txnDate,
+        description: desc,
+        referenceType: 'CreditApplication', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: applyAmt, credit: 0,
+      });
+      if (advId) await postTransactionToCOA({
+        accountId: advId, orgId: currentOrgId, branchId, date: txnDate,
+        description: desc,
+        referenceType: 'CreditApplication', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: 0, credit: applyAmt,
+      });
+      console.log(`✅ COA posted for credit application: ${bill.billNumber} ← ${advance.paymentNumber} ₹${applyAmt}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA post error (apply credits):', coaErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: `₹${applyAmt.toFixed(2)} advance applied to ${bill.billNumber}`,
+      data: { bill, advanceAmountUnused: advance.amountUnused },
+    });
+  } catch (err) {
+    console.error('Error applying credits:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/finance/bills/:id/apply-credits/:creditEntryId
+// Reverses a previously applied credit
+router.delete('/:id/apply-credits/:creditEntryId', async (req, res) => {
+  try {
+    const bill = await Bill.findOne({
+      _id: req.params.id,
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    });
+    if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
+
+    // Find the applied credit entry by its _id (Mongoose subdoc id)
+    const entry = (bill.vendorCreditsApplied || []).id(req.params.creditEntryId);
+    if (!entry) return res.status(404).json({ success: false, error: 'Applied credit entry not found' });
+
+    const reverseAmt = entry.amount;
+    const advanceId  = entry.creditId;
+
+    // ── 1. Remove from Bill ───────────────────────────────────────────────────
+    entry.deleteOne();
+    bill.amountPaid = Math.max(0, bill.amountPaid - reverseAmt);
+    await bill.save();
+
+    // ── 2. Restore Advance balance ────────────────────────────────────────────
+    const PaymentMade = mongoose.models.PaymentMade ||
+      mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }));
+
+    const advance = await PaymentMade.findById(advanceId);
+    if (advance) {
+      advance.amountApplied = Math.max(0, (advance.amountApplied || 0) - reverseAmt);
+      advance.amountUnused  = (advance.amountUnused || 0) + reverseAmt;
+      // Remove the billsApplied entry for this bill
+      advance.billsApplied = (advance.billsApplied || []).filter(
+        b => !(b.billId?.toString() === bill._id.toString() && Math.abs(b.amountApplied - reverseAmt) < 0.001)
+      );
+      // Restore status
+      if (advance.amountUnused > 0.001 && advance.amountApplied < 0.001) {
+        advance.status = 'RECORDED';
+      } else if (advance.amountUnused > 0.001) {
+        advance.status = 'PARTIALLY_APPLIED';
+      }
+      await advance.save();
+    }
+
+    // ── 3. COA Reversal ───────────────────────────────────────────────────────
+    // Reverse: Cr Accounts Payable (liability goes back up)
+    //          Dr Advance to Vendor (asset restored)
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const branchId     = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+      const txnDate      = new Date();
+      const desc         = `Reversal: vendor advance removed from ${bill.billNumber}`;
+
+      const [apId, advId] = await Promise.all([
+        getSystemAccountId('Accounts Payable', currentOrgId),
+        getSystemAccountId('Advance to Vendor', currentOrgId),
+      ]);
+
+      if (apId) await postTransactionToCOA({
+        accountId: apId, orgId: currentOrgId, branchId, date: txnDate,
+        description: desc,
+        referenceType: 'CreditReversal', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: 0, credit: reverseAmt,
+      });
+      if (advId) await postTransactionToCOA({
+        accountId: advId, orgId: currentOrgId, branchId, date: txnDate,
+        description: desc,
+        referenceType: 'CreditReversal', referenceId: bill._id,
+        referenceNumber: bill.billNumber,
+        debit: reverseAmt, credit: 0,
+      });
+      console.log(`✅ COA reversal posted for credit removal: ${bill.billNumber} ₹${reverseAmt}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA reversal error:', coaErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: `₹${reverseAmt.toFixed(2)} credit reversed from ${bill.billNumber}`,
+      data: { bill },
+    });
+  } catch (err) {
+    console.error('Error removing credit:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // DELETE /api/bills/:id - Delete (only drafts)
 router.delete('/:id', async (req, res) => {
   try {
     const bill = await Bill.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
@@ -1520,7 +2252,7 @@ router.post('/bulk-import', async (req, res) => {
         }
 
         if (!billData.billNumber) {
-          billData.billNumber = await generateBillNumber(req.user?.orgId || null);
+          billData.billNumber = await generateBillNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         }
 
         if (!billData.dueDate) {
@@ -1533,9 +2265,32 @@ router.post('/bulk-import', async (req, res) => {
 
         billData.createdBy = req.user?.email || req.user?.uid || 'system';
         billData.orgId = req.user?.orgId || null;
+        billData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
         const bill = new Bill(billData);
         await bill.save();
+
+        // ── COA posting: debit each line item's expense account, credit AP ──
+        try {
+          const currentOrgId = req.user?.orgId || null;
+          const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+          const txnDate = new Date(bill.billDate);
+          const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+          for (const item of bill.items) {
+            const accountName = item.account || 'Cost of Goods Sold';
+            const itemAccId = await getBillExpenseAccountId(accountName, currentOrgId);
+            if (itemAccId) {
+              await postTransactionToCOA({ accountId: itemAccId, orgId: currentOrgId, branchId, date: txnDate, description: `Bill created - ${bill.billNumber} - ${bill.vendorName} - ${item.itemDetails}`, referenceType: 'Bill', referenceId: bill._id, referenceNumber: bill.billNumber, debit: item.amount, credit: 0 });
+            }
+          }
+          if (apId) await postTransactionToCOA({ accountId: apId, orgId: currentOrgId, branchId, date: txnDate, description: `Bill created - ${bill.billNumber} - ${bill.vendorName}`, referenceType: 'Bill', referenceId: bill._id, referenceNumber: bill.billNumber, debit: 0, credit: bill.totalAmount });
+          console.log(`   ✅ COA posted for imported bill: ${bill.billNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (bill bulk import):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
+
         successCount++;
       } catch (err) {
         failedCount++;

@@ -24,6 +24,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/billing_vendors_service.dart';
+import '../../../../core/services/payment_made_service.dart';
 import 'new_vendor.dart';
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -84,6 +85,12 @@ class _VendorDetailPageState extends State<VendorDetailPage>
   // Bar chart tooltip
   int? _hoveredBarIndex;
 
+  // Advances
+  List<Map<String, dynamic>> _advances     = [];
+  bool   _advancesLoading = false;
+  double _totalAdvance    = 0;
+  double _totalUnused     = 0;
+
   // Horizontal scroll controllers for DataTables
   final ScrollController _txnHScroll = ScrollController();
   final ScrollController _stmHScroll = ScrollController();
@@ -93,7 +100,7 @@ class _VendorDetailPageState extends State<VendorDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 5, vsync: this);
+    _tabCtrl = TabController(length: 6, vsync: this);
     _tabCtrl.addListener(_onTabChanged);
     _loadVendor();
     _loadOverview();
@@ -113,6 +120,7 @@ class _VendorDetailPageState extends State<VendorDetailPage>
   void _onTabChanged() {
     if (!_tabCtrl.indexIsChanging) return;
     if (_tabCtrl.index == 4 && _statement == null) _loadStatement();
+    if (_tabCtrl.index == 5 && _advances.isEmpty) _loadAdvances();
   }
 
   // ── Loaders ───────────────────────────────────────────────────────────────
@@ -241,6 +249,7 @@ class _VendorDetailPageState extends State<VendorDetailPage>
                           _buildTransactionsTab(),
                           _buildMailsTab(),
                           _buildStatementTab(),
+                          _buildAdvancesTab(),
                         ],
                       ),
                     ),
@@ -385,6 +394,7 @@ class _VendorDetailPageState extends State<VendorDetailPage>
         Tab(text: 'Transactions'),
         Tab(text: 'Mails'),
         Tab(text: 'Statement'),
+        Tab(text: 'Advances'),
       ],
     ),
   );
@@ -1396,4 +1406,203 @@ class _VendorDetailPageState extends State<VendorDetailPage>
       ),
     ],
   ));
+
+  // =========================================================================
+  //  TAB 6 — ADVANCES
+  // =========================================================================
+
+  Future<void> _loadAdvances() async {
+    setState(() => _advancesLoading = true);
+    try {
+      final res = await PaymentMadeService.getVendorAdvances(widget.vendorId);
+      if (res['success'] == true) {
+        setState(() {
+          _advances     = List<Map<String, dynamic>>.from(res['data'] ?? []);
+          _totalAdvance = (res['totalAdvance'] ?? 0).toDouble();
+          _totalUnused  = (res['totalUnused']  ?? 0).toDouble();
+        });
+      }
+    } catch (e) {
+      debugPrint('Advances load error: $e');
+    } finally {
+      setState(() => _advancesLoading = false);
+    }
+  }
+
+  Widget _buildAdvancesTab() {
+    if (_advancesLoading) {
+      return const Center(child: CircularProgressIndicator(color: _navy));
+    }
+
+    return Column(children: [
+      // ── Summary cards ──────────────────────────────────────────────────
+      Container(
+        color: Colors.white,
+        padding: const EdgeInsets.all(16),
+        child: Row(children: [
+          Expanded(child: _advSummaryCard(
+            label: 'Total Advance Paid',
+            amount: _totalAdvance,
+            icon: Icons.arrow_upward_rounded,
+            color: _orange,
+          )),
+          const SizedBox(width: 12),
+          Expanded(child: _advSummaryCard(
+            label: 'Total Unused',
+            amount: _totalUnused,
+            icon: Icons.account_balance_wallet_outlined,
+            color: _totalUnused > 0 ? _green : Colors.grey,
+          )),
+          const SizedBox(width: 12),
+          Expanded(child: _advSummaryCard(
+            label: 'Total Applied',
+            amount: _totalAdvance - _totalUnused,
+            icon: Icons.check_circle_outline,
+            color: _navy,
+          )),
+        ]),
+      ),
+
+      const Divider(height: 1),
+
+      // ── Table header ───────────────────────────────────────────────────
+      Container(
+        color: const Color(0xFF0D1B3E),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(children: [
+          _advCol('PAYMENT #',  120, Colors.white),
+          _advCol('DATE',        90, Colors.white),
+          _advCol('MODE',        90, Colors.white),
+          _advCol('AMOUNT',     100, Colors.white, align: TextAlign.right),
+          _advCol('USED',       100, Colors.white, align: TextAlign.right),
+          _advCol('UNUSED',     100, Colors.white, align: TextAlign.right),
+          _advCol('STATUS',     100, Colors.white, align: TextAlign.center),
+        ]),
+      ),
+
+      // ── Table rows ─────────────────────────────────────────────────────
+      if (_advances.isEmpty)
+        Expanded(child: Center(child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.account_balance_wallet_outlined, size: 48, color: Colors.grey[300]),
+            const SizedBox(height: 12),
+            Text('No advance payments found',
+                style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+          ],
+        )))
+      else
+        Expanded(child: ListView.separated(
+          itemCount: _advances.length,
+          separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEF2F7)),
+          itemBuilder: (_, i) {
+            final a       = _advances[i];
+            final amount  = (a['amount']        ?? 0).toDouble();
+            final applied = (a['amountApplied'] ?? 0).toDouble();
+            final unused  = (a['amountUnused']  ?? 0).toDouble();
+            final status  = a['status']?.toString() ?? '';
+            final date    = DateTime.tryParse(a['paymentDate']?.toString() ?? '') ?? DateTime.now();
+
+            Color sc; String sl;
+            switch (status) {
+              case 'RECORDED':
+              case 'APPLIED':
+                sc = unused > 0 ? _orange : _green;
+                sl = unused > 0 ? 'Open' : 'Closed';
+                break;
+              case 'PARTIALLY_APPLIED': sc = _orange; sl = 'Partial'; break;
+              case 'VOIDED':            sc = _red;    sl = 'Voided';  break;
+              default:                  sc = Colors.grey; sl = status;
+            }
+
+            return Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(children: [
+                SizedBox(width: 120, child: Text(
+                  a['paymentNumber']?.toString() ?? '-',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navy),
+                )),
+                SizedBox(width: 90, child: Text(
+                  DateFormat('dd/MM/yyyy').format(date),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                )),
+                SizedBox(width: 90, child: Text(
+                  a['paymentMode']?.toString() ?? '-',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                )),
+                SizedBox(width: 100, child: Text(
+                  '₹${_fmt.format(amount)}',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF2C3E50)),
+                  textAlign: TextAlign.right,
+                )),
+                SizedBox(width: 100, child: Text(
+                  '₹${_fmt.format(applied)}',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                      color: applied > 0 ? _navy : Colors.grey[400]!),
+                  textAlign: TextAlign.right,
+                )),
+                SizedBox(width: 100, child: Text(
+                  '₹${_fmt.format(unused)}',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+                      color: unused > 0 ? _green : Colors.grey[400]!),
+                  textAlign: TextAlign.right,
+                )),
+                SizedBox(width: 100, child: Center(child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: sc.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: sc.withOpacity(0.4)),
+                  ),
+                  child: Text(sl, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: sc)),
+                ))),
+              ]),
+            );
+          },
+        )),
+    ]);
+  }
+
+  Widget _advSummaryCard({
+    required String label,
+    required double amount,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+          const SizedBox(height: 2),
+          Text('₹${_fmt.format(amount)}',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _advCol(String label, double width, Color color, {TextAlign align = TextAlign.left}) =>
+      SizedBox(
+        width: width,
+        child: Text(label,
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
+                color: color, letterSpacing: 0.4),
+            textAlign: align),
+      );
 }

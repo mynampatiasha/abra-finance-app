@@ -1,15 +1,15 @@
-﻿// ============================================================================
-// ITEM BILLING BACKEND ROUTES — COMPLETE FIXED VERSION
+// ============================================================================
+// ITEM BILLING BACKEND ROUTES � COMPLETE FIXED VERSION
 // ============================================================================
 // File: backend/routes/items.js
 // Fixes applied:
 //   1. verifyFinanceJWT added to ALL routes (orgId filter now works correctly)
 //   2. /statistics now returns activeItems + inactiveItems + goodsCount
 //   3. /search route moved ABOVE /:id (prevents ObjectId cast error)
-//   4. Vendor schema REMOVED — import from vendors module to avoid OverwriteModelError
+//   4. Vendor schema REMOVED � import from vendors module to avoid OverwriteModelError
 //   5. salesAccountId + purchaseAccountId resolved from COA on item create/update
 //   6. Stats response shape matches Flutter: { statistics: { ... } }
-// All existing functionality preserved — CRUD, bulk import, export, pagination
+// All existing functionality preserved � CRUD, bulk import, export, pagination
 // ============================================================================
 
 const express  = require('express');
@@ -27,7 +27,8 @@ const { ChartOfAccount }        = require('./chart_of_accounts');
 // ============================================================================
 
 const itemSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId:    { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null }, // null = visible to all branches
 
   name: { type: String, required: true, trim: true, index: true },
   type: { type: String, enum: ['Goods', 'Service'], required: true },
@@ -95,7 +96,7 @@ const validateItemData = (req, res, next) => {
 };
 
 // ============================================================================
-// HELPER — resolve COA account name → ObjectId for both sales + purchase
+// HELPER � resolve COA account name ? ObjectId for both sales + purchase
 // ============================================================================
 
 async function resolveCOAIds(orgId, salesAccountName, purchaseAccountName) {
@@ -134,10 +135,10 @@ router.get('/health', (req, res) => {
 });
 
 // ============================================================================
-// FIX 3 — /search MUST be above /:id to avoid ObjectId cast error
+// FIX 3 � /search MUST be above /:id to avoid ObjectId cast error
 // ============================================================================
 
-// GET /search — search by name / description
+// GET /search � search by name / description
 router.get('/search', verifyFinanceJWT, async (req, res) => {
   try {
     const { q, type, startDate, endDate, limit = 20 } = req.query;
@@ -146,17 +147,30 @@ router.get('/search', verifyFinanceJWT, async (req, res) => {
       return res.json({ success: true, items: [], query: '' });
     }
 
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
 
+    let orgFilter = {};
+    if (orgId) {
+      if (branchId) {
+        orgFilter = { orgId, $or: [{ branchId }, { branchId: null }] };
+      } else {
+        orgFilter = { orgId };
+      }
+    }
+
+    const searchOr = [
+      { name:               { $regex: q.trim(), $options: 'i' } },
+      { salesDescription:   { $regex: q.trim(), $options: 'i' } },
+      { purchaseDescription:{ $regex: q.trim(), $options: 'i' } },
+    ];
+
+    // Combine orgFilter and search using $and to avoid $or conflicts
     const filter = {
-      ...orgFilter,
       isActive: true,
-      $or: [
-        { name:               { $regex: q.trim(), $options: 'i' } },
-        { salesDescription:   { $regex: q.trim(), $options: 'i' } },
-        { purchaseDescription:{ $regex: q.trim(), $options: 'i' } },
+      $and: [
+        orgFilter,
+        { $or: searchOr },
       ],
     };
 
@@ -175,23 +189,34 @@ router.get('/search', verifyFinanceJWT, async (req, res) => {
 
     res.json({ success: true, items, query: q });
   } catch (err) {
-    console.error('❌ Error searching items:', err);
+    console.error('? Error searching items:', err);
     res.status(500).json({ success: false, error: 'Failed to search items', message: err.message });
   }
 });
 
 // ============================================================================
-// FIX 2 + FIX 3 — GET / with verifyFinanceJWT so orgId filter works
+// FIX 2 + FIX 3 � GET / with verifyFinanceJWT so orgId filter works
 // ============================================================================
 
 router.get('/', verifyFinanceJWT, async (req, res) => {
   try {
     const { type, isSellable, isPurchasable, page = 1, limit = 50, search, startDate, endDate } = req.query;
 
-    // FIX 2: orgId filter now works because JWT is verified above
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    // Branch-specific items: show items tagged to the selected branch + org-wide items (branchId=null)
+    // All Branches selected: show everything for this org
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+
+    let orgFilter = {};
+    if (orgId) {
+      if (branchId) {
+        // Single branch selected — show branch-specific items + org-wide items
+        orgFilter = { orgId, $or: [{ branchId }, { branchId: null }] };
+      } else {
+        // All Branches — show everything for this org
+        orgFilter = { orgId };
+      }
+    }
 
     const filter = { ...orgFilter, isActive: true };
 
@@ -240,20 +265,29 @@ router.get('/', verifyFinanceJWT, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('❌ Error fetching items:', err);
+    console.error('? Error fetching items:', err);
     res.status(500).json({ success: false, error: 'Failed to fetch items', message: err.message });
   }
 });
 
 // ============================================================================
-// FIX 1 + FIX 2 — /statistics returns ALL fields Flutter stat cards need
+// FIX 1 + FIX 2 � /statistics returns ALL fields Flutter stat cards need
 // ============================================================================
 
 router.get('/statistics', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    // Branch-specific items filter
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+
+    let orgFilter = {};
+    if (orgId) {
+      if (branchId) {
+        orgFilter = { orgId, $or: [{ branchId }, { branchId: null }] };
+      } else {
+        orgFilter = { orgId };
+      }
+    }
 
     const base = { ...orgFilter, isActive: true };
 
@@ -269,7 +303,7 @@ router.get('/statistics', verifyFinanceJWT, async (req, res) => {
         Item.countDocuments({ ...base, isPurchasable: true }),
       ]);
 
-    // FIX 1: wrapped inside statistics{} key — Flutter reads raw['statistics']
+    // FIX 1: wrapped inside statistics{} key � Flutter reads raw['statistics']
     res.json({
       success: true,
       statistics: {
@@ -283,20 +317,25 @@ router.get('/statistics', verifyFinanceJWT, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('❌ Error fetching statistics:', err);
+    console.error('? Error fetching statistics:', err);
     res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
   }
 });
 
 // ============================================================================
-// GET /:id — single item (MUST be below /search and /statistics)
+// GET /:id � single item (MUST be below /search and /statistics)
 // ============================================================================
 
 router.get('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+    let orgFilter = {};
+    if (orgId) {
+      orgFilter = branchId
+        ? { orgId, $or: [{ branchId }, { branchId: null }] }
+        : { orgId };
+    }
 
     const item = await Item.findOne({ _id: req.params.id, ...orgFilter, isActive: true })
       .populate('preferredVendor', 'name email phone')
@@ -306,23 +345,27 @@ router.get('/:id', verifyFinanceJWT, async (req, res) => {
 
     res.json({ success: true, item });
   } catch (err) {
-    console.error('❌ Error fetching item:', err);
+    console.error('? Error fetching item:', err);
     if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
     res.status(500).json({ success: false, error: 'Failed to fetch item' });
   }
 });
 
 // ============================================================================
-// POST / — create item
+// POST / � create item
 // FIX 5: resolve COA IDs for salesAccount + purchaseAccount
 // ============================================================================
 
 router.post('/', verifyFinanceJWT, validateItemData, async (req, res) => {
   try {
-    const orgId = req.user?.orgId || null;
+    const orgId    = req.user?.orgId || null;
+    // If exactly one branch is selected, tag the item to that branch.
+    // If "All Branches" is selected, branchId = null (visible to all branches).
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
 
     const itemData = {
       orgId,
+      branchId,
       name:          req.body.name.trim(),
       type:          req.body.type,
       unit:          req.body.unit?.trim(),
@@ -354,18 +397,18 @@ router.post('/', verifyFinanceJWT, validateItemData, async (req, res) => {
     itemData.purchaseAccountId = purchaseAccountId;
 
     const item = await Item.create(itemData);
-    console.log('✅ Item created:', item.name);
+    console.log('? Item created:', item.name);
 
     res.status(201).json({ success: true, message: 'Item created successfully', item });
   } catch (err) {
-    console.error('❌ Error creating item:', err);
+    console.error('? Error creating item:', err);
     if (err.name === 'ValidationError') return res.status(400).json({ success: false, error: err.message });
     res.status(500).json({ success: false, error: 'Failed to create item' });
   }
 });
 
 // ============================================================================
-// PUT /:id — update item
+// PUT /:id � update item
 // FIX 5: re-resolve COA IDs on every update
 // ============================================================================
 
@@ -428,10 +471,10 @@ router.put('/:id', verifyFinanceJWT, validateItemData, async (req, res) => {
 
     if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
-    console.log('✅ Item updated:', item.name);
+    console.log('? Item updated:', item.name);
     res.json({ success: true, message: 'Item updated successfully', item });
   } catch (err) {
-    console.error('❌ Error updating item:', err);
+    console.error('? Error updating item:', err);
     if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
     if (err.name === 'ValidationError') return res.status(400).json({ success: false, error: err.message });
     res.status(500).json({ success: false, error: 'Failed to update item' });
@@ -439,14 +482,22 @@ router.put('/:id', verifyFinanceJWT, validateItemData, async (req, res) => {
 });
 
 // ============================================================================
-// DELETE /:id — soft delete
+// DELETE /:id � soft delete
 // ============================================================================
 
 router.delete('/:id', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+
+    let orgFilter = {};
+    if (orgId) {
+      if (branchId) {
+        orgFilter = { orgId, $or: [{ branchId }, { branchId: null }] };
+      } else {
+        orgFilter = { orgId };
+      }
+    }
 
     const item = await Item.findOneAndUpdate(
       { _id: req.params.id, ...orgFilter },
@@ -456,24 +507,33 @@ router.delete('/:id', verifyFinanceJWT, async (req, res) => {
 
     if (!item) return res.status(404).json({ success: false, error: 'Item not found' });
 
-    console.log('✅ Item deleted (soft):', item.name);
+    console.log('? Item deleted (soft):', item.name);
     res.json({ success: true, message: 'Item deleted successfully' });
   } catch (err) {
-    console.error('❌ Error deleting item:', err);
+    console.error('? Error deleting item:', err);
     if (err.kind === 'ObjectId') return res.status(404).json({ success: false, error: 'Item not found' });
     res.status(500).json({ success: false, error: 'Failed to delete item' });
   }
 });
 
 // ============================================================================
-// GET /export/csv — export all items as CSV
+// GET /export/csv � export all items as CSV
 // ============================================================================
 
 router.get('/export/csv', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    // Branch-specific items filter
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+
+    let orgFilter = {};
+    if (orgId) {
+      if (branchId) {
+        orgFilter = { orgId, $or: [{ branchId }, { branchId: null }] };
+      } else {
+        orgFilter = { orgId };
+      }
+    }
 
     const { type, isSellable, isPurchasable } = req.query;
     const filter = { ...orgFilter, isActive: true };
@@ -492,14 +552,14 @@ router.get('/export/csv', verifyFinanceJWT, async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=items_export.csv');
     res.send(csvContent);
   } catch (err) {
-    console.error('❌ Error exporting items:', err);
+    console.error('? Error exporting items:', err);
     res.status(500).json({ success: false, error: 'Failed to export items' });
   }
 });
 
 // ============================================================================
-// POST /bulk-import — CSV bulk import
-// FIX 4: removed duplicate Vendor schema — uses multer only, no Vendor model here
+// POST /bulk-import � CSV bulk import
+// FIX 4: removed duplicate Vendor schema � uses multer only, no Vendor model here
 // ============================================================================
 
 const upload = multer({ dest: 'uploads/' });
@@ -579,13 +639,13 @@ router.post('/bulk-import', verifyFinanceJWT, upload.single('file'), async (req,
     res.json({ success: true, message: 'Bulk import completed', successCount, errorCount, errors });
   } catch (err) {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
-    console.error('❌ Bulk import error:', err);
+    console.error('? Bulk import error:', err);
     res.status(500).json({ success: false, error: 'Failed to import: ' + err.message });
   }
 });
 
 // ============================================================================
-// UTILITY ROUTES — units, sales accounts, purchase accounts
+// UTILITY ROUTES � units, sales accounts, purchase accounts
 // These read from COA so dropdowns reflect actual accounts in the org
 // ============================================================================
 
@@ -596,12 +656,17 @@ router.get('/units', verifyFinanceJWT, (req, res) => {
   });
 });
 
-// Sales accounts — pulled from COA (Income types)
+// Sales accounts � pulled from COA (Income types)
 router.get('/accounts/sales', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+    let orgFilter = {};
+    if (orgId) {
+      orgFilter = branchId
+        ? { orgId, $or: [{ branchId }, { branchId: null }] }
+        : { orgId };
+    }
 
     const accounts = await ChartOfAccount.find({
       ...orgFilter,
@@ -619,12 +684,17 @@ router.get('/accounts/sales', verifyFinanceJWT, async (req, res) => {
   }
 });
 
-// Purchase accounts — pulled from COA (Expense / COGS types)
+// Purchase accounts � pulled from COA (Expense / COGS types)
 router.get('/accounts/purchase', verifyFinanceJWT, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
-      : {};
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length === 1 ? req.branchIds[0] : null;
+    let orgFilter = {};
+    if (orgId) {
+      orgFilter = branchId
+        ? { orgId, $or: [{ branchId }, { branchId: null }] }
+        : { orgId };
+    }
 
     const accounts = await ChartOfAccount.find({
       ...orgFilter,

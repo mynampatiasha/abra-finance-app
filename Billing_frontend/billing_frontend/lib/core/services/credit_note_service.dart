@@ -199,6 +199,25 @@ class CreditNoteService {
     }
   }
 
+  /// Delete credit application (unapply credit from invoice)
+  static Future<Map<String, dynamic>> deleteApplication(
+    String creditNoteId,
+    String applicationId,
+  ) async {
+    try {
+      print('📤 DELETE: $_baseEndpoint/$creditNoteId/applications/$applicationId');
+
+      final data = await _api.delete('$_baseEndpoint/$creditNoteId/applications/$applicationId');
+
+      print('✅ Credit application deleted: ${data['message']}');
+
+      return data;
+    } catch (e) {
+      print('❌ Error deleting credit application: $e');
+      rethrow;
+    }
+  }
+
   /// Download credit note PDF
   static Future<String> downloadPDF(String creditNoteId) async {
     try {
@@ -345,6 +364,25 @@ class CreditNoteService {
       rethrow;
     }
   }
+
+  /// Refund a credit note — returns the refund sub-doc _id for use as journalRef.
+  /// Pass bankAccountId in body so the backend can post to the correct bank COA.
+  static Future<String> refundCreditNote(
+    String creditNoteId,
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final data = await _api.post('$_baseEndpoint/$creditNoteId/refund', body: body);
+      if (data['success'] != true) {
+        throw Exception(data['error'] ?? data['message'] ?? 'Failed to process refund');
+      }
+      // Backend returns refundId at the top level of data (mirrors VendorCredit pattern)
+      return data['data']?['refundId']?.toString() ?? creditNoteId;
+    } catch (e) {
+      print('❌ Error refunding credit note: $e');
+      rethrow;
+    }
+  }
 }
 
 // ============================================================================
@@ -360,6 +398,8 @@ class CreditNote {
   final String customerName;
   final String? customerEmail;
   final String? customerPhone;
+  final String customerGSTIN;
+  final String placeOfSupply;
   final Address? billingAddress;
   final String? invoiceId;
   final String? invoiceNumber;
@@ -395,6 +435,8 @@ class CreditNote {
     required this.customerName,
     this.customerEmail,
     this.customerPhone,
+    this.customerGSTIN = '',
+    this.placeOfSupply = '',
     this.billingAddress,
     this.invoiceId,
     this.invoiceNumber,
@@ -432,6 +474,8 @@ class CreditNote {
       customerName: json['customerName'],
       customerEmail: json['customerEmail'],
       customerPhone: json['customerPhone'],
+      customerGSTIN: json['customerGSTIN'] ?? '',
+      placeOfSupply: json['placeOfSupply'] ?? '',
       billingAddress: json['billingAddress'] != null
           ? Address.fromJson(json['billingAddress'])
           : null,
@@ -481,6 +525,7 @@ class CreditNoteItem {
   final double discount;
   final String discountType;
   final double amount;
+  final double itemGstRate;
 
   CreditNoteItem({
     required this.itemDetails,
@@ -489,6 +534,7 @@ class CreditNoteItem {
     required this.discount,
     required this.discountType,
     required this.amount,
+    this.itemGstRate = 18,
   });
 
   factory CreditNoteItem.fromJson(Map<String, dynamic> json) {
@@ -499,6 +545,7 @@ class CreditNoteItem {
       discount: (json['discount'] ?? 0).toDouble(),
       discountType: json['discountType'] ?? 'percentage',
       amount: (json['amount'] ?? 0).toDouble(),
+      itemGstRate: (json['itemGstRate'] ?? 18).toDouble(),
     );
   }
 
@@ -510,6 +557,7 @@ class CreditNoteItem {
       'discount': discount,
       'discountType': discountType,
       'amount': amount,
+      'itemGstRate': itemGstRate,
     };
   }
 }

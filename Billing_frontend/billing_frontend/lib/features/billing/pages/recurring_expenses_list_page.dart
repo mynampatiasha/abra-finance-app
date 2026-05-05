@@ -34,6 +34,7 @@ import 'new_recurring_expense.dart';
 import 'recurring_expense_detail_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../app/config/api_config.dart';
+import '../../../../core/finance_secure_storage.dart';
 
 
 // ─── colour palette (same as recurring_invoices_list_page) ───────────────────
@@ -75,6 +76,9 @@ class _RecurringExpensesListPageState extends State<RecurringExpensesListPage> {
   RecurringExpenseStats? _stats;
   bool    _isLoading    = true;
   String? _errorMessage;
+
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
 
   // ── filters ───────────────────────────────────────────────────────────────
   String   _selectedStatus = 'All';
@@ -558,9 +562,10 @@ Future<void> _downloadExpensePdf(String expenseId, String expenseNumber) async {
   try {
     _showSuccess('Preparing PDF...');
     // Use the same pattern as invoice PDF download with token
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token') ?? '';
-    final url   = '${ApiConfig.baseUrl}/api/finance/expenses/$expenseId/pdf?token=$token';
+    final prefs     = await SharedPreferences.getInstance();
+    final token     = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
+    final url   = '${ApiConfig.baseUrl}/api/finance/expenses/$expenseId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
     if (await canLaunchUrl(Uri.parse(url))) {
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } else {
@@ -1016,7 +1021,7 @@ Future<void> _exportChildExpenses(List<dynamic> expenses, String profileName) as
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -1065,6 +1070,7 @@ Future<void> _exportChildExpenses(List<dynamic> expenses, String profileName) as
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _outlinedBtn('View Process', Icons.info_outline, _blue, _showLifecycleDialog),
     const SizedBox(width: 8),
     _actionBtn('New', Icons.add_rounded, _navy, _openNew),
@@ -1098,6 +1104,7 @@ Future<void> _exportChildExpenses(List<dynamic> expenses, String profileName) as
     Row(children: [
       _outlinedBtn('View Process', Icons.info_outline, _blue, _showLifecycleDialog),
       const SizedBox(width: 8),
+      _buildViewToggle(), const SizedBox(width: 8),
       _actionBtn('New', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -1132,6 +1139,7 @@ Future<void> _exportChildExpenses(List<dynamic> expenses, String profileName) as
       const SizedBox(width: 6),
       _compactBtn('Process', _blue, _showLifecycleDialog),
       const SizedBox(width: 6),
+      _buildViewToggle(), const SizedBox(width: 6),
       _compactBtn('Import', _purple, _isLoading ? null : _handleImport),
       const SizedBox(width: 6),
       _compactBtn('Export', _green, _filtered.isEmpty ? null : _handleExport),
@@ -1354,6 +1362,144 @@ Future<void> _exportChildExpenses(List<dynamic> expenses, String profileName) as
                 Text(d.value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: d.color), overflow: TextOverflow.ellipsis),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    height: 42,
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(10),
+      color: Colors.white,
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? _navy : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.grey[600])),
+        ]),
+      ),
+    );
+  }
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    final items = _currentPageItems;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: items.asMap().entries.map((e) => _buildExpenseProfileCard(e.key, e.value)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildExpenseProfileCard(int index, RecurringExpense p) {
+    final isSel = _selectedRows.contains(index);
+    final total = p.amount + p.tax;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Row 1: checkbox + profile name + status badge
+          Row(children: [
+            Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), activeColor: _navy),
+            const SizedBox(width: 6),
+            Expanded(child: InkWell(
+              onTap: () => _openEdit(p),
+              child: Text(p.profileName, style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 15, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+            )),
+            _statusBadge(p.status),
+          ]),
+          const SizedBox(height: 8),
+          // Row 2: vendor + account
+          Row(children: [
+            const Icon(Icons.store_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(p.vendorName, style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.account_balance_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(p.expenseAccount, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+          ]),
+          const SizedBox(height: 6),
+          // Row 3: frequency + next date + amount
+          Row(children: [
+            const Icon(Icons.repeat, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Text('Every ${p.repeatEvery} ${p.repeatUnit}(s)', style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+            const SizedBox(width: 12),
+            const Icon(Icons.calendar_today, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Text(DateFormat('dd MMM yyyy').format(p.nextExpenseDate), style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+            const Spacer(),
+            Text('₹${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy)),
+          ]),
+          const Divider(height: 16),
+          // Actions row
+          Row(children: [
+            InkWell(
+              onTap: () => _shareProfile(p),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(width: 32, height: 32, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              itemBuilder: (_) => [
+                _menuItem('view',          Icons.visibility,                  const Color(0xFF3D8EFF), 'View Details'),
+                _menuItem('edit',          Icons.edit_outlined,               _blue,   'Edit'),
+                _menuItem('generate',      Icons.add_circle_outline,          _green,  'Generate Expense'),
+                _menuItem('view_expenses', Icons.list_alt_outlined,           _navy,   'View Child Expenses'),
+                _menuItem('ticket',        Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                if (p.status == 'ACTIVE')  _menuItem('pause',  Icons.pause_outlined,      _orange, 'Pause'),
+                if (p.status == 'PAUSED')  _menuItem('resume', Icons.play_arrow_outlined,  _green,  'Resume'),
+                _menuItem('stop',   Icons.stop_outlined,  _red, 'Stop',   textColor: _red),
+                _menuItem('delete', Icons.delete_outline, _red, 'Delete', textColor: _red),
+              ],
+              onSelected: (v) {
+                switch (v) {
+                  case 'view':          Navigator.push(context, MaterialPageRoute(builder: (_) => RecurringExpenseDetailPage(expense: p))); break;
+                  case 'edit':          _openEdit(p);             break;
+                  case 'generate':      _generate(p);             break;
+                  case 'view_expenses': _viewChildExpenses(p);    break;
+                  case 'ticket':        _raiseTicket(p);          break;
+                  case 'pause':         _pause(p);                break;
+                  case 'resume':        _resume(p);               break;
+                  case 'stop':          _stop(p);                 break;
+                  case 'delete':        _delete(p);               break;
+                }
+              },
+            ),
+          ]),
+        ]),
+      ),
     );
   }
 

@@ -134,7 +134,8 @@ expenseNumber: {
     type: mongoose.Schema.Types.ObjectId,
     default: null
   },
-  orgId: { type: String, index: true, default: null }
+  orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
 }, {
   timestamps: true // Automatically adds createdAt and updatedAt
 });
@@ -157,30 +158,15 @@ const PaymentAccount = mongoose.models.PaymentAccount || mongoose.model('Payment
 
 async function getExpenseAccountId(accountName, orgId = null) {
   try {
-    // ✅ Only valid expense-type accounts allowed
-    const EXPENSE_TYPES = ['Expense', 'Other Expense', 'Cost Of Goods Sold'];
-
-    // Step 1: Try exact match — only if it's an Expense-type account
+    // ✅ Accept ANY account type (Asset, Liability, Equity, Income, Expense, etc.)
+    // Step 1: Try exact match — any account type allowed
     let acc = await ChartOfAccount.findOne({
       accountName: { $regex: `^${accountName}$`, $options: 'i' },
-      accountType: { $in: EXPENSE_TYPES },
       ...(orgId ? { orgId } : {}),
     }).select('_id').lean();
     if (acc) return acc._id;
 
-    // Step 1b: Check if account exists BUT is the wrong type (Asset, Liability etc.)
-    const wrongTypeAcc = await ChartOfAccount.findOne({
-      accountName: { $regex: `^${accountName}$`, $options: 'i' },
-      accountType: { $nin: EXPENSE_TYPES },
-      ...(orgId ? { orgId } : {}),
-    }).select('_id accountType').lean();
-    if (wrongTypeAcc) {
-      console.warn(`⚠️ Account "${accountName}" is type "${wrongTypeAcc.accountType}" — not an expense account. ` +
-        `COA post skipped. If this is a Fixed Asset, record it in the Fixed Assets module instead.`);
-      return null; // ← safe: COA post is skipped, expense still saves normally
-    }
-
-    // Step 2: Not found at all — AUTO CREATE as Expense type
+    // Step 2: Not found at all — AUTO CREATE as Expense type (backward compatibility)
     console.log(`📝 COA account "${accountName}" not found — creating automatically as Expense type...`);
     const newAcc = await ChartOfAccount.create({
       accountName:     accountName,
@@ -230,8 +216,7 @@ async function getPaidThroughAccountId(paidThrough, orgId = null) {
       accountName:        paidThrough,
       accountCode:        `CASH-${Date.now().toString().slice(-6)}`,
       accountType:        'Cash and Cash Equivalents',
-      orgId:              orgId,
-      accountSubType:     'Cash',
+      orgId:              orgId,       accountSubType:     'Cash',
       description:        `${paidThrough} account`,
       isSystemAccount:    false,
       isActive:           true,
@@ -250,9 +235,9 @@ async function getPaidThroughAccountId(paidThrough, orgId = null) {
   }
 }
 
-async function generateExpenseNumber(orgId = null) {
+async function generateExpenseNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(Expense, 'expenseNumber', 'EXP', orgId);
+  return generateNumber(Expense, 'expenseNumber', 'EXP', orgId, branchId);
 }
 
 // ============================================================================
@@ -431,7 +416,8 @@ router.get('/billable/:customerId', async (req, res) => {
     const expenses = await Expense.find({
       isBillable: true,
       isBilled: false,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
       $or: [
         { customerName: customerId },
         { customerId: customerId }
@@ -466,6 +452,7 @@ router.get('/', async (req, res) => {
     const { vendor, customerName, startDate, endDate, expenseAccount } = req.query;
     let query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
 
     if (vendor) {
       query.vendor = new RegExp(vendor, 'i');
@@ -605,7 +592,8 @@ router.post('/', upload.single('receipt'), async (req, res) => {
       invoiceId: null,
       providerTransactionId: providerTransactionId || null,
       orgId: req.user?.orgId || null,
-      expenseNumber: await generateExpenseNumber(req.user?.orgId || null),
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            expenseNumber: await generateExpenseNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null),
       receiptFile: req.file ? {
         filename: req.file.filename,
         originalName: req.file.originalname,
@@ -666,6 +654,7 @@ router.post('/', upload.single('receipt'), async (req, res) => {
         await postTransactionToCOA({
           accountId: expAccId,
           orgId: currentOrgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date: txnDate,
           description,
           referenceType: 'Expense',
@@ -683,6 +672,7 @@ router.post('/', upload.single('receipt'), async (req, res) => {
         await postTransactionToCOA({
           accountId: paidAccId,
           orgId: currentOrgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date: txnDate,
           description,
           referenceType: 'Expense',
@@ -701,6 +691,10 @@ router.post('/', upload.single('receipt'), async (req, res) => {
     // ── END COA POSTING ─────────────────────────────────────────────────────
 
     // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    // Skip if this expense was created from the banking categorization flow
+    // (providerTransactionId present means the original bank txn already exists
+    //  and will be marked via /mark-categorized — creating a duplicate here
+    //  would cause ghost entries that survive uncategorization)
     try {
       const ProviderTransaction = mongoose.models.ProviderTransaction
         || mongoose.model('ProviderTransaction',
@@ -708,22 +702,88 @@ router.post('/', upload.single('receipt'), async (req, res) => {
             'providertransactions');
 
       // Find the PaymentAccount by name or ID
-      const ptAccount = paidThrough
+      // ── FIX: also fall back to COA lookup so expenses created directly via
+      //         new_expenses.dart (where paidThrough may only exist in COA, not
+      //         in PaymentAccount) still get a ProviderTransaction created.
+      let ptAccount = paidThrough
         ? (mongoose.Types.ObjectId.isValid(paidThrough)
             ? await PaymentAccount.findById(paidThrough).lean()
             : await PaymentAccount.findOne({ accountName: paidThrough }).lean())
         : null;
 
-      if (ptAccount) {
+      // Fallback: if not found in PaymentAccount, look up in ChartOfAccount
+      // and synthesise a minimal ptAccount-like object so the ProviderTransaction
+      // can still be created with the correct accountId.
+      if (!ptAccount && paidThrough) {
+        const coaAcc = mongoose.Types.ObjectId.isValid(paidThrough)
+          ? await ChartOfAccount.findById(paidThrough).select('_id accountName').lean()
+          : await ChartOfAccount.findOne({
+              accountName: { $regex: `^${paidThrough}$`, $options: 'i' },
+              ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            }).select('_id accountName').lean();
+
+        if (coaAcc) {
+          ptAccount = { _id: coaAcc._id, accountName: coaAcc.accountName, _fromCOA: true };
+          console.log(`🔍 [ProviderTransaction] paidThrough "${paidThrough}" not in PaymentAccount — using COA fallback: ${coaAcc._id}`);
+        }
+      }
+
+      console.log('🔍 [ProviderTransaction] DEBUG - Checking conditions:');
+      console.log('  - paidThrough:', paidThrough);
+      console.log('  - ptAccount found:', !!ptAccount, ptAccount?._fromCOA ? '(COA fallback)' : '(PaymentAccount)');
+      console.log('  - providerTransactionId:', providerTransactionId);
+      console.log('  - Will create ProviderTransaction?', !!(ptAccount && !providerTransactionId));
+
+      if (ptAccount && !providerTransactionId) {
+        // ✅ FIX: Determine cash flow section based on expense account type
+        let cashFlowSection = 'OPERATING'; // default
+        
+        console.log('🔍 [ProviderTransaction] DEBUG - expenseAccount:', expenseAccount);
+        
+        // Get the expense account type from COA
+        const expAcc = await ChartOfAccount.findOne({
+          accountName: expenseAccount,
+          ...req.orgFilter,
+        }).select('accountType').lean();
+        
+        console.log('🔍 [ProviderTransaction] DEBUG - Found COA account:', expAcc);
+        
+        if (expAcc) {
+          const accType = expAcc.accountType;
+          console.log('🔍 [ProviderTransaction] DEBUG - Account type:', accType);
+          
+          // Asset purchases → Investing Activities
+          if (['Asset', 'Fixed Asset', 'Other Current Asset', 'Other Asset'].includes(accType)) {
+            cashFlowSection = 'INVESTING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: INVESTING (Asset account)');
+          }
+          // Liability/Equity payments → Financing Activities
+          else if (['Liability', 'Equity', 'Other Current Liability', 'Non Current Liability', 'Other Liability'].includes(accType)) {
+            cashFlowSection = 'FINANCING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: FINANCING (Liability/Equity account)');
+          }
+          // Expense/Income/COGS → Operating Activities (default)
+          else {
+            cashFlowSection = 'OPERATING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: OPERATING (Expense/Income/COGS account)');
+          }
+        } else {
+          console.log('⚠️ [ProviderTransaction] COA account not found for expenseAccount:', expenseAccount);
+        }
+        
+        console.log('🔍 [ProviderTransaction] Final cashFlowSection:', cashFlowSection);
+        
         await ProviderTransaction.create({
           accountId:            ptAccount._id,
           orgId:                req.user?.orgId || null,
+          branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
           transactionDate:      new Date(date),
           description:          `Expense: ${expenseAccount}${vendor ? ' - ' + vendor : ''}`,
           amount:               newExpense.total,
           transactionType:      'DEBIT',
           reconciliationStatus: 'CATEGORIZED',
           categoryLabel:        expenseAccount,
+          cashFlowSection:      cashFlowSection, // ✅ FIX: Add cash flow section
           source:               'SYSTEM_ENTRY',
           linkedRecordId:       newExpense._id,
           linkedRecordType:     'Expense',
@@ -733,7 +793,61 @@ router.post('/', upload.single('receipt'), async (req, res) => {
           importedAt:           new Date(),
           importedBy:           req.user?.email || 'system',
         });
-        console.log(`✅ ProviderTransaction created for expense: ${newExpense.expenseNumber}`);
+        console.log(`✅ ProviderTransaction created for expense: ${newExpense.expenseNumber} (Cash Flow: ${cashFlowSection})`);
+      } else if (providerTransactionId) {
+        // ✅ FIX: Update existing ProviderTransaction with correct cashFlowSection and categoryLabel
+        console.log('🔍 [ProviderTransaction] DEBUG - Updating existing ProviderTransaction:', providerTransactionId);
+        console.log('  - expenseAccount:', expenseAccount);
+        
+        let cashFlowSection = 'OPERATING'; // default
+        
+        // Get the expense account type from COA
+        const expAcc = await ChartOfAccount.findOne({
+          accountName: expenseAccount,
+          ...req.orgFilter,
+        }).select('accountType').lean();
+        
+        console.log('🔍 [ProviderTransaction] DEBUG - Found COA account:', expAcc);
+        
+        if (expAcc) {
+          const accType = expAcc.accountType;
+          console.log('🔍 [ProviderTransaction] DEBUG - Account type:', accType);
+          
+          // Asset purchases → Investing Activities
+          if (['Asset', 'Fixed Asset', 'Other Current Asset', 'Other Asset'].includes(accType)) {
+            cashFlowSection = 'INVESTING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: INVESTING (Asset account)');
+          }
+          // Liability/Equity payments → Financing Activities
+          else if (['Liability', 'Equity', 'Other Current Liability', 'Non Current Liability', 'Other Liability'].includes(accType)) {
+            cashFlowSection = 'FINANCING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: FINANCING (Liability/Equity account)');
+          }
+          // Expense/Income/COGS → Operating Activities (default)
+          else {
+            cashFlowSection = 'OPERATING';
+            console.log('✅ [ProviderTransaction] Cash Flow Section: OPERATING (Expense/Income/COGS account)');
+          }
+        } else {
+          console.log('⚠️ [ProviderTransaction] COA account not found for expenseAccount:', expenseAccount);
+        }
+        
+        console.log('🔍 [ProviderTransaction] Final cashFlowSection:', cashFlowSection);
+        
+        // Update the existing ProviderTransaction
+        await ProviderTransaction.findByIdAndUpdate(
+          providerTransactionId,
+          {
+            $set: {
+              categoryLabel:    expenseAccount,
+              cashFlowSection:  cashFlowSection,
+              linkedRecordId:   newExpense._id,
+              linkedRecordType: 'Expense',
+              journalRef:       newExpense.expenseNumber || newExpense._id.toString(),
+            },
+          }
+        );
+        console.log(`✅ ProviderTransaction updated: ${providerTransactionId} → categoryLabel: "${expenseAccount}", cashFlowSection: ${cashFlowSection}`);
       }
     } catch (ptErr) {
       console.error('⚠️ ProviderTransaction create error (expense):', ptErr.message);
@@ -765,7 +879,7 @@ router.put('/:id', upload.single('receipt'), async (req, res) => {
     
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!expense) {
@@ -1020,14 +1134,14 @@ router.put('/:id', upload.single('receipt'), async (req, res) => {
       if (paidThroughChanged) {
         // Reverse old entries
         if (expAccId) await postTransactionToCOA({
-          accountId: expAccId, orgId: currentOrgId, date: txnDate,
+          accountId: expAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
           description: `REVERSAL - ${description}`,
           referenceType: 'Expense', referenceId: expense._id,
           referenceNumber: expense.expenseNumber || expense._id.toString(),
           debit: 0, credit: oldTotal
         });
         if (oldPaidAccId) await postTransactionToCOA({
-          accountId: oldPaidAccId, orgId: currentOrgId, date: txnDate,
+          accountId: oldPaidAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
           description: `REVERSAL - ${description}`,
           referenceType: 'Expense', referenceId: expense._id,
           referenceNumber: expense.expenseNumber || expense._id.toString(),
@@ -1036,13 +1150,13 @@ router.put('/:id', upload.single('receipt'), async (req, res) => {
 
         // Post new entries
         if (expAccId) await postTransactionToCOA({
-          accountId: expAccId, orgId: currentOrgId, date: txnDate,
+          accountId: expAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
           description, referenceType: 'Expense', referenceId: expense._id,
           referenceNumber: expense.expenseNumber || expense._id.toString(),
           debit: total, credit: 0
         });
         if (newPaidAccId) await postTransactionToCOA({
-          accountId: newPaidAccId, orgId: currentOrgId, date: txnDate,
+          accountId: newPaidAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
           description, referenceType: 'Expense', referenceId: expense._id,
           referenceNumber: expense.expenseNumber || expense._id.toString(),
           debit: 0, credit: total
@@ -1053,14 +1167,14 @@ router.put('/:id', upload.single('receipt'), async (req, res) => {
         const difference = total - oldTotal;
         if (difference !== 0) {
           if (expAccId) await postTransactionToCOA({
-            accountId: expAccId, orgId: currentOrgId, date: txnDate,
+            accountId: expAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
             description, referenceType: 'Expense', referenceId: expense._id,
             referenceNumber: expense.expenseNumber || expense._id.toString(),
             debit:  difference > 0 ? difference : 0,
             credit: difference < 0 ? Math.abs(difference) : 0
           });
           if (newPaidAccId) await postTransactionToCOA({
-            accountId: newPaidAccId, orgId: currentOrgId, date: txnDate,
+            accountId: newPaidAccId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
             description, referenceType: 'Expense', referenceId: expense._id,
             referenceNumber: expense.expenseNumber || expense._id.toString(),
             debit:  difference < 0 ? Math.abs(difference) : 0,
@@ -1101,7 +1215,7 @@ router.delete('/:id', async (req, res) => {
 
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense) {
@@ -1170,6 +1284,7 @@ router.delete('/:id', async (req, res) => {
         await postTransactionToCOA({
           accountId: expAccId,
           orgId: currentOrgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date: txnDate,
           description,
           referenceType: 'Expense',
@@ -1185,6 +1300,7 @@ router.delete('/:id', async (req, res) => {
         await postTransactionToCOA({
           accountId: paidAccId,
           orgId: currentOrgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date: txnDate,
           description,
           referenceType: 'Expense',
@@ -1207,12 +1323,30 @@ router.delete('/:id', async (req, res) => {
             new mongoose.Schema({}, { strict: false }),
             'providertransactions');
 
+      // Delete system-created ProviderTransactions (source: SYSTEM_ENTRY)
       await ProviderTransaction.deleteMany({
         linkedRecordId:   expense._id,
         linkedRecordType: 'Expense',
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
       });
-      console.log(`✅ ProviderTransaction deleted for expense: ${expense._id}`);
+
+      // If this expense was created from the banking flow, reset the original
+      // imported bank ProviderTransaction back to UNCATEGORIZED
+      if (expense.providerTransactionId) {
+        await ProviderTransaction.findByIdAndUpdate(expense.providerTransactionId, {
+          $set: {
+            reconciliationStatus: 'UNCATEGORIZED',
+            categorizedAt:    null,
+            categorizedBy:    null,
+            journalRef:       null,
+            categoryLabel:    null,
+            linkedRecordId:   null,
+            linkedRecordType: null,
+          }
+        });
+      }
+
+      console.log(`✅ ProviderTransaction cleaned up for expense: ${expense._id}`);
     } catch (ptErr) {
       console.error('⚠️ ProviderTransaction delete error (expense):', ptErr.message);
     }
@@ -1232,7 +1366,10 @@ router.delete('/:id', async (req, res) => {
 router.get('/stats/summary', async (req, res) => {
   try {
     console.log('📊 Fetching expense statistics from MongoDB...');
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const expenses = await Expense.find(orgFilter);
     
     const totalExpenses = expenses.reduce((sum, exp) => sum + exp.total, 0);
@@ -1417,7 +1554,7 @@ router.post('/:id/proof', proofUpload.single('proof'), async (req, res) => {
 
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense) {
@@ -1475,7 +1612,7 @@ router.get('/:id/proof', async (req, res) => {
   try {
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense)         return res.status(404).json({ success: false, message: 'Expense not found' });
@@ -1503,7 +1640,7 @@ router.delete('/:id/proof', async (req, res) => {
   try {
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense)            return res.status(404).json({ success: false, message: 'Expense not found' });
@@ -1533,7 +1670,7 @@ router.get('/:id', async (req, res) => {
 
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense) {
@@ -1563,7 +1700,7 @@ router.get('/:id/receipt', async (req, res) => {
   try {
     const expense = await Expense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
 
     if (!expense) {
@@ -1739,7 +1876,8 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
           isItemized: false,
           itemizedExpenses: [],
           orgId: req.user?.orgId || null,
-          expenseNumber: await generateExpenseNumber(req.user?.orgId || null),
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+                    expenseNumber: await generateExpenseNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null),
         });
 
         await newExpense.save();
@@ -1759,6 +1897,7 @@ try {
   if (expAccId) await postTransactionToCOA({
     accountId:       expAccId,
     orgId:           currentOrgId,
+    branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
     date:            txnDate,
     description:     desc,
     referenceType:   'Expense',
@@ -1771,6 +1910,7 @@ try {
   if (paidAccId) await postTransactionToCOA({
     accountId:       paidAccId,
     orgId:           currentOrgId,
+    branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
     date:            txnDate,
     description:     desc,
     referenceType:   'Expense',
@@ -1867,27 +2007,33 @@ router.get('/:id/pdf', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
 
   try {
     const expense = await Expense.findOne({
       _id:   req.params.id,
-      orgId: req.user?.orgId,
-    }).lean();
+      orgId: req.user?.orgId,     }).lean();
     if (!expense) return res.status(404).json({ success: false, message: 'Expense not found' });
 
-    // ── Fetch org details ──────────────────────────────────────────────────
+    // ── Fetch org details — branch-aware ──────────────────────────────────
     let orgName  = 'Your Company';
     let orgGST   = '';
     let orgAddr  = '';
     let orgEmail = '';
     let orgPhone = '';
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({
-          orgId: String, orgName: String, gstNumber: String,
-          address: String, email: String, phone: String,
-        }), 'organizations');
-      const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
       if (org) {
         orgName  = org.orgName    || orgName;
         orgGST   = org.gstNumber  || '';

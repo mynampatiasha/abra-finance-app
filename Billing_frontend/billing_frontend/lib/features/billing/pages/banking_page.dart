@@ -12,7 +12,7 @@
 //   ✅ Last 30 days ▼ date filter
 //   ✅ Bank Statements button | Add Bank or Credit Card button (top right)
 //   ✅ Active Accounts table: ACCOUNT DETAILS | UNCATEGORIZED |
-//      AMOUNT IN BANK | AMOUNT IN ZOHO BOOKS | ⌄ expand row
+//      AMOUNT IN BANK | AMOUNT IN BOOKS | ⌄ expand row
 //   ✅ Fully responsive: mobile, tablet, desktop
 // ============================================================================
 
@@ -183,9 +183,9 @@ class _BankingDashboardPageState extends State<BankingDashboardPage> {
               accountName:        a.accountName,
               accountNumber:      a.accountNumber,
               isActive:           a.isActive,
-              currentBalance:     a.currentBalance,
-              bankBalance:        (d['currentBalance'] ?? a.currentBalance).toDouble(),
-              uncategorizedCount: (d['uncategorized']  ?? 0).toInt(),
+              currentBalance:     (d['bankCOABalance'] ?? a.currentBalance).toDouble(), // Amount in Books = COA balance
+              bankBalance:        (d['currentBalance']  ?? a.currentBalance).toDouble(), // Amount in Bank = statement balance
+              uncategorizedCount: (d['uncategorized']   ?? 0).toInt(),
             ));
           } else {
             enriched.add(a);

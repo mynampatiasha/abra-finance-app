@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// CURRENCY ADJUSTMENTS — COMPLETE BACKEND
+// ============================================================================
+// CURRENCY ADJUSTMENTS � COMPLETE BACKEND
 // ============================================================================
 // File: backend/routes/currency_adjustments.js
 // Register in app.js:
@@ -46,7 +46,7 @@ const adjustmentLineSchema = new mongoose.Schema({
 }, { _id: true });
 
 const currencyAdjustmentSchema = new mongoose.Schema({
-  adjustmentNumber: { type: String, required: true, unique: true, index: true },
+  adjustmentNumber: { type: String, required: true, index: true },
   adjustmentDate:   { type: Date, required: true, default: Date.now },
   currency:         { type: String, required: true, uppercase: true, trim: true },
   newExchangeRate:  { type: Number, required: true, min: 0 },
@@ -71,6 +71,7 @@ const currencyAdjustmentSchema = new mongoose.Schema({
   orgId:            { type: String, index: true, default: null },
 }, { timestamps: true });
 
+currencyAdjustmentSchema.index({ orgId: 1, branchId: 1, adjustmentNumber: 1 }, { unique: true });
 currencyAdjustmentSchema.index({ adjustmentDate: -1 });
 currencyAdjustmentSchema.index({ currency: 1, status: 1 });
 
@@ -101,7 +102,7 @@ async function seedExchangeAccounts() {
   ];
   for (const acc of toSeed) {
     const exists = await ChartOfAccount.findOne({ accountName: acc.accountName });
-    if (!exists) { await ChartOfAccount.create(acc); console.log(`✅ Seeded: ${acc.accountName}`); }
+    if (!exists) { await ChartOfAccount.create(acc); console.log(`? Seeded: ${acc.accountName}`); }
   }
 }
 // seedExchangeAccounts is called after DB connects (see index.js start())
@@ -111,9 +112,9 @@ module.exports.seedExchangeAccounts = seedExchangeAccounts;
 // HELPERS
 // ============================================================================
 
-async function generateAdjustmentNumber(orgId = null) {
+async function generateAdjustmentNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(CurrencyAdjustment, 'adjustmentNumber', 'CADJ', orgId);
+  return generateNumber(CurrencyAdjustment, 'adjustmentNumber', 'CADJ', orgId, branchId);
 }
 
 async function getAccountId(name) {
@@ -162,7 +163,7 @@ async function postCOAEntries(adj, reverse = false) {
     if (Math.abs(line.gainLoss) < 0.01) continue;
     const isGain = reverse ? line.gainLoss < 0 : line.gainLoss > 0; // flip on reverse
     const amt  = Math.abs(line.gainLoss);
-    const desc = `${prefix}Currency Adj ${adj.adjustmentNumber} — ${line.transactionType} ${line.transactionNumber} (${adj.currency})`;
+    const desc = `${prefix}Currency Adj ${adj.adjustmentNumber} � ${line.transactionType} ${line.transactionNumber} (${adj.currency})`;
     const ref  = { referenceType: 'Journal', referenceId: adj._id, referenceNumber: adj.adjustmentNumber };
 
     if (line.transactionType === 'Invoice') {
@@ -183,7 +184,7 @@ async function postCOAEntries(adj, reverse = false) {
       }
     }
   }
-  console.log(`✅ COA ${reverse ? 'reversed' : 'posted'} for: ${adj.adjustmentNumber}`);
+  console.log(`? COA ${reverse ? 'reversed' : 'posted'} for: ${adj.adjustmentNumber}`);
 }
 
 async function createAuditJournal(adj, user) {
@@ -200,7 +201,7 @@ async function createAuditJournal(adj, user) {
       if (Math.abs(line.gainLoss) < 0.01) continue;
       const isGain = line.gainLoss > 0;
       const amt    = Math.abs(line.gainLoss);
-      const desc   = `${line.transactionType} ${line.transactionNumber} — ${line.partyName}`;
+      const desc   = `${line.transactionType} ${line.transactionNumber} � ${line.partyName}`;
       if (line.transactionType === 'Invoice') {
         if (isGain) {
           if (arId)   lineItems.push({ accountId: arId,   accountName: 'Accounts Receivable', description: desc, debit: amt, credit: 0   });
@@ -228,9 +229,9 @@ async function createAuditJournal(adj, user) {
       lineItems, status: 'Published',
       publishedAt: new Date(), publishedBy: user, createdBy: user,
     });
-    console.log(`✅ Audit journal: ${journal.journalNumber}`);
+    console.log(`? Audit journal: ${journal.journalNumber}`);
     return journal;
-  } catch (e) { console.error('⚠️ Audit journal failed:', e.message); return null; }
+  } catch (e) { console.error('?? Audit journal failed:', e.message); return null; }
 }
 
 async function updateTransactionRates(adj) {
@@ -243,7 +244,7 @@ async function updateTransactionRates(adj) {
       } else if (line.transactionType === 'Bill' && Bill) {
         await Bill.findByIdAndUpdate(line.transactionId, { exchangeRate: adj.newExchangeRate, baseCurrencyAmount: line.amountDue * adj.newExchangeRate, updatedAt: new Date() });
       }
-    } catch (e) { console.error(`⚠️ Rate update failed ${line.transactionNumber}:`, e.message); }
+    } catch (e) { console.error(`?? Rate update failed ${line.transactionNumber}:`, e.message); }
   }
 }
 
@@ -286,7 +287,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { status, currency, fromDate, toDate, search, page = 1, limit = 50 } = req.query;
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {}); Object.assign(query, req.branchFilter || {});
     if (status && status !== 'All')     query.status   = status;
     if (currency && currency !== 'All') query.currency = currency.toUpperCase();
     if (fromDate || toDate) {
@@ -322,17 +323,16 @@ router.post('/', authenticate, async (req, res) => {
     const rate = parseFloat(newExchangeRate);
     const [invoices, bills] = await Promise.all([fetchOpenInvoices(upperCurrency), fetchOpenBills(upperCurrency)]);
     const lineItems = buildLineItems(invoices, bills, rate);
-    const adjNumber = await generateAdjustmentNumber(req.user?.orgId || null);
+    const adjNumber = await generateAdjustmentNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     const adjustment = await CurrencyAdjustment.create({
       adjustmentNumber: adjNumber,
       adjustmentDate:   adjustmentDate ? new Date(adjustmentDate) : new Date(),
       currency: upperCurrency, newExchangeRate: rate, notes: notes.trim(),
       lineItems, status: 'Draft', createdBy: req.user?.email || 'system',
-      orgId: req.user?.orgId || null,
-    });
+      orgId: req.user?.orgId || null,     });
 
-    console.log(`✅ Currency adjustment created: ${adjustment.adjustmentNumber}`);
+    console.log(`? Currency adjustment created: ${adjustment.adjustmentNumber}`);
     res.status(201).json({ success: true, message: 'Currency adjustment created as draft', data: { ...adjustment.toObject(), id: adjustment._id } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
@@ -418,7 +418,7 @@ router.post('/import', authenticate, importUpload.single('file'), async (req, re
     for (let i = 0; i < data.length; i++) {
       const item = data[i];
       try {
-        if (!item.adjustmentNumber) item.adjustmentNumber = await generateAdjustmentNumber(req.user?.orgId || null);
+        if (!item.adjustmentNumber) item.adjustmentNumber = await generateAdjustmentNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         item.createdBy = req.user?.email || 'system'; item.status = 'Draft';
         item.orgId = req.user?.orgId || null;
         await CurrencyAdjustment.create(item);

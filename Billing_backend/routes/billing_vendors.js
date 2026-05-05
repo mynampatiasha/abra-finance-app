@@ -71,12 +71,15 @@ const commentSchema = new mongoose.Schema({
 // ============================================================================
 
 const vendorSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId   : { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
 
   vendorId: {
     type: String,
-    unique: true,
-    required: true,
+    // Optional — kept for backward compatibility with existing records.
+    // New vendors are identified by MongoDB _id only.
+    index: false,
+    default: undefined,
   },
 
   // ── Basic Info ─────────────────────────────────────────────────────────────
@@ -88,8 +91,8 @@ const vendorSchema = new mongoose.Schema({
   },
   vendorName    : { type: String, required: true, trim: true },
   companyName   : { type: String, trim: true, default: '' },
-  email         : { type: String, required: true, trim: true, lowercase: true },
-  phoneNumber   : { type: String, required: true, trim: true },
+  email         : { type: String, trim: true, lowercase: true, default: '' },
+  phoneNumber   : { type: String, trim: true, default: '' },
   alternatePhone: { type: String, trim: true, default: '' },
 
   status: {
@@ -188,7 +191,6 @@ const vendorSchema = new mongoose.Schema({
 
 // Indexes
 vendorSchema.index({ orgId: 1 });
-vendorSchema.index({ vendorId: 1 });
 vendorSchema.index({ email: 1 });
 vendorSchema.index({ phoneNumber: 1 });
 vendorSchema.index({ vendorType: 1 });
@@ -202,11 +204,6 @@ const Vendor = mongoose.models.BillingVendor ||
 // ============================================================================
 // HELPERS
 // ============================================================================
-
-async function generateVendorId(orgId = null) {
-  const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(Vendor, 'vendorId', 'VEN', orgId);
-}
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -229,7 +226,7 @@ function isValidGSTIN(gstin) {
 }
 
 function orgFilter(req) {
-  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+  return { ...req.orgFilter, ...(req.branchFilter || {}) };
 }
 
 // ============================================================================
@@ -267,6 +264,51 @@ router.get('/', verifyToken, async (req, res) => {
       Vendor.countDocuments(query),
     ]);
 
+    // ── Attach unusedCredits (advance payments) per vendor ──────────────────
+    const PaymentMade = mongoose.models.PaymentMade ||
+      mongoose.model('PaymentMade', new mongoose.Schema({}, { strict: false }), 'payments_made');
+
+    const orgId = req.user?.orgId || null;
+    const advanceAgg = await PaymentMade.aggregate([
+      {
+        $match: {
+          paymentType: 'ADVANCE',
+          ...(orgId ? { orgId } : {}),
+        },
+      },
+      {
+        $group: {
+          _id: '$vendorId',
+          unusedCredits: {
+            $sum: {
+              $max: [
+                0,
+                { $subtract: [
+                  { $ifNull: ['$totalAmount', 0] },
+                  { $add: [
+                    { $ifNull: ['$amountApplied', 0] },
+                    { $ifNull: ['$totalRefunded', 0] },
+                  ]},
+                ]},
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    // Build a lookup map: vendorId (string) → unusedCredits
+    const unusedMap = {};
+    for (const row of advanceAgg) {
+      if (row._id) unusedMap[row._id.toString()] = row.unusedCredits || 0;
+    }
+
+    // Attach to each vendor
+    const vendorsWithCredits = vendors.map(v => ({
+      ...v,
+      unusedCredits: unusedMap[v._id.toString()] || 0,
+    }));
+
     const statsFilter = { isDeleted: false, ...orgFilter(req) };
     const statistics = await Vendor.aggregate([
       { $match: statsFilter },
@@ -285,7 +327,7 @@ router.get('/', verifyToken, async (req, res) => {
     res.json({
       success: true,
       data: {
-        vendors,
+        vendors: vendorsWithCredits,
         pagination: {
           currentPage: parseInt(page),
           totalPages : Math.ceil(totalCount / parseInt(limit)),
@@ -872,17 +914,17 @@ router.post('/', verifyToken, async (req, res) => {
     const errors = [];
 
     if (!vendorName  || vendorName.trim()  === '') errors.push('Vendor name is required');
-    if (!email       || email.trim()       === '') errors.push('Email is required');
-    else if (!isValidEmail(email))                  errors.push('Invalid email format');
-    if (!phoneNumber || phoneNumber.trim() === '') errors.push('Phone number is required');
-    else if (!isValidPhone(phoneNumber))            errors.push('Invalid phone number');
+    if (email && email.trim() && !isValidEmail(email)) errors.push('Invalid email format');
+    if (phoneNumber && phoneNumber.trim() && !isValidPhone(phoneNumber)) errors.push('Invalid phone number');
 
-    const existingVendor = await Vendor.findOne({
-      email    : email?.toLowerCase().trim(),
-      isDeleted: false,
-      ...orgFilter(req),
-    });
-    if (existingVendor) errors.push('A vendor with this email already exists');
+    if (email && email.trim()) {
+      const existingVendor = await Vendor.findOne({
+        email    : email.toLowerCase().trim(),
+        isDeleted: false,
+        ...orgFilter(req),
+      });
+      if (existingVendor) errors.push('A vendor with this email already exists');
+    }
 
     if (bankDetailsProvided) {
       if (!accountHolderName?.trim()) errors.push('Account holder name required');
@@ -904,11 +946,9 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation failed', errors });
     }
 
-    const vendorId = await generateVendorId(req.user?.orgId || null);
-
     const vendor = new Vendor({
-      vendorId,
       orgId          : req.user?.orgId || null,
+      branchId       : req.branchIds?.length > 0 ? req.branchIds[0] : null,
       vendorType     : vendorType || 'External Vendor',
       vendorName     : vendorName.trim(),
       companyName    : companyName?.trim() || '',
@@ -1155,11 +1195,10 @@ router.post('/bulk-import', verifyToken, async (req, res) => {
           continue;
         }
 
-        const vendorId = await generateVendorId(req.user?.orgId || null);
-        const vendor   = new Vendor({
+        const vendor = new Vendor({
           ...d,
-          vendorId,
           orgId      : req.user?.orgId || null,
+          branchId   : req.branchIds?.length > 0 ? req.branchIds[0] : null,
           email      : d.email.toLowerCase().trim(),
           panNumber  : d.panNumber?.toUpperCase() || '',
           gstNumber  : d.gstNumber?.toUpperCase() || '',
@@ -1167,7 +1206,9 @@ router.post('/bulk-import', verifyToken, async (req, res) => {
           createdBy  : req.user.email || 'system',
           createdDate: new Date(),
         });
+
         await vendor.save();
+
         results.successCount++;
       } catch (e) {
         results.failedCount++;

@@ -176,7 +176,10 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
         _selectedCustomerId = quote.customerId;
         _selectedCustomerName = quote.customerName;
         _selectedCustomerEmail = quote.customerEmail;
-        _selectedCustomerPhone = quote.customerPhone; // ✅ ADD THIS
+        _selectedCustomerPhone = quote.customerPhone;
+        _customerGSTIN         = quote.customerGSTIN;
+        _customerPAN           = quote.customerPAN;
+        _gstRegistrationType   = quote.gstRegistrationType;
         _referenceNumberController.text = quote.referenceNumber ?? '';
         _quoteDate = quote.quoteDate;
         _expiryDate = quote.expiryDate;
@@ -298,15 +301,6 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   }
 
   Future<void> _saveAndSend() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_selectedCustomerId == null) {
-      _showErrorSnackbar('Please select a customer');
-      return;
-    }
-    if (_selectedCustomerEmail == null || _selectedCustomerEmail!.isEmpty) {
-      _showErrorSnackbar('Customer email is required to send quote');
-      return;
-    }
     if (!_validateItems()) return;
     
     setState(() => _isSaving = true);
@@ -327,6 +321,23 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
       Navigator.pop(context, true);
     } catch (e) {
       _showErrorSnackbar('Failed to send quote: $e');
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _markAsSent() async {
+    if (widget.quoteId == null || widget.quoteId!.isEmpty) {
+      _showErrorSnackbar('Save the quote first before marking as sent');
+      return;
+    }
+    setState(() => _isSaving = true);
+    try {
+      await QuoteService.markAsSent(widget.quoteId!);
+      _showSuccessSnackbar('Quote marked as sent');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showErrorSnackbar('Failed to mark as sent: $e');
     } finally {
       setState(() => _isSaving = false);
     }
@@ -382,6 +393,7 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                   onSelected: (value) {
                     if (value == 'draft') _saveAsDraft();
                     if (value == 'send') _saveAndSend();
+                    if (value == 'mark_sent') _markAsSent();
                     if (value == 'pdf') {
                       if (widget.quoteId == null || widget.quoteId!.isEmpty) {
                         ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
@@ -436,6 +448,14 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
+                    const PopupMenuItem(
+                      value: 'mark_sent',
+                      child: ListTile(
+                        leading: Icon(Icons.mark_email_read_outlined),
+                        title: Text('Mark as Sent'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
                   ],
                 ),
               ]
@@ -467,6 +487,11 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                     }
                     openEmailPreview(context: context, docId: widget.quoteId, emailEndpoint: '/api/finance/quotes');
                   },
+                ),
+                IconButton(
+                  tooltip: 'Mark as Sent',
+                  icon: const Icon(Icons.mark_email_read_outlined, color: Colors.white70, size: 20),
+                  onPressed: _isSaving ? null : _markAsSent,
                 ),
                 TextButton.icon(
                   onPressed: _isSaving ? null : _saveAsDraft,
@@ -1259,6 +1284,23 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               backgroundColor: const Color(0xFF27AE60),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 12),
+        
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _isSaving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined),
+            label: const Text('Mark as Sent'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF27AE60),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              side: const BorderSide(color: Color(0xFF27AE60)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -132,6 +133,16 @@ class ApiService {
           now.difference(_tokenCacheTime!).inMinutes < 50) {
         debugPrint('✅ Using cached JWT token');
         headers['Authorization'] = 'Bearer $_cachedToken';
+        // Inject branch header even on cache hit
+        try {
+          debugPrint('🔧 Getting branch header (cache hit)...');
+          final branchHdr = await FinanceSecureStorage.getBranchHeader();
+          debugPrint('🔧 Branch header retrieved: "$branchHdr"');
+          headers['x-branch-ids'] = branchHdr;
+        } catch (e) {
+          debugPrint('❌ Error getting branch header (cache hit): $e');
+          headers['x-branch-ids'] = 'ALL';
+        }
         return headers;
       }
       
@@ -147,6 +158,15 @@ class ApiService {
         final token = await _tokenRequest!;
         if (token != null) {
           headers['Authorization'] = 'Bearer $token';
+        }
+        try {
+          debugPrint('🔧 Getting branch header (existing token request)...');
+          final branchHdr = await FinanceSecureStorage.getBranchHeader();
+          debugPrint('🔧 Branch header retrieved: "$branchHdr"');
+          headers['x-branch-ids'] = branchHdr;
+        } catch (e) {
+          debugPrint('❌ Error getting branch header (existing token request): $e');
+          headers['x-branch-ids'] = 'ALL';
         }
         return headers;
       }
@@ -173,6 +193,20 @@ class ApiService {
         debugPrint('✅ JWT token retrieved and cached in ${duration}ms');
       } else {
         debugPrint('⚠️ No JWT token found in storage');
+      }
+      
+      // ✅ Inject branch filter header
+      try {
+        debugPrint('🔧 Getting branch header...');
+        final branchHdr = await FinanceSecureStorage.getBranchHeader();
+        debugPrint('🔧 Branch header retrieved: "$branchHdr"');
+        headers['x-branch-ids'] = branchHdr;
+        debugPrint('🔧 Headers after adding branch: $headers');
+      } catch (e, stackTrace) {
+        debugPrint('❌ Error getting branch header: $e');
+        debugPrint('Stack trace: $stackTrace');
+        debugPrint('🔧 Falling back to ALL');
+        headers['x-branch-ids'] = 'ALL';
       }
       
       _tokenRequest = null;
@@ -635,6 +669,16 @@ class ApiService {
     _tokenRequest = null;
     
     debugPrint('Successfully cleared JWT token cache.');
+
+    // ✅ FIX: Also wipe the persisted token from SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('jwt_token');
+      await prefs.remove('finance_jwt_token');
+      debugPrint('✅ JWT token removed from SharedPreferences');
+    } catch (e) {
+      debugPrint('❌ Error clearing token from SharedPreferences on logout: $e');
+    }
   }
 
   // Vehicle endpoints

@@ -64,8 +64,8 @@ const _agingKeys = {
 };
 
 const _trialBalanceKeys = {
-  'trial-balance', 'general-ledger', 'account-transactions',
-  'account-type-summary', 'account-type-transactions', 'detailed-general-ledger',
+  'trial-balance', 'account-transactions',
+  'account-type-summary', 'account-type-transactions',
   'day-book', 'journal-report',
 };
 
@@ -521,6 +521,36 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     _rows = []; _headers = [];
     if (_isFinancial) return;
 
+    // ── Performance Ratios: flat object → single-section rows ────────────────
+    if (widget.report.key == 'performance-ratios') {
+      _headers = ['Metric', 'Value'];
+      _rows = [
+        {'Metric': 'Total Revenue',        'Value': d['totalRevenue']   ?? 0},
+        {'Metric': 'Total Expenses',       'Value': d['totalExpenses']  ?? 0},
+        {'Metric': 'Net Profit',           'Value': d['netProfit']      ?? 0},
+        {'Metric': 'Gross Profit Margin',  'Value': '${d['grossProfitMargin'] ?? 0}%'},
+        {'Metric': 'Net Profit Margin',    'Value': '${d['netProfitMargin']   ?? 0}%'},
+        {'Metric': 'Return on Assets',     'Value': '${d['returnOnAssets']    ?? 0}%'},
+        {'Metric': 'Return on Equity',     'Value': '${d['returnOnEquity']    ?? 0}%'},
+        {'Metric': 'Debt to Equity Ratio', 'Value': d['debtToEquityRatio']    ?? 0},
+        {'Metric': 'Current Ratio',        'Value': d['currentRatio']         ?? 0},
+      ];
+      return;
+    }
+
+    // ── TCS Summary: flat object → single-section rows ────────────────────
+    if (widget.report.key == 'tcs-summary') {
+      _headers = ['Metric', 'Value'];
+      _rows = [
+        {'Metric': 'TCS from Sales',      'Value': d['tcsFromSales']      ?? 0},
+        {'Metric': 'TCS from Purchases',  'Value': d['tcsFromPurchases']  ?? 0},
+        {'Metric': 'Sales Count',         'Value': d['salesCount']        ?? 0},
+        {'Metric': 'Purchases Count',     'Value': d['purchasesCount']    ?? 0},
+        {'Metric': 'Net TCS',             'Value': d['netTCS']            ?? 0},
+      ];
+      return;
+    }
+
     // ── General Ledger: flatten accounts[].transactions into flat rows ────
     final rk = widget.report.key;
     debugPrint('🔍 [PARSE] report=$rk | top-level keys=${d.keys.toList()}');
@@ -663,9 +693,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
   // ── Exports ────────────────────────────────────────────────────────────────
   Future<void> _exportPDF({List<Map<String,dynamic>>? customRows, List<String>? customHeaders}) async {
-    final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _rows);
-    final hdrs = customHeaders ?? _headers;
-    if (rows.isEmpty) { _snackErr('No data to export'); return; }
+    final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _filtered);
+    final rawHeaders = customHeaders ?? (_isFinancial && rows.isNotEmpty
+        ? rows.first.keys.where((k) => !k.startsWith('_')).toList()
+        : _headers);
+    if (rows.isEmpty && !_isFinancial) { _snackErr('No data to export'); return; }
     setState(() => _exporting = true);
     try {
       final period = _data?['period'];
@@ -679,8 +711,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       }
       await ExportHelper.exportToPDF(
         title:    [if (widget.orgName.isNotEmpty) widget.orgName, widget.report.name, if (pl.isNotEmpty) pl].join('\n'),
-        headers:  hdrs.map(_colLabel).toList(),
-        data:     rows.map((r) => hdrs.map((h) => _displayVal(h, r[h]).replaceAll('₹','Rs.')).toList()).toList(),
+        headers:  rawHeaders.map(_colLabel).toList(),
+        data:     rows
+            .where((r) => r['_isAccountHeader'] != true)
+            .map((r) => rawHeaders.map((h) => _displayVal(h, r[h]).replaceAll('₹','Rs.')).toList())
+            .toList(),
         filename: widget.report.name.replaceAll(' ','_'),
       );
       _snackOk('PDF downloaded');
@@ -689,9 +724,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   }
 
   Future<void> _exportExcel({List<Map<String,dynamic>>? customRows, List<String>? customHeaders}) async {
-    final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _rows);
-    final hdrs = customHeaders ?? _headers;
-    if (rows.isEmpty) { _snackErr('No data to export'); return; }
+    final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _filtered);
+    final rawHeaders = customHeaders ?? (_isFinancial && rows.isNotEmpty
+        ? rows.first.keys.where((k) => !k.startsWith('_')).toList()
+        : _headers);
+    if (rows.isEmpty && !_isFinancial) { _snackErr('No data to export'); return; }
     setState(() => _exporting = true);
     try {
       final period = _data?['period'];
@@ -700,9 +737,18 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       await ReportsService.exportExcel(
         reportName:  widget.report.name,
         companyName: widget.orgName,
-        reportData:  rows,
+        reportData:  rows
+            .where((r) => r['_isAccountHeader'] != true)
+            .map((r) {
+              final formatted = <String, dynamic>{};
+              for (final h in rawHeaders) {
+                formatted[_colLabel(h)] = _displayVal(h, r[h]);
+              }
+              return formatted;
+            })
+            .toList(),
         period:      periodMap,
-        headers:     hdrs.map(_colLabel).toList(),
+        headers:     rawHeaders.map(_colLabel).toList(),
       );
       _snackOk('Excel downloaded');
     } catch (e) { _snackErr('Excel failed: $e'); }
@@ -735,6 +781,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
   // ── Row drill-down ─────────────────────────────────────────────────────────
   void _onRowTap(Map<String,dynamic> row) {
+    if (row['_isAccountHeader'] == true) return;
     final dk = _drillDownKey(widget.report.key);
     if (dk.isEmpty) { _viewRowDialog(row); return; }
     Navigator.push(context, MaterialPageRoute(builder: (_) => ReportDetailPage(
@@ -1022,18 +1069,6 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             SizedBox(
               height: MediaQuery.of(context).size.height * 0.55,
               child: _buildChartView(),
-            )
-          else if (_isAging)
-            _AgingTableWidget(
-              rows: _filtered,
-              headers: _headers,
-              onRowTap: _onRowTap,
-            )
-          else if (_isTrialBal)
-            _LedgerTableWidget(
-              rows: _filtered,
-              headers: _headers,
-              onRowTap: _onRowTap,
             )
           else
             _ListTableWidget(
@@ -1475,7 +1510,8 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     if (_data == null) return [];
     final rows = <Map<String,dynamic>>[];
     final k = widget.report.key;
-    if (k == 'profit-loss') {
+
+    if (k == 'profit-loss' ) {
       for (final sec in ['income','costOfGoods','operatingExpenses']) {
         final s = _data![sec] as Map? ?? {};
         rows.add({'Section': sec == 'income' ? 'Operating Income' : sec == 'costOfGoods' ? 'Cost of Goods Sold' : 'Operating Expenses', 'Account': '', 'Amount': ''});
@@ -1483,6 +1519,15 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         rows.add({'Section': 'Subtotal', 'Account': '', 'Amount': s['total']});
       }
       rows.add({'Section': 'Net Profit / Loss', 'Account': '', 'Amount': _data!['netProfit']});
+
+    } else if (k == 'profit-loss-horizontal') {
+      final curr = _data!['current'] as Map? ?? {};
+      final prev = _data!['previous'] as Map? ?? {};
+      final chg  = _data!['changes']  as Map? ?? {};
+      rows.add({'Metric': 'Income',     'Current': curr['income'],    'Previous': prev['income'],    'Change': (chg['income']    as Map?)?['absolute'], 'Change %': (chg['income']    as Map?)?['percent']});
+      rows.add({'Metric': 'Expenses',   'Current': curr['expenses'],  'Previous': prev['expenses'],  'Change': (chg['expenses']  as Map?)?['absolute'], 'Change %': (chg['expenses']  as Map?)?['percent']});
+      rows.add({'Metric': 'Net Profit', 'Current': curr['netProfit'], 'Previous': prev['netProfit'], 'Change': (chg['netProfit'] as Map?)?['absolute'], 'Change %': (chg['netProfit'] as Map?)?['percent']});
+
     } else if (k == 'balance-sheet') {
       for (final sec in ['assets','liabilities','equity']) {
         final s = _data![sec] as Map? ?? {};
@@ -1490,6 +1535,38 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         for (final i in (s['items'] as List? ?? [])) { rows.add({'Section': '', 'Account': (i as Map)['accountName'], 'Amount': i['amount']}); }
         rows.add({'Section': 'Total ${sec[0].toUpperCase()}${sec.substring(1)}', 'Account': '', 'Amount': s['total']});
       }
+
+    } else if (k == 'balance-sheet-horizontal') {
+      final curr = _data!['current'] as Map? ?? {};
+      final prev = _data!['previous'] as Map? ?? {};
+      rows.add({'Item': 'Total Assets',      'Current': curr['assets'],      'Previous': prev['assets']});
+      rows.add({'Item': 'Total Liabilities', 'Current': curr['liabilities'], 'Previous': prev['liabilities']});
+      rows.add({'Item': 'Total Equity',      'Current': curr['equity'],      'Previous': prev['equity']});
+
+    } else if (k == 'cash-flow') {
+      // Backend returns summary + monthlyBreakdown (items[] is always empty)
+      final summary = _data!['summary'] as Map? ?? {};
+      rows.add({'Item': 'Opening Balance',  'Amount': summary['openingBalance']  ?? 0});
+      rows.add({'Item': 'Total Incoming',   'Amount': summary['totalIncoming']   ?? 0});
+      rows.add({'Item': 'Total Outgoing',   'Amount': summary['totalOutgoing']   ?? 0});
+      rows.add({'Item': 'Closing Balance',  'Amount': summary['closingBalance']  ?? 0});
+      final monthly = _data!['monthlyBreakdown'] as List? ?? [];
+      if (monthly.isNotEmpty) {
+        rows.add({'Item': '── Monthly Breakdown ──', 'Amount': ''});
+        for (final m in monthly) {
+          if (m is Map) rows.add({'Item': m['month']?.toString() ?? '', 'Amount': m['balance'] ?? 0, 'Incoming': m['incoming'] ?? 0, 'Outgoing': m['outgoing'] ?? 0});
+        }
+      }
+
+    } else if (k == 'movement-of-equity') {
+      final accounts = _data!['accounts'] as List? ?? [];
+      rows.add({'Account': 'Account', 'Opening': 'Opening', 'Change': 'Change', 'Closing': 'Closing'});
+      for (final a in accounts) {
+        if (a is Map) rows.add({'Account': a['accountName'] ?? '', 'Opening': a['opening'] ?? 0, 'Change': a['change'] ?? 0, 'Closing': a['closing'] ?? 0});
+      }
+      final t = _data!['totals'] as Map? ?? {};
+      rows.add({'Account': 'TOTAL', 'Opening': t['opening'] ?? 0, 'Change': t['change'] ?? 0, 'Closing': t['closing'] ?? 0});
+
     } else {
       rows.addAll(_rows);
     }
@@ -2647,17 +2724,49 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                         itemCount: rows.length,
                         itemBuilder: (_, i) {
                           final r = rows[i];
+                          final isAccountHeader = r['_isAccountHeader'] == true;
                           return InkWell(
-                            onTap: () => widget.onRowTap(r),
+                            onTap: isAccountHeader ? null : () => widget.onRowTap(r),
                             child: Container(
-                              height: 56,
-                              color: i % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
+                              constraints: BoxConstraints(minHeight: isAccountHeader ? 44 : 56),
+                              decoration: BoxDecoration(
+                                color: isAccountHeader
+                                    ? const Color(0xFFEEF2FF)
+                                    : (i % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC)),
+                                border: isAccountHeader
+                                    ? const Border(
+                                        left: BorderSide(color: _navy, width: 3),
+                                        bottom: BorderSide(color: Color(0xFFDDE3EE)))
+                                    : null,
+                              ),
                               child: Row(children: [
                                 const SizedBox(width: 14),
                                 ...widget.headers.map((h) {
                                   final v = r[h];
                                   final hl = h.toLowerCase();
-                                  final isAmt = hl.contains('amount') || hl.contains('total') || hl.contains('balance') || hl.contains('due') || hl.contains('paid');
+                                  final isAmt = hl.contains('amount') || hl.contains('total') || hl.contains('balance') || hl.contains('due') || hl.contains('paid') || hl.contains('debit') || hl.contains('credit');
+                                  if (isAccountHeader) {
+                                    if (h == 'accountName') {
+                                      return SizedBox(width: colW * 2,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          child: Text(v?.toString() ?? '',
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navy))));
+                                    }
+                                    if (h == 'accountType') {
+                                      return SizedBox(width: colW,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(color: _navy.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                                            child: Text(v?.toString() ?? '',
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _navy)))));
+                                    }
+                                    return SizedBox(width: colW);
+                                  }
                                   return SizedBox(width: colW, child: h.toLowerCase() == 'status'
                                       ? widget.statusBadge(v?.toString() ?? '')
                                       : Text(widget.displayVal(h, v),

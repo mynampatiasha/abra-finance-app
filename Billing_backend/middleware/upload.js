@@ -58,14 +58,18 @@ const documentStorage = multer.diskStorage({
 
 // File filter for payment proofs (images and PDFs)
 const paymentProofFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|pdf/;
+  const allowedTypes = /jpeg|jpg|png|gif|webp|pdf/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
+  // mimetype check — webp comes as 'image/webp', pdf as 'application/pdf'
+  const mimetypeOk = allowedTypes.test(file.mimetype) ||
+                     file.mimetype === 'application/pdf' ||
+                     file.mimetype === 'image/webp' ||
+                     file.mimetype === 'application/octet-stream'; // some browsers send this
 
-  if (mimetype && extname) {
+  if (mimetypeOk && extname) {
     return cb(null, true);
   } else {
-    cb(new Error('Only images (JPEG, JPG, PNG, GIF) and PDF files are allowed for payment proofs'));
+    cb(new Error('Only images (JPEG, JPG, PNG, GIF, WEBP) and PDF files are allowed for payment proofs'));
   }
 };
 

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app/config/api_config.dart';
+import '../../core/finance_secure_storage.dart';
 
 class EWayBillService {
   static const String _base = '/api/finance/eway-bills';
@@ -16,9 +17,11 @@ class EWayBillService {
   static Future<Map<String, String>> _headers() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 

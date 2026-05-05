@@ -138,13 +138,69 @@ class InvoiceService {
   }
 
   static Future<String> downloadPDF(String invoiceId) async {
-    final headers = await _api.getHeaders();
-    final token   = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
-    return '${_api.baseUrl}$_baseEndpoint/$invoiceId/pdf?token=$token';
+    final headers   = await _api.getHeaders();
+    final token     = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
+    final branchHdr = headers['x-branch-ids'] ?? 'ALL';
+    return '${_api.baseUrl}$_baseEndpoint/$invoiceId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
   }
 
   static Future<void> deleteInvoice(String invoiceId) async {
     await _api.delete('$_baseEndpoint/$invoiceId');
+  }
+
+  // ==========================================================================
+  // REMINDER AUTOMATION
+  // ==========================================================================
+
+  static Future<void> pauseReminder(String invoiceId) async {
+    await _api.patch('$_baseEndpoint/$invoiceId/pause-reminder');
+  }
+
+  static Future<void> resumeReminder(String invoiceId) async {
+    await _api.patch('$_baseEndpoint/$invoiceId/resume-reminder');
+  }
+
+  static Future<Map<String, dynamic>> getReminderLog(String invoiceId) async {
+    final data = await _api.get('$_baseEndpoint/$invoiceId/reminder-log');
+    return {
+      'log':            List<Map<String, dynamic>>.from(data['data'] ?? []),
+      'reminderCount':  data['meta']?['reminderCount']  ?? 0,
+      'reminderPaused': data['meta']?['reminderPaused'] ?? false,
+    };
+  }
+
+  static Future<Map<String, dynamic>> getReminderSettings() async {
+    final data = await _api.get('/api/finance/reminder-settings');
+    return Map<String, dynamic>.from(data['data'] ?? {});
+  }
+
+  static Future<void> saveReminderSettings(Map<String, dynamic> settings) async {
+    await _api.put('/api/finance/reminder-settings', body: settings);
+  }
+
+  // ==========================================================================
+  // MANUAL REMINDERS
+  // ==========================================================================
+
+  /// Preview manual reminder message before sending
+  static Future<Map<String, dynamic>> previewManualReminder(
+    String invoiceId, String channel, String type,
+  ) async {
+    final data = await _api.post(
+      '$_baseEndpoint/$invoiceId/preview-manual-reminder',
+      body: {'channel': channel, 'type': type},
+    );
+    return Map<String, dynamic>.from(data['data'] ?? {});
+  }
+
+  /// Send manual reminder (email or WhatsApp)
+  static Future<void> sendManualReminder(
+    String invoiceId, String channel, String type,
+  ) async {
+    await _api.post(
+      '$_baseEndpoint/$invoiceId/send-manual-reminder',
+      body: {'channel': channel, 'type': type},
+    );
   }
 
   // ==========================================================================
@@ -459,6 +515,12 @@ class Invoice {
   final double amountDue;
   final List<Payment> payments;
   final List<EmailSent> emailsSent;
+
+  // ── Reminder Automation ───────────────────────────────────────────────────
+  final bool    reminderPaused;
+  final int     reminderCount;
+  final String? reminderPausedBy;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -514,6 +576,9 @@ class Invoice {
     required this.amountDue,
     required this.payments,
     this.emailsSent               = const [],
+    this.reminderPaused           = false,
+    this.reminderCount            = 0,
+    this.reminderPausedBy,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -582,6 +647,9 @@ class Invoice {
       emailsSent: (json['emailsSent'] as List? ?? [])
           .map((e) => EmailSent.fromJson(e))
           .toList(),
+      reminderPaused:   json['reminderPaused']   ?? false,
+      reminderCount:    (json['reminderCount']   ?? 0) as int,
+      reminderPausedBy: json['reminderPausedBy'],
       createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
       updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
     );
@@ -699,7 +767,7 @@ class EmailSent {
   factory EmailSent.fromJson(Map<String, dynamic> json) {
     return EmailSent(
       sentTo:    json['sentTo']    ?? '',
-      sentAt:    DateTime.parse(json['sentAt'] ?? DateTime.now().toIso8601String()),
+      sentAt:    (DateTime.tryParse(json['sentAt'] ?? DateTime.now().toIso8601String()) ?? DateTime.now()).toLocal(),
       emailType: json['emailType'] ?? 'invoice',
     );
   }

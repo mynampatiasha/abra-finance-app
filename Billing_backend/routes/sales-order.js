@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // SALES ORDERS BACKEND API - Complete Implementation
 // ============================================================================
 // File: backend/routes/sales-order.js
@@ -125,6 +125,7 @@ const salesOrderItemSchema = new mongoose.Schema({
 
 const salesOrderSchema = new mongoose.Schema({
   orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   organizationId: {
     type: String,
     required: false,
@@ -342,7 +343,7 @@ const salesOrderSchema = new mongoose.Schema({
     required: true,
   },
   updatedBy: String,
-  // Custom email fields — saved when user edits email preview before sending
+  // Custom email fields � saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -351,7 +352,7 @@ const salesOrderSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-salesOrderSchema.index({ orgId: 1, salesOrderNumber: 1 }, { unique: true });
+salesOrderSchema.index({ orgId: 1, branchId: 1, salesOrderNumber: 1 }, { unique: true });
 salesOrderSchema.index({ orgId: 1, customerId: 1 });
 salesOrderSchema.index({ orgId: 1, status: 1 });
 salesOrderSchema.index({ orgId: 1, salesOrderDate: -1 });
@@ -427,9 +428,9 @@ function numberToWords(n) {
   return s.trim();
 }
 
-const generateSalesOrderNumber = async (organizationId) => {
+const generateSalesOrderNumber = async (organizationId, branchId = null) => {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(SalesOrder, 'salesOrderNumber', 'SO', organizationId || null);
+  return generateNumber(SalesOrder, 'salesOrderNumber', 'SO', organizationId || null, branchId);
 };
 
 // Calculate sales order totals
@@ -476,7 +477,7 @@ const calculateSalesOrderTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18
 };
 
 // Generate PDF for sales order
-const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
+const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) => {
   return new Promise(async (resolve, reject) => {
     try {
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'sales-orders');
@@ -492,9 +493,9 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
       let orgPhone = '';
       let orgData  = null;
       try {
-        const OrgModel = mongoose.models.Organization ||
-          mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        orgData = await OrgModel.findOne({ orgId }).lean();
+        const { getEffectiveOrgData } = require('./branches');
+        const db = mongoose.connection.db;
+        if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
         if (orgData) {
           orgName  = orgData.orgName   || orgName;
           orgGST   = orgData.gstNumber || '';
@@ -510,8 +511,13 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
 
       const pageW = 515;
 
-      // ── HEADER — plain white background like invoices.js ─────────────────
-      const logoPath = getLogoPath(orgId);
+      // -- HEADER - plain white background like invoices.js -----------------
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getLogoPath(orgId);
       let logoLoaded = false;
       const textX = logoPath ? 126 : 50;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
@@ -525,16 +531,23 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
         try {
           doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
           logoLoaded = true;
-        } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+        } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let contactY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+      let contactY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, contactY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('SALES ORDER', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -546,10 +559,9 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text(`${(salesOrder.status || 'DRAFT')}`, 380, 92, { width: 170, align: 'right' });
 
-      // ── META GRID — 3 columns: Bill To | Ship To | SO Details ─────────────
-      const metaY = 132;
+      // -- META GRID � 3 columns: Bill To | Ship To | SO Details -------------
+      const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 3;
-      const metaH = 90;
 
       const billingStr = [
         salesOrder.billingAddress?.street,
@@ -558,20 +570,32 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
         salesOrder.billingAddress?.pincode,
       ].filter(Boolean).join(', ');
 
+      // Dynamic box height
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _custNameH = doc.heightOfString(salesOrder.customerName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const metaH  = Math.max(90, 18 + _custNameH + 2 + _addrH + 20);
+
       // Col 1: Bill To
       const billX = 40;
       doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-         .text(salesOrder.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+         .text(salesOrder.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const custNameH = doc.heightOfString(salesOrder.customerName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + custNameH + 2;
       if (billingStr) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (salesOrder.customerEmail) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(salesOrder.customerEmail, billX + 8, metaY + 60, { width: colW - 16, ellipsis: true });
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000')
+           .text(salesOrder.customerEmail, billX + 8, billAddrY + addrH + 2, { width: colW - 16, ellipsis: true });
       }
 
       // Col 2: Ship To
@@ -610,7 +634,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
 
       let tableStartY = metaY + metaH + 12;
 
-      // ── ITEMS TABLE — same columns as invoices.js ─────────────────────────
+      // -- ITEMS TABLE � same columns as invoices.js -------------------------
       const isInterState = salesOrder.isInterState || false;
 
       const cols = {
@@ -663,7 +687,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '—';
+          : '�';
 
         const gstRate  = item.itemGstRate || 0;
         const taxable  = item.taxableAmount || item.amount || 0;
@@ -694,7 +718,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
         rowY += rowH;
       });
 
-      // ── TOTALS ────────────────────────────────────────────────────────────
+      // -- TOTALS ------------------------------------------------------------
       const totalsX = 315;
       const totalsW = 240;
       let totalsY   = rowY + 12;
@@ -768,30 +792,59 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null) => {
       const authBoxX     = 555 - signBoxW;
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _soSigRelPath = orgData?.digitalSignaturePath;
+      const _soSigSize    = 200;
+      let   _soActualSigH = _soSigSize;
+      if (_soSigRelPath) {
+        try {
+          const _soSigAbs = path.join(__dirname, '..', _soSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_soSigAbs)) {
+            let _soW = _soSigSize, _soH = _soSigSize;
+            try {
+              const _soBuf = fs.readFileSync(_soSigAbs);
+              const _soExt = path.extname(_soSigAbs).toLowerCase();
+              if (_soExt === '.png' && _soBuf.length > 24) { _soW = _soBuf.readUInt32BE(16); _soH = _soBuf.readUInt32BE(20); }
+              else if ((_soExt === '.jpg' || _soExt === '.jpeg') && _soBuf.length > 4) {
+                let _soi = 2;
+                while (_soi < _soBuf.length - 8) {
+                  if (_soBuf[_soi] === 0xFF && _soBuf[_soi+1] >= 0xC0 && _soBuf[_soi+1] <= 0xC3) { _soH = _soBuf.readUInt16BE(_soi+5); _soW = _soBuf.readUInt16BE(_soi+7); break; }
+                  _soi += 2 + _soBuf.readUInt16BE(_soi + 2);
+                }
+              }
+            } catch (_) {}
+            const _soScale = Math.min(_soSigSize / _soW, _soSigSize / _soH);
+            _soActualSigH  = Math.round(_soH * _soScale);
+            const _soActualSigW = Math.round(_soW * _soScale);
+            doc.image(_soSigAbs, authBoxX + (signBoxW - _soActualSigW) / 2, signSectionY + 10, { width: _soActualSigW, height: _soActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _soSigLineY = signSectionY + 10 + _soActualSigH + 14;
+      doc.moveTo(authBoxX, _soSigLineY).lineTo(authBoxX + signBoxW, _soSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _soSigLineY + 3, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${salesOrder.salesOrderNumber}`,
+         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${salesOrder.salesOrderNumber}`,
                40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
                40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
       stream.on('finish', () => {
-        console.log(`✅ Sales Order PDF generated: ${filename}`);
+        console.log(`? Sales Order PDF generated: ${filename}`);
         resolve({ filename, filepath, relativePath: `/uploads/sales-orders/${filename}` });
       });
       stream.on('error', reject);
 
     } catch (error) {
-      console.error('❌ Sales Order PDF error:', error);
+      console.error('? Sales Order PDF error:', error);
       reject(error);
     }
   });
@@ -810,11 +863,11 @@ const getEmailTransporter = () => {
   });
 };
 
-// Send sales order email — styled identical to invoices.js
-const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null) => {
+// Send sales order email � styled identical to invoices.js
+const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
-      console.log('⚠️  SMTP not configured - skipping email send');
+      console.log('SMTP not configured - skipping email send');
       return;
     }
 
@@ -824,9 +877,9 @@ const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null) =>
     let orgPhone = '';
     let orgData  = null;
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-      orgData = await OrgModel.findOne({ orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
       if (orgData) {
         orgName  = orgData.orgName    || orgName;
         orgGST   = orgData.gstNumber  || '';
@@ -925,14 +978,14 @@ const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null) =>
     await transporter.sendMail({
       from: `"Accounts" <${process.env.SMTP_USER}>`,
       to: salesOrder.customerEmail,
-      subject: `Sales Order ${salesOrder.salesOrderNumber} — Rs.${(salesOrder.totalAmount || 0).toFixed(2)}`,
+      subject: `Sales Order ${salesOrder.salesOrderNumber} � Rs.${(salesOrder.totalAmount || 0).toFixed(2)}`,
       html: htmlBody,
       attachments: [attachment],
     });
 
-    console.log(`✅ Sales order email sent to ${salesOrder.customerEmail}`);
+    console.log(`? Sales order email sent to ${salesOrder.customerEmail}`);
   } catch (error) {
-    console.error('⚠️  Error sending sales order email:', error.message);
+    console.error('??  Error sending sales order email:', error.message);
   }
 };
 
@@ -955,6 +1008,7 @@ router.get('/', async (req, res) => {
     const orgId = req.user?.orgId;
     
     const query = { orgId };
+    Object.assign(query, req.branchFilter || {});
     
     if (status && status !== 'All') {
       query.status = status;
@@ -1015,6 +1069,7 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const orgId = req.user?.orgId;
+    const orgFilter = { orgId, ...(req.branchFilter || {}) };
     
     const [
       totalSalesOrders,
@@ -1025,14 +1080,14 @@ router.get('/stats', async (req, res) => {
       invoicedSalesOrders,
       totalValue,
     ] = await Promise.all([
-      SalesOrder.countDocuments({ orgId }),
-      SalesOrder.countDocuments({ orgId, status: 'DRAFT' }),
-      SalesOrder.countDocuments({ orgId, status: 'OPEN' }),
-      SalesOrder.countDocuments({ orgId, status: 'CONFIRMED' }),
-      SalesOrder.countDocuments({ orgId, status: 'SHIPPED' }),
-      SalesOrder.countDocuments({ orgId, status: 'INVOICED' }),
+      SalesOrder.countDocuments(orgFilter),
+      SalesOrder.countDocuments({ ...orgFilter, status: 'DRAFT' }),
+      SalesOrder.countDocuments({ ...orgFilter, status: 'OPEN' }),
+      SalesOrder.countDocuments({ ...orgFilter, status: 'CONFIRMED' }),
+      SalesOrder.countDocuments({ ...orgFilter, status: 'SHIPPED' }),
+      SalesOrder.countDocuments({ ...orgFilter, status: 'INVOICED' }),
       SalesOrder.aggregate([
-        { $match: { orgId } },
+        { $match: orgFilter },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } },
       ]),
     ]);
@@ -1067,7 +1122,8 @@ router.get('/:id', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1096,9 +1152,9 @@ router.post('/', salesOrderValidationRules, validateRequest, async (req, res) =>
   try {
     const orgId = req.user?.orgId;
     
-    console.log('✅ Creating sales order with orgId:', orgId);
+    console.log('? Creating sales order with orgId:', orgId);
     
-    const salesOrderNumber = await generateSalesOrderNumber(orgId);
+    const salesOrderNumber = await generateSalesOrderNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     const totals = calculateSalesOrderTotals(
       req.body.items,
       req.body.tdsRate || 0,
@@ -1110,13 +1166,14 @@ router.post('/', salesOrderValidationRules, validateRequest, async (req, res) =>
       ...req.body,
       salesOrderNumber,
       orgId,
-      createdBy: req.user.userId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            createdBy: req.user.userId,
       ...totals,
     });
     
     await salesOrder.save();
     
-    console.log('✅ Sales order created successfully:', salesOrder.salesOrderNumber);
+    console.log('? Sales order created successfully:', salesOrder.salesOrderNumber);
     
     res.status(201).json({
       success: true,
@@ -1124,7 +1181,7 @@ router.post('/', salesOrderValidationRules, validateRequest, async (req, res) =>
       data: salesOrder,
     });
   } catch (error) {
-    console.error('❌ Error creating sales order:', error);
+    console.error('? Error creating sales order:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to create sales order', 
@@ -1143,7 +1200,7 @@ router.post('/bulk-import', [
     const userId = req.user.userId;
     const salesOrdersData = req.body.salesOrders;
     
-    console.log(`\n📦 Starting bulk import for ${salesOrdersData.length} sales orders...`);
+    console.log(`\n?? Starting bulk import for ${salesOrdersData.length} sales orders...`);
     
     const results = {
       successCount: 0,
@@ -1172,12 +1229,12 @@ router.post('/bulk-import', [
         // Generate sales order number
         let salesOrderNumber = soData.salesOrderNumber;
         if (!salesOrderNumber) {
-          salesOrderNumber = await generateSalesOrderNumber(orgId);
+          salesOrderNumber = await generateSalesOrderNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         } else {
 const existingSO = await SalesOrder.findOne({ salesOrderNumber });
 if (existingSO) {
-  salesOrderNumber = await generateSalesOrderNumber(orgId);
-            console.log(`   ⚠️  SO number ${soData.salesOrderNumber} exists, generated new: ${salesOrderNumber}`);
+  salesOrderNumber = await generateSalesOrderNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
+            console.log(`   ??  SO number ${soData.salesOrderNumber} exists, generated new: ${salesOrderNumber}`);
           }
         }
         
@@ -1200,6 +1257,7 @@ if (existingSO) {
         
         const salesOrder = new SalesOrder({
           orgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           salesOrderNumber,
           referenceNumber: soData.referenceNumber || '',
           customerId,
@@ -1232,19 +1290,19 @@ if (existingSO) {
         await salesOrder.save();
         
         results.successCount++;
-        console.log(`   ✅ Successfully imported sales order: ${salesOrderNumber}`);
+        console.log(`   ? Successfully imported sales order: ${salesOrderNumber}`);
         
       } catch (error) {
         results.failedCount++;
         const errorMsg = `SO ${i + 1} (${soData.salesOrderNumber || 'N/A'}): ${error.message}`;
         results.errors.push(errorMsg);
-        console.log(`   ❌ Failed to import: ${errorMsg}`);
+        console.log(`   ? Failed to import: ${errorMsg}`);
       }
     }
     
-    console.log(`\n📊 Bulk import completed:`);
-    console.log(`   ✅ Success: ${results.successCount}`);
-    console.log(`   ❌ Failed: ${results.failedCount}`);
+    console.log(`\n?? Bulk import completed:`);
+    console.log(`   ? Success: ${results.successCount}`);
+    console.log(`   ? Failed: ${results.failedCount}`);
     
     res.status(200).json({
       success: true,
@@ -1253,7 +1311,7 @@ if (existingSO) {
     });
     
   } catch (error) {
-    console.error('❌ Error in bulk import:', error);
+    console.error('? Error in bulk import:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to process bulk import',
@@ -1271,7 +1329,8 @@ router.put('/:id', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1319,11 +1378,11 @@ router.put('/:id', [
 // GET /api/sales-orders/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const so = await SalesOrder.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const so = await SalesOrder.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!so) return res.status(404).json({ success: false, error: 'Sales order not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
     const orgName  = org?.orgName    || '';
     const orgGST   = org?.gstNumber  || '';
     const orgPhone = org?.phone      || '';
@@ -1407,17 +1466,17 @@ router.get('/:id/email-preview', async (req, res) => {
 </div>
 </body>
 </html>`;
-    res.json({ success: true, data: { subject: `Sales Order ${so.salesOrderNumber} — Rs.${(so.totalAmount || 0).toFixed(2)}`, html, to: so.customerEmail } });
+    res.json({ success: true, data: { subject: `Sales Order ${so.salesOrderNumber} � Rs.${(so.totalAmount || 0).toFixed(2)}`, html, to: so.customerEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview — save custom email content
+// PATCH /:id/email-preview � save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const so = await SalesOrder.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const so = await SalesOrder.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!so) return res.status(404).json({ success: false, message: 'Sales order not found' });
     if (to !== undefined)      so.set('customEmailTo',      to);
     if (subject !== undefined) so.set('customEmailSubject', subject);
@@ -1437,7 +1496,8 @@ router.delete('/:id', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1474,6 +1534,7 @@ router.post('/:id/send', [
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
       orgId: orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1491,7 +1552,7 @@ router.post('/:id/send', [
     }
     
     // Generate PDF
-    const pdfInfo = await generateSalesOrderPDF(salesOrder, orgId);
+    const pdfInfo = await generateSalesOrderPDF(salesOrder, orgId, salesOrder.branchId || null);
     const pdfBuffer = fs.readFileSync(pdfInfo.filepath);
 
     // Use custom email content if the user edited it in the preview dialog
@@ -1516,7 +1577,7 @@ router.post('/:id/send', [
       });
     } else {
       // Send email
-      await sendSalesOrderEmail(salesOrder, pdfBuffer, orgId);
+      await sendSalesOrderEmail(salesOrder, pdfBuffer, orgId, salesOrder.branchId || null);
     }
     
     // Update status
@@ -1553,7 +1614,7 @@ router.post('/:id/send', [
 // PATCH /api/sales-orders/:id/mark-as-sent - Mark as sent without sending email
 router.patch('/:id/mark-as-sent', async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const salesOrder = await SalesOrder.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!salesOrder) return res.status(404).json({ success: false, message: 'Sales order not found' });
     if (salesOrder.status === 'DRAFT') salesOrder.status = 'OPEN';
     salesOrder.emailsSent.push({ sentTo: salesOrder.customerEmail || '', sentAt: new Date(), emailType: 'sales_order' });
@@ -1572,13 +1633,24 @@ router.get('/:id/pdf', async (req, res) => {
       req.user  = jwt.verify(req.query.token, process.env.FINANCE_JWT_SECRET || process.env.JWT_SECRET);
     } catch (e) { return res.status(401).json({ success: false, message: 'Invalid token' }); }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!salesOrder) return res.status(404).json({ success: false, message: 'Sales order not found' });
-    const pdfInfo = await generateSalesOrderPDF(salesOrder, req.user?.orgId);
+    const pdfInfo = await generateSalesOrderPDF(salesOrder, req.user?.orgId, salesOrder.branchId || null);
     salesOrder.pdfPath        = pdfInfo.filepath;
     salesOrder.pdfGeneratedAt = new Date();
     await salesOrder.save();
@@ -1597,7 +1669,8 @@ router.get('/:id/download', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1609,7 +1682,7 @@ router.get('/:id/download', [
     
     // Generate PDF
     if (!salesOrder.pdfPath || !fs.existsSync(salesOrder.pdfPath)) {
-      const pdfInfo = await generateSalesOrderPDF(salesOrder, req.user?.orgId);
+      const pdfInfo = await generateSalesOrderPDF(salesOrder, req.user?.orgId, salesOrder.branchId || null);
       salesOrder.pdfPath = pdfInfo.filepath;
       salesOrder.pdfGeneratedAt = new Date();
       await salesOrder.save();
@@ -1634,7 +1707,8 @@ router.post('/:id/confirm', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!salesOrder) {
@@ -1670,7 +1744,8 @@ router.post('/:id/convert-to-invoice', [
   try {
     const salesOrder = await SalesOrder.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
 
     if (!salesOrder) {
@@ -1691,7 +1766,7 @@ router.post('/:id/convert-to-invoice', [
     const Invoice = mongoose.model('Invoice');
 
     const { generateNumber } = require('../utils/numberGenerator');
-    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId);
+    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     const invoiceDate = new Date();
     const dueDate = new Date(invoiceDate);
@@ -1705,15 +1780,16 @@ router.post('/:id/convert-to-invoice', [
       default: dueDate.setDate(dueDate.getDate() + 30);
     }
 
-    // ✅ Convert customerId safely to string to avoid ObjectId cast error
+    // ? Convert customerId safely to string to avoid ObjectId cast error
     const customerId = salesOrder.customerId
       ? salesOrder.customerId.toString()
       : req.user.userId;
 
     const invoice = new Invoice({
       orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       invoiceNumber,
-      customerId,                          // ✅ always a string now
+      customerId,                          // ? always a string now
       customerName:        salesOrder.customerName,
       customerEmail:       salesOrder.customerEmail  || '',
       customerPhone:       salesOrder.customerPhone  || '',
@@ -1751,7 +1827,7 @@ router.post('/:id/convert-to-invoice', [
 
     await invoice.save();
 
-    // ✅ COA Posting
+    // ? COA Posting
     try {
       const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
@@ -1771,6 +1847,7 @@ router.post('/:id/convert-to-invoice', [
       if (arId) await postTransactionToCOA({
         accountId:       arId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
         referenceType:   'Invoice',
@@ -1783,6 +1860,7 @@ router.post('/:id/convert-to-invoice', [
       if (salesId) await postTransactionToCOA({
         accountId:       salesId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
         referenceType:   'Invoice',
@@ -1795,6 +1873,7 @@ router.post('/:id/convert-to-invoice', [
       if (taxId && gst > 0) await postTransactionToCOA({
         accountId:       taxId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `GST on Invoice ${invoice.invoiceNumber}`,
         referenceType:   'Invoice',
@@ -1804,9 +1883,9 @@ router.post('/:id/convert-to-invoice', [
         credit:          gst,
       });
 
-      console.log(`✅ COA posted for SO converted invoice: ${invoice.invoiceNumber}`);
+      console.log(`? COA posted for SO converted invoice: ${invoice.invoiceNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA post error (SO convert):', coaErr.message);
+      console.error('?? COA post error (SO convert):', coaErr.message);
     }
 
     // Update sales order
@@ -1817,7 +1896,7 @@ router.post('/:id/convert-to-invoice', [
     salesOrder.convertedDate            = new Date();
     await salesOrder.save();
 
-    console.log(`✅ Sales order ${salesOrder.salesOrderNumber} converted to invoice ${invoiceNumber}`);
+    console.log(`? Sales order ${salesOrder.salesOrderNumber} converted to invoice ${invoiceNumber}`);
 
     res.json({
       success: true,
@@ -1828,7 +1907,7 @@ router.post('/:id/convert-to-invoice', [
       },
     });
   } catch (error) {
-    console.error('❌ Error converting sales order to invoice:', error);
+    console.error('? Error converting sales order to invoice:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to convert sales order to invoice',

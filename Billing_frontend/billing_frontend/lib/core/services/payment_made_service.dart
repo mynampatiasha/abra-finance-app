@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../finance_secure_storage.dart';
 import '../../app/config/api_config.dart';
 
 // ============================================================================
@@ -306,9 +307,11 @@ class PaymentMadeService {
   static Future<Map<String, String>> _getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 
@@ -538,5 +541,37 @@ static Future<String> getVendorPhone(String paymentId) async {
       } catch (_) {}
       throw Exception(message);
     }
+  }
+
+  // ── Vendor Advances ───────────────────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> getVendorAdvances(String vendorId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$_endpoint/vendor-advances/$vendorId'),
+        headers: headers,
+      );
+      _checkStatus(response);
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // ── Vendor Payments With Refundable Balance ────────────────────────────────
+  // Returns all payments for a vendor where amountUnused > 0
+  // Used by the Vendor Payment Refund flow in account_detail_page.dart
+  static Future<List<Map<String, dynamic>>> getVendorPaymentsWithBalance(
+      String vendorId) async {
+    final headers = await _getHeaders();
+    final response = await http.get(
+      Uri.parse('$_endpoint/vendor-payments-with-balance/$vendorId'),
+      headers: headers,
+    );
+    _checkStatus(response);
+    final body = jsonDecode(response.body);
+    final data = body['data'] as List? ?? [];
+    return data.map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p)).toList();
   }
 }

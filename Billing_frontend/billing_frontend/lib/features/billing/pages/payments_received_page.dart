@@ -95,6 +95,9 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
   int _grandTotal   = 0;
   static const int _pageSize = 20;
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── scroll ────────────────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
@@ -305,6 +308,17 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
       context,
       MaterialPageRoute(builder: (_) => PaymentReceivedDetailPage(payment: p)),
     );
+  }
+
+  void _editPayment(Map<String, dynamic> p) {
+    final paymentId = p['id']?.toString() ?? p['_id']?.toString() ?? '';
+    if (paymentId.isEmpty) { _showError('Payment ID not available'); return; }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NewPaymentPage(paymentId: paymentId),
+      ),
+    ).then((_) => _refresh());
   }
 
   Future<void> _viewProofs(Map<String, dynamic> p) async {
@@ -681,7 +695,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _pagePayments.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildPaymentListView(),
           if (!_isLoading && _pagePayments.isNotEmpty) _buildPagination(),
           const SizedBox(height: 24),
         ]),
@@ -743,6 +757,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
     _iconBtn(Icons.account_tree_outlined, _showProcessDialog,
         tooltip: 'View Process', color: _green),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Export', Icons.download_rounded, _blue,
@@ -785,6 +800,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Export', Icons.download_rounded, _blue,
@@ -805,6 +821,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
     SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
+        _buildViewToggle(), const SizedBox(width: 8),
         _dateChip(
           label: _fromDate != null ? 'From: ${_fmtD(_fromDate!)}' : 'From Date',
           isActive: _fromDate != null, onTap: _pickFromDate,
@@ -1130,6 +1147,179 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
 
   // ── TABLE ─────────────────────────────────────────────────────────────────
 
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── List View ─────────────────────────────────────────────────────────────
+
+  Widget _buildPaymentListView() {
+    if (_pagePayments.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _pagePayments.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildPaymentListCard(_pagePayments[i]),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status) {
+    final s = status.toLowerCase();
+    Color bg, fg;
+    if (s == 'paid') { bg = _green.withOpacity(0.12); fg = _green; }
+    else if (s == 'draft') { bg = _orange.withOpacity(0.12); fg = _orange; }
+    else if (s == 'void') { bg = _red.withOpacity(0.12); fg = _red; }
+    else { bg = Colors.grey.shade100; fg = Colors.grey.shade600; }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(status.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg)),
+    );
+  }
+
+  Widget _buildPaymentListCard(Map<String, dynamic> p) {
+    final paymentNumber = p['paymentNumber']?.toString() ?? '-';
+    final customerName  = p['customerName']?.toString() ?? '-';
+    final status        = p['status']?.toString() ?? '-';
+    final amount        = (p['amount'] as num?)?.toDouble() ?? 0.0;
+    final netAmount     = (p['netAmount'] as num?)?.toDouble() ?? 0.0;
+    final mode          = p['paymentMode']?.toString() ?? p['mode']?.toString() ?? '-';
+    final reference     = p['referenceNumber']?.toString() ?? '';
+    final invoiceNumber = p['invoiceNumber']?.toString() ?? '-';
+    DateTime? paymentDate;
+    try { paymentDate = DateTime.parse(p['paymentDate']?.toString() ?? ''); } catch (_) {}
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _viewDetails(p),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Row 1: Payment # + Status
+            Row(children: [
+              Expanded(child: Text(paymentNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy), overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 8),
+              _buildStatusBadge(status),
+            ]),
+            const SizedBox(height: 10),
+            // Row 2: Customer avatar + name
+            Row(children: [
+              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(customerName.isNotEmpty ? customerName[0].toUpperCase() : '?',
+                      style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              if (reference.isNotEmpty) Text('Ref: $reference', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+            const SizedBox(height: 8),
+            // Row 3: Date + Invoice # + Mode
+            Row(children: [
+              if (paymentDate != null) ...[
+                Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(DateFormat('dd MMM yyyy').format(paymentDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                const SizedBox(width: 12),
+              ],
+              Icon(Icons.receipt_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(invoiceNumber, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Icon(Icons.payment_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(mode, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            // Row 4: Amount + Actions
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              // Actions
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(
+                  onTap: () => _sharePayment(p),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.share, size: 16, color: _blue)),
+                )),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (value) async {
+                    switch (value) {
+                      case 'view':         _viewDetails(p);         break;
+                      case 'proofs':       _viewProofs(p);          break;
+                      case 'mark_sent':    await _markPaymentAsSent(p); break;
+                      case 'send':         await _sendPaymentEmail(p);  break;
+                      case 'whatsapp':     await _whatsApp(p);      break;
+                      case 'ticket':       _raiseTicket(p);         break;
+                      case 'delete':       await _delete(p);        break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'proofs', child: ListTile(leading: Icon(Icons.attach_file_outlined, size: 17, color: _navy), title: Text('View Proofs'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'mark_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'send', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTable() {
     return Container(
       margin: const EdgeInsets.all(16),
@@ -1198,7 +1388,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
             child: Text(p['date'] ?? '', style: const TextStyle(fontSize: 13)))),
 
         DataCell(SizedBox(width: 140, child: InkWell(
-          onTap: () => _viewDetails(p),
+          onTap: () => _editPayment(p),
           child: Text(p['paymentNumber']?.toString() ?? '',
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: _navy, fontWeight: FontWeight.w600,
@@ -1277,6 +1467,7 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
             onSelected: (v) {
               switch (v) {
                 case 'view':         _viewDetails(p);         break;
+                case 'edit':         _editPayment(p);         break;
                 case 'proofs':       _viewProofs(p);          break;
                 case 'mark_as_sent': _markPaymentAsSent(p);   break;
                 case 'send_email':   _sendPaymentEmail(p);    break;
@@ -1287,6 +1478,8 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
             itemBuilder: (_) => [
               _menuItem('view',         Icons.visibility_outlined,
                   _blue,   'View Details'),
+              _menuItem('edit',         Icons.edit_outlined,
+                  _navy,   'Edit'),
               if (p['hasProofs'] == true)
                 _menuItem('proofs', Icons.attach_file,
                     _green,  'View Proofs'),

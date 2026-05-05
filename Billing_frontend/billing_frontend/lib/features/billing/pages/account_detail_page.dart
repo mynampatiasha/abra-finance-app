@@ -28,11 +28,18 @@ import '../../../core/utils/detail_page_actions.dart';
 import 'reconciliation_billing.dart';
 import 'transaction_rules_screen.dart';
 import 'bulk_import_bank_statement_dialog.dart';
+import 'new_chart_of_account.dart';
 import 'record_deposit_dialog.dart';
 import 'manual_entry_dialog.dart';
 import 'new_expenses.dart';
 import 'new_payment_page.dart';
 import 'new_payment_made.dart';
+import '../../../core/services/payment_made_service.dart';
+import '../../../core/services/billing_vendors_service.dart';
+import '../../../core/services/vendor_credit_service.dart';
+import '../../../core/services/billing_customers_service.dart';
+import '../../../core/services/payment_service.dart';
+import '../../../core/services/credit_note_service.dart';
 
 const Color _navyDark   = Color(0xFF0D1B3E);
 const Color _navy       = Color(0xFF1e3a8a);
@@ -147,6 +154,10 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     'expense', 'card_payment', 'owner_drawings',
     'customer_payment', 'customer_advance',
     'vendor_payment', 'vendor_advance',
+    'vendor_payment_refund',
+    'vendor_credit_refund',
+    'payment_refund',
+    'credit_note_refund',
   ].contains(cat.id);
 
   @override
@@ -302,14 +313,41 @@ class _AccountDetailPageState extends State<AccountDetailPage>
         case 'vendor_advance':
           linkedRecordType = 'PaymentMade';
           break;
+        case 'vendor_payment_refund':
+          linkedRecordType = 'PaymentMade';
+          break;
+        case 'vendor_credit_refund':
+          linkedRecordType = 'VendorCredit';
+          break;
+        case 'payment_refund':
+          linkedRecordType = 'PaymentReceived';
+          break;
+        case 'credit_note_refund':
+          linkedRecordType = 'CreditNote';
+          break;
         default:
           linkedRecordType = 'Expense';
       }
+
+      // vendor_credit_refund passes "creditId::refundId" so we can
+      // store creditId as linkedRecordId and refundId as journalRef
+      // for precise reversal on uncategorize.
+      // credit_note_refund follows the exact same pattern.
+      String linkedRecordId = recordId;
+      String journalRef     = recordId;
+      if ((cat.id == 'vendor_credit_refund' || cat.id == 'credit_note_refund') &&
+          recordId.contains('::')) {
+        final parts    = recordId.split('::');
+        linkedRecordId = parts[0]; // creditId / creditNoteId
+        journalRef     = parts[1]; // refund sub-doc _id
+      }
+
       await _svc.markAsCategorized(
         providerTransactionId: txn['_id']?.toString() ?? '',
         categoryLabel:    cat.label,
-        linkedRecordId:   recordId,
+        linkedRecordId:   linkedRecordId,
         linkedRecordType: linkedRecordType,
+        journalRef:       journalRef,
       );
     }
     _showSuccess('Transaction categorized successfully');
@@ -355,7 +393,7 @@ class _AccountDetailPageState extends State<AccountDetailPage>
       } else {
         result = await _svc.categorizeAsDeposit(
           providerTransactionId: txnId,
-          coaAccountId: _expCOAs.isNotEmpty ? _expCOAs.first.id : '',
+          categoryType: cat.id,
           notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         );
       }
@@ -363,6 +401,57 @@ class _AccountDetailPageState extends State<AccountDetailPage>
         _showSuccess('Transaction categorized');
         _closePanel();
         _loadAll();
+      } else if (result['code'] == 'COA_ACCOUNT_MISSING') {
+        // The required COA account doesn't exist yet — take the user to create it
+        final suggestedName    = result['suggestedName']    as String?;
+        final suggestedType    = result['suggestedType']    as String?;
+        final suggestedSubType = result['suggestedSubType'] as String?;
+        setState(() => _panelSaving = false);
+        final created = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: const Text('Account Not Found'),
+            content: Text(
+              'The account "${suggestedName ?? 'required account'}" doesn\'t exist yet.\n\n'
+              'Create it now to continue categorizing this transaction.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('Create Account'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.pop(context, true),
+              ),
+            ],
+          ),
+        );
+        if (created == true && mounted) {
+          final ok = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => NewChartOfAccountScreen(
+                initialName:    suggestedName,
+                initialType:    suggestedType,
+                initialSubType: suggestedSubType,
+              ),
+            ),
+          );
+          if (ok == true) {
+            // Account created — retry the categorization automatically
+            _saveSimpleCategory();
+          }
+        }
+        return;
       } else {
         _showError(result['message'] ?? 'Failed');
       }
@@ -560,6 +649,7 @@ void _openReconcile() {
               fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
         ),
       ]),
+      const Spacer(),
     ]),
   );
 
@@ -1059,41 +1149,120 @@ void _openReconcile() {
     _linkedRecord   = null;
   });
 
-  Future<void> _downloadAndOpenPdf(Map<String,dynamic> txn) async {
-    final linkedId   = txn['linkedRecordId']?.toString() ?? '';
-    final linkedType = txn['linkedRecordType']?.toString() ?? '';
-    if (linkedId.isEmpty) { _showError('No linked record found'); return; }
-    try {
-      final url = await _svc.getPdfUrl(
-        linkedRecordId:   linkedId,
-        linkedRecordType: linkedType,
-      );
-      final filename = '${linkedType.toLowerCase()}_$linkedId.pdf';
-      if (!mounted) return;
-      await fetchAndHandleFile(context, url, filename, download: true);
-    } catch (e) {
-      _showError('PDF error: $e');
-    }
-  }
+  // Print a simple transaction receipt using only bank transaction data
+  void _printTransactionReceipt(Map<String, dynamic> txn) {
+    final isDebit  = txn['transactionType'] == 'DEBIT';
+    final amount   = (txn['amount'] ?? 0).toDouble();
+    final date     = _parseDate(txn['transactionDate'] ?? txn['date']);
+    final desc     = txn['description']?.toString() ?? '';
+    final ref      = txn['referenceNumber']?.toString() ?? '';
+    final catLabel = txn['categoryLabel']?.toString() ?? '';
 
-  Future<void> _printPdf(Map<String,dynamic> txn) async {
-    final linkedId   = txn['linkedRecordId']?.toString() ?? '';
-    final linkedType = txn['linkedRecordType']?.toString() ?? '';
-    if (linkedId.isEmpty) { _showError('No linked record found'); return; }
-    try {
-      final url = await _svc.getPdfUrl(
-        linkedRecordId:   linkedId,
-        linkedRecordType: linkedType,
+    // Build simple HTML receipt
+    final htmlContent = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Transaction Receipt</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 15px; }
+    .header h1 { margin: 0; font-size: 24px; color: #0D1B3E; }
+    .header p { margin: 5px 0; color: #666; font-size: 12px; }
+    .content { margin: 20px 0; }
+    .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+    .row .label { font-weight: bold; color: #555; }
+    .row .value { color: #000; }
+    .amount-box { background: ${isDebit ? '#fee' : '#efe'}; padding: 15px; margin: 20px 0; text-align: center; border-radius: 8px; }
+    .amount-box .label { font-size: 12px; color: #666; margin-bottom: 5px; }
+    .amount-box .amount { font-size: 28px; font-weight: bold; color: ${isDebit ? '#E74C3C' : '#27AE60'}; }
+    .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TRANSACTION RECEIPT</h1>
+    <p>${widget.accountName}</p>
+    <p>Account Number: ${widget.accountNumber ?? 'N/A'}</p>
+  </div>
+  
+  <div class="content">
+    <div class="amount-box">
+      <div class="label">${isDebit ? 'DEBIT' : 'CREDIT'}</div>
+      <div class="amount">${isDebit ? '-' : '+'}₹${NumberFormat('#,##,##0.00').format(amount)}</div>
+    </div>
+    
+    <div class="row">
+      <span class="label">Date:</span>
+      <span class="value">${DateFormat('dd MMM yyyy, hh:mm a').format(date)}</span>
+    </div>
+    
+    <div class="row">
+      <span class="label">Category:</span>
+      <span class="value">${catLabel.isNotEmpty ? catLabel : 'Uncategorized'}</span>
+    </div>
+    
+    ${desc.isNotEmpty ? '<div class="row"><span class="label">Description:</span><span class="value">$desc</span></div>' : ''}
+    
+    ${ref.isNotEmpty ? '<div class="row"><span class="label">Reference:</span><span class="value">$ref</span></div>' : ''}
+    
+    <div class="row">
+      <span class="label">Transaction ID:</span>
+      <span class="value">${txn['_id']?.toString() ?? 'N/A'}</span>
+    </div>
+  </div>
+  
+  <div class="footer">
+    <p>Generated on ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}</p>
+    <p>This is a computer-generated receipt</p>
+  </div>
+  
+  <script>
+    window.onload = function() {
+      window.print();
+    };
+  </script>
+</body>
+</html>
+''';
+
+    // Open in new window and trigger print
+    if (kIsWeb) {
+      final blob = html.Blob([htmlContent], 'text/html');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.window.open(url, '_blank');
+      Future.delayed(const Duration(seconds: 2), () => html.Url.revokeObjectUrl(url));
+    } else {
+      // For mobile, show a dialog with the receipt data
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Transaction Receipt'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${isDebit ? 'DEBIT' : 'CREDIT'}: ${isDebit ? '-' : '+'}₹${NumberFormat('#,##,##0.00').format(amount)}',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold,
+                        color: isDebit ? _red : _green)),
+                const SizedBox(height: 10),
+                Text('Date: ${DateFormat('dd MMM yyyy').format(date)}'),
+                Text('Category: ${catLabel.isNotEmpty ? catLabel : 'Uncategorized'}'),
+                if (desc.isNotEmpty) Text('Description: $desc'),
+                if (ref.isNotEmpty) Text('Reference: $ref'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
       );
-      if (kIsWeb) {
-        html.window.open(url, '_blank');
-      } else {
-        final filename = '${linkedType.toLowerCase()}_$linkedId.pdf';
-        if (!mounted) return;
-        await fetchAndHandleFile(context, url, filename, download: false);
-      }
-    } catch (e) {
-      _showError('Print error: $e');
     }
   }
 
@@ -1219,23 +1388,9 @@ void _openReconcile() {
                   Row(children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: linkedId.isNotEmpty ? () => _downloadAndOpenPdf(txn) : null,
-                        icon: const Icon(Icons.download_outlined, size: 15),
-                        label: const Text('Download PDF', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: _navyAccent,
-                          side: const BorderSide(color: _navyAccent),
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: linkedId.isNotEmpty ? () => _printPdf(txn) : null,
+                        onPressed: () => _printTransactionReceipt(txn),
                         icon: const Icon(Icons.print_outlined, size: 15),
-                        label: const Text('Print', style: TextStyle(fontSize: 12)),
+                        label: const Text('Print Receipt', style: TextStyle(fontSize: 12)),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: _blue,
                           side: const BorderSide(color: _blue),
@@ -1300,6 +1455,15 @@ void _openReconcile() {
           rows.add({'Amount': '₹${(record['amount'] as num).toStringAsFixed(2)}'});
         if (record['paymentMode'] != null) rows.add({'Mode': record['paymentMode'].toString()});
         if ((record['reference'] ?? '').toString().isNotEmpty) rows.add({'Reference': record['reference'].toString()});
+        break;
+      case 'CreditNote':
+        if (record['creditNoteNumber'] != null) rows.add({'Credit Note #': record['creditNoteNumber'].toString()});
+        if (record['customerName'] != null) rows.add({'Customer': record['customerName'].toString()});
+        if (record['totalAmount'] != null)
+          rows.add({'Total Amount': '₹${(record['totalAmount'] as num).toStringAsFixed(2)}'});
+        if (record['creditBalance'] != null)
+          rows.add({'Balance': '₹${(record['creditBalance'] as num).toStringAsFixed(2)}'});
+        if (record['status'] != null) rows.add({'Status': record['status'].toString()});
         break;
     }
 
@@ -1485,9 +1649,19 @@ void _openReconcile() {
         );
         break;
       case 'customer_payment':
+        page = NewPaymentPage(
+          showAppBar: false,
+          prefilledAmount: amount,
+          prefilledDate: date,
+          prefilledReference: ref,
+          providerTransactionId: _selectedTxn?['_id']?.toString(),
+          onSavedCallback: _onEmbeddedPageSaved,
+        );
+        break;
       case 'customer_advance':
         page = NewPaymentPage(
           showAppBar: false,
+          isAdvance: true,
           prefilledAmount: amount,
           prefilledDate: date,
           prefilledReference: ref,
@@ -1499,6 +1673,41 @@ void _openReconcile() {
       case 'vendor_advance':
         page = NewPaymentMadeScreen(
           showAppBar: false,
+          prefilledAmount: amount,
+          prefilledDate: date,
+          prefilledReference: ref,
+          prefilledPaymentType: 'ADVANCE',
+          providerTransactionId: _selectedTxn?['_id']?.toString(),
+          onSavedCallback: _onEmbeddedPageSaved,
+        );
+        break;
+      case 'vendor_payment_refund':
+        page = _VendorPaymentRefundPage(
+          prefilledAmount: amount,
+          prefilledDate: date,
+          prefilledReference: ref,
+          onSavedCallback: _onEmbeddedPageSaved,
+        );
+        break;
+      case 'vendor_credit_refund':
+        page = _VendorCreditRefundPage(
+          prefilledAmount: amount,
+          prefilledDate: date,
+          prefilledReference: ref,
+          onSavedCallback: _onEmbeddedPageSaved,
+        );
+        break;
+      case 'credit_note_refund':
+        page = _CreditNoteRefundPage(
+          prefilledAmount: amount,
+          prefilledDate: date,
+          prefilledReference: ref,
+          bankAccountId: widget.accountId,
+          onSavedCallback: _onEmbeddedPageSaved,
+        );
+        break;
+      case 'payment_refund':
+        page = _CustomerPaymentRefundPage(
           prefilledAmount: amount,
           prefilledDate: date,
           prefilledReference: ref,
@@ -1998,4 +2207,1884 @@ void _openReconcile() {
     if (d == null) return DateTime.now();
     try { return DateTime.parse(d.toString()); } catch (_) { return DateTime.now(); }
   }
+}
+
+// ============================================================================
+// VENDOR CREDIT REFUND PAGE — embedded inside account_detail_page panel
+// ============================================================================
+
+class _VendorCreditRefundPage extends StatefulWidget {
+  final double   prefilledAmount;
+  final DateTime prefilledDate;
+  final String   prefilledReference;
+  // Callback receives "creditId::refundId" so _onEmbeddedPageSaved can split them
+  final void Function(String creditIdAndRefundId) onSavedCallback;
+
+  const _VendorCreditRefundPage({
+    Key? key,
+    required this.prefilledAmount,
+    required this.prefilledDate,
+    required this.prefilledReference,
+    required this.onSavedCallback,
+  }) : super(key: key);
+
+  @override
+  State<_VendorCreditRefundPage> createState() => _VendorCreditRefundPageState();
+}
+
+class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
+  // ── vendors ──────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _vendors        = [];
+  bool                       _loadingVendors = true;
+  String?                    _selectedVendorId;
+
+  // ── credits for selected vendor ──────────────────────────────────────────
+  List<VendorCredit> _credits        = [];
+  bool               _loadingCredits = false;
+
+  // per-credit refund amount controllers (creditId → controller)
+  final Map<String, TextEditingController> _amtCtrls = {};
+
+  // ── form fields ──────────────────────────────────────────────────────────
+  late DateTime _refundDate;
+  String        _paymentMode = 'Cash';
+  final _refCtrl  = TextEditingController();
+  final _descCtrl = TextEditingController();
+  bool  _saving   = false;
+
+  static const _modes = [
+    'Cash', 'Cheque', 'Bank Transfer', 'UPI', 'NEFT', 'RTGS', 'IMPS', 'Online',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _refundDate   = widget.prefilledDate;
+    _refCtrl.text = widget.prefilledReference;
+    _fetchVendors();
+  }
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    _descCtrl.dispose();
+    for (final c in _amtCtrls.values) c.dispose();
+    super.dispose();
+  }
+
+  // ── loaders ──────────────────────────────────────────────────────────────
+
+  Future<void> _fetchVendors() async {
+    setState(() => _loadingVendors = true);
+    try {
+      final res = await BillingVendorsService.getAllVendors(limit: 1000);
+      if (res['success'] == true) {
+        final raw  = res['data'];
+        final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
+        setState(() {
+          _vendors = list.map<Map<String, dynamic>>((v) => {
+            '_id':        v['_id']?.toString() ?? '',
+            'vendorName': v['vendorName']?.toString() ?? '',
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Vendor load error: $e');
+    } finally {
+      setState(() => _loadingVendors = false);
+    }
+  }
+
+  Future<void> _fetchCredits(String vendorId) async {
+    setState(() { _loadingCredits = true; _credits = []; _amtCtrls.clear(); });
+    try {
+      final res = await VendorCreditService.getVendorCredits(
+        vendorId: vendorId,
+        limit: 100,
+      );
+      // Only show credits that still have a balance (OPEN or PARTIALLY_APPLIED)
+      final open = res.credits
+          .where((c) =>
+              (c.status == 'OPEN' || c.status == 'PARTIALLY_APPLIED') &&
+              c.balanceAmount > 0)
+          .toList();
+      setState(() {
+        _credits = open;
+        for (final c in open) {
+          _amtCtrls[c.id] = TextEditingController();
+        }
+      });
+    } catch (e) {
+      debugPrint('Credits load error: $e');
+    } finally {
+      setState(() => _loadingCredits = false);
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────
+
+  Future<void> _save() async {
+    if (_selectedVendorId == null) {
+      _showError('Please select a vendor');
+      return;
+    }
+
+    // Collect credits with a refund amount entered
+    final toRefund = <({VendorCredit credit, double amount})>[];
+    for (final credit in _credits) {
+      final raw = double.tryParse(_amtCtrls[credit.id]?.text.trim() ?? '') ?? 0;
+      if (raw <= 0) continue;
+      if (raw > credit.balanceAmount + 0.01) {
+        _showError(
+          'Refund for ${credit.creditNumber} exceeds balance '
+          '₹${credit.balanceAmount.toStringAsFixed(2)}',
+        );
+        return;
+      }
+      toRefund.add((credit: credit, amount: raw));
+    }
+
+    if (toRefund.isEmpty) {
+      _showError('Enter a refund amount for at least one vendor credit');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      String refundId = '';
+      String creditId = '';
+      for (final item in toRefund) {
+        // refundCredit returns the refund sub-doc _id for precise reversal
+        refundId = await VendorCreditService.refundCredit(item.credit.id, {
+          'amount':          item.amount,
+          'refundDate':      _refundDate.toIso8601String(),
+          'paymentMode':     _paymentMode,
+          'referenceNumber': _refCtrl.text.trim(),
+          'notes':           _descCtrl.text.trim(),
+        });
+        creditId = item.credit.id;
+      }
+      // Pass "creditId::refundId" — _onEmbeddedPageSaved splits this to store
+      // creditId as linkedRecordId and refundId as journalRef
+      widget.onSavedCallback('$creditId::$refundId');
+    } catch (e) {
+      _showError('Failed: $e');
+      setState(() => _saving = false);
+    }
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _red,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
+  }
+
+  // ── build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Vendor ──────────────────────────────────────────────────────────
+        _label('Vendor', required: true),
+        const SizedBox(height: 6),
+        _loadingVendors
+            ? const LinearProgressIndicator()
+            : DropdownButtonFormField<String>(
+                value: _selectedVendorId,
+                isExpanded: true,
+                decoration: _inputDec(hint: 'Select Vendor'),
+                items: _vendors.map((v) => DropdownMenuItem(
+                  value: v['_id'] as String,
+                  child: Text(v['vendorName'] as String,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                )).toList(),
+                onChanged: (id) {
+                  if (id == null) return;
+                  setState(() => _selectedVendorId = id);
+                  _fetchCredits(id);
+                },
+              ),
+
+        const SizedBox(height: 14),
+
+        // ── Date ────────────────────────────────────────────────────────────
+        _label('Date', required: true),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _refundDate,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) setState(() => _refundDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(children: [
+              const Icon(Icons.calendar_today_outlined, size: 15, color: Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Text(DateFormat('dd/MM/yyyy').format(_refundDate),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF2C3E50))),
+            ]),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Received Via ────────────────────────────────────────────────────
+        _label('Received Via'),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _paymentMode,
+          isExpanded: true,
+          decoration: _inputDec(),
+          items: _modes.map((m) => DropdownMenuItem(
+            value: m,
+            child: Text(m, style: const TextStyle(fontSize: 13)),
+          )).toList(),
+          onChanged: (v) { if (v != null) setState(() => _paymentMode = v); },
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Reference# ──────────────────────────────────────────────────────
+        _label('Reference#'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _refCtrl,
+          decoration: _inputDec(hint: 'e.g. Ref-1900'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 18),
+
+        // ── Select Vendor Credit table ───────────────────────────────────────
+        RichText(text: const TextSpan(
+          text: 'Select Vendor Credit',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _red),
+          children: [TextSpan(text: ' *', style: TextStyle(color: _red))],
+        )),
+        const SizedBox(height: 8),
+
+        if (_selectedVendorId == null)
+          _emptyBox('Select a vendor to load available credits')
+        else if (_loadingCredits)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(color: _navyAccent, strokeWidth: 2)),
+          )
+        else if (_credits.isEmpty)
+          _emptyBox('No open vendor credits found for this vendor')
+        else
+          _buildCreditsTable(),
+
+        const SizedBox(height: 14),
+
+        // ── Description ─────────────────────────────────────────────────────
+        _label('Description'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _descCtrl,
+          maxLines: 3,
+          decoration: _inputDec(hint: 'e.g. Cheque deposit'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Save / Cancel ────────────────────────────────────────────────────
+        Row(children: [
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: _saving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF5D6D7E))),
+            ),
+          ),
+        ]),
+
+        const SizedBox(height: 16),
+      ]),
+    );
+  }
+
+  Widget _emptyBox(String msg) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF8F9FB),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFFE2E8F0)),
+    ),
+    child: Center(child: Text(msg,
+        style: const TextStyle(fontSize: 12, color: Color(0xFF7F8C8D)))),
+  );
+
+  Widget _buildCreditsTable() {
+    final fmt = NumberFormat('#,##,##0.00');
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF0F4FF),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(5), topRight: Radius.circular(5),
+            ),
+          ),
+          child: Row(children: const [
+            SizedBox(width: 28),
+            Expanded(child: Text('CN#',     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 72, child: Text('Amount',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 72, child: Text('Balance', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 82, child: Text('Refund',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        // Rows
+        ...List.generate(_credits.length, (i) {
+          final c = _credits[i];
+          return Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                // Radio indicator — activates when amount is typed
+                SizedBox(
+                  width: 28,
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _amtCtrls[c.id]!,
+                    builder: (_, val, __) {
+                      final active = (double.tryParse(val.text.trim()) ?? 0) > 0;
+                      return Icon(
+                        active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: active ? _navyAccent : const Color(0xFFCBD5E1),
+                      );
+                    },
+                  ),
+                ),
+                // CN# — blue underlined
+                Expanded(
+                  child: Text(c.creditNumber,
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      color: _navyAccent,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                // Total amount
+                SizedBox(width: 72,
+                  child: Text('₹${fmt.format(c.totalAmount)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF2C3E50))),
+                ),
+                // Balance
+                SizedBox(width: 72,
+                  child: Text('₹${fmt.format(c.balanceAmount)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: Color(0xFF2C3E50))),
+                ),
+                // Refund amount input
+                SizedBox(
+                  width: 82,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: TextField(
+                      controller: _amtCtrls[c.id],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        hintText: '0.00',
+                        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1)),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            if (i < _credits.length - 1)
+              const Divider(height: 1, color: Color(0xFFEEF2F7)),
+          ]);
+        }),
+      ]),
+    );
+  }
+
+  Widget _label(String text, {bool required = false}) => RichText(
+    text: TextSpan(
+      text: text,
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+      children: required
+          ? const [TextSpan(text: ' *', style: TextStyle(color: _red))]
+          : [],
+    ),
+  );
+
+  InputDecoration _inputDec({String? hint}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  );
+}
+
+// ============================================================================
+// CREDIT NOTE REFUND PAGE — embedded inside account_detail_page panel
+// ============================================================================
+// Shown when user selects "Credit Note Refund" (money_out) in the categorize panel.
+// Flow:
+//   1. Select customer → loads all their credit notes with creditBalance > 0
+//   2. Table shows: CN# | Total Amount | Balance | Refund amount input
+//   3. Fill Date, Paid Via, Reference#, Description
+//   4. Save → POST /api/finance/credit-notes/:id/refund
+//   5. onSavedCallback("creditNoteId::refundId") → bank transaction categorized
+// ============================================================================
+
+class _CreditNoteRefundPage extends StatefulWidget {
+  final double   prefilledAmount;
+  final DateTime prefilledDate;
+  final String   prefilledReference;
+  final String   bankAccountId;
+  // Callback receives "creditNoteId::refundId" so _onEmbeddedPageSaved can split them
+  final void Function(String creditNoteIdAndRefundId) onSavedCallback;
+
+  const _CreditNoteRefundPage({
+    Key? key,
+    required this.prefilledAmount,
+    required this.prefilledDate,
+    required this.prefilledReference,
+    required this.bankAccountId,
+    required this.onSavedCallback,
+  }) : super(key: key);
+
+  @override
+  State<_CreditNoteRefundPage> createState() => _CreditNoteRefundPageState();
+}
+
+class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
+  // ── customers ─────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _customers        = [];
+  bool                       _loadingCustomers = true;
+  String?                    _selectedCustomerId;
+
+  // ── credit notes for selected customer ────────────────────────────────────
+  List<CreditNote> _creditNotes        = [];
+  bool             _loadingCreditNotes = false;
+
+  // per-credit-note refund amount controllers (creditNoteId → controller)
+  final Map<String, TextEditingController> _amtCtrls = {};
+
+  // ── form fields ───────────────────────────────────────────────────────────
+  late DateTime _refundDate;
+  String        _paymentMode = 'Cash';
+  final _refCtrl  = TextEditingController();
+  final _descCtrl = TextEditingController();
+  bool  _saving   = false;
+
+  static const _modes = [
+    'Cash', 'Cheque', 'Bank Transfer', 'UPI', 'NEFT', 'RTGS', 'IMPS', 'Online',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _refundDate   = widget.prefilledDate;
+    _refCtrl.text = widget.prefilledReference;
+    _fetchCustomers();
+  }
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    _descCtrl.dispose();
+    for (final c in _amtCtrls.values) c.dispose();
+    super.dispose();
+  }
+
+  // ── loaders ───────────────────────────────────────────────────────────────
+
+  Future<void> _fetchCustomers() async {
+    setState(() => _loadingCustomers = true);
+    try {
+      final res = await BillingCustomersService.getAllCustomers(limit: 1000);
+      setState(() {
+        _customers = res.customers.map<Map<String, dynamic>>((c) => {
+          '_id':          c.id,
+          'customerName': c.customerDisplayName,
+        }).toList();
+      });
+    } catch (e) {
+      debugPrint('Customer load error: $e');
+    } finally {
+      setState(() => _loadingCustomers = false);
+    }
+  }
+
+  Future<void> _fetchCreditNotes(String customerId) async {
+    setState(() { _loadingCreditNotes = true; _creditNotes = []; _amtCtrls.clear(); });
+    try {
+      final res = await CreditNoteService.getCreditNotes(
+        customerId: customerId,
+        limit: 100,
+      );
+      // Only show credit notes that still have a balance (OPEN or PARTIALLY_APPLIED)
+      final open = res.creditNotes
+          .where((cn) =>
+              (cn.status == 'OPEN' || cn.status == 'PARTIALLY_APPLIED') &&
+              cn.creditBalance > 0)
+          .toList();
+      setState(() {
+        _creditNotes = open;
+        for (final cn in open) {
+          _amtCtrls[cn.id] = TextEditingController();
+        }
+      });
+    } catch (e) {
+      debugPrint('Credit notes load error: $e');
+    } finally {
+      setState(() => _loadingCreditNotes = false);
+    }
+  }
+
+  // ── save ──────────────────────────────────────────────────────────────────
+
+  Future<void> _save() async {
+    if (_selectedCustomerId == null) {
+      _showError('Please select a customer');
+      return;
+    }
+
+    // Collect credit notes with a refund amount entered
+    final toRefund = <({CreditNote creditNote, double amount})>[];
+    for (final cn in _creditNotes) {
+      final raw = double.tryParse(_amtCtrls[cn.id]?.text.trim() ?? '') ?? 0;
+      if (raw <= 0) continue;
+      if (raw > cn.creditBalance + 0.01) {
+        _showError(
+          'Refund for ${cn.creditNoteNumber} exceeds balance '
+          '₹${cn.creditBalance.toStringAsFixed(2)}',
+        );
+        return;
+      }
+      toRefund.add((creditNote: cn, amount: raw));
+    }
+
+    if (toRefund.isEmpty) {
+      _showError('Enter a refund amount for at least one credit note');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      String refundId     = '';
+      String creditNoteId = '';
+      for (final item in toRefund) {
+        // refundCreditNote returns the refund sub-doc _id for precise reversal
+        refundId = await CreditNoteService.refundCreditNote(item.creditNote.id, {
+          'amount':          item.amount,
+          'refundDate':      _refundDate.toIso8601String(),
+          'refundMethod':    _paymentMode,
+          'referenceNumber': _refCtrl.text.trim(),
+          'notes':           _descCtrl.text.trim(),
+          'bankAccountId':   widget.bankAccountId,
+        });
+        creditNoteId = item.creditNote.id;
+      }
+      // Pass "creditNoteId::refundId" — _onEmbeddedPageSaved splits this to store
+      // creditNoteId as linkedRecordId and refundId as journalRef
+      widget.onSavedCallback('$creditNoteId::$refundId');
+    } catch (e) {
+      _showError('Failed: $e');
+      setState(() => _saving = false);
+    }
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _red,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
+  }
+
+  // ── build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Customer ──────────────────────────────────────────────────────
+        _label('Customer', required: true),
+        const SizedBox(height: 6),
+        _loadingCustomers
+            ? const LinearProgressIndicator()
+            : DropdownButtonFormField<String>(
+                value: _selectedCustomerId,
+                isExpanded: true,
+                decoration: _inputDec(hint: 'Select Customer'),
+                items: _customers.map((c) => DropdownMenuItem(
+                  value: c['_id'] as String,
+                  child: Text(c['customerName'] as String,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                )).toList(),
+                onChanged: (id) {
+                  if (id == null) return;
+                  setState(() => _selectedCustomerId = id);
+                  _fetchCreditNotes(id);
+                },
+              ),
+
+        const SizedBox(height: 14),
+
+        // ── Date ──────────────────────────────────────────────────────────
+        _label('Date', required: true),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _refundDate,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) setState(() => _refundDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(children: [
+              const Icon(Icons.calendar_today_outlined, size: 15, color: Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Text(DateFormat('dd/MM/yyyy').format(_refundDate),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF2C3E50))),
+            ]),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Paid Via ──────────────────────────────────────────────────────
+        _label('Paid Via'),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _paymentMode,
+          isExpanded: true,
+          decoration: _inputDec(),
+          items: _modes.map((m) => DropdownMenuItem(
+            value: m,
+            child: Text(m, style: const TextStyle(fontSize: 13)),
+          )).toList(),
+          onChanged: (v) { if (v != null) setState(() => _paymentMode = v); },
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Reference# ────────────────────────────────────────────────────
+        _label('Reference#'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _refCtrl,
+          decoration: _inputDec(hint: 'e.g. Ref-1900'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 18),
+
+        // ── Select Credit Note table ───────────────────────────────────────
+        RichText(text: const TextSpan(
+          text: 'Select Credit Note',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _red),
+          children: [TextSpan(text: ' *', style: TextStyle(color: _red))],
+        )),
+        const SizedBox(height: 8),
+
+        if (_selectedCustomerId == null)
+          _emptyBox('Select a customer to load available credit notes')
+        else if (_loadingCreditNotes)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(color: _navyAccent, strokeWidth: 2)),
+          )
+        else if (_creditNotes.isEmpty)
+          _emptyBox('There are no credit notes with balance for this customer')
+        else
+          _buildCreditNotesTable(),
+
+        const SizedBox(height: 14),
+
+        // ── Description ───────────────────────────────────────────────────
+        _label('Description'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _descCtrl,
+          maxLines: 3,
+          decoration: _inputDec(hint: 'Optional notes'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Save / Cancel ─────────────────────────────────────────────────
+        Row(children: [
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: _saving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF5D6D7E))),
+            ),
+          ),
+        ]),
+
+        const SizedBox(height: 16),
+      ]),
+    );
+  }
+
+  Widget _emptyBox(String msg) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF8F9FB),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFFE2E8F0)),
+    ),
+    child: Center(child: Text(msg,
+        style: const TextStyle(fontSize: 12, color: Color(0xFF7F8C8D)))),
+  );
+
+  Widget _buildCreditNotesTable() {
+    final fmt = NumberFormat('#,##,##0.00');
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF0F4FF),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(5), topRight: Radius.circular(5),
+            ),
+          ),
+          child: Row(children: const [
+            SizedBox(width: 28),
+            Expanded(child: Text('CN#',     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 72, child: Text('Amount',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 72, child: Text('Balance', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 82, child: Text('Refund',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        // Rows
+        ...List.generate(_creditNotes.length, (i) {
+          final cn = _creditNotes[i];
+          return Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                // Radio indicator — activates when amount is typed
+                SizedBox(
+                  width: 28,
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _amtCtrls[cn.id]!,
+                    builder: (_, val, __) {
+                      final active = (double.tryParse(val.text.trim()) ?? 0) > 0;
+                      return Icon(
+                        active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: active ? _navyAccent : const Color(0xFFCBD5E1),
+                      );
+                    },
+                  ),
+                ),
+                // CN# — blue underlined
+                Expanded(
+                  child: Text(cn.creditNoteNumber,
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      color: _navyAccent,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                // Total amount
+                SizedBox(width: 72,
+                  child: Text('₹${fmt.format(cn.totalAmount)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF2C3E50))),
+                ),
+                // Balance
+                SizedBox(width: 72,
+                  child: Text('₹${fmt.format(cn.creditBalance)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: Color(0xFF2C3E50))),
+                ),
+                // Refund amount input
+                SizedBox(
+                  width: 82,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: TextField(
+                      controller: _amtCtrls[cn.id],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        hintText: '0.00',
+                        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1)),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            if (i < _creditNotes.length - 1)
+              const Divider(height: 1, color: Color(0xFFEEF2F7)),
+          ]);
+        }),
+      ]),
+    );
+  }
+
+  Widget _label(String text, {bool required = false}) => RichText(
+    text: TextSpan(
+      text: text,
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+      children: required
+          ? const [TextSpan(text: ' *', style: TextStyle(color: _red))]
+          : [],
+    ),
+  );
+
+  InputDecoration _inputDec({String? hint}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  );
+}
+
+// ============================================================================
+// VENDOR PAYMENT REFUND — Embedded page
+// ============================================================================
+// Shown when user selects "Vendor Payment Refund" in the categorize panel.
+// Flow:
+//   1. Select vendor → loads all their payments with amountUnused > 0
+//   2. Table shows: Payment# | Amount | Balance | Refund amount input
+//   3. Fill Date, Received Via, Reference#, Description
+//   4. Save → POST /api/payments-made/:id/refund for each row with amount
+//   5. onSavedCallback(paymentId) → bank transaction gets categorized
+// ============================================================================
+
+class _VendorPaymentRefundPage extends StatefulWidget {
+  final double   prefilledAmount;
+  final DateTime prefilledDate;
+  final String   prefilledReference;
+  final void Function(String paymentId) onSavedCallback;
+
+  const _VendorPaymentRefundPage({
+    Key? key,
+    required this.prefilledAmount,
+    required this.prefilledDate,
+    required this.prefilledReference,
+    required this.onSavedCallback,
+  }) : super(key: key);
+
+  @override
+  State<_VendorPaymentRefundPage> createState() => _VendorPaymentRefundPageState();
+}
+
+class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
+  // ── vendors ──────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _vendors      = [];
+  bool                       _loadingVendors = true;
+  String?                    _selectedVendorId;
+
+  // ── payments with balance ─────────────────────────────────────────────────
+  List<Map<String, dynamic>> _payments        = [];
+  bool                       _loadingPayments = false;
+
+  // per-payment refund amount controllers  (paymentId → controller)
+  final Map<String, TextEditingController> _amtCtrls = {};
+
+  // ── form fields ──────────────────────────────────────────────────────────
+  late DateTime _refundDate;
+  String        _paymentMode = 'Cash';
+  final _refCtrl  = TextEditingController();
+  final _descCtrl = TextEditingController();
+  bool  _saving   = false;
+
+  static const _modes = [
+    'Cash', 'Cheque', 'Bank Transfer', 'UPI', 'NEFT', 'RTGS', 'IMPS', 'Online',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _refundDate   = widget.prefilledDate;
+    _refCtrl.text = widget.prefilledReference;
+    _fetchVendors();
+  }
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    _descCtrl.dispose();
+    for (final c in _amtCtrls.values) c.dispose();
+    super.dispose();
+  }
+
+  // ── loaders ──────────────────────────────────────────────────────────────
+
+  Future<void> _fetchVendors() async {
+    setState(() => _loadingVendors = true);
+    try {
+      final res = await BillingVendorsService.getAllVendors(limit: 1000);
+      if (res['success'] == true) {
+        final raw  = res['data'];
+        final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
+        setState(() {
+          _vendors = list.map<Map<String, dynamic>>((v) => {
+            '_id':        v['_id']?.toString() ?? '',
+            'vendorName': v['vendorName']?.toString() ?? '',
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Vendor load error: $e');
+    } finally {
+      setState(() => _loadingVendors = false);
+    }
+  }
+
+  Future<void> _fetchPayments(String vendorId) async {
+    setState(() {
+      _loadingPayments = true;
+      _payments = [];
+      // dispose old controllers
+      for (final c in _amtCtrls.values) c.dispose();
+      _amtCtrls.clear();
+    });
+    try {
+      final list = await PaymentMadeService.getVendorPaymentsWithBalance(vendorId);
+      setState(() {
+        _payments = list;
+        for (final p in list) {
+          final id = p['_id']?.toString() ?? '';
+          if (id.isNotEmpty) _amtCtrls[id] = TextEditingController();
+        }
+      });
+    } catch (e) {
+      debugPrint('Payments load error: $e');
+    } finally {
+      setState(() => _loadingPayments = false);
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────
+
+  Future<void> _save() async {
+    if (_selectedVendorId == null) {
+      _showErr('Please select a vendor');
+      return;
+    }
+
+    // Collect rows where user entered a refund amount
+    final toRefund = <({Map<String, dynamic> payment, double amount})>[];
+    for (final p in _payments) {
+      final id  = p['_id']?.toString() ?? '';
+      final raw = double.tryParse(_amtCtrls[id]?.text.trim() ?? '') ?? 0;
+      if (raw <= 0) continue;
+      final balance = (p['amountUnused'] as num?)?.toDouble() ?? 0;
+      if (raw > balance + 0.01) {
+        _showErr('Refund for ${p['paymentNumber']} exceeds balance ₹${balance.toStringAsFixed(2)}');
+        return;
+      }
+      toRefund.add((payment: p, amount: raw));
+    }
+
+    if (toRefund.isEmpty) {
+      _showErr('Enter a refund amount for at least one payment');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      String lastPaymentId = '';
+      for (final item in toRefund) {
+        final id = item.payment['_id']?.toString() ?? '';
+        await PaymentMadeService.recordRefund(id, {
+          'amount':          item.amount,
+          'refundMode':      _paymentMode,
+          'referenceNumber': _refCtrl.text.trim(),
+          'notes':           _descCtrl.text.trim(),
+        });
+        lastPaymentId = id;
+      }
+      widget.onSavedCallback(lastPaymentId);
+    } catch (e) {
+      _showErr('Failed: $e');
+      setState(() => _saving = false);
+    }
+  }
+
+  void _showErr(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _red,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
+  }
+
+  // ── build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Vendor ──────────────────────────────────────────────────────────
+        _lbl('Vendor', required: true),
+        const SizedBox(height: 6),
+        _loadingVendors
+            ? const LinearProgressIndicator()
+            : DropdownButtonFormField<String>(
+                value: _selectedVendorId,
+                isExpanded: true,
+                decoration: _dec(hint: 'Select Vendor'),
+                items: _vendors.map((v) => DropdownMenuItem(
+                  value: v['_id'] as String,
+                  child: Text(v['vendorName'] as String,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                )).toList(),
+                onChanged: (id) {
+                  if (id == null) return;
+                  setState(() => _selectedVendorId = id);
+                  _fetchPayments(id);
+                },
+              ),
+
+        const SizedBox(height: 14),
+
+        // ── Date ────────────────────────────────────────────────────────────
+        _lbl('Date', required: true),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _refundDate,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) setState(() => _refundDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(children: [
+              const Icon(Icons.calendar_today_outlined, size: 15, color: Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Text(DateFormat('dd/MM/yyyy').format(_refundDate),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF2C3E50))),
+            ]),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Received Via ────────────────────────────────────────────────────
+        _lbl('Received Via'),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _paymentMode,
+          isExpanded: true,
+          decoration: _dec(),
+          items: _modes.map((m) => DropdownMenuItem(
+            value: m,
+            child: Text(m, style: const TextStyle(fontSize: 13)),
+          )).toList(),
+          onChanged: (v) { if (v != null) setState(() => _paymentMode = v); },
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Reference# ──────────────────────────────────────────────────────
+        _lbl('Reference#'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _refCtrl,
+          decoration: _dec(hint: 'e.g. Ref-1900'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 18),
+
+        // ── Select a Payment table ───────────────────────────────────────────
+        RichText(text: const TextSpan(
+          text: 'Select a Payment',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF374151)),
+          children: [TextSpan(text: ' *', style: TextStyle(color: _red))],
+        )),
+        const SizedBox(height: 8),
+
+        if (_selectedVendorId == null)
+          _emptyBox('Select a vendor to load available payments')
+        else if (_loadingPayments)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(color: _navyAccent, strokeWidth: 2)),
+          )
+        else if (_payments.isEmpty)
+          _emptyBox('There are no payments with credits for this vendor')
+        else
+          _buildPaymentsTable(),
+
+        const SizedBox(height: 14),
+
+        // ── Description ─────────────────────────────────────────────────────
+        _lbl('Description'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _descCtrl,
+          maxLines: 3,
+          decoration: _dec(hint: 'e.g. Refund received via cheque'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Save / Cancel ────────────────────────────────────────────────────
+        Row(children: [
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: _saving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF5D6D7E))),
+            ),
+          ),
+        ]),
+
+        const SizedBox(height: 16),
+      ]),
+    );
+  }
+
+  Widget _emptyBox(String msg) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF8F9FB),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFFE2E8F0)),
+    ),
+    child: Center(
+      child: Text(msg, style: const TextStyle(fontSize: 12, color: Color(0xFF7F8C8D))),
+    ),
+  );
+
+  Widget _buildPaymentsTable() {
+    final fmt = NumberFormat('#,##,##0.00');
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF0F4FF),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(5), topRight: Radius.circular(5),
+            ),
+          ),
+          child: Row(children: const [
+            SizedBox(width: 28),
+            Expanded(child: Text('Payment#', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 70, child: Text('Amount',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 70, child: Text('Balance', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 80, child: Text('Refund',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        // Rows
+        ...List.generate(_payments.length, (i) {
+          final p       = _payments[i];
+          final id      = p['_id']?.toString() ?? '';
+          final pNum    = p['paymentNumber']?.toString() ?? '-';
+          final total   = (p['amount'] as num?)?.toDouble() ?? 0;
+          final balance = (p['amountUnused'] as num?)?.toDouble() ?? 0;
+          final ctrl    = _amtCtrls[id];
+          if (ctrl == null) return const SizedBox.shrink();
+
+          return Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                // Radio indicator — lights up when amount is typed
+                SizedBox(
+                  width: 28,
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: ctrl,
+                    builder: (_, val, __) {
+                      final active = (double.tryParse(val.text.trim()) ?? 0) > 0;
+                      return Icon(
+                        active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: active ? _navyAccent : const Color(0xFFCBD5E1),
+                      );
+                    },
+                  ),
+                ),
+                // Payment number — blue underlined
+                Expanded(
+                  child: Text(pNum,
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      color: _navyAccent,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                // Total amount
+                SizedBox(
+                  width: 70,
+                  child: Text('₹${fmt.format(total)}',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF2C3E50))),
+                ),
+                // Balance (refundable)
+                SizedBox(
+                  width: 70,
+                  child: Text('₹${fmt.format(balance)}',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                          color: Color(0xFF2C3E50))),
+                ),
+                // Refund amount input
+                SizedBox(
+                  width: 80,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: TextField(
+                      controller: ctrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        hintText: '0.00',
+                        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1)),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            if (i < _payments.length - 1)
+              const Divider(height: 1, color: Color(0xFFEEF2F7)),
+          ]);
+        }),
+      ]),
+    );
+  }
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  Widget _lbl(String text, {bool required = false}) => RichText(
+    text: TextSpan(
+      text: text,
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+      children: required
+          ? const [TextSpan(text: ' *', style: TextStyle(color: _red))]
+          : [],
+    ),
+  );
+
+  InputDecoration _dec({String? hint}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  );
+}
+
+// ============================================================================
+// CUSTOMER PAYMENT REFUND — Embedded page
+// ============================================================================
+// Shown when user selects "Payment Refund" (money_out) in the categorize panel.
+// Flow:
+//   1. Select customer → loads all their payments with amountInExcess > 0
+//   2. Table shows: Payment# | Amount | Balance | Refund amount input
+//   3. Fill Date, Paid Via, Reference#, Description
+//   4. Save → POST /api/finance/payments-received/:id/refund for each row
+//   5. onSavedCallback(paymentId) → bank transaction gets categorized
+// ============================================================================
+
+class _CustomerPaymentRefundPage extends StatefulWidget {
+  final double   prefilledAmount;
+  final DateTime prefilledDate;
+  final String   prefilledReference;
+  final String?  providerTransactionId;
+  final void Function(String paymentId) onSavedCallback;
+
+  const _CustomerPaymentRefundPage({
+    Key? key,
+    required this.prefilledAmount,
+    required this.prefilledDate,
+    required this.prefilledReference,
+    this.providerTransactionId,
+    required this.onSavedCallback,
+  }) : super(key: key);
+
+  @override
+  State<_CustomerPaymentRefundPage> createState() => _CustomerPaymentRefundPageState();
+}
+
+class _CustomerPaymentRefundPageState extends State<_CustomerPaymentRefundPage> {
+  // ── customers ─────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _customers       = [];
+  bool                       _loadingCustomers = true;
+  String?                    _selectedCustomerId;
+
+  // ── payments with balance ─────────────────────────────────────────────────
+  List<Map<String, dynamic>> _payments        = [];
+  bool                       _loadingPayments = false;
+
+  // per-payment refund amount controllers (paymentId → controller)
+  final Map<String, TextEditingController> _amtCtrls = {};
+
+  // ── form fields ──────────────────────────────────────────────────────────
+  late DateTime _refundDate;
+  String        _paymentMode = 'Cash';
+  final _refCtrl  = TextEditingController();
+  final _descCtrl = TextEditingController();
+  bool  _saving   = false;
+
+  static const _modes = [
+    'Cash', 'Cheque', 'Bank Transfer', 'UPI', 'NEFT', 'RTGS', 'IMPS', 'Online',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _refundDate   = widget.prefilledDate;
+    _refCtrl.text = widget.prefilledReference;
+    _fetchCustomers();
+  }
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    _descCtrl.dispose();
+    for (final c in _amtCtrls.values) c.dispose();
+    super.dispose();
+  }
+
+  // ── loaders ──────────────────────────────────────────────────────────────
+
+  Future<void> _fetchCustomers() async {
+    setState(() => _loadingCustomers = true);
+    try {
+      final res = await BillingCustomersService.getAllCustomers(limit: 1000, skipStats: true);
+      setState(() {
+        _customers = res.customers.map<Map<String, dynamic>>((c) => {
+          '_id':          c.id,
+          'customerName': c.customerDisplayName.isNotEmpty
+              ? c.customerDisplayName
+              : c.companyName,
+        }).toList();
+      });
+    } catch (e) {
+      debugPrint('Customer load error: $e');
+    } finally {
+      setState(() => _loadingCustomers = false);
+    }
+  }
+
+  Future<void> _fetchPayments(String customerId) async {
+    setState(() {
+      _loadingPayments = true;
+      _payments = [];
+      for (final c in _amtCtrls.values) c.dispose();
+      _amtCtrls.clear();
+    });
+    try {
+      final list = await PaymentService.getCustomerPaymentsWithBalance(customerId);
+      setState(() {
+        _payments = list;
+        for (final p in list) {
+          final id = p['_id']?.toString() ?? '';
+          if (id.isNotEmpty) _amtCtrls[id] = TextEditingController();
+        }
+      });
+    } catch (e) {
+      debugPrint('Payments load error: $e');
+    } finally {
+      setState(() => _loadingPayments = false);
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────
+
+  Future<void> _save() async {
+    if (_selectedCustomerId == null) {
+      _showErr('Please select a customer');
+      return;
+    }
+
+    final toRefund = <({Map<String, dynamic> payment, double amount})>[];
+    for (final p in _payments) {
+      final id      = p['_id']?.toString() ?? '';
+      final raw     = double.tryParse(_amtCtrls[id]?.text.trim() ?? '') ?? 0;
+      if (raw <= 0) continue;
+      final balance = (p['amountInExcess'] as num?)?.toDouble() ?? 0;
+      if (raw > balance + 0.01) {
+        _showErr('Refund for ${p['paymentNumber']} exceeds balance ₹${balance.toStringAsFixed(2)}');
+        return;
+      }
+      toRefund.add((payment: p, amount: raw));
+    }
+
+    if (toRefund.isEmpty) {
+      _showErr('Enter a refund amount for at least one payment');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      String lastPaymentId = '';
+      for (final item in toRefund) {
+        final id = item.payment['_id']?.toString() ?? '';
+        await PaymentService.recordRefund(id, {
+          'amount':          item.amount,
+          'refundMode':      _paymentMode,
+          'referenceNumber': _refCtrl.text.trim(),
+          'refundDate':      _refundDate.toIso8601String(),
+          'notes':           _descCtrl.text.trim(),
+          if (widget.providerTransactionId != null)
+            'providerTransactionId': widget.providerTransactionId,
+        });
+        lastPaymentId = id;
+      }
+      widget.onSavedCallback(lastPaymentId);
+    } catch (e) {
+      _showErr('Failed: $e');
+      setState(() => _saving = false);
+    }
+  }
+
+  void _showErr(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _red,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
+  }
+
+  // ── build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Customer ────────────────────────────────────────────────────────
+        _lbl('Customer', required: true),
+        const SizedBox(height: 6),
+        _loadingCustomers
+            ? const LinearProgressIndicator()
+            : DropdownButtonFormField<String>(
+                value: _selectedCustomerId,
+                isExpanded: true,
+                decoration: _dec(hint: 'Select Customer'),
+                items: _customers.map((c) => DropdownMenuItem(
+                  value: c['_id'] as String,
+                  child: Text(c['customerName'] as String,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                )).toList(),
+                onChanged: (id) {
+                  if (id == null) return;
+                  setState(() => _selectedCustomerId = id);
+                  _fetchPayments(id);
+                },
+              ),
+
+        const SizedBox(height: 14),
+
+        // ── Date ────────────────────────────────────────────────────────────
+        _lbl('Date', required: true),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _refundDate,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) setState(() => _refundDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(children: [
+              const Icon(Icons.calendar_today_outlined, size: 15, color: Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Text(DateFormat('dd/MM/yyyy').format(_refundDate),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF2C3E50))),
+            ]),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Paid Via ────────────────────────────────────────────────────────
+        _lbl('Paid Via'),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _paymentMode,
+          isExpanded: true,
+          decoration: _dec(),
+          items: _modes.map((m) => DropdownMenuItem(
+            value: m,
+            child: Text(m, style: const TextStyle(fontSize: 13)),
+          )).toList(),
+          onChanged: (v) { if (v != null) setState(() => _paymentMode = v); },
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Reference# ──────────────────────────────────────────────────────
+        _lbl('Reference#'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _refCtrl,
+          decoration: _dec(hint: 'e.g. Ref-1900'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 18),
+
+        // ── Select a Payment table ───────────────────────────────────────────
+        RichText(text: const TextSpan(
+          text: 'Select a Payment',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF374151)),
+          children: [TextSpan(text: ' *', style: TextStyle(color: _red))],
+        )),
+        const SizedBox(height: 8),
+
+        if (_selectedCustomerId == null)
+          _emptyBox('Select a customer to load available payments')
+        else if (_loadingPayments)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(color: _navyAccent, strokeWidth: 2)),
+          )
+        else if (_payments.isEmpty)
+          _emptyBox('There are no payments with credits for this customer')
+        else
+          _buildPaymentsTable(),
+
+        const SizedBox(height: 14),
+
+        // ── Description ─────────────────────────────────────────────────────
+        _lbl('Description'),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _descCtrl,
+          maxLines: 3,
+          decoration: _dec(hint: 'e.g. Refund via bank transfer'),
+          style: const TextStyle(fontSize: 13),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Save / Cancel ────────────────────────────────────────────────────
+        Row(children: [
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _saving ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: _saving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF5D6D7E))),
+            ),
+          ),
+        ]),
+
+        const SizedBox(height: 16),
+      ]),
+    );
+  }
+
+  Widget _emptyBox(String msg) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF8F9FB),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFFE2E8F0)),
+    ),
+    child: Center(
+      child: Text(msg, style: const TextStyle(fontSize: 12, color: Color(0xFF7F8C8D))),
+    ),
+  );
+
+  Widget _buildPaymentsTable() {
+    final fmt = NumberFormat('#,##,##0.00');
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF0F4FF),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(5), topRight: Radius.circular(5),
+            ),
+          ),
+          child: Row(children: const [
+            SizedBox(width: 28),
+            Expanded(child: Text('Payment#', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 70, child: Text('Amount',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 70, child: Text('Balance', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+            SizedBox(width: 80, child: Text('Refund',  textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _navyAccent))),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        // Rows
+        ...List.generate(_payments.length, (i) {
+          final p       = _payments[i];
+          final id      = p['_id']?.toString() ?? '';
+          final amount  = (p['amountReceived'] as num?)?.toDouble() ?? 0;
+          final balance = (p['amountInExcess'] as num?)?.toDouble() ?? 0;
+          return Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                // Radio indicator — activates when amount is typed
+                SizedBox(
+                  width: 28,
+                  child: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _amtCtrls[id]!,
+                    builder: (_, val, __) {
+                      final active = (double.tryParse(val.text.trim()) ?? 0) > 0;
+                      return Icon(
+                        active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: active ? _navyAccent : const Color(0xFFCBD5E1),
+                      );
+                    },
+                  ),
+                ),
+                // Payment#
+                Expanded(
+                  child: Text(p['paymentNumber']?.toString() ?? '',
+                    style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      color: _navyAccent,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                // Amount
+                SizedBox(width: 70,
+                  child: Text('₹${fmt.format(amount)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF2C3E50))),
+                ),
+                // Balance (amountInExcess)
+                SizedBox(width: 70,
+                  child: Text('₹${fmt.format(balance)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                        color: Color(0xFF2C3E50))),
+                ),
+                // Refund input
+                SizedBox(
+                  width: 80,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: TextField(
+                      controller: _amtCtrls[id],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        hintText: '0.00',
+                        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFCBD5E1)),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            if (i < _payments.length - 1)
+              const Divider(height: 1, color: Color(0xFFEEF2F7)),
+          ]);
+        }),
+      ]),
+    );
+  }
+
+  Widget _lbl(String text, {bool required = false}) => RichText(
+    text: TextSpan(
+      text: text,
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+      children: required
+          ? const [TextSpan(text: ' *', style: TextStyle(color: _red))]
+          : [],
+    ),
+  );
+
+  InputDecoration _dec({String? hint}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  );
 }

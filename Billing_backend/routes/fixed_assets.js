@@ -26,6 +26,7 @@ const depreciationEntrySchema = new mongoose.Schema({
 
 const fixedAssetSchema = new mongoose.Schema({
   orgId:         { type: String, index: true, default: null },
+  branchId:      { type: String, index: true, default: null },
   assetNumber:   { type: String, default: null },           // e.g. FA000001
 
   // Basic Info
@@ -107,8 +108,8 @@ const PaymentAccount = mongoose.models.PaymentAccount
 // HELPERS
 // ============================================================================
 
-async function generateAssetNumber(orgId = null) {
-  return generateNumber(FixedAsset, 'assetNumber', 'FA', orgId);
+async function generateAssetNumber(orgId = null, branchId = null) {
+  return generateNumber(FixedAsset, 'assetNumber', 'FA', orgId, branchId);
 }
 
 // Get or auto-create a Fixed Asset type COA account
@@ -287,7 +288,7 @@ router.get('/', async (req, res) => {
   try {
     const { status, assetType, search } = req.query;
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
     if (status)          query.status = status;
     if (assetType)       query.assetType = assetType;
     if (search)          query.assetName = { $regex: search, $options: 'i' };
@@ -318,7 +319,10 @@ router.get('/', async (req, res) => {
 
 router.get('/stats/summary', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const assets    = await FixedAsset.find(orgFilter);
 
     const totalAssets     = assets.length;
@@ -353,7 +357,8 @@ router.get('/:id', async (req, res) => {
   try {
     const asset = await FixedAsset.findOne({
       _id:  req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
 
@@ -416,7 +421,8 @@ router.post('/', async (req, res) => {
 
     const newAsset = new FixedAsset({
       orgId,
-      assetNumber:            await generateAssetNumber(orgId),
+      branchId:               req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            assetNumber:            await generateAssetNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null),
       assetName,
       assetType:              assetType || 'IT Equipment',
       description:            description || null,
@@ -467,7 +473,7 @@ router.post('/', async (req, res) => {
 
       if (assetAccId) {
         await postTransactionToCOA({
-          accountId: assetAccId, orgId, date: txnDate, description: desc,
+          accountId: assetAccId, orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
           referenceType: 'Journal', referenceId: newAsset._id,
           referenceNumber: newAsset.assetNumber,
           debit: costValue, credit: 0,
@@ -476,7 +482,7 @@ router.post('/', async (req, res) => {
 
       if (paidAccId) {
         await postTransactionToCOA({
-          accountId: paidAccId, orgId, date: txnDate, description: desc,
+          accountId: paidAccId, orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
           referenceType: 'Journal', referenceId: newAsset._id,
           referenceNumber: newAsset.assetNumber,
           debit: 0, credit: costValue,
@@ -501,7 +507,8 @@ router.patch('/:id/activate', async (req, res) => {
   try {
     const asset = await FixedAsset.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
     if (asset.status !== 'Draft')
@@ -525,7 +532,8 @@ router.post('/:id/depreciate', async (req, res) => {
   try {
     const asset = await FixedAsset.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
     if (asset.status !== 'Active')
@@ -558,14 +566,14 @@ router.post('/:id/depreciate', async (req, res) => {
       const desc = `Depreciation - ${asset.assetName} [${asset.assetNumber}] - ${nextEntry.period}`;
 
       if (expAccId) await postTransactionToCOA({
-        accountId: expAccId, orgId, date: nextEntry.date, description: desc,
+        accountId: expAccId, orgId, date: nextEntry.date, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
         referenceType: 'Journal', referenceId: asset._id,
         referenceNumber: asset.assetNumber,
         debit: nextEntry.amount, credit: 0,
       });
 
       if (accumAccId) await postTransactionToCOA({
-        accountId: accumAccId, orgId, date: nextEntry.date, description: desc,
+        accountId: accumAccId, orgId, date: nextEntry.date, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
         referenceType: 'Journal', referenceId: asset._id,
         referenceNumber: asset.assetNumber,
         debit: 0, credit: nextEntry.amount,
@@ -611,7 +619,8 @@ router.post('/:id/dispose', async (req, res) => {
 
     const asset = await FixedAsset.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
     if (['Disposed', 'Written Off'].includes(asset.status))
@@ -639,7 +648,7 @@ router.post('/:id/dispose', async (req, res) => {
 
       // Remove asset from books
       if (assetAccId) await postTransactionToCOA({
-        accountId: assetAccId, orgId, date: dispDate, description: desc,
+        accountId: assetAccId, orgId, date: dispDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
         referenceType: 'Journal', referenceId: asset._id,
         referenceNumber: asset.assetNumber,
         debit: 0, credit: asset.assetCost, // CR to remove asset
@@ -647,7 +656,7 @@ router.post('/:id/dispose', async (req, res) => {
 
       // Clear accumulated depreciation
       if (accumAccId && asset.totalDepreciation > 0) await postTransactionToCOA({
-        accountId: accumAccId, orgId, date: dispDate, description: desc,
+        accountId: accumAccId, orgId, date: dispDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
         referenceType: 'Journal', referenceId: asset._id,
         referenceNumber: asset.assetNumber,
         debit: asset.totalDepreciation, credit: 0, // DR to clear accumulated
@@ -657,7 +666,7 @@ router.post('/:id/dispose', async (req, res) => {
       if (saleAmount > 0) {
         const cashAccId = await getOrCreateCOAAccount('Cash', 'Cash', orgId);
         if (cashAccId) await postTransactionToCOA({
-          accountId: cashAccId, orgId, date: dispDate, description: `Proceeds - ${desc}`,
+          accountId: cashAccId, orgId, date: dispDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: `Proceeds - ${desc}`,
           referenceType: 'Journal', referenceId: asset._id,
           referenceNumber: asset.assetNumber,
           debit: saleAmount, credit: 0,
@@ -672,7 +681,7 @@ router.post('/:id/dispose', async (req, res) => {
           orgId
         );
         if (glAccId) await postTransactionToCOA({
-          accountId: glAccId, orgId, date: dispDate, description: desc,
+          accountId: glAccId, orgId, date: dispDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: desc,
           referenceType: 'Journal', referenceId: asset._id,
           referenceNumber: asset.assetNumber,
           debit:  gainLoss < 0 ? Math.abs(gainLoss) : 0,
@@ -715,7 +724,8 @@ router.put('/:id', async (req, res) => {
   try {
     const asset = await FixedAsset.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
 
@@ -755,7 +765,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const asset = await FixedAsset.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!asset) return res.status(404).json({ success: false, message: 'Asset not found' });
     if (asset.status !== 'Draft')
@@ -779,7 +790,10 @@ router.delete('/:id', async (req, res) => {
 
 router.get('/depreciation/schedule', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const assets = await FixedAsset.find({ ...orgFilter, status: 'Active' });
 
     const schedule = assets.flatMap(a =>

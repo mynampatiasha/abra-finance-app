@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/finance_secure_storage.dart';
 import '../../../../core/services/timesheet_service.dart';
 import '../../../../core/services/project_service.dart';
 import '../../../../core/services/timer_service.dart';
@@ -201,10 +202,18 @@ class _NewTimeEntryScreenState extends State<NewTimeEntryScreen> {
   Future<void> _loadStaffList() async {
     setState(() => _loadingStaff = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
-      final res   = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/finance/users'), headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'});
-      final body  = json.decode(res.body) as Map<String, dynamic>;
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final res       = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/finance/users'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'x-branch-ids': branchHdr,
+        },
+      );
+      final body = json.decode(res.body) as Map<String, dynamic>;
       if (body['success'] == true && mounted) {
         setState(() { _allStaff = List<Map<String, dynamic>>.from(body['data'] ?? []); _loadingStaff = false; });
       } else { setState(() => _loadingStaff = false); }

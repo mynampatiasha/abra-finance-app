@@ -35,6 +35,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'new_chart_of_account.dart'; // ✅ FIX 2: for Add Account navigation
 import '../../../../core/services/invoice_service.dart'; // for BillingCustomer + getBillingCustomers
+import '../../../../core/finance_secure_storage.dart';
 import 'new_customer.dart';
 import 'new_vendor.dart';
 
@@ -220,45 +221,89 @@ class _NewExpensePageState extends State<NewExpensePage> {
   Future<void> _loadCoaExpenseAccounts() async {
     setState(() => _loadingCoaAccounts = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token') ?? '';
-      final uri   = Uri.parse(
-          '${ApiConfig.baseUrl}/api/finance/chart-of-accounts?accountType=Expense&limit=200');
-      final resp  = await http.get(uri, headers: {
-        'Content-Type': 'application/json',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-      });
-      if (resp.statusCode == 200) {
-        final body     = json.decode(resp.body);
-        final accounts = (body['data']?['accounts'] as List? ?? []);
-        setState(() {
-          _coaExpAccounts = accounts
-              .map((a) => {
-                    '_id':         a['_id']?.toString() ?? '',
-                    'accountName': a['accountName']?.toString() ?? '',
-                    'accountType': a['accountType']?.toString() ?? '',
-                  })
-              .toList();
-          _loadingCoaAccounts = false;
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+
+      // Fetch ALL account types (Asset, Liability, Equity, Income, Expense)
+      // ✅ FIXED: Include BOTH broad categories AND specific types from backend enum
+      final types = [
+        'Asset',                    // ✅ Broad category (includes Laptop purchase, etc.)
+        'Fixed Asset',              // ✅ Specific type
+        'Other Current Asset',      // ✅ Specific type
+        'Cash',                     // ✅ Specific type
+        'Stock',                    // ✅ Specific type
+        'Other Asset',              // ✅ Specific type
+        'Accounts Receivable',      // ✅ Specific type
+        'Liability',                // ✅ Broad category
+        'Accounts Payable',         // ✅ Specific type
+        'Other Current Liability',  // ✅ Specific type
+        'Non Current Liability',    // ✅ Specific type
+        'Other Liability',          // ✅ Specific type
+        'Equity',                   // ✅ Broad category
+        'Income',                   // ✅ Broad category
+        'Other Income',             // ✅ Specific type
+        'Expense',                  // ✅ Broad category
+        'Other Expense',            // ✅ Specific type
+        'Cost Of Goods Sold',       // ✅ Specific type
+      ];
+      final futures = types.map((t) {
+        final encodedType = Uri.encodeComponent(t);
+        final uri = Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/chart-of-accounts?accountType=$encodedType&limit=500');
+        return http.get(uri, headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+          'x-branch-ids': branchHdr,
         });
-        debugPrint('✅ COA expense accounts: ${_coaExpAccounts.length}');
-      } else {
-        throw Exception('COA fetch failed: ${resp.statusCode}');
+      });
+
+      final responses = await Future.wait(futures);
+
+      final allAccounts = <Map<String, dynamic>>[];
+      for (final resp in responses) {
+        if (resp.statusCode == 200) {
+          final body     = json.decode(resp.body);
+          final accounts = (body['data']?['accounts'] as List? ?? []);
+          allAccounts.addAll(accounts.map((a) => {
+                '_id':         a['_id']?.toString() ?? '',
+                'accountName': a['accountName']?.toString() ?? '',
+                'accountType': a['accountType']?.toString() ?? '',
+              }));
+        }
       }
+
+      // Deduplicate by _id, then sort by accountName
+      final seen = <String>{};
+      final unique = allAccounts.where((a) {
+        final id = a['_id'] as String;
+        if (id.isEmpty || seen.contains(id)) return false;
+        seen.add(id);
+        return true;
+      }).toList()
+        ..sort((a, b) => (a['accountName'] as String)
+            .compareTo(b['accountName'] as String));
+
+      setState(() {
+        _coaExpAccounts     = unique;
+        _loadingCoaAccounts = false;
+      });
+      debugPrint('✅ COA accounts loaded (all types): ${_coaExpAccounts.length}');
     } catch (e) {
       debugPrint('❌ COA load error: $e — using fallback');
       setState(() {
         _coaExpAccounts = [
-          {'_id': '1', 'accountName': 'Fuel',                    'accountType': 'Expense'},
-          {'_id': '2', 'accountName': 'Office Supplies',         'accountType': 'Expense'},
-          {'_id': '3', 'accountName': 'Travel & Conveyance',     'accountType': 'Expense'},
-          {'_id': '4', 'accountName': 'Advertising & Marketing', 'accountType': 'Expense'},
+          {'_id': '1', 'accountName': 'Advertising & Marketing', 'accountType': 'Expense'},
+          {'_id': '2', 'accountName': 'Cost of Goods Sold',      'accountType': 'Cost Of Goods Sold'},
+          {'_id': '3', 'accountName': 'Fuel',                    'accountType': 'Expense'},
+          {'_id': '4', 'accountName': 'Insurance',               'accountType': 'Expense'},
           {'_id': '5', 'accountName': 'Meals & Entertainment',   'accountType': 'Expense'},
-          {'_id': '6', 'accountName': 'Utilities',               'accountType': 'Expense'},
-          {'_id': '7', 'accountName': 'Rent',                    'accountType': 'Expense'},
+          {'_id': '6', 'accountName': 'Office Supplies',         'accountType': 'Expense'},
+          {'_id': '7', 'accountName': 'Other Expenses',          'accountType': 'Other Expense'},
           {'_id': '8', 'accountName': 'Professional Fees',       'accountType': 'Expense'},
-          {'_id': '9', 'accountName': 'Insurance',               'accountType': 'Expense'},
-          {'_id': '10','accountName': 'Other Expenses',          'accountType': 'Other Expense'},
+          {'_id': '9', 'accountName': 'Rent',                    'accountType': 'Expense'},
+          {'_id': '10','accountName': 'Travel & Conveyance',     'accountType': 'Expense'},
+          {'_id': '11','accountName': 'Utilities',               'accountType': 'Expense'},
         ];
         _loadingCoaAccounts = false;
       });
@@ -1088,81 +1133,316 @@ class _NewExpensePageState extends State<NewExpensePage> {
     );
   }
 
-  // ✅ FIX 2: Expense Account field with "Add Account" button
+  // ── Expense Account: tap-to-search dialog ────────────────────────────────
   Widget _buildExpenseAccountField() {
+    final hasValue = _expenseAcctCtrl.text.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header row: label + Add Account button
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const SizedBox(), // spacer so button goes right
+        // Tap tile
+        InkWell(
+          onTap: _loadingCoaAccounts ? null : _showExpenseAccountSelector,
+          borderRadius: BorderRadius.circular(8),
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Expense Account *',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: _navyAccent, width: 2)),
+              prefixIcon: const Icon(Icons.account_tree_outlined,
+                  color: _navyAccent),
+              suffixIcon: _loadingCoaAccounts
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child:
+                              CircularProgressIndicator(strokeWidth: 2)))
+                  : const Icon(Icons.search, color: _navyAccent),
+            ),
+            child: Text(
+              hasValue ? _expenseAcctCtrl.text : 'Search expense accounts…',
+              style: TextStyle(
+                fontSize: 15,
+                color: hasValue ? _navyDark : Colors.grey[500],
+                fontWeight:
+                    hasValue ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+        // Clear + account-type badge
+        if (hasValue) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _navyAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                _coaExpAccounts.firstWhere(
+                    (a) => a['accountName'] == _expenseAcctCtrl.text,
+                    orElse: () =>
+                        {'accountType': 'Expense'})['accountType'] as String,
+                style: const TextStyle(
+                    fontSize: 11,
+                    color: _navyAccent,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Spacer(),
             TextButton.icon(
-              onPressed: () async {
-                // Navigate to NewChartOfAccountScreen — same as COA list page
-                final ok = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const NewChartOfAccountScreen(),
-                  ),
-                );
-                // ✅ Refresh COA list when returning
-                if (ok == true || ok == null) {
-                  _loadCoaExpenseAccounts();
-                }
-              },
-              icon: const Icon(Icons.add_circle_outline,
-                  size: 16, color: _navyAccent),
-              label: const Text('Add Account',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: _navyAccent,
-                      fontWeight: FontWeight.w600)),
+              onPressed: () =>
+                  setState(() => _expenseAcctCtrl.text = ''),
+              icon: const Icon(Icons.clear, size: 14, color: Colors.red),
+              label: const Text('Clear',
+                  style: TextStyle(color: Colors.red, fontSize: 12)),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 4),
+                    horizontal: 8, vertical: 2),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        if (_loadingCoaAccounts)
-          _loadingField('Expense Account *')
-        else if (_coaExpAccounts.isEmpty)
-          _textField(
-            controller: _expenseAcctCtrl,
-            label: 'Expense Account *',
-            hint: 'e.g. Fuel, Office Supplies',
-            required: true,
-            icon: Icons.account_tree_outlined,
-            validator: (v) =>
-                (v == null || v.isEmpty) ? 'Required' : null,
-          )
-        else
-          _dropdownField<String>(
-            label: 'Expense Account *',
-            value: _coaExpAccounts.any(
-                    (a) => a['accountName'] == _expenseAcctCtrl.text)
-                ? _expenseAcctCtrl.text
-                : null,
-            icon: Icons.account_tree_outlined,
-            items: _coaExpAccounts
-                .map((a) => DropdownMenuItem(
-                      value: a['accountName'] as String,
-                      child: Text(a['accountName'] as String,
-                          overflow: TextOverflow.ellipsis),
-                    ))
-                .toList(),
-            onChanged: (v) =>
-                setState(() => _expenseAcctCtrl.text = v ?? ''),
-            validator: (v) =>
-                (v == null || v.isEmpty) ? 'Required' : null,
-          ),
+          ]),
+        ],
       ],
     );
+  }
+
+  // ── Expense Account search dialog ─────────────────────────────────────────
+  Future<void> _showExpenseAccountSelector({
+    void Function(String name)? onSelected,
+  }) async {
+    final searchCtrl = TextEditingController();
+    List<Map<String, dynamic>> filtered = List.from(_coaExpAccounts);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          void doFilter(String q) {
+            setDlg(() {
+              filtered = q.trim().isEmpty
+                  ? List.from(_coaExpAccounts)
+                  : _coaExpAccounts
+                      .where((a) => (a['accountName'] as String)
+                          .toLowerCase()
+                          .contains(q.trim().toLowerCase()))
+                      .toList();
+            });
+          }
+
+          return Dialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                  maxWidth: 480, maxHeight: 560),
+              child: Column(children: [
+                // ── Header ──────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [_navyDark, _navyMid],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                    borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(12)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.account_tree_outlined,
+                        color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Select Expense Account',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white70, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ]),
+                ),
+
+                // ── Search bar ──────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                  child: TextField(
+                    controller: searchCtrl,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search accounts…',
+                      prefixIcon: const Icon(Icons.search,
+                          color: _navyAccent),
+                      suffixIcon: searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear,
+                                  size: 18),
+                              onPressed: () {
+                                searchCtrl.clear();
+                                doFilter('');
+                              })
+                          : null,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: _navyAccent, width: 2)),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                    onChanged: doFilter,
+                  ),
+                ),
+
+                // ── Count ───────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 2),
+                  child: Row(children: [
+                    Text('${filtered.length} account(s)',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey[500])),
+                  ]),
+                ),
+
+                // ── List ────────────────────────────────────────────
+                Expanded(
+                  child: filtered.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.search_off,
+                                  size: 40,
+                                  color: Colors.grey[300]),
+                              const SizedBox(height: 8),
+                              Text('No accounts found',
+                                  style: TextStyle(
+                                      color: Colors.grey[500])),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (_, i) {
+                            final acc = filtered[i];
+                            final name =
+                                acc['accountName'] as String;
+                            final type =
+                                acc['accountType'] as String;
+                            final isSelected =
+                                _expenseAcctCtrl.text == name;
+                            return ListTile(
+                              dense: true,
+                              selected: isSelected,
+                              selectedTileColor:
+                                  _navyAccent.withOpacity(0.08),
+                              leading: CircleAvatar(
+                                radius: 16,
+                                backgroundColor: isSelected
+                                    ? _navyAccent
+                                    : _navyAccent.withOpacity(0.1),
+                                child: Icon(
+                                  Icons.account_tree_outlined,
+                                  size: 14,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : _navyAccent,
+                                ),
+                              ),
+                              title: Text(name,
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: _navyDark)),
+                              subtitle: Text(type,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[500])),
+                              trailing: isSelected
+                                  ? const Icon(Icons.check_circle,
+                                      color: _navyAccent, size: 18)
+                                  : null,
+                              onTap: () {
+                                if (onSelected != null) {
+                                  onSelected(name);
+                                } else {
+                                  setState(() =>
+                                      _expenseAcctCtrl.text = name);
+                                }
+                                Navigator.pop(ctx);
+                              },
+                            );
+                          },
+                        ),
+                ),
+
+                // ── Footer: Add Account ──────────────────────────────
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final ok = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const NewChartOfAccountScreen()),
+                        );
+                        if (ok == true || ok == null) {
+                          await _loadCoaExpenseAccounts();
+                          // Re-open selector so user can pick the new account
+                          if (mounted) {
+                            _showExpenseAccountSelector(
+                                onSelected: onSelected);
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.add_circle_outline,
+                          size: 16, color: _navyAccent),
+                      label: const Text('Add New Account',
+                          style: TextStyle(color: _navyAccent)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: _navyAccent),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+    searchCtrl.dispose();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1315,6 +1595,50 @@ class _NewExpensePageState extends State<NewExpensePage> {
 
   Widget _buildItemRow(int index) {
     final row = _itemRows[index];
+
+    // Shared: tap-to-search tile for expense account in an itemized row
+    Widget _itemAccountTile({bool isDense = false}) {
+      final hasVal = (row.expenseAccount ?? '').isNotEmpty;
+      return InkWell(
+        onTap: () => _showExpenseAccountSelector(
+          onSelected: (name) => setState(() {
+            row.expenseAccount = name;
+            row.acctCtrl.text  = name;
+          }),
+        ),
+        borderRadius: BorderRadius.circular(isDense ? 6 : 8),
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: isDense ? 'Expense Account' : null,
+            hintText:  isDense ? null : 'Expense Account',
+            isDense: isDense,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(isDense ? 6 : 8)),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(isDense ? 6 : 8),
+                borderSide:
+                    const BorderSide(color: _navyAccent, width: 2)),
+            suffixIcon: const Icon(Icons.search,
+                color: _navyAccent, size: 18),
+            contentPadding: isDense
+                ? null
+                : const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 12),
+          ),
+          child: Text(
+            hasVal ? row.expenseAccount! : 'Search…',
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13,
+              color: hasVal ? _navyDark : Colors.grey[500],
+              fontWeight:
+                  hasVal ? FontWeight.w500 : FontWeight.normal,
+            ),
+          ),
+        ),
+      );
+    }
+
     return LayoutBuilder(builder: (ctx, cs) {
       final isMobile = cs.maxWidth < 500;
       if (isMobile) {
@@ -1329,18 +1653,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: row.acctCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Expense Account',
-                      isDense: true,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(6)),
-                    ),
-                    onChanged: (v) => row.expenseAccount = v,
-                  ),
-                ),
+                Expanded(child: _itemAccountTile(isDense: true)),
                 IconButton(
                   icon: const Icon(Icons.delete_outline,
                       color: Colors.red, size: 20),
@@ -1384,27 +1697,11 @@ class _NewExpensePageState extends State<NewExpensePage> {
         );
       }
 
+      // ── Desktop layout ──────────────────────────────────────────────
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 3,
-            child: TextFormField(
-              controller: row.acctCtrl,
-              decoration: InputDecoration(
-                hintText: 'Expense Account',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: _navyAccent, width: 2)),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
-              ),
-              onChanged: (v) => row.expenseAccount = v,
-            ),
-          ),
+          Expanded(flex: 3, child: _itemAccountTile(isDense: false)),
           const SizedBox(width: 8),
           SizedBox(
             width: 100,

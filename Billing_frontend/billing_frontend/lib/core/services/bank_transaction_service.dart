@@ -107,13 +107,29 @@ class BankTransactionService {
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
     try {
       final headers = await _api.getHeaders();
-      final res     = await http.post(
+      debugPrint('🔧 POST $path');
+      debugPrint('  Headers: $headers');
+      debugPrint('  Body: ${jsonEncode(body)}');
+      
+      final res = await http.post(
         Uri.parse('${_api.baseUrl}$path'),
         headers: headers,
         body:    jsonEncode(body),
       );
+      
+      debugPrint('  Response status: ${res.statusCode}');
+      debugPrint('  Response body: ${res.body}');
+      
+      if (res.statusCode >= 400) {
+        final errorBody = jsonDecode(res.body) as Map<String, dynamic>;
+        debugPrint('❌ Error response: $errorBody');
+        return errorBody;
+      }
+      
       return jsonDecode(res.body) as Map<String, dynamic>;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ POST error: $e');
+      debugPrint('Stack trace: $stackTrace');
       return {'success': false, 'message': e.toString()};
     }
   }
@@ -247,15 +263,24 @@ class BankTransactionService {
 
   Future<Map<String, dynamic>> categorizeAsDeposit({
     required String providerTransactionId,
-    required String coaAccountId,
+    String? coaAccountId,
+    String? categoryType,
     String? customerName,
     String? notes,
   }) => _post('/api/finance/banking/transactions/categorize/deposit', {
     'providerTransactionId': providerTransactionId,
-    'coaAccountId':          coaAccountId,
-    if (customerName != null) 'customerName': customerName,
-    if (notes        != null) 'notes':        notes,
+    if (coaAccountId  != null) 'coaAccountId':  coaAccountId,
+    if (categoryType  != null) 'categoryType':  categoryType,
+    if (customerName  != null) 'customerName':  customerName,
+    if (notes         != null) 'notes':         notes,
   });
+
+  /// Checks if the COA account for a simple category exists.
+  /// Returns { found: true, account: {...} } or
+  ///         { found: false, suggestedName, suggestedType, suggestedSubType }
+  Future<Map<String, dynamic>> resolveCategoryCoa(String categoryType) =>
+      _get('/api/finance/banking/transactions/resolve-category-coa',
+          params: {'categoryType': categoryType});
 
   Future<Map<String, dynamic>> categorizeAsTransfer({
     required String providerTransactionId,
@@ -424,11 +449,13 @@ class BankTransactionService {
     String? categoryLabel,
     String? linkedRecordId,
     String? linkedRecordType,
+    String? journalRef,
   }) => _post('/api/finance/banking/transactions/mark-categorized', {
     'providerTransactionId': providerTransactionId,
     if (categoryLabel    != null) 'categoryLabel':    categoryLabel,
     if (linkedRecordId   != null) 'linkedRecordId':   linkedRecordId,
     if (linkedRecordType != null) 'linkedRecordType': linkedRecordType,
+    if (journalRef       != null) 'journalRef':       journalRef,
   });
 
   Future<Map<String, dynamic>> deleteTransaction(String txnId) async {

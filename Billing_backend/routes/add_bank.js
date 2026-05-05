@@ -61,7 +61,8 @@ const CustomAccountTypeSchema = new mongoose.Schema({
 });
 
 const PaymentAccountSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
+  orgId:    { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   // Common fields for all account types
   accountType: {
     type: String,
@@ -226,7 +227,7 @@ router.post('/add', async (req, res) => {
     const newAccount = new PaymentAccount({
       ...accountData,
       currentBalance: accountData.openingBalance || 0,
-      orgId: req.user?.orgId || null,
+      orgId: req.user?.orgId || null, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
     });
 
     // Save to database
@@ -251,7 +252,7 @@ try {
   // Check if COA account already exists with this name
   const existingCOA = await ChartOfAccount.findOne({
     accountName: accountData.accountName,
-    ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+    ...req.orgFilter,
   });
   
   if (!existingCOA) {
@@ -267,6 +268,7 @@ try {
       balanceType:    'Dr',
       createdBy:      req.user?.email || 'system',
       orgId:          req.user?.orgId || null,
+      branchId:       req.branchIds?.length > 0 ? req.branchIds[0] : null,
     });
     console.log(`✅ COA account auto-created: ${accountData.accountName} (${coaType})`);
   } else {
@@ -323,10 +325,12 @@ router.get('/custom-types', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { isActive } = req.query;
+    const { isActive, allBranches } = req.query;
     
     const filter = {};
     if (req.user?.orgId) filter.orgId = req.user.orgId;
+    // Skip branch filter when caller explicitly needs all org accounts (e.g. transfer dropdowns)
+    if (!allBranches && req.branchFilter) Object.assign(filter, req.branchFilter);
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true';
     }
@@ -366,7 +370,8 @@ router.get('/:id', async (req, res) => {
 
     const account = await PaymentAccount.findOne({
       _id: id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
 
     if (!account) {
@@ -414,7 +419,7 @@ router.put('/:id', async (req, res) => {
 
     // Update the account
     const updatedAccount = await PaymentAccount.findOneAndUpdate(
-      { _id: id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) },
+      { _id: id, ...req.orgFilter, ...(req.branchFilter || {}) },
       { ...updateData, updatedAt: Date.now() },
       { new: true, runValidators: true }
     );
@@ -459,7 +464,8 @@ router.delete('/:id', async (req, res) => {
 
     const deletedAccount = await PaymentAccount.findOneAndDelete({
       _id: id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
 
     if (!deletedAccount) {
@@ -475,7 +481,8 @@ router.delete('/:id', async (req, res) => {
       const deleted = await ChartOfAccount.findOneAndDelete({
         accountName: deletedAccount.accountName,
         accountSubType: deletedAccount.accountType,
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
+        ...(req.branchFilter || {}),
       });
       if (deleted) {
         console.log(`✅ COA account deleted: ${deletedAccount.accountName}`);
@@ -518,7 +525,7 @@ router.get('/:id/balance', async (req, res) => {
 
     const account = await PaymentAccount.findOne({
       _id: id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).select('currentBalance accountName');
 
     if (!account) {
@@ -571,7 +578,7 @@ router.patch('/:id/status', async (req, res) => {
     }
 
     const updatedAccount = await PaymentAccount.findOneAndUpdate(
-      { _id: id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) },
+      { _id: id, ...req.orgFilter },
       { isActive, updatedAt: Date.now() },
       { new: true }
     );

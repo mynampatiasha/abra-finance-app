@@ -11,6 +11,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 // ============================================================================
 // ALL INDIAN STATES
@@ -306,34 +307,57 @@ class CustomerTransaction {
 // ============================================================================
 // CUSTOMER MAIL MODEL
 // ============================================================================
+// CUSTOMER MAIL MODEL
+// ============================================================================
 class CustomerMail {
   final String   invoiceNumber;
   final String   invoiceId;
+  final String   customerName;
+  final String   customerPhone;
   final String   sentTo;
   final DateTime sentAt;
-  final String   emailType;
+  final String   emailType;   // 'invoice' | 'reminder' | 'payment_receipt' | 'whatsapp'
+  final String   channel;     // 'email' | 'whatsapp'
   final String   subject;
   final double   amount;
+  final double   amountDue;
+  final bool     success;
+  final String?  failReason;
+  final String?  reminderType; // 'overdue' | 'predue' | null
 
   const CustomerMail({
     required this.invoiceNumber,
     required this.invoiceId,
+    this.customerName  = '',
+    this.customerPhone = '',
     required this.sentTo,
     required this.sentAt,
     required this.emailType,
+    this.channel  = 'email',
     required this.subject,
     required this.amount,
+    this.amountDue  = 0,
+    this.success    = true,
+    this.failReason,
+    this.reminderType,
   });
 
   factory CustomerMail.fromJson(Map<String, dynamic> json) {
     return CustomerMail(
       invoiceNumber: json['invoiceNumber'] ?? '',
       invoiceId:     json['invoiceId']?.toString() ?? '',
+      customerName:  json['customerName']  ?? '',
+      customerPhone: json['customerPhone'] ?? '',
       sentTo:        json['sentTo']   ?? '',
-      sentAt:        DateTime.tryParse(json['sentAt'] ?? '') ?? DateTime.now(),
+      sentAt:        (DateTime.tryParse(json['sentAt'] ?? '') ?? DateTime.now()).toLocal(),
       emailType:     json['emailType'] ?? 'invoice',
+      channel:       json['channel']   ?? 'email',
       subject:       json['subject']   ?? '',
-      amount:        (json['amount'] ?? 0).toDouble(),
+      amount:        (json['amount']    ?? 0).toDouble(),
+      amountDue:     (json['amountDue'] ?? 0).toDouble(),
+      success:       json['success'] != false,
+      failReason:    json['failReason'],
+      reminderType:  json['reminderType'],
     );
   }
 }
@@ -687,9 +711,11 @@ class BillingCustomersService {
 
   static Future<Map<String, String>> _getHeaders({bool isMultipart = false}) async {
     final token = await _getAuthToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     final headers = <String, String>{ 'Accept': 'application/json' };
     if (!isMultipart) headers['Content-Type'] = 'application/json';
     if (token != null && token.isNotEmpty) headers['Authorization'] = 'Bearer $token';
+    headers['x-branch-ids'] = branchHdr;
     return headers;
   }
 

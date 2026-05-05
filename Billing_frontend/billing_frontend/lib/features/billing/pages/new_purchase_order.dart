@@ -430,6 +430,53 @@ class _NewPurchaseOrderScreenState
   // SAVE METHODS — all unchanged
   // ============================================================================
 
+  Future<void> _markAsSent() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedVendorId == null) {
+      _showErrorSnackbar('Please select a vendor'); return;
+    }
+    if (!_validateItems()) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'The email will NOT be sent to the vendor.\n\nDo you want to mark this purchase order as Sent (Issued) anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            child: const Text('Mark as Sent'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      final poData = _buildPOData('ISSUED');
+      PurchaseOrder po;
+      if (widget.purchaseOrderId != null) {
+        po = await PurchaseOrderService.updatePurchaseOrder(widget.purchaseOrderId!, poData);
+      } else {
+        po = await PurchaseOrderService.createPurchaseOrder(poData);
+      }
+      await PurchaseOrderService.markAsSent(po.id);
+      _showSuccessSnackbar('Purchase order marked as sent');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showErrorSnackbar(_extractError(e, 'Failed to mark as sent'));
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _saveAsDraft() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedVendorId == null) {
@@ -636,6 +683,17 @@ class _NewPurchaseOrderScreenState
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             label: const Text('Cancel',
                 style: TextStyle(color: Colors.white70)),
+          ),
+          const SizedBox(width: 4),
+          // Mark as Sent — no email, just status → ISSUED
+          OutlinedButton.icon(
+            onPressed: _isSaving ? null : _markAsSent,
+            icon: const Icon(Icons.mark_email_read_outlined, size: 18, color: Colors.white70),
+            label: const Text('Mark as Sent', style: TextStyle(color: Colors.white70)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white38),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
           ),
           const SizedBox(width: 4),
           TextButton.icon(

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // DASHBOARD SERVICE — FULLY FIXED
 // ============================================================================
 // File: lib/core/services/dashboard_service.dart
@@ -62,7 +62,7 @@ class DashboardService {
         break;
       case 'This Fiscal Year':
         start = fyStart;
-        end   = fyEnd;
+        end   = now;
         break;
       case 'Last Fiscal Year':
         start = DateTime(fyStart.year - 1, 4, 1);
@@ -515,24 +515,33 @@ class DashboardService {
   // ── 4. Income & Expense ────────────────────────────────────────────────────
   Future<Map<String, dynamic>> fetchIncomeExpense(
       String period, String basis) async {
-    // Try P&L report first for totals
-    double totalIncome  = 0;
-    double totalExpense = 0;
     try {
       final dates = getPeriodDates(period);
+      // Use the monthly endpoint — reads from AccountTransaction (same as P&L)
+      // so categorized bank transactions are included correctly
       final res = await _api.get(
-        '/api/finance/reports/profit-loss?period=${dates['period']}&basis=${basis.toLowerCase()}',
+        '/api/finance/reports/profit-loss-monthly?period=${dates['period']}',
       );
       final payload = _unwrap(res);
       if (payload != null) {
-        totalIncome  = _toDouble(payload['income']?['total']);
-        totalExpense = _toDouble(payload['operatingExpenses']?['total'])
-                     + _toDouble(payload['costOfGoods']?['total']);
+        final rawMonthly = (payload['monthly'] as List?)?.cast<Map>() ?? [];
+        if (rawMonthly.isNotEmpty) {
+          final List<Map<String, dynamic>> monthly = rawMonthly.map<Map<String, dynamic>>((m) => {
+            'month':   m['month']?.toString() ?? '',
+            'income':  _toDouble(m['income']),
+            'expense': _toDouble(m['expense']),
+          }).toList();
+          return {
+            'totalIncome':  _toDouble(payload['totalIncome']),
+            'totalExpense': _toDouble(payload['totalExpense']),
+            'monthly':      monthly,
+          };
+        }
       }
     } catch (_) {}
 
-    // Always build monthly from raw data for the bar chart
-    return _buildIncomeExpMonthly(period, totalIncome, totalExpense);
+    // Fallback: build from raw collections
+    return _buildIncomeExpMonthly(period, 0, 0);
   }
 
   Future<Map<String, dynamic>> _buildIncomeExpMonthly(
@@ -649,18 +658,18 @@ class DashboardService {
         categories.sort((a, b) =>
             (_toDouble(b['amount'])).compareTo(_toDouble(a['amount'])));
 
-        if (categories.isNotEmpty) {
-          return {
-            'total':      grandTotal > 0
-                ? grandTotal
-                : categories.fold(0.0, (s, c) => s + _toDouble(c['amount'])),
-            'categories': categories,
-          };
-        }
+        // ✅ FIX: Return empty data instead of falling back when backend filters out non-expenses
+        return {
+          'total':      grandTotal > 0
+              ? grandTotal
+              : categories.fold(0.0, (s, c) => s + _toDouble(c['amount'])),
+          'categories': categories,
+        };
       }
     } catch (_) {}
 
     // Fallback: aggregate expenses by account
+    // ⚠️ This fallback does NOT filter by account type, so it will show ALL expenses including Assets
     try {
       final res = await _api.get('/api/finance/expenses?limit=1000');
       final list = _unwrapList(res);

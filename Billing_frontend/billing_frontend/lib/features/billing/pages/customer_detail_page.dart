@@ -15,12 +15,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
 import '../../../../core/services/billing_customers_service.dart';
+import '../../../../core/services/payment_service.dart';
 import 'new_customer.dart';
 import 'new_invoice.dart';
 import 'new_quote.dart';
 import 'new_sales_order.dart';
 import 'new_credit_note.dart';
 import 'new_payment_page.dart';
+import 'reminder_settings_page.dart'; // For ReminderService
 
 const Color _navyDark   = Color(0xFF0D1B3E);
 const Color _navyMid    = Color(0xFF1A3A6B);
@@ -63,14 +65,18 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
   List<CustomerTransaction>? _transactions;
   List<CustomerMail>?     _mails;
   CustomerStatementData?  _statement;
+  Map<String, dynamic>?   _advanceRegister;
 
   bool _loadingCustomer     = true;
   bool _loadingOverview     = true;
   bool _loadingTransactions = false;
   bool _loadingMails        = false;
   bool _loadingStatement    = false;
+  bool _loadingAdvances     = false;
   String? _error;
   bool _changed = false;
+
+  String _mailFilter = 'All';
 
   DateTime _statementFrom = DateTime.now().subtract(const Duration(days: 365));
   DateTime _statementTo   = DateTime.now();
@@ -87,7 +93,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadCustomer();
   }
@@ -109,6 +115,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
       case 2: if (_transactions == null) _loadTransactions(); break;
       case 3: if (_mails        == null) _loadMails();        break;
       case 4: if (_statement    == null) _loadStatement();    break;
+      case 5: if (_advanceRegister == null) _loadAdvanceRegister(); break;
     }
   }
 
@@ -156,6 +163,14 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
         widget.customerId, fromDate: _statementFrom, toDate: _statementTo);
       setState(() { _statement = s; _loadingStatement = false; });
     } catch (_) { setState(() { _statement = null; _loadingStatement = false; }); }
+  }
+
+  Future<void> _loadAdvanceRegister() async {
+    setState(() => _loadingAdvances = true);
+    try {
+      final data = await PaymentService.getCustomerAdvanceRegister(widget.customerId);
+      setState(() { _advanceRegister = data; _loadingAdvances = false; });
+    } catch (_) { setState(() { _advanceRegister = {}; _loadingAdvances = false; }); }
   }
 
   Future<void> _postComment() async {
@@ -277,6 +292,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
               Tab(text: 'Transactions'),
               Tab(text: 'Mails'),
               Tab(text: 'Statement'),
+              Tab(text: 'Advances'),
             ],
           ),
         ),
@@ -289,6 +305,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
           _buildTransactionsTab(),
           _buildMailsTab(),
           _buildStatementTab(),
+          _buildAdvancesTab(),
         ],
       ),
     );
@@ -777,43 +794,551 @@ Widget _buildTransactionsTab() {
   // ============================================================================
 
   Widget _buildMailsTab() {
-    if (_loadingMails) return const Center(child: CircularProgressIndicator(color: _navyLight));
+    if (_loadingMails) {
+      return const Center(child: CircularProgressIndicator(color: _navyLight));
+    }
     if (_mails == null) {
       return _emptyState(Icons.mail_outline, 'Loading mails...', '',
-          action: ElevatedButton.icon(onPressed: _loadMails, icon: const Icon(Icons.refresh), label: const Text('Load')));
+          action: ElevatedButton.icon(
+            onPressed: _loadMails,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Load'),
+          ));
     }
-    if (_mails!.isEmpty) return _emptyState(Icons.mark_email_unread_outlined, 'No emails sent', 'Emails sent via invoices will appear here');
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _mails!.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (_, i) {
-        final m = _mails![i];
-        final icon  = m.emailType == 'payment_receipt' ? Icons.receipt_outlined : Icons.email_outlined;
-        final color = m.emailType == 'payment_receipt' ? _green : _navyLight;
-        return _card(child: Row(children: [
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, size: 20, color: color),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(m.subject, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navyDark), overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 3),
-            Text('To: ${m.sentTo}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            Text('Invoice: ${m.invoiceNumber}  •  ₹${m.amount.toStringAsFixed(2)}',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-          ])),
-          const SizedBox(width: 8),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(DateFormat('dd MMM yyyy').format(m.sentAt), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-            const SizedBox(height: 4),
-            Text(DateFormat('hh:mm a').format(m.sentAt), style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+    // ── Filter ─────────────────────────────────────────────────────────────
+    final filtered = _mailFilter == 'All'
+        ? _mails!
+        : _mails!.where((m) {
+            if (_mailFilter == 'Invoice')         return m.emailType == 'invoice';
+            if (_mailFilter == 'Reminder')        return m.emailType == 'reminder' && m.channel == 'email';
+            if (_mailFilter == 'WhatsApp')        return m.channel == 'whatsapp';
+            if (_mailFilter == 'Payment Receipt') return m.emailType == 'payment_receipt';
+            return true;
+          }).toList();
+
+    // ── Counts ─────────────────────────────────────────────────────────────
+    final whatsappCount  = _mails!.where((m) => m.channel == 'whatsapp').length;
+    final invoiceCount   = _mails!.where((m) => m.emailType == 'invoice').length;
+    final reminderCount  = _mails!.where((m) => m.emailType == 'reminder' && m.channel == 'email').length;
+    final receiptCount   = _mails!.where((m) => m.emailType == 'payment_receipt').length;
+
+    return Column(children: [
+      // ── Filter bar ────────────────────────────────────────────────────────
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        color: Colors.white,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(
+              '${_mails!.length} message${_mails!.length == 1 ? '' : 's'} total',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: _navyDark, fontSize: 13),
+            )),
+            // WhatsApp preview buttons
+            TextButton.icon(
+              onPressed: () => _showWhatsAppPreviewDialog('overdue'),
+              icon: const Icon(Icons.chat_rounded, size: 14, color: Color(0xFF25D366)),
+              label: const Text('Preview Overdue',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF25D366))),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+            ),
+            TextButton.icon(
+              onPressed: () => _showWhatsAppPreviewDialog('predue'),
+              icon: const Icon(Icons.chat_rounded, size: 14, color: Color(0xFFD97706)),
+              label: const Text('Preview Pre-Due',
+                  style: TextStyle(fontSize: 11, color: Color(0xFFD97706))),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+            ),
           ]),
-        ]));
-      },
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _mailFilterChip('All',             _mails!.length),
+              const SizedBox(width: 6),
+              _mailFilterChip('Invoice',         invoiceCount),
+              const SizedBox(width: 6),
+              _mailFilterChip('Reminder',        reminderCount,  color: _orange),
+              const SizedBox(width: 6),
+              _mailFilterChip('WhatsApp',        whatsappCount,  color: const Color(0xFF25D366)),
+              const SizedBox(width: 6),
+              _mailFilterChip('Payment Receipt', receiptCount,   color: _green),
+            ]),
+          ),
+        ]),
+      ),
+
+      const Divider(height: 1),
+
+      // ── List ─────────────────────────────────────────────────────────────
+      if (filtered.isEmpty)
+        Expanded(child: _emptyState(
+          Icons.mark_email_unread_outlined,
+          'No ${_mailFilter == 'All' ? '' : _mailFilter} messages',
+          '',
+        ))
+      else
+        Expanded(child: ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: filtered.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (_, i) => _buildMailCard(filtered[i]),
+        )),
+    ]);
+  }
+
+  Widget _buildMailCard(CustomerMail m) {
+    final isWhatsApp = m.channel == 'whatsapp';
+    final isOverdue  = m.reminderType == 'overdue';
+    final isPredue   = m.reminderType == 'predue';
+
+    final Color color = isWhatsApp
+        ? (isOverdue ? _red : isPredue ? _orange : const Color(0xFF25D366))
+        : m.emailType == 'payment_receipt'
+            ? _green
+            : m.emailType == 'reminder'
+                ? _orange
+                : _navyLight;
+
+    final IconData icon = isWhatsApp
+        ? Icons.chat_rounded
+        : m.emailType == 'payment_receipt'
+            ? Icons.receipt_outlined
+            : m.emailType == 'reminder'
+                ? Icons.notifications_outlined
+                : Icons.email_outlined;
+
+    final String typeLabel = isWhatsApp
+        ? 'WhatsApp ${isOverdue ? 'Overdue' : isPredue ? 'Pre-Due' : 'Reminder'}'
+        : m.emailType == 'payment_receipt'
+            ? 'Payment Receipt'
+            : m.emailType == 'reminder'
+                ? 'Reminder Email'
+                : 'Invoice Email';
+
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        // Channel icon
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 20, color: color),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(
+              m.subject,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navyDark),
+              overflow: TextOverflow.ellipsis,
+            )),
+            // Success/fail badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: m.success ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                m.success ? '✓ Sent' : '✗ Failed',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: m.success ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+                ),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 3),
+          // To: line — phone for WA, email for others
+          Text(
+            isWhatsApp
+                ? 'To: ${m.customerPhone.isNotEmpty ? m.customerPhone : m.sentTo}'
+                : 'To: ${m.sentTo}',
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+          Text(
+            'Invoice: ${m.invoiceNumber}  •  ₹${m.amount.toStringAsFixed(2)}'
+            '${m.amountDue > 0 ? '  •  Due: ₹${m.amountDue.toStringAsFixed(2)}' : ''}',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
+          if (m.failReason != null && m.failReason!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Error: ${m.failReason}',
+              style: const TextStyle(fontSize: 11, color: Color(0xFFDC2626)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ])),
+        const SizedBox(width: 8),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text(DateFormat('dd MMM yyyy').format(m.sentAt),
+              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+          const SizedBox(height: 4),
+          Text(DateFormat('hh:mm a').format(m.sentAt),
+              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+        ]),
+      ]),
+      const SizedBox(height: 10),
+      // Type badge + preview button
+      Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(typeLabel,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+        ),
+        if (isWhatsApp) ...[
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _showWhatsAppMessagePreview(m),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF25D366).withOpacity(0.10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF25D366).withOpacity(0.4)),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.visibility_outlined, size: 12, color: Color(0xFF25D366)),
+                SizedBox(width: 4),
+                Text('View Message', style: TextStyle(fontSize: 11, color: Color(0xFF25D366), fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ],
+      ]),
+    ]));
+  }
+
+  Widget _mailFilterChip(String label, int count, {Color color = _navyDark}) {
+    final isSelected = _mailFilter == label;
+    return GestureDetector(
+      onTap: () => setState(() => _mailFilter = label),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? color : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? color : Colors.grey[300]!,
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isSelected ? Colors.white : Colors.grey[600],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Colors.white.withOpacity(0.25)
+                  : Colors.grey[100],
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? Colors.white : Colors.grey[600],
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ── WhatsApp message preview from reminder log ────────────────────────────────
+  void _showWhatsAppMessagePreview(CustomerMail m) {
+    final isOverdue = m.reminderType == 'overdue';
+    final color     = isOverdue ? _red : _orange;
+    final customer  = _customer!;
+
+    // Rebuild the message text using the same template logic
+    final customerName  = customer.customerDisplayName;
+    final phone         = customer.primaryPhone;
+    final invoiceNumber = m.invoiceNumber;
+    final amountDue     = m.amountDue > 0 ? m.amountDue.toStringAsFixed(2) : m.amount.toStringAsFixed(2);
+
+    final message = isOverdue
+        ? 'Hello *$customerName*,\n\nInvoice *$invoiceNumber* is *overdue*.\n\nBalance Due: Rs. $amountDue\n\nPlease arrange payment at the earliest.\n\nThank you!'
+        : 'Hello *$customerName*,\n\nInvoice *$invoiceNumber* payment is due soon.\n\nAmount Due: Rs. $amountDue\n\nPlease arrange payment before the due date.\n\nThank you!';
+
+    _showWhatsAppBubbleDialog(
+      type:    isOverdue ? 'overdue' : 'predue',
+      message: message,
+      phone:   phone,
+      invoiceNumber: invoiceNumber,
+      customerName:  customerName,
+      isLiveMessage: true,
+      sentAt: m.sentAt,
+      success: m.success,
+      failReason: m.failReason,
+    );
+  }
+
+  // ── WhatsApp preview dialog (for preview buttons — test data) ─────────────────
+  void _showWhatsAppPreviewDialog(String type) async {
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF25D366))),
+    );
+
+    try {
+      final result = await ReminderService.getWhatsAppPreview(type);
+      if (!mounted) return;
+      Navigator.pop(context); // close loader
+
+      final data = result;
+      _showWhatsAppBubbleDialog(
+        type:          type,
+        message:       data['message'] ?? '',
+        phone:         data['testPhone'] ?? '+91 98765 43210',
+        invoiceNumber: data['invoiceNumber'] ?? 'INV-2024-0042',
+        customerName:  data['customerName']  ?? 'Rajesh Kumar',
+        isLiveMessage: false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      _snack('Could not load preview: $e', error: true);
+    }
+  }
+
+  // ── The actual WhatsApp bubble dialog ──────────────────────────────────────────
+  void _showWhatsAppBubbleDialog({
+    required String type,
+    required String message,
+    required String phone,
+    required String invoiceNumber,
+    required String customerName,
+    required bool   isLiveMessage,
+    DateTime?       sentAt,
+    bool?           success,
+    String?         failReason,
+  }) {
+    final isOverdue = type == 'overdue';
+    final color     = isOverdue ? _red : _orange;
+    final label     = isOverdue ? 'Overdue Reminder' : 'Pre-Due Reminder';
+    final bgColor   = isOverdue
+        ? const Color(0xFFFFF1F1)
+        : const Color(0xFFFFFBEB);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // ── Header ────────────────────────────────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: const BoxDecoration(
+              color: Color(0xFF128C7E),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Row(children: [
+              Container(
+                width: 38, height: 38,
+                decoration: const BoxDecoration(
+                  color: Colors.white24,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.chat_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  isLiveMessage ? customerName : 'Preview — $customerName',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                Text(
+                  phone,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ])),
+              // Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: color.withOpacity(0.5)),
+                ),
+                child: Text(
+                  label,
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ]),
+          ),
+
+          // ── WhatsApp chat background ───────────────────────────────────────
+          Container(
+            color: const Color(0xFFECE5DD), // WhatsApp chat bg
+            padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              // Date chip
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  isLiveMessage && sentAt != null
+                      ? DateFormat('dd MMM yyyy').format(sentAt)
+                      : DateFormat('dd MMM yyyy').format(DateTime.now()),
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF555555)),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Message bubble (right side — sender)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCF8C6), // WhatsApp green bubble
+                    borderRadius: const BorderRadius.only(
+                      topLeft:     Radius.circular(12),
+                      topRight:    Radius.circular(4),
+                      bottomLeft:  Radius.circular(12),
+                      bottomRight: Radius.circular(12),
+                    ),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 4, offset: const Offset(1, 2)),
+                    ],
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    // Message text — bold markers rendered
+                    _buildWhatsAppText(message),
+                    const SizedBox(height: 4),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(
+                        isLiveMessage && sentAt != null
+                            ? DateFormat('hh:mm a').format(sentAt)
+                            : DateFormat('hh:mm a').format(DateTime.now()),
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF777777)),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.done_all,
+                        size: 14,
+                        color: (success == false)
+                            ? _red
+                            : const Color(0xFF4FC3F7),
+                      ),
+                    ]),
+                  ]),
+                ),
+              ),
+
+              // Fail reason if any
+              if (isLiveMessage && success == false && failReason != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.error_outline, size: 14, color: Color(0xFFDC2626)),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(
+                      'Failed: $failReason',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF991B1B)),
+                    )),
+                  ]),
+                ),
+              ],
+
+              const SizedBox(height: 8),
+
+              // Info label
+              if (!isLiveMessage)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'This is a preview with test data.\nActual messages use real invoice details.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600], height: 1.4),
+                  ),
+                ),
+            ]),
+          ),
+
+          // ── Footer ────────────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+            ),
+            child: Row(children: [
+              Expanded(child: Text(
+                'Invoice: $invoiceNumber',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              )),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close', style: TextStyle(color: _navyDark)),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ── Render WhatsApp bold markers (*text*) ──────────────────────────────────────
+  Widget _buildWhatsAppText(String message) {
+    final lines = message.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lines.map((line) {
+        final spans = <TextSpan>[];
+        final parts = line.split('*');
+        for (int i = 0; i < parts.length; i++) {
+          spans.add(TextSpan(
+            text: parts[i],
+            style: TextStyle(
+              fontSize: 13,
+              color: const Color(0xFF111111),
+              fontWeight: i.isOdd ? FontWeight.bold : FontWeight.normal,
+            ),
+          ));
+        }
+        return RichText(text: TextSpan(children: spans));
+      }).toList(),
     );
   }
 
@@ -1053,6 +1578,209 @@ Widget _buildStatementTab() {
       ],
       if (action != null) ...[const SizedBox(height: 16), action],
     ]));
+  }
+
+  // ============================================================================
+  // TAB 6 — ADVANCES
+  // ============================================================================
+
+  Widget _buildAdvancesTab() {
+    if (_loadingAdvances) {
+      return const Center(child: CircularProgressIndicator(color: _navyLight));
+    }
+    if (_advanceRegister == null) {
+      return _emptyState(
+        Icons.account_balance_wallet_outlined,
+        'Loading advance register...',
+        '',
+        action: ElevatedButton.icon(
+          onPressed: _loadAdvanceRegister,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Load'),
+          style: ElevatedButton.styleFrom(backgroundColor: _navyLight, foregroundColor: Colors.white),
+        ),
+      );
+    }
+
+    final summary = _advanceRegister!['summary'] as Map? ?? {};
+    final advances = (_advanceRegister!['advances'] as List? ?? []);
+    final utilization = (_advanceRegister!['utilizationHistory'] as List? ?? []);
+    final fmt = (dynamic v) => '₹${(double.tryParse(v?.toString() ?? '0') ?? 0).toStringAsFixed(2)}';
+    final fmtDate = (dynamic d) {
+      if (d == null) return '—';
+      try { return DateFormat('dd MMM yyyy').format(DateTime.parse(d.toString())); } catch (_) { return d.toString(); }
+    };
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Summary cards ──────────────────────────────────────────────────
+        Row(children: [
+          _advSummaryCard('Total Advanced', fmt(summary['totalAdvanced']), Icons.arrow_downward, Colors.blue.shade700, Colors.blue.shade50),
+          const SizedBox(width: 12),
+          _advSummaryCard('Total Utilized', fmt(summary['totalUtilized']), Icons.check_circle_outline, Colors.orange.shade700, Colors.orange.shade50),
+          const SizedBox(width: 12),
+          _advSummaryCard('Available Balance', fmt(summary['availableBalance']), Icons.account_balance_wallet, Colors.green.shade700, Colors.green.shade50),
+        ]),
+
+        const SizedBox(height: 20),
+
+        // ── Advance payments list ──────────────────────────────────────────
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          const Text('Advance Payments', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+          ElevatedButton.icon(
+            onPressed: _loadAdvanceRegister,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Refresh'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _navyLight, foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+
+        if (advances.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Center(
+              child: Column(children: [
+                Icon(Icons.account_balance_wallet_outlined, size: 48, color: Colors.grey[300]),
+                const SizedBox(height: 12),
+                Text('No advance payments recorded', style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+              ]),
+            ),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: Column(children: [
+              // Table header
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [_navyDark, _navyMid]),
+                  borderRadius: BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10)),
+                ),
+                child: const Row(children: [
+                  Expanded(flex: 2, child: Text('DATE',    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                  Expanded(flex: 2, child: Text('RECEIPT #', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                  Expanded(flex: 2, child: Text('MODE',    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                  Expanded(flex: 2, child: Text('AMOUNT',  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
+                  Expanded(flex: 2, child: Text('NET CREDIT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
+                  Expanded(flex: 1, child: Text('STATUS',  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+                ]),
+              ),
+              // Rows
+              ...advances.asMap().entries.map((e) {
+                final idx = e.key;
+                final a = e.value as Map;
+                final bg = idx % 2 == 0 ? Colors.white : const Color(0xFFF8F9FA);
+                return Container(
+                  color: bg,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(children: [
+                    Expanded(flex: 2, child: Text(fmtDate(a['date']), style: TextStyle(fontSize: 12, color: Colors.grey[600]))),
+                    Expanded(flex: 2, child: Text(a['paymentNumber']?.toString() ?? '—',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navyAccent))),
+                    Expanded(flex: 2, child: Text(a['paymentMode']?.toString() ?? '—', style: const TextStyle(fontSize: 12))),
+                    Expanded(flex: 2, child: Text(fmt(a['amount']),
+                        textAlign: TextAlign.right, style: const TextStyle(fontSize: 12))),
+                    Expanded(flex: 2, child: Text(fmt(a['netAmount']),
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)))),
+                    Expanded(flex: 1, child: Center(child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(a['status']?.toString().toUpperCase() ?? 'PAID',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+                    ))),
+                  ]),
+                );
+              }),
+            ]),
+          ),
+
+        const SizedBox(height: 24),
+
+        // ── Utilization history ────────────────────────────────────────────
+        if (utilization.isNotEmpty) ...[
+          const Text('Credit Utilization History', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+          const SizedBox(height: 10),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: Column(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [Color(0xFF15803D), Color(0xFF166534)]),
+                  borderRadius: BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10)),
+                ),
+                child: const Row(children: [
+                  Expanded(flex: 2, child: Text('DATE',    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                  Expanded(flex: 2, child: Text('PAYMENT #', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                  Expanded(flex: 2, child: Text('CREDITS APPLIED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
+                ]),
+              ),
+              ...utilization.asMap().entries.map((e) {
+                final idx = e.key;
+                final u = e.value as Map;
+                final bg = idx % 2 == 0 ? Colors.white : const Color(0xFFF8F9FA);
+                return Container(
+                  color: bg,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(children: [
+                    Expanded(flex: 2, child: Text(fmtDate(u['date']), style: TextStyle(fontSize: 12, color: Colors.grey[600]))),
+                    Expanded(flex: 2, child: Text(u['paymentNumber']?.toString() ?? '—',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navyAccent))),
+                    Expanded(flex: 2, child: Text(fmt(u['creditsApplied']),
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)))),
+                  ]),
+                );
+              }),
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _advSummaryCard(String label, String value, IconData icon, Color color, Color bg) {
+    return Expanded(child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 6),
+          Expanded(child: Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+        ]),
+        const SizedBox(height: 8),
+        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+      ]),
+    ));
   }
 
   Widget _buildError() {

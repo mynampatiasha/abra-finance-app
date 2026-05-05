@@ -81,6 +81,7 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
   int _total      = 0;
 
   // ── scroll ────────────────────────────────────────────────────────────────
+  bool _isTableView = true;
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
 
@@ -483,7 +484,7 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _journals.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildJournalListView(),
           if (!_isLoading && _journals.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -524,6 +525,7 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree, _showViewProcess, tooltip: 'View Process', color: _navy, bg: _navy.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Journal', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -553,6 +555,7 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Journal', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -573,6 +576,7 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: () => _pickDate(true)),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: () => _pickDate(false)),
@@ -759,6 +763,121 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildJournalListView() {
+    if (_journals.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _journals.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildJournalListCard(_journals[i]),
+      ),
+    );
+  }
+
+  Widget _buildJournalListCard(ManualJournal j) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _openDetail(j), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: InkWell(onTap: () => _openDetail(j), child: Text(j.journalNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+              const SizedBox(width: 8),
+              _statusBadge(j.status),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(DateFormat('dd MMM yyyy').format(j.date), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              if (j.referenceNumber.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Icon(Icons.tag, size: 13, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(j.referenceNumber, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ],
+            ]),
+            if (j.notes.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(j.notes, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Debit', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${j.totalDebit.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red[700])),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Credit', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${j.totalCredit.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.green[700])),
+              ])),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(onTap: () => _share(j), borderRadius: BorderRadius.circular(8),
+                    child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)))),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (v) { switch (v) { case 'view': _openDetail(j); break; case 'edit': _openEdit(j); break; case 'publish': _quickPublish(j); break; case 'clone': _clone(j); break; case 'pdf': _downloadPDF(j); break; case 'void': _void(j); break; case 'ticket': _raiseTicket(j); break; case 'delete': _delete(j); break; } },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                    if (j.status == 'Draft') ...[
+                      const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _orange), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                      const PopupMenuItem(value: 'publish', child: ListTile(leading: Icon(Icons.publish, size: 17, color: _green), title: Text('Publish'), contentPadding: EdgeInsets.zero)),
+                    ],
+                    const PopupMenuItem(value: 'clone', child: ListTile(leading: Icon(Icons.copy_outlined, size: 17, color: _blue), title: Text('Clone'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'pdf', child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _navy), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
+                    if (j.status != 'Void') const PopupMenuItem(value: 'void', child: ListTile(leading: Icon(Icons.block_outlined, size: 17, color: _orange), title: Text('Void', style: TextStyle(color: _orange)), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                    if (j.status == 'Draft') const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

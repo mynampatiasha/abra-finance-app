@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 // ============================================================================
 // MODELS
@@ -173,10 +174,12 @@ class BudgetService {
   static Future<Map<String, String>> _getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 

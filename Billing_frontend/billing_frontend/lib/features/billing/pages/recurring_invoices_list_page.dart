@@ -89,6 +89,9 @@ class _RecurringInvoicesListPageState extends State<RecurringInvoicesListPage> {
   Set<int> _selectedRows = {};
   bool _selectAll = false;
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── scroll controllers ────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
@@ -516,7 +519,7 @@ String _extractPhone(RecurringInvoice p) {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildRecurringListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -561,6 +564,7 @@ String _extractPhone(RecurringInvoice p) {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -590,6 +594,7 @@ String _extractPhone(RecurringInvoice p) {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -610,6 +615,7 @@ String _extractPhone(RecurringInvoice p) {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
@@ -863,6 +869,151 @@ String _extractPhone(RecurringInvoice p) {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildRecurringListView() {
+    final items = _currentPageItems;
+    if (items.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildRecurringListCard(i, items[i]),
+      ),
+    );
+  }
+
+  Widget _buildRecurringListCard(int index, RecurringInvoice p) {
+    final isSel = _selectedRows.contains(index);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _openEdit(p), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Row 1: Checkbox + Profile Name + Status
+            Row(children: [
+              Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(
+                onTap: () => _openEdit(p),
+                child: Text(p.profileName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+              )),
+              const SizedBox(width: 8),
+              _statusBadge(p.status),
+            ]),
+            const SizedBox(height: 10),
+            // Row 2: Customer + Mode
+            Row(children: [
+              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(p.customerName.isNotEmpty ? p.customerName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(p.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              Text(p.invoiceCreationMode == 'auto_send' ? '🚀 Auto' : '📝 Draft', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+            const SizedBox(height: 8),
+            // Row 3: Frequency + Next Invoice
+            Row(children: [
+              Icon(Icons.repeat_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text('Every ${p.repeatEvery} ${p.repeatUnit}(s)', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Icon(Icons.event_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text('Next: ${DateFormat('dd MMM yyyy').format(p.nextInvoiceDate)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            // Row 4: Amount + Generated + Actions
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${p.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Generated', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                InkWell(
+                  onTap: () => _viewChildInvoices(p),
+                  child: Text(p.totalInvoicesGenerated.toString(), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _blue, decoration: TextDecoration.underline)),
+                ),
+              ])),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(
+                  onTap: () => _shareProfile(p), borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                )),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'edit':          _openEdit(p);           break;
+                      case 'generate':      _generate(p);           break;
+                      case 'view_invoices': _viewChildInvoices(p);  break;
+                      case 'whatsapp':      _whatsApp(p);           break;
+                      case 'ticket':        _raiseTicket(p);        break;
+                      case 'pause':         _pause(p);              break;
+                      case 'resume':        _resume(p);             break;
+                      case 'stop':          _stop(p);               break;
+                      case 'delete':        _delete(p);             break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'generate', child: ListTile(leading: Icon(Icons.add_circle_outline, size: 17, color: _green), title: Text('Generate Invoice'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'view_invoices', child: ListTile(leading: Icon(Icons.receipt_long_outlined, size: 17, color: _blue), title: Text('View Invoices'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'pause', child: ListTile(leading: Icon(Icons.pause_circle_outline, size: 17, color: _orange), title: Text('Pause'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'resume', child: ListTile(leading: Icon(Icons.play_circle_outline, size: 17, color: _green), title: Text('Resume'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'stop', child: ListTile(leading: Icon(Icons.stop_circle_outlined, size: 17, color: _red), title: Text('Stop'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

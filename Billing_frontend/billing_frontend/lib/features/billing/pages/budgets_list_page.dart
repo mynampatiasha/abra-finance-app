@@ -91,6 +91,7 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
   bool _selectAll = false;
 
   // ── scroll ────────────────────────────────────────────────────────────────
+  bool _isTableView = true;
   final _tableHScrollCtrl = ScrollController();
   final _statsHScrollCtrl = ScrollController();
 
@@ -497,7 +498,7 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _budgets.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildBudgetListView(),
           if (!_isLoading && _budgets.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -535,6 +536,7 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_outlined, _showProcessDialog, tooltip: 'View Process', color: _navy, bg: _navy.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Budget', Icons.add_rounded, _navy, _goToNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _handleImport),
@@ -557,6 +559,7 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Budget', Icons.add_rounded, _navy, _goToNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _handleImport),
@@ -577,6 +580,7 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
     _searchField(width: double.infinity),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _fyDropdown(), const SizedBox(width: 6),
       _periodDropdown(), const SizedBox(width: 6),
       if (_hasFilters) ...[_clearBtn(), const SizedBox(width: 6)],
@@ -762,6 +766,121 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildBudgetListView() {
+    if (_budgets.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _budgets.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildBudgetListCard(_budgets[i]),
+      ),
+    );
+  }
+
+  Widget _buildBudgetListCard(Budget b) {
+    final isSel = _selected.contains(b.id);
+    final variance = b.totalBudgeted - b.totalActual;
+    final over = variance < 0;
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _goToDetail(b.id), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Checkbox(value: isSel, onChanged: (_) { setState(() { if (isSel) _selected.remove(b.id); else _selected.add(b.id); _selectAll = _selected.length == _budgets.length; }); }, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(onTap: () => _goToDetail(b.id), child: Text(b.budgetName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+              const SizedBox(width: 8),
+              _statusBadge(b.isActive),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              _periodBadge(b.budgetPeriod),
+              const SizedBox(width: 10),
+              Text(b.financialYear, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 10),
+              Icon(Icons.list_alt, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text('${b.accountLines.length} accounts', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            if (b.notes != null && b.notes!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(b.notes!, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Budgeted', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${_fmt(b.totalBudgeted)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Actual', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${_fmt(b.totalActual)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal[700])),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Variance', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('${over ? '-' : ''}₹${_fmt(variance.abs())}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: over ? _red : _green)),
+              ])),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                onSelected: (v) async { switch (v) { case 'view': _goToDetail(b.id); break; case 'edit': _goToEdit(b.id); break; case 'toggle': await _toggle(b); break; case 'clone': await _clone(b); break; case 'share': _share(b); break; case 'ticket': _raiseTicket(b); break; case 'delete': await _delete(b); break; } },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'toggle', child: ListTile(leading: Icon(Icons.toggle_on_outlined, size: 17, color: _orange), title: Text('Toggle Active'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'clone', child: ListTile(leading: Icon(Icons.copy_outlined, size: 17, color: _navy), title: Text('Clone'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share, size: 17, color: _blue), title: Text('Share'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                ],
+              ),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

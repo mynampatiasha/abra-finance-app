@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
     if (req.user?.orgId) query.orgId = req.user.orgId;
     if (search) {
       query = {
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        ...req.orgFilter,
         $or: [
           { name: { $regex: search, $options: 'i' } },
           { email: { $regex: search, $options: 'i' } },

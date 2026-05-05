@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 // ============================================================================
 // RECURRING EXPENSE MODEL (UPDATED WITH TAX)
@@ -170,6 +171,17 @@ class RecurringExpenseService {
     }
   }
 
+  // Build headers with branch context
+  static Future<Map<String, String>> _headers() async {
+    final token = await _getToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
+    };
+  }
+
   // ============================================================================
   // GET RECURRING EXPENSES
   // ============================================================================
@@ -182,8 +194,6 @@ class RecurringExpenseService {
     int limit = 20,
   }) async {
     try {
-      final token = await _getToken();
-      
       final queryParams = <String, String>{
         'page': page.toString(),
         'limit': limit.toString(),
@@ -206,10 +216,7 @@ class RecurringExpenseService {
       
       final response = await http.get(
         uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -245,16 +252,11 @@ class RecurringExpenseService {
   
   static Future<RecurringExpenseStats?> getStats() async {
     try {
-      final token = await _getToken();
-      
       print('📊 GET Stats');
       
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/stats'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -276,16 +278,11 @@ class RecurringExpenseService {
   
   static Future<RecurringExpense?> getRecurringExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('🔍 GET Recurring Expense: $id');
       
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -307,8 +304,6 @@ class RecurringExpenseService {
   
   static Future<bool> createRecurringExpense(Map<String, dynamic> data) async {
     try {
-      final token = await _getToken();
-      
       // Ensure tax fields are properly formatted
       if (data.containsKey('tax')) {
         data['tax'] = (data['tax'] as num).toDouble();
@@ -322,10 +317,7 @@ class RecurringExpenseService {
       
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
         body: json.encode(data),
       );
 
@@ -345,8 +337,6 @@ class RecurringExpenseService {
   
   static Future<bool> updateRecurringExpense(String id, Map<String, dynamic> data) async {
     try {
-      final token = await _getToken();
-      
       // Ensure tax fields are properly formatted
       if (data.containsKey('tax')) {
         data['tax'] = (data['tax'] as num).toDouble();
@@ -360,10 +350,7 @@ class RecurringExpenseService {
       
       final response = await http.put(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
         body: json.encode(data),
       );
 
@@ -383,16 +370,11 @@ class RecurringExpenseService {
   
   static Future<bool> pauseRecurringExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('⏸️ PAUSE Recurring Expense: $id');
       
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/pause'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -410,16 +392,11 @@ class RecurringExpenseService {
   
   static Future<bool> resumeRecurringExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('▶️ RESUME Recurring Expense: $id');
       
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/resume'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -437,16 +414,11 @@ class RecurringExpenseService {
   
   static Future<bool> stopRecurringExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('⏹️ STOP Recurring Expense: $id');
       
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/stop'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -464,16 +436,11 @@ class RecurringExpenseService {
   
   static Future<bool> generateManualExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('🔧 GENERATE Manual Expense: $id');
       
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/generate'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -491,16 +458,11 @@ class RecurringExpenseService {
   
   static Future<List<dynamic>> getChildExpenses(String id) async {
     try {
-      final token = await _getToken();
-      
       print('📋 GET Child Expenses: $id');
       
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/child-expenses'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
@@ -522,16 +484,11 @@ class RecurringExpenseService {
   
   static Future<bool> deleteRecurringExpense(String id) async {
     try {
-      final token = await _getToken();
-      
       print('🗑️ DELETE Recurring Expense: $id');
       
       final response = await http.delete(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');

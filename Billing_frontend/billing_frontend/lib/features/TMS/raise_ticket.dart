@@ -257,7 +257,19 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
 
     if (response['success'] == true) {
       _showSuccessSnackbar('Ticket created successfully!');
-      Navigator.pop(context, true);
+      // Reset form and stay on the page
+      _formKey.currentState?.reset();
+      setState(() {
+        _subjectController.clear();
+        _messageController.clear();
+        _priority        = 'Medium';
+        _timeline        = null;
+        _assignedTo      = null;
+        _assignedToName  = null;
+        _attachment      = null;
+        _attachmentName  = null;
+        _calculatedDeadline = null;
+      });
     } else {
       _showErrorSnackbar(response['message'] ?? 'Failed to create ticket');
     }
@@ -826,161 +838,213 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
 
     showDialog(
       context: context,
+      barrierColor: Colors.black.withOpacity(0.5),
+      barrierDismissible: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return Dialog(
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
             child: Container(
-              constraints: const BoxConstraints(maxHeight: 600),
-              padding: const EdgeInsets.all(24),
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.18),
+                    blurRadius: 40,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [darkBlue, mediumBlue]),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.people, color: Colors.white, size: 24),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Select Employee',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: darkBlue),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Color(0xFF64748B)),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+                  // ── Gradient header ──────────────────────────────────────
                   Container(
-                    decoration: BoxDecoration(
-                      color: lightBlue.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: accentBlue.withOpacity(0.4)),
-                    ),
-                    child: TextField(
-                      controller: _employeeSearchController,
-                      style: TextStyle(color: darkBlue),
-                      decoration: InputDecoration(
-                        hintText: 'Search employees...',
-                        hintStyle: const TextStyle(color: Color(0xFF94A3B8)),
-                        prefixIcon: Icon(Icons.search, color: mediumBlue),
-                        suffixIcon: _employeeSearchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, color: Color(0xFF64748B)),
-                                onPressed: () {
-                                  setDialogState(() {
-                                    _employeeSearchController.clear();
-                                    _filteredEmployees = _employees;
-                                  });
-                                },
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF042E45), Color(0xFF186285)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      onChanged: (value) {
-                        setDialogState(() => _filterEmployees(value));
-                      },
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        topRight: Radius.circular(20),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.people, color: Colors.white, size: 20),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Assign To',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Select an employee to assign this ticket',
+                                style: TextStyle(color: Colors.white60, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                          onPressed: () => Navigator.pop(context),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Expanded(
+                  // ── Search field ─────────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEBF2F5).withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF186285).withOpacity(0.3)),
+                      ),
+                      child: TextField(
+                        controller: _employeeSearchController,
+                        style: TextStyle(color: darkBlue, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search employees...',
+                          hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                          prefixIcon: Icon(Icons.search, color: mediumBlue, size: 20),
+                          suffixIcon: _employeeSearchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, color: Color(0xFF64748B), size: 18),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      _employeeSearchController.clear();
+                                      _filteredEmployees = _employees;
+                                    });
+                                  },
+                                )
+                              : null,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() => _filterEmployees(value));
+                        },
+                      ),
+                    ),
+                  ),
+                  // ── Employee list ────────────────────────────────────────
+                  Flexible(
                     child: _filteredEmployees.isEmpty
-                        ? Center(
+                        ? Padding(
+                            padding: const EdgeInsets.all(24),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.search_off, size: 64, color: accentBlue.withOpacity(0.4)),
-                                const SizedBox(height: 16),
+                                Icon(Icons.search_off, size: 48, color: const Color(0xFF186285).withOpacity(0.4)),
+                                const SizedBox(height: 12),
                                 const Text(
                                   'No employees found',
-                                  style: TextStyle(color: Color(0xFF64748B), fontSize: 16, fontWeight: FontWeight.w500),
+                                  style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500),
                                 ),
                               ],
                             ),
                           )
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: _filteredEmployees.length,
-                            itemBuilder: (context, index) {
-                              final employee = _filteredEmployees[index];
-                              final isSelected = _assignedTo == employee['_id'].toString();
-
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? accentBlue.withOpacity(0.15)
-                                      : lightBlue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isSelected ? mediumBlue : accentBlue.withOpacity(0.3),
-                                    width: isSelected ? 2 : 1,
-                                  ),
-                                ),
-                                child: ListTile(
+                        : SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Column(
+                              children: _filteredEmployees.map((employee) {
+                                final isSelected = _assignedTo == employee['_id'].toString();
+                                return GestureDetector(
                                   onTap: () {
                                     setState(() {
-                                      _assignedTo = employee['_id'].toString();
+                                      _assignedTo     = employee['_id'].toString();
                                       _assignedToName = employee['name_parson'] ?? 'Unknown';
                                     });
                                     Navigator.pop(context);
                                   },
-                                  leading: CircleAvatar(
-                                    backgroundColor: isSelected ? mediumBlue : accentBlue.withOpacity(0.3),
-                                    child: Text(
-                                      (employee['name_parson'] ?? 'U')[0].toUpperCase(),
-                                      style: TextStyle(
-                                        color: isSelected ? Colors.white : darkBlue,
-                                        fontWeight: FontWeight.bold,
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? const Color(0xFF186285).withOpacity(0.08)
+                                          : const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isSelected ? const Color(0xFF186285) : const Color(0xFFE2E8F0),
+                                        width: isSelected ? 2 : 1,
                                       ),
                                     ),
-                                  ),
-                                  title: Text(
-                                    employee['name_parson'] ?? 'Unknown',
-                                    style: TextStyle(color: darkBlue, fontWeight: FontWeight.w600),
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (employee['email'] != null)
-                                        Text(
-                                          employee['email'],
-                                          style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                                        ),
-                                      if (employee['role'] != null)
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 4),
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: accentBlue.withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
+                                    child: Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 20,
+                                          backgroundColor: isSelected
+                                              ? const Color(0xFF186285)
+                                              : const Color(0xFF186285).withOpacity(0.15),
                                           child: Text(
-                                            employee['role'].toString().toUpperCase(),
+                                            (employee['name_parson'] ?? 'U')[0].toUpperCase(),
                                             style: TextStyle(
-                                              color: mediumBlue,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w600,
+                                              color: isSelected ? Colors.white : const Color(0xFF186285),
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
                                             ),
                                           ),
                                         ),
-                                    ],
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                employee['name_parson'] ?? 'Unknown',
+                                                style: TextStyle(
+                                                  color: darkBlue,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                              if (employee['email'] != null) ...[
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  employee['email'],
+                                                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                        if (isSelected)
+                                          const Icon(Icons.check_circle_rounded, color: Color(0xFF186285), size: 18)
+                                        else
+                                          const Icon(Icons.chevron_right_rounded, color: Color(0xFFCBD5E1), size: 18),
+                                      ],
+                                    ),
                                   ),
-                                  trailing: isSelected ? Icon(Icons.check_circle, color: mediumBlue) : null,
-                                ),
-                              );
-                            },
+                                );
+                              }).toList(),
+                            ),
                           ),
                   ),
                 ],

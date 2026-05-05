@@ -16,10 +16,12 @@ class TMSService {
 
   Future<Map<String, String>> _headers() async {
     final token = await FinanceSecureStorage.getToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 
@@ -124,10 +126,12 @@ class TMSService {
     try {
       final token = await FinanceSecureStorage.getToken();
       if (token == null) return {'success': false, 'message': 'Not authenticated'};
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
 
       final uri = Uri.parse('$_base$_prefix');
       final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer $token'
+        ..headers['x-branch-ids'] = branchHdr
         ..fields['subject'] = subject
         ..fields['message'] = message
         ..fields['priority'] = priority

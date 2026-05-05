@@ -9,16 +9,21 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../../core/finance_secure_storage.dart';
 import '../../app/config/finance_api_config.dart';
+import '../../../main.dart' show handleTokenExpired;
 
 class FinanceAuthService {
   // ── Finance backend base URL ─────────────────────────────────────────────────
   static String get _baseUrl => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _authHeaders() async {
-    final token = await FinanceSecureStorage.getToken();
+    final token     = await FinanceSecureStorage.getToken();
+    final orgHdr    = await FinanceSecureStorage.getOrgHeader();    // ← NEW
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
+      'x-org-ids': orgHdr,        // ← NEW
+      'x-branch-ids': branchHdr,
     };
   }
 
@@ -36,8 +41,9 @@ class FinanceAuthService {
       final user  = data['user']  as Map<String, dynamic>? ?? {};
       final token = data['token'] as String? ?? '';
 
-      // ✅ Extract orgLogoUrl from user object
+      // ✅ Extract orgLogoUrl and entityName from user object
       final orgLogoUrl = user['orgLogoUrl']?.toString();
+      final entityName = user['entityName']?.toString();
 
       await FinanceSecureStorage.saveSession(
         token:      token,
@@ -49,9 +55,10 @@ class FinanceAuthService {
         orgId:      user['orgId']?.toString()   ?? '',
         orgName:    user['orgName']?.toString() ?? '',
         orgLogoUrl: orgLogoUrl,                         // ✅ NEW
+        entityName: entityName,                         // ✅ NEW: Entity name
       );
 
-      debugPrint('✅ Finance session saved (logo: ${orgLogoUrl ?? 'none'})');
+      debugPrint('✅ Finance session saved (logo: ${orgLogoUrl ?? 'none'}, entity: ${entityName ?? 'none'})');
 
       // ── Save permissions ─────────────────────────────────────────────────────
       final rawPerms = user['permissions'];
@@ -70,6 +77,18 @@ class FinanceAuthService {
       if (rawOrgs is List && rawOrgs.isNotEmpty) {
         await FinanceSecureStorage.saveOrganizations(rawOrgs);
         debugPrint('✅ Finance organizations saved: ${rawOrgs.length} org(s)');
+
+        // ── Save allowedBranches for the current org ──────────────────────────
+        // Find the org entry matching the logged-in orgId and persist its
+        // allowedBranches so the branch selector can filter the list.
+        final currentOrgId = user['orgId']?.toString() ?? '';
+        final orgEntry = rawOrgs.firstWhere(
+          (o) => (o as Map)['orgId'] == currentOrgId,
+          orElse: () => <String, dynamic>{},
+        ) as Map;
+        final allowedBranches = List<String>.from(orgEntry['allowedBranches'] ?? []);
+        await FinanceSecureStorage.saveAllowedBranchIds(allowedBranches);
+        debugPrint('✅ Finance allowedBranches saved: $allowedBranches');
       } else {
         final orgId      = user['orgId']?.toString()   ?? '';
         final orgName    = user['orgName']?.toString() ?? '';
@@ -88,7 +107,15 @@ class FinanceAuthService {
           await FinanceSecureStorage.saveOrganizations([]);
           debugPrint('⚠️  No organizations found — saved empty list');
         }
+        // No org entry with allowedBranches — clear restriction (allow all)
+        await FinanceSecureStorage.saveAllowedBranchIds([]);
       }
+
+      // ── Always clear previously selected branch IDs on org change ────────────
+      // Stale branch IDs from a previous org would cause 403s on the branch
+      // selector's GET /api/finance/branches call (x-branch-ids mismatch).
+      await FinanceSecureStorage.saveSelectedBranchIds([]);
+      debugPrint('✅ Finance selectedBranchIds cleared for new org session');
     } catch (e) {
       debugPrint('❌ _persistSession error: $e');
     }
@@ -101,17 +128,19 @@ class FinanceAuthService {
     required String password,
     required String phone,
     required String orgName,
+    String? entityName,  // ✅ NEW: Optional entity name
   }) async {
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/api/finance/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'name':     name,
-          'email':    email,
-          'password': password,
-          'phone':    phone,
-          'orgName':  orgName,
+          'name':       name,
+          'email':      email,
+          'password':   password,
+          'phone':      phone,
+          'orgName':    orgName,
+          'entityName': entityName ?? '',  // ✅ NEW: Include entity name
         }),
       );
       final result = jsonDecode(response.body) as Map<String, dynamic>;
@@ -171,13 +200,16 @@ class FinanceAuthService {
   }
 
   // ── Select Org ────────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> selectOrg(String orgId) async {
+  static Future<Map<String, dynamic>> selectOrg(String orgId, {String? directToken}) async {
     try {
       final mainToken  = await FinanceSecureStorage.getToken();
-      final tempToken  = await FinanceSecureStorage.getTempToken();
-      final activeToken = (mainToken != null && mainToken.isNotEmpty)
-          ? mainToken
-          : tempToken;
+      final tempToken  = directToken ?? await FinanceSecureStorage.getTempToken();
+      // Prefer tempToken for org selection — it's the multi-org flow token
+      // issued by login. Falling back to mainToken handles re-selection from
+      // within an already-authenticated session (e.g. switching orgs).
+      final activeToken = (tempToken != null && tempToken.isNotEmpty)
+          ? tempToken
+          : mainToken;
 
       final headers = {
         'Content-Type': 'application/json',
@@ -190,6 +222,12 @@ class FinanceAuthService {
         headers: headers,
         body: jsonEncode({'orgId': orgId}),
       );
+
+      // Auto-logout if token is expired/invalid
+      if (await _checkForTokenExpiry(response)) {
+        return {'success': false, 'message': 'Session expired. Please log in again.'};
+      }
+
       final result = jsonDecode(response.body) as Map<String, dynamic>;
 
       if (result['success'] == true && result['data'] != null) {
@@ -232,11 +270,13 @@ class FinanceAuthService {
     required String filename,
   }) async {
     try {
-      final token = await FinanceSecureStorage.getToken();
-      final uri   = Uri.parse('$_baseUrl/api/finance/auth/upload-org-logo');
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-logo');
 
       final request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer ${token ?? ''}';
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
 
       final ext      = filename.split('.').last.toLowerCase();
       final mimeType = ext == 'png'  ? 'image/png'  :
@@ -363,6 +403,9 @@ class FinanceAuthService {
         Uri.parse('$_baseUrl$endpoint'),
         headers: headers,
       );
+      if (await _checkForTokenExpiry(response)) {
+        return {'success': false, 'message': 'Session expired. Please log in again.'};
+      }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
@@ -379,6 +422,9 @@ class FinanceAuthService {
         headers: headers,
         body: jsonEncode(body),
       );
+      if (await _checkForTokenExpiry(response)) {
+        return {'success': false, 'message': 'Session expired. Please log in again.'};
+      }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
@@ -395,6 +441,9 @@ class FinanceAuthService {
         headers: headers,
         body: jsonEncode(body),
       );
+      if (await _checkForTokenExpiry(response)) {
+        return {'success': false, 'message': 'Session expired. Please log in again.'};
+      }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
@@ -402,17 +451,48 @@ class FinanceAuthService {
   }
 
   // ── Generic authenticated DELETE ──────────────────────────────────────────────
-  static Future<Map<String, dynamic>> delete(String endpoint) async {
+  static Future<Map<String, dynamic>> delete(String endpoint, {Map<String, dynamic>? body}) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.delete(
         Uri.parse('$_baseUrl$endpoint'),
         headers: headers,
+        body: body != null ? jsonEncode(body) : null,
       );
+      if (await _checkForTokenExpiry(response)) {
+        return {'success': false, 'message': 'Session expired. Please log in again.'};
+      }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
     }
+  }
+
+  // ── Token expiry check ────────────────────────────────────────────────────────
+  // Returns true if the session was cleared (caller should stop processing).
+  static Future<bool> _checkForTokenExpiry(http.Response response) async {
+    // Only 401 is a token error — 403 means forbidden (wrong org/branch), not expired token
+    if (response.statusCode != 401) return false;
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final code    = body['code']    as String? ?? '';
+      final message = body['message'] as String? ?? '';
+
+      final isTokenError =
+          code == 'TOKEN_EXPIRED'   ||
+          code == 'INVALID_TOKEN'   ||
+          code == 'MISSING_TOKEN'   ||
+          code == 'USER_NOT_FOUND'  ||
+          message.toLowerCase().contains('expired') ||
+          message.toLowerCase().contains('invalid or expired');
+
+      if (isTokenError) {
+        debugPrint('🔒 FinanceAuthService: $code / "$message" — triggering auto-logout');
+        await handleTokenExpired();
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 }
 
@@ -427,10 +507,14 @@ class FinanceAuthServiceExtra {
   static String get _baseUrl => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _authHeaders() async {
-    final token = await FinanceSecureStorage.getToken();
+    final token     = await FinanceSecureStorage.getToken();
+    final orgHdr    = await FinanceSecureStorage.getOrgHeader();    // ← NEW
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
+      'x-org-ids': orgHdr,        // ← NEW
+      'x-branch-ids': branchHdr,
     };
   }
 
@@ -441,10 +525,12 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token = await FinanceSecureStorage.getToken();
-      final uri   = Uri.parse('$_baseUrl/api/finance/auth/upload-org-qr');
-      final request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer ${token ?? ''}';
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-qr');
+      final request   = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
       final ext      = filename.split('.').last.toLowerCase();
       final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
       if (imageFile != null) {
@@ -470,10 +556,12 @@ class FinanceAuthServiceExtra {
     required String label,
   }) async {
     try {
-      final token = await FinanceSecureStorage.getToken();
-      final uri   = Uri.parse('$_baseUrl/api/finance/auth/upload-org-document');
-      final request = http.MultipartRequest('POST', uri)
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-document');
+      final request   = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr
         ..fields['label'] = label;
       if (docFile != null) {
         request.files.add(await http.MultipartFile.fromPath('document', docFile.path));
@@ -501,6 +589,168 @@ class FinanceAuthServiceExtra {
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
       return {'success': false, 'message': 'Delete failed: $e'};
+    }
+  }
+
+  // ── Upload Digital Signature ────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> uploadDigitalSignature({
+    File? imageFile,
+    Uint8List? imageBytes,
+    required String filename,
+  }) async {
+    try {
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-digital-signature');
+      final request   = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
+      final ext      = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+      if (imageFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'signature', imageFile.path, contentType: MediaType.parse(mimeType)));
+      } else if (imageBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'signature', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+      } else {
+        return {'success': false, 'message': 'No image provided'};
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Signature upload failed: $e'};
+    }
+  }
+
+  // ── Delete Digital Signature ────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> deleteDigitalSignature() async {
+    try {
+      final headers  = await _authHeaders();
+      final response = await http.delete(
+        Uri.parse('$_baseUrl/api/finance/auth/delete-digital-signature'),
+        headers: headers,
+      );
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Delete failed: $e'};
+    }
+  }
+
+  // ── Upload Branch Logo ──────────────────────────────────────────────────────
+  /// Uploads a logo for a specific branch (branch-scoped profile).
+  static Future<Map<String, dynamic>> uploadBranchLogo({
+    required String branchId,
+    File? imageFile,
+    Uint8List? imageBytes,
+    required String filename,
+  }) async {
+    try {
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-logo');
+      final request   = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
+      final ext      = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+      if (imageFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'logo', imageFile.path, contentType: MediaType.parse(mimeType)));
+      } else if (imageBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'logo', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+      } else {
+        return {'success': false, 'message': 'No image provided'};
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Branch logo upload failed: $e'};
+    }
+  }
+
+  // ── Upload Branch QR Code ───────────────────────────────────────────────────
+  /// Uploads a payment QR code for a specific branch (branch-scoped profile).
+  static Future<Map<String, dynamic>> uploadBranchQr({
+    required String branchId,
+    File? imageFile,
+    Uint8List? imageBytes,
+    required String filename,
+  }) async {
+    try {
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-qr');
+      final request   = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
+      final ext      = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+      if (imageFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'qr', imageFile.path, contentType: MediaType.parse(mimeType)));
+      } else if (imageBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'qr', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+      } else {
+        return {'success': false, 'message': 'No image provided'};
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Branch QR upload failed: $e'};
+    }
+  }
+
+  // ── Delete Branch QR Code ───────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> deleteBranchQr(String branchId) async {
+    try {
+      final headers  = await _authHeaders();
+      final response = await http.delete(
+        Uri.parse('$_baseUrl/api/finance/branches/$branchId/delete-qr'),
+        headers: headers,
+      );
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Delete failed: $e'};
+    }
+  }
+
+  // ── Upload Branch Digital Signature ────────────────────────────────────────
+  /// Uploads a digital signature for a specific branch (branch-scoped profile).
+  static Future<Map<String, dynamic>> uploadBranchSignature({
+    required String branchId,
+    File? imageFile,
+    Uint8List? imageBytes,
+    required String filename,
+  }) async {
+    try {
+      final token     = await FinanceSecureStorage.getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-signature');
+      final request   = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${token ?? ''}'
+        ..headers['x-branch-ids']  = branchHdr;
+      final ext      = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+      if (imageFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'signature', imageFile.path, contentType: MediaType.parse(mimeType)));
+      } else if (imageBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'signature', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+      } else {
+        return {'success': false, 'message': 'No image provided'};
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'message': 'Branch signature upload failed: $e'};
     }
   }
 }

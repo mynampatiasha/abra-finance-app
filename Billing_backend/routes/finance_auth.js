@@ -3,14 +3,15 @@
 // ✅ NEW: Org Logo Upload per organisation
 
 const express = require('express');
+const { encrypt, decrypt } = require('../utils/encryption');
 const router  = express.Router();
 const bcrypt  = require('bcryptjs');
 const { ObjectId } = require('mongodb');
-const { generateFinanceToken, verifyFinanceJWT } = require('../middleware/finance_jwt');
+const { generateFinanceToken, verifyFinanceJWT, FINANCE_SECRET } = require('../middleware/finance_jwt');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
-const { seedSystemAccounts } = require('./chart_of_accounts');
+// seedSystemAccounts is called from branches.js only (per-branch seeding)
 
 const SALT_ROUNDS = 12;
 
@@ -76,7 +77,7 @@ async function enrichOrgsWithLogos(db, orgs) {
 router.post('/register', async (req, res) => {
   console.log('\n📝 FINANCE REGISTER');
   try {
-    const { name, email, password, phone, orgName } = req.body;
+    const { name, email, password, phone, orgName, entityName } = req.body;
 
     if (!name || !email || !password || !phone || !orgName) {
       return res.status(400).json({
@@ -121,6 +122,7 @@ router.post('/register', async (req, res) => {
       status:        'active',
       permissions:   {},
       organizations: [{ orgId, orgName: orgName.trim(), role: 'owner' }],
+      entityName:    entityName?.trim() || '',  // ✅ NEW: Save entity name from registration
       createdAt:     now,
       updatedAt:     now,
       lastLogin:     null,
@@ -136,7 +138,9 @@ router.post('/register', async (req, res) => {
 
     const token = generateFinanceToken(newUser, newUser.organizations[0]);
 
-    console.log(`✅ Registered: ${email} | Org: ${orgName}`);
+    // ℹ️ System accounts are seeded per-branch when a branch is created (branches.js).
+    // Do NOT seed here — seeding with branchId=null creates duplicate org-level accounts.
+    console.log(`✅ Registered: ${email} | Org: ${orgName} | Entity: ${entityName || 'none'}`);
     return res.status(201).json({
       success: true,
       message: 'Registration successful',
@@ -154,6 +158,7 @@ router.post('/register', async (req, res) => {
           organizations: newUser.organizations,
           permissions:   {},
           createdBy:     null,
+          entityName:    newUser.entityName,  // ✅ NEW: Include entity name in response
         },
       },
     });
@@ -202,7 +207,7 @@ router.post('/login', async (req, res) => {
       const orgLogoUrl  = await getOrgLogoUrl(db, orgs[0].orgId);
       const enrichedOrgs = await enrichOrgsWithLogos(db, orgs);
       const token = generateFinanceToken(user, orgs[0]);
-      await seedSystemAccounts(orgs[0].orgId).catch(e => console.warn('Seed warning:', e.message));
+      // ℹ️ Seeding is intentionally NOT done here — accounts are seeded once at org/branch creation time.
 
       return res.json({
         success:          true,
@@ -221,6 +226,7 @@ router.post('/login', async (req, res) => {
             organizations: enrichedOrgs,  // ✅ each org has logoUrl
             permissions:   user.permissions || {},
             createdBy:     user.createdBy || null,
+            entityName:    user.entityName || '',  // ✅ NEW: Entity name
           },
         },
       });
@@ -242,6 +248,7 @@ router.post('/login', async (req, res) => {
           email:     user.email,
           phone:     user.phone,
           createdBy: user.createdBy || null,
+          entityName: user.entityName || '',  // ✅ NEW: Entity name
         },
       },
     });
@@ -259,16 +266,16 @@ router.post('/select-org', async (req, res) => {
 
     const authHeader = req.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, message: 'No token provided' });
+      return res.status(401).json({ success: false, message: 'No token provided', code: 'MISSING_TOKEN' });
     }
 
     const token = authHeader.split(' ')[1];
     let decoded;
     try {
       const jwt = require('jsonwebtoken');
-      decoded = jwt.verify(token, process.env.JWT_FINANCE_SECRET);
+      decoded = jwt.verify(token, FINANCE_SECRET);
     } catch (e) {
-      return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+      return res.status(401).json({ success: false, message: 'Invalid or expired token', code: e.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN' });
     }
 
     const db   = req.db;
@@ -278,13 +285,13 @@ router.post('/select-org', async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const org = (user.organizations || []).find(o => o.orgId === orgId);
-    if (!org) return res.status(403).json({ success: false, message: 'You do not belong to this org' });
+    if (!org) return res.status(403).json({ success: false, message: 'You do not belong to this org', code: 'ORG_ACCESS_DENIED' });
 
     // ✅ Fetch logo for selected org + enrich full list
     const orgLogoUrl   = await getOrgLogoUrl(db, orgId);
     const enrichedOrgs = await enrichOrgsWithLogos(db, user.organizations || []);
     const newToken     = generateFinanceToken(user, org);
-    await seedSystemAccounts(orgId).catch(e => console.warn('Seed warning:', e.message));
+    // ℹ️ Seeding is intentionally NOT done here — accounts are seeded once at org/branch creation time.
 
     console.log(`✅ select-org: userId=${decoded.userId} → orgId=${orgId} | logo=${orgLogoUrl || 'none'}`);
     return res.json({
@@ -303,6 +310,7 @@ router.post('/select-org', async (req, res) => {
           organizations: enrichedOrgs,  // ✅
           permissions:   user.permissions || {},
           createdBy:     user.createdBy || null,
+          entityName:    user.entityName || '',  // ✅ NEW: Entity name
         },
       },
     });
@@ -459,9 +467,9 @@ router.delete('/delete-org-logo', verifyFinanceJWT, async (req, res) => {
 router.put('/update-profile', verifyFinanceJWT, async (req, res) => {
   console.log('\n✏️  FINANCE UPDATE PROFILE');
   try {
-    const { name, phone, email } = req.body;
+    const { name, phone, email, entityName } = req.body;
 
-    if (!name && !phone && !email) {
+    if (!name && !phone && !email && entityName === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field required' });
     }
 
@@ -485,6 +493,7 @@ router.put('/update-profile', verifyFinanceJWT, async (req, res) => {
     if (name)  updateFields.name  = name.trim();
     if (phone) updateFields.phone = phone.trim();
     if (email) updateFields.email = email.toLowerCase().trim();
+    if (entityName !== undefined) updateFields.entityName = entityName.trim();  // ✅ NEW: Entity name
 
     await db.collection('billing_users').updateOne(
       { _id: uid },
@@ -499,10 +508,11 @@ router.put('/update-profile', verifyFinanceJWT, async (req, res) => {
       message: 'Profile updated successfully',
       data: {
         user: {
-          id:    updated._id,
-          name:  updated.name,
-          email: updated.email,
-          phone: updated.phone,
+          id:         updated._id,
+          name:       updated.name,
+          email:      updated.email,
+          phone:      updated.phone,
+          entityName: updated.entityName || '',  // ✅ NEW: Entity name
         },
       },
     });
@@ -645,25 +655,37 @@ router.get('/org-profile', verifyFinanceJWT, async (req, res) => {
       success: true,
       data: {
         orgId,
-        orgName:             org.orgName             || '',
-        gstNumber:           org.gstNumber           || '',
-        phone:               org.phone               || '',
-        whatsappNumber:      org.whatsappNumber      || '',
-        email:               org.email               || '',
-        address:             org.address             || '',
-        website:             org.website             || '',
-        panNumber:           org.panNumber           || '',
-        logoUrl:             org.logoUrl             || null,
+        orgName:              org.orgName              || '',
+        gstNumber:            org.gstNumber            || '',
+        phone:                org.phone                || '',
+        whatsappNumber:       org.whatsappNumber       || '',
+        email:                org.email                || '',
+        address:              org.address              || '',
+        website:              org.website              || '',
+        panNumber:            org.panNumber            || '',
+        logoUrl:              org.logoUrl              || null,
+        digitalSignaturePath: org.digitalSignaturePath || null,
         // Banking fields
-        bankAccountHolder:   org.bankAccountHolder   || '',
-        bankAccountNumber:   org.bankAccountNumber   || '',
-        bankIfscCode:        org.bankIfscCode        || '',
-        bankName:            org.bankName            || '',
-        upiId:               org.upiId               || '',
-        qrCodePath:          org.qrCodePath          || '',
-        otherPaymentOptions: org.otherPaymentOptions || '',
-        documents:           org.documents           || [],
-        invoiceNote:         org.invoiceNote         || '',
+        bankAccountHolder:    org.bankAccountHolder    || '',
+        bankAccountNumber:    org.bankAccountNumber    || '',
+        bankIfscCode:         org.bankIfscCode         || '',
+        bankName:             org.bankName             || '',
+        upiId:                org.upiId                || '',
+        qrCodePath:           org.qrCodePath           || '',
+        otherPaymentOptions:  org.otherPaymentOptions  || '',
+        documents:            org.documents            || [],
+        invoiceNote:          org.invoiceNote          || '',
+        smtpHost:     org.smtpHost     || '',
+        smtpPort:     org.smtpPort     || 587,
+        smtpUser:     org.smtpUser     || '',
+        smtpFromName: org.smtpFromName || '',
+        smtpVerified: org.smtpVerified || false,
+        // WhatsApp Meta credentials
+        whatsappMetaPhoneNumberId: org.whatsappMetaPhoneNumberId || '',
+        whatsappMetaWabaId:        org.whatsappMetaWabaId        || '',
+        whatsappMetaVerified:      org.whatsappMetaVerified      || false,
+        // Access token: return masked if set, empty if not
+        whatsappMetaAccessToken:   org.whatsappMetaAccessToken ? '••••••••' : '',
       },
     });
   } catch (err) {
@@ -680,6 +702,7 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
       gstNumber, phone, whatsappNumber, email, address, website, panNumber,
       bankAccountHolder, bankAccountNumber, bankIfscCode, bankName, upiId, otherPaymentOptions,
     } = req.body;
+    const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpFromName } = req.body;
     const db  = req.db;
     const org = await db.collection('organizations').findOne({ orgId });
     if (!org) return res.status(404).json({ success: false, message: 'Organisation not found' });
@@ -698,6 +721,14 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
     if (upiId                !== undefined) updateFields.upiId                = upiId.trim();
     if (otherPaymentOptions  !== undefined) updateFields.otherPaymentOptions  = otherPaymentOptions.trim();
     if (req.body.invoiceNote !== undefined) updateFields.invoiceNote          = req.body.invoiceNote.trim();
+    if (smtpHost     !== undefined) updateFields.smtpHost     = smtpHost.trim();
+    if (smtpPort     !== undefined) updateFields.smtpPort     = parseInt(smtpPort) || 587;
+    if (smtpUser     !== undefined) updateFields.smtpUser     = smtpUser.trim();
+    if (smtpFromName !== undefined) updateFields.smtpFromName = smtpFromName.trim();
+    if (smtpPassword !== undefined && smtpPassword.trim() !== '') {
+      updateFields.smtpPasswordEnc = encrypt(smtpPassword.trim());
+      updateFields.smtpVerified    = false; // reset verified on password change
+    }
     await db.collection('organizations').updateOne({ orgId }, { $set: updateFields });
     const updated = await db.collection('organizations').findOne({ orgId });
     return res.json({
@@ -713,16 +744,17 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
         address:             updated.address             || '',
         website:             updated.website             || '',
         panNumber:           updated.panNumber           || '',
-        logoUrl:             updated.logoUrl             || null,
-        bankAccountHolder:   updated.bankAccountHolder   || '',
-        bankAccountNumber:   updated.bankAccountNumber   || '',
-        bankIfscCode:        updated.bankIfscCode        || '',
-        bankName:            updated.bankName            || '',
-        upiId:               updated.upiId               || '',
-        qrCodePath:          updated.qrCodePath          || '',
-        otherPaymentOptions: updated.otherPaymentOptions || '',
-        documents:           updated.documents           || [],
-        invoiceNote:         updated.invoiceNote         || '',
+        logoUrl:              updated.logoUrl              || null,
+        digitalSignaturePath: updated.digitalSignaturePath || null,
+        bankAccountHolder:    updated.bankAccountHolder    || '',
+        bankAccountNumber:    updated.bankAccountNumber    || '',
+        bankIfscCode:         updated.bankIfscCode         || '',
+        bankName:             updated.bankName             || '',
+        upiId:                updated.upiId                || '',
+        qrCodePath:           updated.qrCodePath           || '',
+        otherPaymentOptions:  updated.otherPaymentOptions  || '',
+        documents:            updated.documents            || [],
+        invoiceNote:          updated.invoiceNote          || '',
       },
     });
   } catch (err) {
@@ -848,6 +880,118 @@ router.delete('/org-document/:docId', verifyFinanceJWT, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── POST /api/finance/auth/upload-digital-signature ─────────────────────────
+// Uploads a digital signature image for the org (used in all PDFs)
+// ═══════════════════════════════════════════════════════════════════════════════
+const orgSignatureStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', 'uploads', 'org-signatures');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const orgId = req.user?.orgId || 'unknown';
+    const ext   = path.extname(file.originalname).toLowerCase();
+    cb(null, `sig-${orgId}-${Date.now()}${ext}`);
+  },
+});
+const orgSignatureUpload = multer({
+  storage: orgSignatureStorage,
+  limits:  { fileSize: 3 * 1024 * 1024 }, // 3 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|webp/;
+    const okExt  = allowed.test(path.extname(file.originalname).toLowerCase());
+    const okMime = allowed.test(file.mimetype) ||
+                   file.mimetype === 'image/jpeg' ||
+                   file.mimetype === 'image/png'  ||
+                   file.mimetype === 'image/webp' ||
+                   file.mimetype === 'application/octet-stream'; // Flutter web fallback
+    if (okExt && okMime) cb(null, true);
+    else cb(new Error('Only JPEG, PNG or WebP images are allowed'));
+  },
+});
+
+router.post(
+  '/upload-digital-signature',
+  verifyFinanceJWT,
+  (req, res, next) => {
+    orgSignatureUpload.single('signature')(req, res, (err) => {
+      if (err) {
+        // Multer fileFilter rejection or size limit
+        return res.status(400).json({ success: false, message: err.message || 'File upload error' });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    console.log('\n✍️  DIGITAL SIGNATURE UPLOAD');
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No file uploaded' });
+      }
+      const orgId = req.user?.orgId;
+      if (!orgId) {
+        return res.status(400).json({ success: false, message: 'orgId not found in token' });
+      }
+      const db  = req.db;
+      const org = await db.collection('organizations').findOne({ orgId });
+      if (!org) {
+        return res.status(404).json({ success: false, message: 'Organisation not found' });
+      }
+      // Delete old signature file if exists
+      if (org.digitalSignaturePath) {
+        try {
+          const oldPath = path.join(__dirname, '..', org.digitalSignaturePath.replace(/^\//, ''));
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } catch (_) {}
+      }
+      const digitalSignaturePath = `/uploads/org-signatures/${req.file.filename}`;
+      await db.collection('organizations').updateOne(
+        { orgId },
+        { $set: { digitalSignaturePath, signatureUpdatedAt: new Date() } }
+      );
+      console.log(`✅ Digital signature uploaded for org ${orgId}: ${digitalSignaturePath}`);
+      return res.json({
+        success: true,
+        message: 'Digital signature uploaded successfully',
+        data: { orgId, digitalSignaturePath },
+      });
+    } catch (err) {
+      console.error('❌ upload-digital-signature error:', err.message);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// ─── DELETE /api/finance/auth/delete-digital-signature ───────────────────────
+router.delete('/delete-digital-signature', verifyFinanceJWT, async (req, res) => {
+  console.log('\n🗑️  DELETE DIGITAL SIGNATURE');
+  try {
+    const orgId = req.user?.orgId;
+    if (!orgId) return res.status(400).json({ success: false, message: 'orgId not found in token' });
+    const db  = req.db;
+    const org = await db.collection('organizations').findOne({ orgId });
+    if (!org) return res.status(404).json({ success: false, message: 'Organisation not found' });
+    if (!org.digitalSignaturePath) {
+      return res.json({ success: true, message: 'No signature to delete' });
+    }
+    try {
+      const filePath = path.join(__dirname, '..', org.digitalSignaturePath.replace(/^\//, ''));
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) {}
+    await db.collection('organizations').updateOne(
+      { orgId },
+      { $set: { digitalSignaturePath: null, signatureUpdatedAt: new Date() } }
+    );
+    console.log(`✅ Digital signature deleted for org ${orgId}`);
+    return res.json({ success: true, message: 'Digital signature removed', data: { orgId, digitalSignaturePath: null } });
+  } catch (err) {
+    console.error('❌ delete-digital-signature error:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── DELETE /api/finance/auth/delete-account ─────────────────────────────────
 // Permanently deactivates the user account.
 // Sets status = 'deleted' so login is blocked forever for this email.
@@ -878,6 +1022,330 @@ router.delete('/delete-account', verifyFinanceJWT, async (req, res) => {
     return res.json({ success: true, message: 'Account deleted successfully' });
   } catch (err) {
     console.error('❌ delete-account error:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── POST /api/finance/auth/test-smtp ────────────────────────────────────────
+router.post('/test-smtp', verifyFinanceJWT, async (req, res) => {
+  try {
+    const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpFromName, branchId } = req.body;
+    if (!smtpHost || !smtpUser || !smtpPassword) {
+      return res.status(400).json({ success: false, message: 'smtpHost, smtpUser and smtpPassword are required' });
+    }
+    const nodemailer = require('nodemailer');
+    const port = parseInt(smtpPort) || 587;
+    const transporter = nodemailer.createTransport({
+      host:   smtpHost.trim(),
+      port,
+      secure: port === 465,
+      auth:   { user: smtpUser.trim(), pass: smtpPassword.trim() },
+      tls:    { rejectUnauthorized: false },
+    });
+    await transporter.verify();
+
+    // Save ALL credentials (not just verified flag) to the right collection
+    const db     = req.db;
+    const orgId  = req.user.orgId;
+    const fields = {
+      smtpHost:        smtpHost.trim(),
+      smtpPort:        port,
+      smtpUser:        smtpUser.trim(),
+      smtpPasswordEnc: encrypt(smtpPassword.trim()),
+      smtpFromName:    smtpFromName?.trim() || '',
+      smtpVerified:    true,
+      updatedAt:       new Date(),
+    };
+
+    if (branchId) {
+      console.log(`✅ test-smtp: saving to branch ${branchId}`);
+      await db.collection('branches').updateOne(
+        { branchId, orgId },
+        { $set: fields }
+      );
+    } else {
+      console.log(`✅ test-smtp: saving to org ${orgId}`);
+      await db.collection('organizations').updateOne(
+        { orgId },
+        { $set: fields }
+      );
+    }
+
+    return res.json({ success: true, message: 'SMTP connection verified successfully ✓' });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: `SMTP test failed: ${err.message}` });
+  }
+});
+
+// ─── PUT /api/finance/auth/rename-org ────────────────────────────────────────
+router.put('/rename-org', verifyFinanceJWT, async (req, res) => {
+  console.log('\n✏️  RENAME ORG');
+  try {
+    const { orgId, newOrgName } = req.body;
+    if (!orgId || !newOrgName || !newOrgName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'orgId and newOrgName are required',
+      });
+    }
+
+    const db   = req.db;
+    const user = await db.collection('billing_users').findOne({
+      _id: new ObjectId(req.user.userId),
+    });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Check user owns this org
+    const orgEntry = (user.organizations || []).find(
+      o => o.orgId === orgId && o.role === 'owner'
+    );
+    if (!orgEntry) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not the owner of this organisation',
+      });
+    }
+
+    const trimmedName = newOrgName.trim();
+
+    // Update in organizations collection
+    await db.collection('organizations').updateOne(
+      { orgId },
+      { $set: { orgName: trimmedName, updatedAt: new Date() } }
+    );
+
+    // Update in all users who belong to this org
+    await db.collection('billing_users').updateMany(
+      { 'organizations.orgId': orgId },
+      { $set: { 'organizations.$.orgName': trimmedName, updatedAt: new Date() } }
+    );
+
+    const updatedUser  = await db.collection('billing_users').findOne({ _id: user._id });
+    const enrichedOrgs = await enrichOrgsWithLogos(db, updatedUser.organizations || []);
+
+    console.log(`✅ Org renamed: ${orgId} → ${trimmedName}`);
+    return res.json({
+      success: true,
+      message: `Organisation renamed to "${trimmedName}"`,
+      data: { orgId, newOrgName: trimmedName, organizations: enrichedOrgs },
+    });
+  } catch (err) {
+    console.error('❌ rename-org error:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── DELETE /api/finance/auth/leave-org ──────────────────────────────────────
+router.delete('/leave-org', verifyFinanceJWT, async (req, res) => {
+  console.log('\n🚪 LEAVE ORG');
+  try {
+    const { orgId } = req.body;
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'orgId is required' });
+    }
+
+    const db   = req.db;
+    const user = await db.collection('billing_users').findOne({
+      _id: new ObjectId(req.user.userId),
+    });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Check user belongs to this org
+    const orgEntry = (user.organizations || []).find(o => o.orgId === orgId);
+    if (!orgEntry) {
+      return res.status(404).json({
+        success: false,
+        message: 'You do not belong to this organisation',
+      });
+    }
+
+    // Cannot leave currently active org
+    if (orgId === req.user.orgId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot leave your currently active organisation. Switch to another org first.',
+      });
+    }
+
+    // Remove org from user's organizations array
+    await db.collection('billing_users').updateOne(
+      { _id: user._id },
+      {
+        $pull: { organizations: { orgId } },
+        $set:  { updatedAt: new Date() },
+      }
+    );
+
+    const updatedUser  = await db.collection('billing_users').findOne({ _id: user._id });
+    const enrichedOrgs = await enrichOrgsWithLogos(db, updatedUser.organizations || []);
+
+    console.log(`✅ User ${req.user.userId} left org ${orgId}`);
+    return res.json({
+      success: true,
+      message: `You have left the organisation successfully`,
+      data: { organizations: enrichedOrgs },
+    });
+  } catch (err) {
+    console.error('❌ leave-org error:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── POST /api/finance/auth/test-whatsapp ────────────────────────────────────
+router.post('/test-whatsapp', verifyFinanceJWT, async (req, res) => {
+  console.log('\n📱 TEST WHATSAPP CONNECTION');
+  try {
+    const { phoneNumberId, accessToken, wabaId, testPhone } = req.body;
+
+    if (!phoneNumberId || !accessToken || !wabaId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone Number ID, Access Token and WhatsApp Business Account ID are all required.',
+      });
+    }
+    if (!testPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Enter a test phone number to receive the test message.',
+      });
+    }
+
+    // Format phone number
+    let phone = String(testPhone).replace(/[^\d]/g, '');
+    if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
+
+    // Send test message via Meta Cloud API using native https
+    const https = require('https');
+    const postData = JSON.stringify({
+      messaging_product: 'whatsapp',
+      to:   phone,
+      type: 'template',
+      template: {
+        name:     'hello_world',
+        language: { code: 'en_US' },
+      },
+    });
+
+    const options = {
+      hostname: 'graph.facebook.com',
+      port: 443,
+      path: `/v18.0/${phoneNumberId.trim()}/messages`,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken.trim()}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const request = https.request(options, (response) => {
+        let data = '';
+        response.on('data', (chunk) => { data += chunk; });
+        response.on('end', () => {
+          try {
+            resolve({ statusCode: response.statusCode, body: JSON.parse(data) });
+          } catch (e) {
+            reject(new Error('Invalid JSON response'));
+          }
+        });
+      });
+      request.on('error', (error) => reject(error));
+      request.write(postData);
+      request.end();
+    });
+
+    console.log('Meta API response:', JSON.stringify(result.body));
+
+    if (result.statusCode === 200 && result.body.messages) {
+      // Save credentials to branch
+      const db       = req.db;
+      const orgId    = req.user?.orgId;
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+      const fields = {
+        whatsappMetaPhoneNumberId: phoneNumberId.trim(),
+        whatsappMetaAccessToken:   encrypt(accessToken.trim()),
+        whatsappMetaWabaId:        wabaId.trim(),
+        whatsappMetaVerified:      true,
+        whatsappMetaVerifiedAt:    new Date(),
+        updatedAt:                 new Date(),
+      };
+
+      if (branchId) {
+        await db.collection('branches').updateOne({ branchId, orgId }, { $set: fields });
+      } else {
+        await db.collection('organizations').updateOne({ orgId }, { $set: fields });
+      }
+
+      return res.json({
+        success: true,
+        message: `✅ WhatsApp message sent successfully to +${phone}. Check your WhatsApp — if you received a "hello world" message, your connection is working perfectly.`,
+        data: { messageId: result.body.messages[0]?.id },
+      });
+    }
+
+    // Meta returned an error — give detailed message
+    const errCode    = result.body.error?.code;
+    const errMsg     = result.body.error?.message     || 'Unknown error';
+    const errDetails = result.body.error?.error_data?.details || '';
+
+    let friendlyMessage = `❌ Meta API Error (${errCode}): ${errMsg}`;
+    if (errDetails) friendlyMessage += `\nDetails: ${errDetails}`;
+
+    // Common error guidance
+    if (errCode === 190)  friendlyMessage += '\n\n👉 Your Access Token is invalid or expired. Generate a new one from Meta Developer Console.';
+    if (errCode === 100)  friendlyMessage += '\n\n👉 Phone Number ID is incorrect. Copy it from Meta Developer → WhatsApp → API Setup.';
+    if (errCode === 131030) friendlyMessage += '\n\n👉 This number is not registered on WhatsApp or is not in your allowed test recipients.';
+    if (errCode === 131047) friendlyMessage += '\n\n👉 Payment method missing on Meta Business Account. Add a card to send messages.';
+
+    return res.status(400).json({ success: false, message: friendlyMessage });
+
+  } catch (err) {
+    console.error('❌ test-whatsapp error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: `Server error: ${err.message}`,
+    });
+  }
+});
+
+// ─── PUT /api/finance/auth/save-whatsapp-credentials ─────────────────────────
+router.put('/save-whatsapp-credentials', verifyFinanceJWT, async (req, res) => {
+  console.log('\n💾 SAVE WHATSAPP CREDENTIALS');
+  try {
+    const { phoneNumberId, accessToken, wabaId } = req.body;
+
+    if (!phoneNumberId || !accessToken || !wabaId) {
+      return res.status(400).json({
+        success: false,
+        message: 'All three credentials are required.',
+      });
+    }
+
+    const db       = req.db;
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+    const fields = {
+      whatsappMetaPhoneNumberId: phoneNumberId.trim(),
+      whatsappMetaAccessToken:   encrypt(accessToken.trim()),
+      whatsappMetaWabaId:        wabaId.trim(),
+      updatedAt:                 new Date(),
+    };
+
+    if (branchId) {
+      await db.collection('branches').updateOne({ branchId, orgId }, { $set: fields });
+    } else {
+      await db.collection('organizations').updateOne({ orgId }, { $set: fields });
+    }
+
+    return res.json({
+      success: true,
+      message: 'WhatsApp credentials saved successfully.',
+    });
+  } catch (err) {
+    console.error('❌ save-whatsapp-credentials error:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });

@@ -273,10 +273,12 @@ class JournalListResult {
 class ManualJournalService {
   static Future<Map<String, String>> _getHeaders() async {
     final token = await FinanceSecureStorage.getToken() ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 

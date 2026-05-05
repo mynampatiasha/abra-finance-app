@@ -6,6 +6,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../../app/config/api_config.dart';
 import '../../../core/services/api_service.dart';
+import '../../../core/finance_secure_storage.dart';
+
+Future<String> _getBranchHeader() async {
+  try {
+    return await FinanceSecureStorage.getBranchHeader();
+  } catch (_) {
+    return 'ALL';
+  }
+}
 
 const Color _navy  = Color(0xFF0F1E3D);
 const Color _blue  = Color(0xFF2563EB);
@@ -90,9 +99,10 @@ Future<void> openDocumentPdf({
     return;
   }
   try {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token') ?? '';
-    final url   = '${ApiConfig.baseUrl}$pdfEndpoint/$docId/pdf?token=$token';
+    final prefs     = await SharedPreferences.getInstance();
+    final token     = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await _getBranchHeader();
+    final url   = '${ApiConfig.baseUrl}$pdfEndpoint/$docId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
     if (!context.mounted) return;
     await showDialog(
       context: context,

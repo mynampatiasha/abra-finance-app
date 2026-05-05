@@ -244,6 +244,8 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
         _selectedCustomerName  = cn.customerName;
         _selectedCustomerEmail = cn.customerEmail;
         _selectedCustomerPhone = cn.customerPhone;
+        _customerGSTIN         = cn.customerGSTIN;
+        _placeOfSupply         = cn.placeOfSupply;
         _billingAddress        = cn.billingAddress;
         _selectedInvoiceId     = cn.invoiceId;
         _selectedInvoiceNumber = cn.invoiceNumber;
@@ -262,12 +264,13 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
           rate:         i.rate,
           discount:     i.discount,
           discountType: i.discountType,
-          itemGstRate:  18,
+          itemGstRate:  i.itemGstRate,
           amount:       i.amount,
         )).toList();
         for (final item in _items) {
           _descControllers.add(TextEditingController(text: item.itemDetails));
         }
+        _updateInterState();
         _calculateAmounts();
       });
     } catch (e) { _showError('Failed to load credit note: $e'); }
@@ -406,6 +409,7 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       'customerName':     _selectedCustomerName,
       'customerEmail':    _selectedCustomerEmail,
       'customerPhone':    _selectedCustomerPhone,
+      'customerGSTIN':    _customerGSTIN,
       if (_billingAddress != null) 'billingAddress': _billingAddress!.toJson(),
       if (_selectedInvoiceId     != null) 'invoiceId':     _selectedInvoiceId,
       if (_selectedInvoiceNumber != null) 'invoiceNumber': _selectedInvoiceNumber,
@@ -1327,7 +1331,7 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
                     .toList(),
                 onChanged: (v) {
                   setState(() {
-                    item.itemGstRate = v ?? 18.0;
+                    item.itemGstRate = v ?? 0.0;  // Default to 0% instead of 18%
                     _calculateAmounts();
                   });
                 },
@@ -1877,7 +1881,7 @@ class CreditNoteItemRow {
     this.rate         = 0,
     this.discount     = 0,
     this.discountType = 'percentage',
-    this.itemGstRate  = 18,
+    this.itemGstRate  = 0,  // Default to 0% GST instead of 18%
     this.hsnCode      = '',
     this.unit         = 'Nos',
     this.taxableAmount= 0,

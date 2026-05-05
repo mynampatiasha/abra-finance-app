@@ -77,6 +77,9 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
   bool    _isLoading = true;
   String? _errorMessage;
 
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── filters ───────────────────────────────────────────────────────────────
   String   _statusFilter = 'All';
   String?  _modeFilter;
@@ -491,7 +494,7 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _payments.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _payments.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -549,6 +552,7 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _handleImport),
@@ -585,6 +589,7 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _handleImport),
@@ -605,6 +610,7 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
     SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
+        _buildViewToggle(), const SizedBox(width: 6),
         _dateChip(
           label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date',
           isActive: _fromDate != null, onTap: _pickFromDate,
@@ -963,6 +969,139 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
     );
   }
 
+  // ── VIEW TOGGLE ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    height: 42,
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(10),
+      color: Colors.white,
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? _navy : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.grey[600])),
+        ]),
+      ),
+    );
+  }
+
+  // ── LIST VIEW ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    if (_payments.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: _payments.map((p) => _buildPaymentCard(p)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildPaymentCard(PaymentMade p) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Row 1: payment # + status badge
+          Row(children: [
+            Expanded(child: InkWell(
+              onTap: () => _showDetail(p),
+              child: Text(p.paymentNumber, style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 15, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+            )),
+            _statusBadge(p.status),
+          ]),
+          const SizedBox(height: 8),
+          // Row 2: vendor + mode + type
+          Row(children: [
+            const Icon(Icons.store_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Expanded(child: Text(p.vendorName, style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
+            _typeBadge(p.paymentType),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: _navy.withOpacity(0.06), borderRadius: BorderRadius.circular(6)),
+              child: Text(p.paymentMode, style: const TextStyle(color: _navy, fontSize: 11, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          // Row 3: date + amounts
+          Row(children: [
+            const Icon(Icons.calendar_today, size: 14, color: Color(0xFF7F8C8D)),
+            const SizedBox(width: 5),
+            Text(DateFormat('dd MMM yyyy').format(p.paymentDate), style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+            const Spacer(),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('₹${_fmt(p.totalAmount)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy)),
+              if (p.amountUnused > 0.01)
+                Text('Unused: ₹${_fmt(p.amountUnused)}', style: TextStyle(fontSize: 12, color: Colors.orange[700])),
+            ]),
+          ]),
+          const Divider(height: 16),
+          // Actions row
+          Row(children: [
+            InkWell(
+              onTap: () => _sharePayment(p),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(width: 32, height: 32, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              onSelected: (v) {
+                switch (v) {
+                  case 'view':         _showDetail(p);          break;
+                  case 'edit':         _openEdit(p.id);         break;
+                  case 'pdf':          _downloadPDF(p);         break;
+                  case 'mark_as_sent': _markPaymentAsSent(p);   break;
+                  case 'ticket':       _raiseTicket(p);         break;
+                  case 'delete':       _delete(p);              break;
+                }
+              },
+              itemBuilder: (_) => [
+                _menuItem('view',         Icons.visibility_outlined,         _blue,   'View Details'),
+                _menuItem('edit',         Icons.edit_outlined,               _orange, 'Edit Payment'),
+                _menuItem('pdf',          Icons.picture_as_pdf_outlined,     _red,    'Download PDF'),
+                _menuItem('mark_as_sent', Icons.mark_email_read_outlined,    _orange, 'Mark as Sent'),
+                _menuItem('ticket',       Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                const PopupMenuDivider(),
+                _menuItem('delete',       Icons.delete_outline,              _red,    'Delete', textColor: _red),
+              ],
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   // ── TABLE ─────────────────────────────────────────────────────────────────
 
   Widget _buildTable() {
@@ -1057,7 +1196,7 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
 
         // Payment #
         DataCell(SizedBox(width: 140, child: InkWell(
-          onTap: () => _showDetail(p),
+          onTap: () => _openEdit(p.id),
           child: Text(p.paymentNumber, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, fontSize: 13, decoration: TextDecoration.underline)),
         ))),

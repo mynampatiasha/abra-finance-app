@@ -12,6 +12,7 @@ import '../../core/finance_secure_storage.dart';
 import '../../data/services/finance_auth_service.dart';
 import 'finance_login_page.dart';
 import 'finance_post_login_splash.dart';
+import 'finance_branch_selector_page.dart';
 import '../billing/billing_main_shell.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
@@ -38,7 +39,9 @@ class FinanceOrgSelectorPage extends StatefulWidget {
 
 class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
     with SingleTickerProviderStateMixin {
-  String? _selectedOrgId;
+  String? _selectedOrgId;  // Keep for single-select backward compatibility
+  Set<String> _selectedOrgIds = {};  // NEW: Multi-select support
+  bool _selectAll = false;  // NEW: All organizations checkbox
   bool _loading = false;
   String? _error;
 
@@ -67,7 +70,7 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
       _selectedOrgId = orgId;
     });
 
-    final res = await FinanceAuthService.selectOrg(orgId);
+    final res = await FinanceAuthService.selectOrg(orgId, directToken: widget.tempToken);
     if (!mounted) return;
     setState(() => _loading = false);
 
@@ -89,16 +92,15 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
 
       if (!mounted) return;
 
-      // ✅ Splash injected here after org selection
+      // ✅ Navigate to branch selector — it will go to splash+shell after branch pick
       Navigator.pushReplacement(
         context,
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => FinancePostLoginSplash(
-            userName:    user['name'] ?? widget.user['name'] ?? 'User',
-            orgName:     user['orgName'] ?? orgName,
-            destination: const BillingMainShell(),
-            // ↑ Replace _FinanceDashboardPlaceholder() with your actual
-            //   finance dashboard widget, e.g. FinanceDashboard()
+          pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
+            orgId:        user['orgId'] ?? orgId,
+            orgName:      user['orgName'] ?? orgName,
+            userName:     user['name'] ?? widget.user['name'] ?? 'User',
+            isInitialLogin: true,
           ),
           transitionsBuilder: (_, anim, __, child) =>
               FadeTransition(opacity: anim, child: child),
@@ -109,6 +111,129 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
       setState(() {
         _error = res['message'] ?? 'Failed to select organisation';
         _selectedOrgId = null;
+      });
+    }
+  }
+
+  // ── NEW: Multi-org selection logic ─────────────────────────────────────────
+  void _toggleOrgSelection(String orgId) {
+    setState(() {
+      if (_selectedOrgIds.contains(orgId)) {
+        _selectedOrgIds.remove(orgId);
+        _selectAll = false;  // Uncheck "All" if user deselects an org
+      } else {
+        _selectedOrgIds.add(orgId);
+        // Check if all orgs are now selected
+        if (_selectedOrgIds.length == widget.organizations.length) {
+          _selectAll = true;
+        }
+      }
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      _selectAll = !_selectAll;
+      if (_selectAll) {
+        // Select all organizations
+        _selectedOrgIds = widget.organizations
+            .map((org) => org['orgId'] as String)
+            .toSet();
+      } else {
+        // Deselect all
+        _selectedOrgIds.clear();
+      }
+    });
+  }
+
+  Future<void> _applyMultiOrgSelection() async {
+    if (_selectedOrgIds.isEmpty) {
+      setState(() => _error = 'Please select at least one organisation');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    // Save selected org IDs to storage
+    if (_selectAll) {
+      await FinanceSecureStorage.saveSelectedOrgIds(['ALL']);
+    } else {
+      await FinanceSecureStorage.saveSelectedOrgIds(_selectedOrgIds.toList());
+    }
+
+    // For multi-org, automatically select ALL branches (no branch selector needed)
+    await FinanceSecureStorage.saveSelectedBranchIds([]);  // Empty = ALL branches
+
+    // For multi-org, we still need to select one org for the token
+    // Use the first selected org
+    final firstOrgId = _selectedOrgIds.first;
+    final firstOrg = widget.organizations.firstWhere(
+      (org) => org['orgId'] == firstOrgId,
+    );
+
+    final res = await FinanceAuthService.selectOrg(firstOrgId, directToken: widget.tempToken);
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    if (res['success'] == true) {
+      final data = res['data'] as Map<String, dynamic>;
+      final user = data['user'] as Map<String, dynamic>;
+
+      await FinanceSecureStorage.clearTempToken();
+      await FinanceSecureStorage.saveSession(
+        token:   data['token'],
+        userId:  user['id'].toString(),
+        name:    user['name'] ?? '',
+        email:   user['email'] ?? '',
+        phone:   user['phone'] ?? '',
+        role:    user['role'] ?? '',
+        orgId:   user['orgId'] ?? '',
+        orgName: user['orgName'] ?? '',
+      );
+
+      if (!mounted) return;
+
+      // ✅ MULTI-ORG: Skip branch selector, go directly to splash+main app
+      if (_selectedOrgIds.length > 1 || _selectAll) {
+        // Multi-org mode - skip branch selector
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => FinancePostLoginSplash(
+              userName: user['name'] ?? widget.user['name'] ?? 'User',
+              orgName: _selectAll 
+                  ? 'All Organizations' 
+                  : '${_selectedOrgIds.length} Organizations',
+              destination: const BillingMainShell(),
+            ),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 400),
+          ),
+        );
+      } else {
+        // Single org mode - show branch selector (existing behavior)
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
+              orgId:        user['orgId'] ?? firstOrgId,
+              orgName:      user['orgName'] ?? firstOrg['orgName'],
+              userName:     user['name'] ?? widget.user['name'] ?? 'User',
+              isInitialLogin: true,
+            ),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 400),
+          ),
+        );
+      }
+    } else {
+      setState(() {
+        _error = res['message'] ?? 'Failed to select organisation';
       });
     }
   }
@@ -184,6 +309,46 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                         ),
                         const SizedBox(height: 20),
 
+                        // ── Entity Name (if set) ──────────────────────────
+                        if (widget.user['entityName'] != null && 
+                            (widget.user['entityName'] as String).isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 12),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  _navyAccent.withOpacity(0.15),
+                                  _navyLight.withOpacity(0.10),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: _navyAccent.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.business_center_rounded,
+                                    color: _navyAccent, size: 18),
+                                const SizedBox(width: 10),
+                                Text(
+                                  widget.user['entityName'] as String,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
                         const Text(
                           'Select Organisation',
                           style: TextStyle(
@@ -223,12 +388,83 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Choose an organisation to continue',
+                          'Select one or more organisations to view data',
                           style: TextStyle(
                               color: Colors.white.withOpacity(0.5),
                               fontSize: 13),
                         ),
                         const SizedBox(height: 32),
+
+                        // ── "All Organizations" checkbox ──────────────────
+                        GestureDetector(
+                          onTap: _loading ? null : _toggleSelectAll,
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: _selectAll
+                                  ? _navyAccent.withOpacity(0.18)
+                                  : Colors.white.withOpacity(0.07),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: _selectAll
+                                    ? _navyAccent
+                                    : Colors.white.withOpacity(0.12),
+                                width: _selectAll ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 24,
+                                  height: 24,
+                                  decoration: BoxDecoration(
+                                    color: _selectAll
+                                        ? _navyAccent
+                                        : Colors.transparent,
+                                    border: Border.all(
+                                      color: _selectAll
+                                          ? _navyAccent
+                                          : Colors.white.withOpacity(0.3),
+                                      width: 2,
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: _selectAll
+                                      ? const Icon(Icons.check,
+                                          color: Colors.white, size: 16)
+                                      : null,
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'All Organizations',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _navyAccent.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '${widget.organizations.length} orgs',
+                                    style: TextStyle(
+                                      color: _navyAccent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
 
                         // ── Error box ─────────────────────────────────────
                         if (_error != null) ...[
@@ -254,20 +490,19 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                           const SizedBox(height: 16),
                         ],
 
-                        // ── Org cards ─────────────────────────────────────
+                        // ── Org cards with checkboxes ─────────────────────────────────────
                         ...widget.organizations.map((org) {
                           final orgId   = org['orgId']   as String? ?? '';
                           final orgName = org['orgName'] as String? ?? '';
                           final role    = org['role']    as String? ?? 'staff';
-                          final isSelected = _selectedOrgId == orgId;
-                          final isThisLoading = _loading && isSelected;
+                          final isSelected = _selectedOrgIds.contains(orgId);
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: GestureDetector(
                               onTap: _loading
                                   ? null
-                                  : () => _selectOrg(orgId, orgName),
+                                  : () => _toggleOrgSelection(orgId),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 220),
                                 padding: const EdgeInsets.all(18),
@@ -302,6 +537,29 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                                 ),
                                 child: Row(
                                   children: [
+                                    // Checkbox
+                                    Container(
+                                      width: 24,
+                                      height: 24,
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? _navyAccent
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? _navyAccent
+                                              : Colors.white.withOpacity(0.3),
+                                          width: 2,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: isSelected
+                                          ? const Icon(Icons.check,
+                                              color: Colors.white, size: 16)
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 12),
+
                                     // Org avatar
                                     Container(
                                       width: 52,
@@ -364,51 +622,67 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                                         ],
                                       ),
                                     ),
-
-                                    // Arrow / loader / check
-                                    isThisLoading
-                                        ? const SizedBox(
-                                            width: 22,
-                                            height: 22,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: _navyAccent))
-                                        : AnimatedContainer(
-                                            duration: const Duration(
-                                                milliseconds: 200),
-                                            width: 32,
-                                            height: 32,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: isSelected
-                                                  ? _navyAccent
-                                                      .withOpacity(0.2)
-                                                  : Colors.white
-                                                      .withOpacity(0.06),
-                                              border: Border.all(
-                                                color: isSelected
-                                                    ? _navyAccent
-                                                    : Colors.white
-                                                        .withOpacity(0.15),
-                                              ),
-                                            ),
-                                            child: Icon(
-                                              isSelected
-                                                  ? Icons.check_rounded
-                                                  : Icons
-                                                      .arrow_forward_rounded,
-                                              color: isSelected
-                                                  ? _navyAccent
-                                                  : Colors.white54,
-                                              size: 16,
-                                            ),
-                                          ),
                                   ],
                                 ),
                               ),
                             ),
                           );
                         }),
+
+                        const SizedBox(height: 24),
+
+                        // ── Apply button ──────────────────────────────────
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _loading || _selectedOrgIds.isEmpty
+                                ? null
+                                : _applyMultiOrgSelection,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _navyAccent,
+                              disabledBackgroundColor:
+                                  Colors.white.withOpacity(0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              elevation: 0,
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        _selectedOrgIds.isEmpty
+                                            ? 'Select at least one organisation'
+                                            : _selectAll
+                                                ? 'Continue with All Organizations'
+                                                : 'Continue with ${_selectedOrgIds.length} organisation${_selectedOrgIds.length != 1 ? 's' : ''}',
+                                        style: TextStyle(
+                                          color: _selectedOrgIds.isEmpty
+                                              ? Colors.white38
+                                              : Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      if (_selectedOrgIds.isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        const Icon(Icons.arrow_forward_rounded,
+                                            color: Colors.white, size: 18),
+                                      ],
+                                    ],
+                                  ),
+                          ),
+                        ),
 
                         const SizedBox(height: 28),
 

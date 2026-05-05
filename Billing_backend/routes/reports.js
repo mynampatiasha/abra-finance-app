@@ -78,9 +78,7 @@ function parseDateRange(q) {
   };
 }
 
-function orgScope(req) {
-  return req.user?.orgId ? { orgId: req.user.orgId } : {};
-}
+function orgScope(req) { return { ...req.orgFilter, ...(req.branchFilter || {}) }; }
 
 function getDB(req) {
   if (req.db) return req.db;
@@ -126,6 +124,73 @@ router.get('/profit-loss', async (req, res) => {
     const netProfit   = fmt(grossProfit - totalOpEx);
     res.json({ success: true, data: { period: { start, end }, income: { items: income, total: fmt(totalIncome) }, costOfGoods: { items: cogs, total: fmt(totalCOGS) }, grossProfit, operatingExpenses: { items: opEx, total: fmt(totalOpEx) }, netProfit } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ── Monthly income & expense breakdown (for dashboard bar chart) ─────────────
+// Returns 12 months of income/expense from AccountTransaction — same source as P&L
+router.get('/profit-loss-monthly', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+
+    const accounts = await ChartOfAccount.find({
+      accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] },
+      isActive: true,
+      ...scope,
+    }).lean();
+
+    const ids = accounts.map(a => a._id);
+    if (ids.length === 0) return res.json({ success: true, data: { monthly: [] } });
+
+    // Aggregate by account + month
+    const txns = await AccountTransaction.aggregate([
+      { $match: { accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope } },
+      { $group: {
+          _id: {
+            accountId: '$accountId',
+            year:  { $year:  '$date' },
+            month: { $month: '$date' },
+          },
+          dr: { $sum: '$debit' },
+          cr: { $sum: '$credit' },
+      }},
+    ]);
+
+    // Map accountId → type
+    const typeMap = {};
+    accounts.forEach(a => { typeMap[a._id.toString()] = a.accountType; });
+
+    // Build monthly totals keyed "YYYY-MM"
+    const monthlyMap = {};
+    for (const t of txns) {
+      const key = `${t._id.year}-${String(t._id.month).padStart(2, '0')}`;
+      if (!monthlyMap[key]) monthlyMap[key] = { income: 0, expense: 0 };
+      const type = typeMap[t._id.accountId.toString()] || '';
+      if (INCOME_TYPES.includes(type))  monthlyMap[key].income  += t.cr - t.dr;
+      else                              monthlyMap[key].expense += t.dr - t.cr;
+    }
+
+    // Build FY-ordered 12-month array
+    const fyStart = start;
+    const monthly = [];
+    const abbr = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    for (let i = 0; i < 12; i++) {
+      const d   = new Date(fyStart.getFullYear(), fyStart.getMonth() + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthly.push({
+        month:   abbr[d.getMonth() + 1],
+        income:  fmt(monthlyMap[key]?.income  || 0),
+        expense: fmt(monthlyMap[key]?.expense || 0),
+      });
+    }
+
+    const totalIncome  = fmt(monthly.reduce((s, m) => s + m.income,  0));
+    const totalExpense = fmt(monthly.reduce((s, m) => s + m.expense, 0));
+
+    res.json({ success: true, data: { monthly, totalIncome, totalExpense } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 router.get('/balance-sheet', async (req, res) => {
@@ -188,96 +253,113 @@ router.get('/balance-sheet', async (req, res) => {
 router.get('/cash-flow', async (req, res) => {
   try {
     const { start, end } = parseDateRange(req.query);
-    const db    = getDB(req);
     const scope = orgScope(req);
 
-    // Helper: parse any date format into a JS Date
-    function parseAnyDate(v) {
-      if (!v) return null;
-      if (v instanceof Date) return v;
-      // ISO string or "DD/MM/YYYY" or "YYYY-MM-DD"
-      const s = v.toString().trim();
-      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-        const [d, m, y] = s.split('/');
-        return new Date(`${y}-${m}-${d}`);
+    // ✅ FIX: Use ProviderTransaction which has cashFlowSection field
+    const ProviderTransaction = col('ProviderTransaction', 'providertransactions');
+
+    // Get all provider transactions in the period
+    const allTxns = await ProviderTransaction.find({
+      transactionDate: { $gte: start, $lte: end },
+      reconciliationStatus: 'CATEGORIZED',
+      ...scope,
+    }).lean();
+
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('🔍 [Cash Flow] DETAILED DEBUG START');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('🔍 [Cash Flow] Period:', { start, end });
+    console.log('🔍 [Cash Flow] Total transactions found:', allTxns.length);
+    console.log('🔍 [Cash Flow] Scope filter:', scope);
+    
+    // Show ALL transactions with full details
+    console.log('\n📋 [Cash Flow] ALL TRANSACTIONS:');
+    allTxns.forEach((t, idx) => {
+      console.log(`\n  [${idx + 1}/${allTxns.length}] Transaction:`);
+      console.log(`    _id: ${t._id}`);
+      console.log(`    description: ${t.description}`);
+      console.log(`    amount: ₹${t.amount}`);
+      console.log(`    transactionType: ${t.transactionType}`);
+      console.log(`    cashFlowSection: ${t.cashFlowSection}`);
+      console.log(`    categoryLabel: ${t.categoryLabel}`);
+      console.log(`    source: ${t.source}`);
+      console.log(`    linkedRecordType: ${t.linkedRecordType}`);
+      console.log(`    linkedRecordId: ${t.linkedRecordId}`);
+      console.log(`    journalRef: ${t.journalRef}`);
+      console.log(`    reconciliationStatus: ${t.reconciliationStatus}`);
+      console.log(`    transactionDate: ${t.transactionDate}`);
+    });
+
+    // Categorize by cash flow section
+    let operatingInflows = 0, operatingOutflows = 0;
+    let investingInflows = 0, investingOutflows = 0;
+    let financingInflows = 0, financingOutflows = 0;
+
+    console.log('\n💰 [Cash Flow] PROCESSING TRANSACTIONS:');
+    for (const txn of allTxns) {
+      const amount = txn.amount || 0;
+      const section = txn.cashFlowSection || 'OPERATING'; // Default to operating
+      
+      console.log(`  → ${txn.description} | ₹${amount} | ${txn.transactionType} | ${section}`);
+      
+      if (txn.transactionType === 'CREDIT') {
+        // Money coming IN
+        if (section === 'INVESTING') investingInflows += amount;
+        else if (section === 'FINANCING') financingInflows += amount;
+        else operatingInflows += amount;
+      } else {
+        // Money going OUT (DEBIT)
+        if (section === 'INVESTING') investingOutflows += amount;
+        else if (section === 'FINANCING') financingOutflows += amount;
+        else operatingOutflows += amount;
       }
-      const d = new Date(s);
-      return isNaN(d) ? null : d;
     }
 
-    // ── INCOMING: payments_received collection ───────────────────────────
-    const prFilter = { status: { $ne: 'void' } };
-    if (scope.orgId) prFilter.orgId = scope.orgId;
-    const allPaymentsReceived = await db.collection('payments_received').find(prFilter).toArray();
+    console.log('\n📊 [Cash Flow] SUMMARY:');
+    console.log(`  Operating Activities:`);
+    console.log(`    Inflows:  ₹${operatingInflows}`);
+    console.log(`    Outflows: ₹${operatingOutflows}`);
+    console.log(`    Net:      ₹${operatingInflows - operatingOutflows}`);
+    console.log(`  Investing Activities:`);
+    console.log(`    Inflows:  ₹${investingInflows}`);
+    console.log(`    Outflows: ₹${investingOutflows}`);
+    console.log(`    Net:      ₹${investingInflows - investingOutflows}`);
+    console.log(`  Financing Activities:`);
+    console.log(`    Inflows:  ₹${financingInflows}`);
+    console.log(`    Outflows: ₹${financingOutflows}`);
+    console.log(`    Net:      ₹${financingInflows - financingOutflows}`);
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('🔍 [Cash Flow] DETAILED DEBUG END');
+    console.log('═══════════════════════════════════════════════════════════════');
 
-    // ── OUTGOING: payments_made + expenses collections ───────────────────
-    const pmFilter = { status: { $nin: ['VOIDED', 'void'] } };
-    if (scope.orgId) pmFilter.orgId = scope.orgId;
-    const allPaymentsMade = await db.collection('payments_made').find(pmFilter).toArray();
+    // Calculate opening and closing balance from cash accounts
+    const CASH_BANK_TYPES = ['Cash', 'Other Current Asset', 'Fixed Asset', 'Other Asset'];
+    const cashAccounts = await ChartOfAccount.find({
+      accountType: { $in: CASH_BANK_TYPES },
+      isActive: true,
+      isSystemAccount: { $ne: true },
+      ...scope,
+    }).lean();
 
-    const expFilter = {};
-    if (scope.orgId) expFilter.orgId = scope.orgId;
-    const allExpenses = await db.collection('expenses').find(expFilter).toArray();
-
-    // ── Build monthly map (keyed "YYYY-MM") ─────────────────────────────
-    const monthlyMap = {};
-
-    function addToMonth(dateVal, inAmt, outAmt) {
-      const d = parseAnyDate(dateVal);
-      if (!d || isNaN(d)) return;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!monthlyMap[key]) monthlyMap[key] = { month: key, incoming: 0, outgoing: 0 };
-      monthlyMap[key].incoming += inAmt;
-      monthlyMap[key].outgoing += outAmt;
+    const cashAccountIds = cashAccounts.map(a => a._id);
+    
+    let openingBalance = 0;
+    if (cashAccountIds.length > 0) {
+      const openingAgg = await AccountTransaction.aggregate([
+        {
+          $match: {
+            accountId: { $in: cashAccountIds },
+            date: { $lt: start },
+            ...scope,
+          },
+        },
+        { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
+      ]);
+      openingBalance = fmt((openingAgg[0]?.totalDebit || 0) - (openingAgg[0]?.totalCredit || 0));
     }
 
-    let openingBalance  = 0;
-    let totalIncoming   = 0;
-    let totalOutgoing   = 0;
-
-    // Payments received
-    for (const p of allPaymentsReceived) {
-      const d   = parseAnyDate(p.paymentDate || p.date);
-      const amt = fmt(p.amountReceived || p.amount || p.netAmount || 0);
-      if (!d) continue;
-      if (d < start) { openingBalance += amt; }
-      else if (d >= start && d <= end) { totalIncoming += amt; addToMonth(d, amt, 0); }
-    }
-
-    // Payments made (bills paid)
-    for (const p of allPaymentsMade) {
-      const d   = parseAnyDate(p.paymentDate || p.date);
-      const amt = fmt(p.amount || p.totalAmount || p.amountPaid || 0);
-      if (!d) continue;
-      if (d >= start && d <= end) { totalOutgoing += amt; addToMonth(d, 0, amt); }
-    }
-
-    // Expenses (all — expenses schema has no status field)
-    for (const e of allExpenses) {
-      const d   = parseAnyDate(e.date || e.expenseDate || e.createdAt);
-      const amt = fmt(e.total || e.amount || 0);
-      if (!d) continue;
-      if (d >= start && d <= end) { totalOutgoing += amt; addToMonth(d, 0, amt); }
-    }
-
-    totalIncoming = fmt(totalIncoming);
-    totalOutgoing = fmt(totalOutgoing);
-    openingBalance = fmt(openingBalance);
-
-    // ── Build sorted monthlyBreakdown with running balance ───────────────
-    let runningBalance = openingBalance;
-    const monthlyBreakdown = Object.values(monthlyMap)
-      .sort((a, b) => a.month.localeCompare(b.month))
-      .map(m => {
-        runningBalance += m.incoming - m.outgoing;
-        return {
-          month:    m.month,
-          incoming: fmt(m.incoming),
-          outgoing: fmt(m.outgoing),
-          balance:  fmt(runningBalance),
-        };
-      });
-
+    const totalIncoming = operatingInflows + investingInflows + financingInflows;
+    const totalOutgoing = operatingOutflows + investingOutflows + financingOutflows;
     const closingBalance = fmt(openingBalance + totalIncoming - totalOutgoing);
 
     res.json({
@@ -285,24 +367,34 @@ router.get('/cash-flow', async (req, res) => {
       data: {
         period: { start, end },
         operating: {
-          inflows:  totalIncoming,
-          outflows: totalOutgoing,
-          net:      fmt(totalIncoming - totalOutgoing),
+          inflows:  fmt(operatingInflows),
+          outflows: fmt(operatingOutflows),
+          net:      fmt(operatingInflows - operatingOutflows),
           items:    [],
         },
-        investing:      { inflows: 0, outflows: 0, net: 0 },
-        netCashChange:  fmt(totalIncoming - totalOutgoing),
-        monthlyBreakdown,
+        investing: {
+          inflows:  fmt(investingInflows),
+          outflows: fmt(investingOutflows),
+          net:      fmt(investingInflows - investingOutflows),
+        },
+        financing: {
+          inflows:  fmt(financingInflows),
+          outflows: fmt(financingOutflows),
+          net:      fmt(financingInflows - financingOutflows),
+        },
+        netCashChange: fmt(totalIncoming - totalOutgoing),
+        monthlyBreakdown: [],
         summary: {
           openingBalance,
-          totalIncoming,
-          totalOutgoing,
+          totalIncoming: fmt(totalIncoming),
+          totalOutgoing: fmt(totalOutgoing),
           closingBalance,
         },
       },
     });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+  } catch (e) { 
+    console.error('❌ cash-flow error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
   }
 });
 
@@ -399,7 +491,9 @@ router.get('/performance-ratios', async (req, res) => {
       sumTxns(ASSET_TYPES, 'debit', de),   sumTxns(LIABILITY_TYPES, 'credit', de),
     ]);
     const gp = rev - exp, eq = ast - lia;
-    res.json({ success: true, data: { period: { start, end }, grossProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0, netProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0, returnOnAssets: ast > 0 ? fmt((gp / ast) * 100) : 0, returnOnEquity: eq > 0 ? fmt((gp / eq) * 100) : 0, debtToEquityRatio: eq > 0 ? fmt(lia / eq) : 0, currentRatio: lia > 0 ? fmt(ast / lia) : 0, totalRevenue: fmt(rev), totalExpenses: fmt(exp), netProfit: fmt(gp) } });
+    // ✅ FIX: Use actual net profit (revenue - all expenses) not gross profit
+    const np = rev - exp;
+    res.json({ success: true, data: { period: { start, end }, grossProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0, netProfitMargin: rev > 0 ? fmt((np / rev) * 100) : 0, returnOnAssets: ast > 0 ? fmt((gp / ast) * 100) : 0, returnOnEquity: eq > 0 ? fmt((gp / eq) * 100) : 0, debtToEquityRatio: eq > 0 ? fmt(lia / eq) : 0, currentRatio: lia > 0 ? fmt(ast / lia) : 0, totalRevenue: fmt(rev), totalExpenses: fmt(exp), netProfit: fmt(gp) } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1151,9 +1245,37 @@ router.get('/expense-details', async (req, res) => {
     const query = { date: { $gte: startStr, $lte: endStr }, ...scope };
     if (req.query.vendor)         query.vendor         = new RegExp(req.query.vendor, 'i');
     if (req.query.expenseAccount) query.expenseAccount = req.query.expenseAccount;
-    const expenses = await Expense.find(query).sort({ date: -1 }).limit(500).lean();
+    
+    // ✅ FIX: Fetch all expenses first
+    const allExpenses = await Expense.find(query).sort({ date: -1 }).limit(500).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch all account types at once
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    // Create a map of accountName → accountType
+    const accountTypeMap = {};
+    accounts.forEach(acc => {
+      accountTypeMap[acc.accountName] = acc.accountType;
+    });
+    
+    // ✅ Filter to ONLY include actual expense account types (not Asset, Liability, Equity)
+    const expenses = allExpenses.filter(expense => {
+      const accountType = accountTypeMap[expense.expenseAccount];
+      // ONLY include if it's an actual expense account type
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
     res.json({ success: true, data: { period: { start, end }, expenses: expenses.map(e => ({ id: e._id, expenseNumber: e.expenseNumber, date: e.date, expenseAccount: e.expenseAccount, amount: fmt(e.amount), tax: fmt(e.tax), total: fmt(e.total), paidThrough: e.paidThrough, vendor: e.vendor, customerName: e.customerName, isBillable: e.isBillable, project: e.project, notes: e.notes })), totals: { count: expenses.length, totalAmount: fmt(expenses.reduce((s, e) => s + (e.total || 0), 0)) } } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { 
+    console.error('❌ expense-details error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 router.get('/expenses-by-category', async (req, res) => {
@@ -1161,14 +1283,59 @@ router.get('/expenses-by-category', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const rows = await Expense.aggregate([
-      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope } },
-      { $group: { _id: '$expenseAccount', count: { $sum: 1 }, totalAmount: { $sum: '$amount' }, totalTax: { $sum: '$tax' }, total: { $sum: '$total' } } },
-      { $sort: { total: -1 } },
-    ]);
+    
+    // ✅ FIX BUG 2: Get all expenses first
+    const allExpenses = await Expense.find({
+      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      ...scope
+    }).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch all account types at once
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    // Create a map of accountName → accountType
+    const accountTypeMap = {};
+    accounts.forEach(acc => {
+      accountTypeMap[acc.accountName] = acc.accountType;
+    });
+    
+    // Filter to ONLY include actual expense account types (not Asset, Liability, Equity)
+    const filteredExpenses = allExpenses.filter(expense => {
+      const accountType = accountTypeMap[expense.expenseAccount];
+      // ✅ ONLY include if it's an actual expense account type
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
+    // Aggregate filtered expenses by category
+    const categoryMap = {};
+    for (const exp of filteredExpenses) {
+      const cat = exp.expenseAccount || 'Other';
+      if (!categoryMap[cat]) {
+        categoryMap[cat] = { count: 0, totalAmount: 0, totalTax: 0, total: 0 };
+      }
+      categoryMap[cat].count += 1;
+      categoryMap[cat].totalAmount += exp.amount || 0;
+      categoryMap[cat].totalTax += exp.tax || 0;
+      categoryMap[cat].total += exp.total || 0;
+    }
+    
+    // Convert to array and sort by total
+    const rows = Object.entries(categoryMap)
+      .map(([category, data]) => ({ _id: category, ...data }))
+      .sort((a, b) => b.total - a.total);
+    
     const grandTotal = rows.reduce((s, r) => s + r.total, 0);
     res.json({ success: true, data: { period: { start, end }, categories: rows.map(r => ({ category: r._id, count: r.count, totalAmount: fmt(r.totalAmount), totalTax: fmt(r.totalTax), total: fmt(r.total), percent: grandTotal > 0 ? fmt((r.total / grandTotal) * 100) : 0 })), grandTotal: fmt(grandTotal) } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { 
+    console.error('❌ expenses-by-category error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 router.get('/expenses-by-customer', async (req, res) => {
@@ -1176,13 +1343,53 @@ router.get('/expenses-by-customer', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const rows = await Expense.aggregate([
-      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, customerName: { $ne: null, $exists: true }, ...scope } },
-      { $group: { _id: '$customerName', count: { $sum: 1 }, total: { $sum: '$total' }, billableTotal: { $sum: { $cond: ['$isBillable', '$billableAmount', 0] } } } },
-      { $sort: { total: -1 } },
-    ]);
-    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ customerName: r._id, count: r.count, total: fmt(r.total), billableTotal: fmt(r.billableTotal) })) } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    
+    // ✅ FIX: Fetch all expenses first, then filter by account type
+    const allExpenses = await Expense.find({
+      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      customerName: { $ne: null, $exists: true },
+      ...scope
+    }).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch account types
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    const accountTypeMap = {};
+    accounts.forEach(acc => { accountTypeMap[acc.accountName] = acc.accountType; });
+    
+    // Filter to ONLY actual expense accounts
+    const filteredExpenses = allExpenses.filter(e => {
+      const accountType = accountTypeMap[e.expenseAccount];
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
+    // Aggregate by customer
+    const customerMap = {};
+    filteredExpenses.forEach(e => {
+      const cust = e.customerName;
+      if (!customerMap[cust]) {
+        customerMap[cust] = { count: 0, total: 0, billableTotal: 0 };
+      }
+      customerMap[cust].count += 1;
+      customerMap[cust].total += e.total || 0;
+      customerMap[cust].billableTotal += e.isBillable ? (e.billableAmount || 0) : 0;
+    });
+    
+    const rows = Object.entries(customerMap)
+      .map(([customerName, data]) => ({ customerName, ...data }))
+      .sort((a, b) => b.total - a.total);
+    
+    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ customerName: r.customerName, count: r.count, total: fmt(r.total), billableTotal: fmt(r.billableTotal) })) } });
+  } catch (e) { 
+    console.error('❌ expenses-by-customer error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 router.get('/expenses-by-project', async (req, res) => {
@@ -1190,13 +1397,52 @@ router.get('/expenses-by-project', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const rows = await Expense.aggregate([
-      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, project: { $ne: null, $exists: true }, ...scope } },
-      { $group: { _id: '$project', count: { $sum: 1 }, total: { $sum: '$total' } } },
-      { $sort: { total: -1 } },
-    ]);
-    res.json({ success: true, data: { period: { start, end }, projects: rows.map(r => ({ project: r._id, count: r.count, total: fmt(r.total) })) } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    
+    // ✅ FIX: Fetch all expenses first, then filter by account type
+    const allExpenses = await Expense.find({
+      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      project: { $ne: null, $exists: true },
+      ...scope
+    }).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch account types
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    const accountTypeMap = {};
+    accounts.forEach(acc => { accountTypeMap[acc.accountName] = acc.accountType; });
+    
+    // Filter to ONLY actual expense accounts
+    const filteredExpenses = allExpenses.filter(e => {
+      const accountType = accountTypeMap[e.expenseAccount];
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
+    // Aggregate by project
+    const projectMap = {};
+    filteredExpenses.forEach(e => {
+      const proj = e.project;
+      if (!projectMap[proj]) {
+        projectMap[proj] = { count: 0, total: 0 };
+      }
+      projectMap[proj].count += 1;
+      projectMap[proj].total += e.total || 0;
+    });
+    
+    const rows = Object.entries(projectMap)
+      .map(([project, data]) => ({ project, ...data }))
+      .sort((a, b) => b.total - a.total);
+    
+    res.json({ success: true, data: { period: { start, end }, projects: rows.map(r => ({ project: r.project, count: r.count, total: fmt(r.total) })) } });
+  } catch (e) { 
+    console.error('❌ expenses-by-project error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 router.get('/expenses-by-employee', async (req, res) => {
@@ -1204,13 +1450,51 @@ router.get('/expenses-by-employee', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const rows = await Expense.aggregate([
-      { $match: { date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope } },
-      { $group: { _id: '$paidThrough', count: { $sum: 1 }, total: { $sum: '$total' } } },
-      { $sort: { total: -1 } },
-    ]);
-    res.json({ success: true, data: { period: { start, end }, employees: rows.map(r => ({ employee: r._id, count: r.count, total: fmt(r.total) })) } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    
+    // ✅ FIX: Fetch all expenses first, then filter by account type
+    const allExpenses = await Expense.find({
+      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      ...scope
+    }).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch account types
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    const accountTypeMap = {};
+    accounts.forEach(acc => { accountTypeMap[acc.accountName] = acc.accountType; });
+    
+    // Filter to ONLY actual expense accounts
+    const filteredExpenses = allExpenses.filter(e => {
+      const accountType = accountTypeMap[e.expenseAccount];
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
+    // Aggregate by paidThrough (employee)
+    const employeeMap = {};
+    filteredExpenses.forEach(e => {
+      const emp = e.paidThrough;
+      if (!employeeMap[emp]) {
+        employeeMap[emp] = { count: 0, total: 0 };
+      }
+      employeeMap[emp].count += 1;
+      employeeMap[emp].total += e.total || 0;
+    });
+    
+    const rows = Object.entries(employeeMap)
+      .map(([employee, data]) => ({ employee, ...data }))
+      .sort((a, b) => b.total - a.total);
+    
+    res.json({ success: true, data: { period: { start, end }, employees: rows.map(r => ({ employee: r.employee, count: r.count, total: fmt(r.total) })) } });
+  } catch (e) { 
+    console.error('❌ expenses-by-employee error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 router.get('/billable-expenses', async (req, res) => {
@@ -1218,9 +1502,37 @@ router.get('/billable-expenses', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const expenses = await Expense.find({ isBillable: true, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).sort({ date: -1 }).lean();
+    
+    // ✅ FIX: Fetch all billable expenses first, then filter by account type
+    const allExpenses = await Expense.find({ 
+      isBillable: true, 
+      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, 
+      ...scope 
+    }).sort({ date: -1 }).lean();
+    
+    // Get unique expense account names
+    const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
+    
+    // Batch fetch account types
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: uniqueAccounts },
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    }).select('accountName accountType').lean();
+    
+    const accountTypeMap = {};
+    accounts.forEach(acc => { accountTypeMap[acc.accountName] = acc.accountType; });
+    
+    // Filter to ONLY actual expense accounts
+    const expenses = allExpenses.filter(e => {
+      const accountType = accountTypeMap[e.expenseAccount];
+      return accountType && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(accountType);
+    });
+    
     res.json({ success: true, data: { period: { start, end }, expenses: expenses.map(e => ({ date: e.date, expenseAccount: e.expenseAccount, total: fmt(e.total), billableAmount: fmt(e.billableAmount), customerName: e.customerName, project: e.project, isBilled: e.isBilled, vendor: e.vendor, notes: e.notes })), totals: { unbilled: fmt(expenses.filter(e => !e.isBilled).reduce((s, e) => s + (e.billableAmount || 0), 0)), billed: fmt(expenses.filter(e => e.isBilled).reduce((s, e) => s + (e.billableAmount || 0), 0)) } } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  } catch (e) { 
+    console.error('❌ billable-expenses error:', e.message);
+    res.status(500).json({ success: false, message: e.message }); 
+  }
 });
 
 // ============================================================================
@@ -1362,7 +1674,7 @@ router.get('/timesheet-profitability', async (req, res) => {
     const projects = await db.collection('projects').find(scope).toArray();
     const rows = [];
     for (const project of projects) {
-      const entries = await db.collection('timesheets').find({ orgId: scope.orgId, projectId: project._id.toString() }).toArray();
+      const entries = await db.collection('timesheets').find({ ...scope, projectId: project._id.toString() }).toArray();
       const totalHours    = entries.reduce((s, e) => s + (e.hours || 0), 0);
       const billableHours = entries.filter(e => e.isBillable).reduce((s, e) => s + (e.hours || 0), 0);
       const billedAmount  = project.totalBilledAmount || 0;
@@ -1495,7 +1807,9 @@ router.get('/general-ledger', async (req, res) => {
   try {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
-    let accQuery = { isActive: true, ...scope };
+    // FIX-5: COA is org-level only — branchId must NOT be applied to account lookup
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    let accQuery = { isActive: true, ...orgFilter };
     if (req.query.accountId)   accQuery._id         = req.query.accountId;
     if (req.query.accountType) accQuery.accountType = req.query.accountType;
     const accounts = await ChartOfAccount.find(accQuery).sort({ accountCode: 1 }).lean();
@@ -1741,27 +2055,139 @@ router.get('/system-mails', async (req, res) => {
 router.get('/audit-trail', async (req, res) => {
   const { start, end } = parseDateRange(req.query);
   const scope = orgScope(req);
-  const Invoice     = col('Invoice',     'invoices');
-  const Bill        = col('Bill',        'bills');
-  const PaymentMade = col('PaymentMade', 'paymentmades');
-  const Expense     = col('Expense',     'expenses');
+  const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+  const Invoice       = col('Invoice',       'invoices');
+  const Bill          = col('Bill',          'bills');
+  const PaymentMade   = col('PaymentMade',   'paymentmades');
+  const Expense       = col('Expense',       'expenses');
   const ManualJournal = col('ManualJournal', 'manualjournals');
   try {
-    const [invoices, bills, payments, expenses, journals] = await Promise.all([
-      Invoice.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('invoiceNumber customerName totalAmount status updatedAt updatedBy').limit(200).lean(),
-      Bill.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('billNumber vendorName totalAmount status updatedAt updatedBy').limit(200).lean(),
-      PaymentMade.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('paymentNumber vendorName amount status updatedAt updatedBy').limit(200).lean(),
-      Expense.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('expenseAccount total updatedAt').limit(200).lean(),
-      ManualJournal.find({ updatedAt: { $gte: start, $lte: end }, ...scope }).select('journalNumber notes totalDebit status updatedAt updatedBy').limit(200).lean(),
+    const [invoices, bills, payments, expenses, journals, coaTxns] = await Promise.all([
+      Invoice.find({ updatedAt: { $gte: start, $lte: end }, ...scope })
+        .select('invoiceNumber customerName totalAmount status updatedAt updatedBy createdBy')
+        .limit(200).lean(),
+      Bill.find({ updatedAt: { $gte: start, $lte: end }, ...scope })
+        .select('billNumber vendorName totalAmount status updatedAt updatedBy createdBy')
+        .limit(200).lean(),
+      PaymentMade.find({ updatedAt: { $gte: start, $lte: end }, ...scope })
+        .select('paymentNumber vendorName amount status updatedAt updatedBy createdBy')
+        .limit(200).lean(),
+      Expense.find({ updatedAt: { $gte: start, $lte: end }, ...scope })
+        .select('expenseAccount total updatedAt createdBy expenseNumber')
+        .limit(200).lean(),
+      ManualJournal.find({ updatedAt: { $gte: start, $lte: end }, ...scope })
+        .select('journalNumber notes totalDebit status updatedAt updatedBy')
+        .limit(200).lean(),
+      // ✅ NEW: Pull actual Dr/Cr movements from AccountTransaction
+      AccountTransaction.find({ date: { $gte: start, $lte: end }, ...scope })
+        .sort({ date: 1 }).limit(1000).lean(),
     ]);
+
+    // Build referenceNumber → journal lines map
+    const journalMap = {};
+    for (const txn of coaTxns) {
+      const key = txn.referenceNumber || txn.referenceId?.toString();
+      if (!key) continue;
+      if (!journalMap[key]) journalMap[key] = [];
+      journalMap[key].push({
+        accountId:   txn.accountId,
+        description: txn.description,
+        debit:       fmt(txn.debit),
+        credit:      fmt(txn.credit),
+        date:        txn.date,
+      });
+    }
+
+    // Resolve accountId → accountName
+    const allAccountIds = [...new Set(coaTxns.map(t => t.accountId?.toString()).filter(Boolean))];
+    const coaAccounts   = await ChartOfAccount.find({ _id: { $in: allAccountIds }, ...scope }).lean();
+    const coaNameMap    = {};
+    coaAccounts.forEach(a => { coaNameMap[a._id.toString()] = a.accountName; });
+
+    // Enrich journal lines with account names
+    for (const key of Object.keys(journalMap)) {
+      journalMap[key] = journalMap[key].map(line => ({
+        ...line,
+        accountName: coaNameMap[line.accountId?.toString()] || 'Unknown',
+      }));
+    }
+
     const logs = [
-      ...invoices.map(i => ({ type: 'Invoice',     ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.updatedAt, by: i.updatedBy || i.createdBy })),
-      ...bills.map(b =>    ({ type: 'Bill',         ref: b.billNumber,    name: b.vendorName,   amount: fmt(b.totalAmount), status: b.status, date: b.updatedAt, by: b.updatedBy || b.createdBy })),
-      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName,   amount: fmt(p.amount),     status: p.status, date: p.updatedAt, by: p.updatedBy || p.createdBy })),
-      ...expenses.map(e => ({ type: 'Expense',      ref: e._id,           name: e.expenseAccount, amount: fmt(e.total),   status: 'Recorded', date: e.updatedAt, by: 'system' })),
-      ...journals.map(j => ({ type: 'Journal',      ref: j.journalNumber, name: j.notes,        amount: fmt(j.totalDebit), status: j.status, date: j.updatedAt, by: j.updatedBy })),
+      ...invoices.map(i => ({ type: 'Invoice',     ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.updatedAt, by: i.updatedBy || i.createdBy, journalLines: journalMap[i.invoiceNumber] || [] })),
+      ...bills.map(b =>    ({ type: 'Bill',         ref: b.billNumber,    name: b.vendorName,   amount: fmt(b.totalAmount), status: b.status, date: b.updatedAt, by: b.updatedBy || b.createdBy, journalLines: journalMap[b.billNumber]    || [] })),
+      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName,   amount: fmt(p.amount),     status: p.status, date: p.updatedAt, by: p.updatedBy || p.createdBy, journalLines: journalMap[p.paymentNumber] || [] })),
+      ...expenses.map(e => ({ type: 'Expense',      ref: e.expenseNumber || e._id.toString(), name: e.expenseAccount, amount: fmt(e.total), status: 'Recorded', date: e.updatedAt, by: e.createdBy || 'system', journalLines: journalMap[e.expenseNumber || e._id.toString()] || [] })),
+      ...journals.map(j => ({ type: 'Journal',      ref: j.journalNumber, name: j.notes,        amount: fmt(j.totalDebit), status: j.status, date: j.updatedAt, by: j.updatedBy, journalLines: journalMap[j.journalNumber] || [] })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
-    res.json({ success: true, data: { period: { start, end }, logs, count: logs.length } });
+
+    res.json({
+      success: true,
+      data: {
+        period: { start, end },
+        logs,
+        count: logs.length,
+        // ✅ NEW: Raw COA movements for CA review
+        accountMovements: coaTxns.map(t => ({
+          date:            t.date,
+          accountName:     coaNameMap[t.accountId?.toString()] || 'Unknown',
+          description:     t.description,
+          referenceType:   t.referenceType,
+          referenceNumber: t.referenceNumber,
+          debit:           fmt(t.debit),
+          credit:          fmt(t.credit),
+        })),
+      },
+    });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ✅ NEW ROUTE: CA looks up exact journal entries for any reference number
+// Usage: GET /api/finance/reports/journal-entries-by-reference?ref=INV-001
+router.get('/journal-entries-by-reference', async (req, res) => {
+  try {
+    const { ref } = req.query;
+    const scope     = orgScope(req);
+    if (!ref) return res.status(400).json({ success: false, message: 'ref query param required. Example: ?ref=INV-001' });
+
+    const txns = await AccountTransaction.find({ referenceNumber: ref, ...scope }).sort({ date: 1 }).lean();
+    if (txns.length === 0) return res.json({ success: true, data: { ref, entries: [], balanced: true, message: 'No journal entries found for this reference' } });
+
+    const accountIds = [...new Set(txns.map(t => t.accountId?.toString()))];
+    const accounts   = await ChartOfAccount.find({ _id: { $in: accountIds }, ...scope }).lean();
+    const nameMap    = {};
+    accounts.forEach(a => { nameMap[a._id.toString()] = a; });
+
+    let totalDebit = 0, totalCredit = 0;
+    const entries = txns.map(t => {
+      const acc = nameMap[t.accountId?.toString()] || {};
+      totalDebit  += t.debit  || 0;
+      totalCredit += t.credit || 0;
+      return {
+        date:            t.date,
+        accountCode:     acc.accountCode || '',
+        accountName:     acc.accountName || 'Unknown',
+        accountType:     acc.accountType || '',
+        description:     t.description,
+        referenceType:   t.referenceType,
+        debit:           fmt(t.debit),
+        credit:          fmt(t.credit),
+      };
+    });
+
+    const balanced = Math.abs(totalDebit - totalCredit) < 0.02;
+    res.json({
+      success: true,
+      data: {
+        ref,
+        referenceType:  txns[0]?.referenceType,
+        date:           txns[0]?.date,
+        entries,
+        totals:         { totalDebit: fmt(totalDebit), totalCredit: fmt(totalCredit) },
+        // ✅ This is what CA checks — if false something needs investigation
+        balanced,
+        balanceWarning: balanced ? null : `WARNING: Entry unbalanced by Rs.${fmt(Math.abs(totalDebit - totalCredit))}. Needs investigation.`,
+      },
+    });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1886,6 +2312,7 @@ router.get('/meta', (req, res) => {
       { key: 'account-transactions', name: 'Account Transactions' }, { key: 'account-type-summary', name: 'Account Type Summary' },
       { key: 'general-ledger', name: 'General Ledger' }, { key: 'general-ledger-detailed', name: 'Detailed General Ledger' },
       { key: 'journal-report', name: 'Journal Report' }, { key: 'activity-logs', name: 'Activity Logs & Audit Trail' },
+      { key: 'journal-entries-by-reference', name: 'Journal Entries by Reference' },
     ]},
     { category: 'Budgets', reports: [{ key: 'budget-vs-actuals', name: 'Budget Vs Actuals' }]},
     { category: 'Currency', reports: [{ key: 'realized-gain-loss', name: 'Realized Gain or Loss' }, { key: 'unrealized-gain-loss', name: 'Unrealized Gain or Loss' }]},

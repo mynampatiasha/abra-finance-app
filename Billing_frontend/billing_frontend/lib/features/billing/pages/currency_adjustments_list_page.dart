@@ -69,6 +69,7 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
   static const _perPage = 50;
 
   final _tableHScroll = ScrollController();
+  bool _isTableView = true;
   final _statsHScroll = ScrollController();
 
   @override
@@ -432,7 +433,7 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _adjustments.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildAdjustmentListView(),
           if (!_isLoading && _adjustments.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -468,6 +469,7 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_rounded, _showLifecycle, color: _teal, bg: _teal.withOpacity(0.08), tooltip: 'View Process'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Adjustment', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -488,6 +490,7 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       Expanded(child: _searchField(width: double.infinity)),
       const SizedBox(width: 8),
       _actionBtn('New', Icons.add_rounded, _navy, _openNew),
@@ -507,6 +510,7 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _currencyDropdown(), const SizedBox(width: 6),
       _filterIconBtn(),
       if (_hasFilters) ...[const SizedBox(width: 4), _iconBtn(Icons.clear, _clearFilters, color: _red, bg: Colors.red[50]!)],
@@ -647,6 +651,114 @@ class _CurrencyAdjustmentsListPageState extends State<CurrencyAdjustmentsListPag
   }
 
   // â”€â”€ table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildAdjustmentListView() {
+    if (_adjustments.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _adjustments.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildAdjustmentListCard(_adjustments[i]),
+      ),
+    );
+  }
+
+  Widget _buildAdjustmentListCard(CurrencyAdjustment a) {
+    final fmt = NumberFormat('#,##0.00');
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _viewDetail(a), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: InkWell(onTap: () => _viewDetail(a), child: Text(a.adjustmentNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+              const SizedBox(width: 8),
+              _statusBadge(a.status),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: _teal.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Text(a.currency, style: const TextStyle(color: _teal, fontWeight: FontWeight.w700, fontSize: 13))),
+              const SizedBox(width: 12),
+              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(DateFormat('dd MMM yyyy').format(a.adjustmentDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Text('Rate: ${a.newExchangeRate.toStringAsFixed(4)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Gain', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${fmt.format(a.totalGain)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _green)),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Loss', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${fmt.format(a.totalLoss)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _red)),
+              ])),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Net', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${fmt.format(a.netAdjustment)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: a.netAdjustment >= 0 ? _green : _red)),
+              ])),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                onSelected: (v) { switch (v) { case 'view': _viewDetail(a); break; case 'edit': _openEdit(a); break; case 'publish': _publish(a); break; case 'void': _void(a); break; case 'ticket': _raiseTicket(a); break; case 'delete': _delete(a); break; } },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                  if (a.status == 'Draft') ...[
+                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'publish', child: ListTile(leading: Icon(Icons.publish_outlined, size: 17, color: _green), title: Text('Publish'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                  if (a.status == 'Published') const PopupMenuItem(value: 'void', child: ListTile(leading: Icon(Icons.block_outlined, size: 17, color: _red), title: Text('Void', style: TextStyle(color: _red)), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                ],
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
 
   Widget _buildTable() {
     return Container(

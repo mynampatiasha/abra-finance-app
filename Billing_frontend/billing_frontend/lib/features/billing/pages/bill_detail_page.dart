@@ -7,6 +7,8 @@ import '../../../../core/services/bill_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_bill.dart';
 
+// ignore_for_file: use_build_context_synchronously
+
 const Color _navyDark   = Color(0xFF0D1B3E);
 const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
@@ -108,6 +110,22 @@ class _BillDetailPageState extends State<BillDetailPage> {
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
                 label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+              ),
+            // ── Apply Credits button ──────────────────────────────────────────
+            if (_bill != null &&
+                ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].contains(_bill!.status))
+              TextButton.icon(
+                onPressed: () async {
+                  final changed = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => _ApplyCreditsDialog(bill: _bill!),
+                  );
+                  if (changed == true) { setState(() => _changed = true); _load(); }
+                },
+                icon: const Icon(Icons.account_balance_wallet_outlined,
+                    color: Colors.white70, size: 18),
+                label: const Text('Apply Credits',
+                    style: TextStyle(color: Colors.white70)),
               ),
             const SizedBox(width: 8),
             IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
@@ -334,7 +352,131 @@ class _BillDetailPageState extends State<BillDetailPage> {
             ],
           ),
         ),
+
+        // ── Applied Credits section ───────────────────────────────────────────
+        if (b.vendorCreditsApplied.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF0D7377), Color(0xFF14A085)]),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.account_balance_wallet_outlined,
+                  color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 8),
+            const Text('Applied Credits',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyDark)),
+          ]),
+          const SizedBox(height: 10),
+          ...b.vendorCreditsApplied.map((c) => Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.teal[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.teal[200]!),
+            ),
+            child: Row(children: [
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(c.paymentNumber ?? 'Advance',
+                      style: const TextStyle(fontSize: 12,
+                          fontWeight: FontWeight.w600, color: _navyDark)),
+                  Text(DateFormat('dd MMM yyyy').format(c.appliedDate),
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                ],
+              )),
+              Text('₹${c.amount.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 13,
+                      fontWeight: FontWeight.bold, color: Color(0xFF0D7377))),
+              const SizedBox(width: 6),
+              if (!['PAID', 'VOID'].contains(b.status))
+                InkWell(
+                  onTap: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        title: const Text('Remove Credit?',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        content: Text(
+                            'Remove ₹${c.amount.toStringAsFixed(2)} credit '
+                            'from ${c.paymentNumber ?? "this advance"}?\n\n'
+                            'The advance balance will be restored.'),
+                        actions: [
+                          TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel')),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white),
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    try {
+                      await BillService.removeCredit(widget.billId, c.id);
+                      setState(() => _changed = true);
+                      _load();
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('Failed to remove credit: $e'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                      ));
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.red[200]!),
+                    ),
+                    child: Icon(Icons.close, size: 14, color: Colors.red[700]),
+                  ),
+                ),
+            ]),
+          )),
+        ],
+
         const SizedBox(height: 16),
+
+        // Apply Credits button
+        if (['OPEN', 'PARTIALLY_PAID', 'OVERDUE'].contains(b.status))
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final changed = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => _ApplyCreditsDialog(bill: b),
+                );
+                if (changed == true) { setState(() => _changed = true); _load(); }
+              },
+              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+              label: const Text('Apply Credits'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0D7377),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+
+        const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -469,6 +611,322 @@ class _BillDetailPageState extends State<BillDetailPage> {
             style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// APPLY CREDITS DIALOG — Zoho Books style
+// ============================================================================
+
+class _ApplyCreditsDialog extends StatefulWidget {
+  final Bill bill;
+  const _ApplyCreditsDialog({required this.bill});
+
+  @override
+  State<_ApplyCreditsDialog> createState() => _ApplyCreditsDialogState();
+}
+
+class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
+  bool _loading = true;
+  bool _applying = false;
+  String? _error;
+  List<VendorAdvance> _advances = [];
+
+  // Per-advance amount controllers
+  final Map<String, TextEditingController> _amtCtrls = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAdvances();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _amtCtrls.values) { c.dispose(); }
+    super.dispose();
+  }
+
+  Future<void> _loadAdvances() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final list = await BillService.getAvailableCredits(widget.bill.id);
+      setState(() {
+        _advances = list;
+        _loading  = false;
+        // Pre-fill each controller with min(unused, amountDue)
+        for (final a in list) {
+          final suggested = a.amountUnused < widget.bill.amountDue
+              ? a.amountUnused
+              : widget.bill.amountDue;
+          _amtCtrls[a.id] = TextEditingController(
+              text: suggested.toStringAsFixed(2));
+        }
+      });
+    } catch (e) {
+      setState(() { _error = e.toString(); _loading = false; });
+    }
+  }
+
+  Future<void> _apply(VendorAdvance advance) async {
+    final ctrl = _amtCtrls[advance.id];
+    final amt  = double.tryParse(ctrl?.text.trim() ?? '');
+    if (amt == null || amt <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter a valid amount'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    if (amt > advance.amountUnused + 0.001) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Amount exceeds available balance '
+            '(₹${advance.amountUnused.toStringAsFixed(2)})'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    if (amt > widget.bill.amountDue + 0.001) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Amount exceeds bill due '
+            '(₹${widget.bill.amountDue.toStringAsFixed(2)})'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    setState(() => _applying = true);
+    try {
+      await BillService.applyCredit(widget.bill.id, advance.id, amt);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _applying = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Failed to apply credit: $e'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 600),
+        child: Column(children: [
+          // ── Header ──────────────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0D7377), Color(0xFF14A085)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.account_balance_wallet_outlined,
+                  color: Colors.white, size: 22),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Apply Vendor Credits',
+                      style: TextStyle(color: Colors.white,
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text('Bill: ${widget.bill.billNumber}  •  '
+                      'Due: ₹${widget.bill.amountDue.toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              )),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                onPressed: () => Navigator.pop(context, false),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ]),
+          ),
+
+          // ── Body ────────────────────────────────────────────────────────────
+          Expanded(child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? Center(child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+                        const SizedBox(height: 12),
+                        Text(_error!, textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey[700])),
+                        const SizedBox(height: 16),
+                        ElevatedButton(onPressed: _loadAdvances,
+                            child: const Text('Retry')),
+                      ]),
+                    ))
+                  : _advances.isEmpty
+                      ? Center(child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.account_balance_wallet_outlined,
+                                size: 56, color: Colors.grey[300]),
+                            const SizedBox(height: 12),
+                            Text('No available vendor advances',
+                                style: TextStyle(fontSize: 15,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500)),
+                            const SizedBox(height: 6),
+                            Text('Record an advance payment for '
+                                '${widget.bill.vendorName} first.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13,
+                                    color: Colors.grey[500])),
+                          ]),
+                        ))
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _advances.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (_, i) {
+                            final a = _advances[i];
+                            final ctrl = _amtCtrls[a.id]!;
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.teal[50],
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.teal[200]!),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(children: [
+                                    Expanded(child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(a.paymentNumber,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: _navyDark)),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${DateFormat('dd MMM yyyy').format(a.paymentDate)}'
+                                          '  •  ${a.paymentMode}',
+                                          style: TextStyle(fontSize: 12,
+                                              color: Colors.grey[600]),
+                                        ),
+                                      ],
+                                    )),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text('₹${a.amount.toStringAsFixed(2)}',
+                                            style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.grey)),
+                                        Text(
+                                          'Available: ₹${a.amountUnused.toStringAsFixed(2)}',
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF0D7377)),
+                                        ),
+                                      ],
+                                    ),
+                                  ]),
+                                  const SizedBox(height: 12),
+                                  Row(children: [
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: ctrl,
+                                        keyboardType: const TextInputType
+                                            .numberWithOptions(decimal: true),
+                                        decoration: InputDecoration(
+                                          labelText: 'Amount to Apply (₹)',
+                                          prefixText: '₹ ',
+                                          border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8)),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            borderSide: const BorderSide(
+                                                color: Color(0xFF0D7377),
+                                                width: 2),
+                                          ),
+                                          isDense: true,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                  horizontal: 12, vertical: 10),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    ElevatedButton(
+                                      onPressed: _applying
+                                          ? null
+                                          : () => _apply(a),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFF0D7377),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 20, vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8)),
+                                      ),
+                                      child: _applying
+                                          ? const SizedBox(
+                                              width: 16, height: 16,
+                                              child: CircularProgressIndicator(
+                                                  color: Colors.white,
+                                                  strokeWidth: 2))
+                                          : const Text('Apply'),
+                                    ),
+                                  ]),
+                                ],
+                              ),
+                            );
+                          },
+                        )),
+
+          // ── Footer ──────────────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              border: Border(top: BorderSide(color: Colors.grey[200]!)),
+              borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(14)),
+            ),
+            child: Row(children: [
+              Icon(Icons.info_outline, size: 14, color: Colors.grey[500]),
+              const SizedBox(width: 6),
+              Expanded(child: Text(
+                'Applying credits reduces the bill balance and '
+                'consumes the vendor advance.',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              )),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Close'),
+              ),
+            ]),
+          ),
+        ]),
       ),
     );
   }

@@ -93,6 +93,9 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
   final Set<String> _selectedIds = {};
   bool _selectAll = false;
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── scroll ────────────────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
@@ -562,7 +565,7 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _salesOrders.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildSalesOrderListView(),
           if (!_isLoading && _salesOrders.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -605,6 +608,7 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree, _showLifecycleDialog, tooltip: 'View Process', color: _navy, bg: _navy.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Sales Order', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -634,6 +638,7 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Sales Order', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -654,6 +659,7 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
@@ -873,6 +879,140 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildSalesOrderListView() {
+    if (_salesOrders.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _salesOrders.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildSalesOrderListCard(_salesOrders[i]),
+      ),
+    );
+  }
+
+  Widget _buildSalesOrderListCard(SalesOrder so) {
+    final isSelected = _selectedIds.contains(so.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _viewDetails(so), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Checkbox(value: isSelected, onChanged: (_) => _toggleRow(so.id), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(onTap: () => _openEdit(so.id), child: Text(so.salesOrderNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+              const SizedBox(width: 8),
+              _statusBadge(so.status),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(so.customerName.isNotEmpty ? so.customerName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(so.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              if (so.referenceNumber != null && so.referenceNumber!.isNotEmpty)
+                Text('Ref: ${so.referenceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(DateFormat('dd MMM yyyy').format(so.salesOrderDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              if (so.expectedShipmentDate != null) ...[
+                const SizedBox(width: 12),
+                Icon(Icons.local_shipping_outlined, size: 13, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(DateFormat('dd MMM yyyy').format(so.expectedShipmentDate!), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ],
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Total Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text('₹${so.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(message: 'Share', child: InkWell(
+                  onTap: () => _share(so), borderRadius: BorderRadius.circular(8),
+                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                )),
+                const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  onSelected: (value) async {
+                    switch (value) {
+                      case 'view': _viewDetails(so); break;
+                      case 'edit': _openEdit(so.id); break;
+                      case 'send': await _send(so); break;
+                      case 'mark_sent': await _markSalesOrderAsSent(so); break;
+                      case 'download': await _downloadPDF(so); break;
+                      case 'confirm': await _confirm(so); break;
+                      case 'to_invoice': await _convertToInvoice(so); break;
+                      case 'whatsapp': await _whatsApp(so); break;
+                      case 'ticket': _raiseTicket(so); break;
+                      case 'delete': await _delete(so); break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'send', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'mark_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'download', child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'confirm', child: ListTile(leading: Icon(Icons.check_circle_outline, size: 17, color: _green), title: Text('Confirm Order'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'to_invoice', child: ListTile(leading: Icon(Icons.receipt_long_outlined, size: 17, color: _green), title: Text('Convert to Invoice'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ]),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

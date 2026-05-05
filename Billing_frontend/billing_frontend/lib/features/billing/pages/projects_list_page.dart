@@ -65,6 +65,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
   final Set<String> _selectedProjects = {};
   bool _selectAll = false;
 
+  bool _isTableView = true;
   final ScrollController _tableHScroll = ScrollController();
   final ScrollController _statsHScroll = ScrollController();
 
@@ -379,7 +380,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
                 ? SizedBox(height: 400, child: _buildErrorState())
                 : _projects.isEmpty
                     ? SizedBox(height: 400, child: _buildEmptyState())
-                    : _buildTable(),
+                    : _isTableView ? _buildTable() : _buildProjectListView(),
         if (!_isLoading && _projects.isNotEmpty) _buildPagination(),
       ])),
     );
@@ -414,6 +415,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_rounded, _showLifecycle, tooltip: 'View Process', color: _blue, bg: _blue.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Project', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -437,6 +439,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Project', Icons.add_rounded, _navy, _openNew), const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport), const SizedBox(width: 8),
       _actionBtn('Export', Icons.download_rounded, _green, _projects.isEmpty ? null : _exportExcel),
@@ -451,6 +454,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _billingDropdown(), const SizedBox(width: 6),
       Stack(children: [
         _iconBtn(Icons.filter_list, _showFilterDialog, color: _hasFilters ? _navy : const Color(0xFF7F8C8D), bg: _hasFilters ? _navy.withOpacity(0.08) : const Color(0xFFF1F1F1)),
@@ -628,6 +632,125 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildProjectListView() {
+    if (_projects.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _projects.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildProjectListCard(_projects[i]),
+      ),
+    );
+  }
+
+  Widget _buildProjectListCard(Project p) {
+    final isSel = _selectedProjects.contains(p.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProjectDashboardPage(projectId: p.id, projectName: p.projectName))).then((_) => _load()),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Checkbox(value: isSel, onChanged: (_) { setState(() { isSel ? _selectedProjects.remove(p.id) : _selectedProjects.add(p.id); _selectAll = _selectedProjects.length == _projects.length; }); }, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              Expanded(child: InkWell(onTap: () => _openEdit(p), child: Text(p.projectName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+              const SizedBox(width: 8),
+              _statusBadge(p.status),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(p.customerName.isNotEmpty ? p.customerName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(p.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              Text(p.projectNumber, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.receipt_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text(p.billingMethod, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Icon(Icons.schedule_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Text('${p.unbilledHours.toStringAsFixed(1)}h unbilled', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Budget', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text(p.budgetAmount > 0 ? '₹${p.budgetAmount.toStringAsFixed(2)}' : '—', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              ])),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                onSelected: (v) async {
+                  switch (v) {
+                    case 'dashboard': Navigator.push(context, MaterialPageRoute(builder: (_) => ProjectDashboardPage(projectId: p.id, projectName: p.projectName))).then((_) => _load()); break;
+                    case 'edit':      _openEdit(p);              break;
+                    case 'invoice':   _generateInvoice(p);       break;
+                    case 'status':    _changeStatus(p);          break;
+                    case 'clone':     _cloneProject(p);          break;
+                    case 'ticket':    _raiseTicket(p);           break;
+                    case 'delete':    await _delete(p);          break;
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'dashboard', child: ListTile(leading: Icon(Icons.dashboard_outlined, size: 17, color: _blue), title: Text('Dashboard'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'invoice', child: ListTile(leading: Icon(Icons.receipt_long_outlined, size: 17, color: _green), title: Text('Generate Invoice'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'status', child: ListTile(leading: Icon(Icons.swap_horiz_outlined, size: 17, color: _orange), title: Text('Change Status'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'clone', child: ListTile(leading: Icon(Icons.copy_outlined, size: 17, color: _navy), title: Text('Clone'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                ],
+              ),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 

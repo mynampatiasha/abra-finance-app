@@ -116,6 +116,7 @@ class NewPaymentMadeScreen extends StatefulWidget {
   final String?   providerTransactionId;
   final bool showAppBar;
   final Function(String recordId)? onSavedCallback;
+  final String?   prefilledPaymentType;
 
   const NewPaymentMadeScreen({
     Key? key,
@@ -126,6 +127,7 @@ class NewPaymentMadeScreen extends StatefulWidget {
     this.providerTransactionId,
     this.showAppBar = true,
     this.onSavedCallback,
+    this.prefilledPaymentType,
   }) : super(key: key);
 
   @override
@@ -212,6 +214,9 @@ class _NewPaymentMadeScreenState extends State<NewPaymentMadeScreen> {
     }
     _fetchVendors();
     _loadAllAccounts(); // ✅ FIX 1
+    if (widget.prefilledPaymentType != null && widget.prefilledPaymentType!.isNotEmpty) {
+      _paymentType = widget.prefilledPaymentType!;
+    }
     if (widget.paymentId != null) _loadExistingPayment();
   }
 
@@ -374,6 +379,18 @@ Future<void> _loadAllAccounts() async {
   // ── calculation ──────────────────────────────────────────────────────────────
 
   void _recalculate() {
+    // ── ADVANCE: grandTotal comes from totalAmountEntered directly ──
+    if (_paymentType == 'ADVANCE') {
+      setState(() {
+        _billsTotal    = 0;
+        _itemsSubTotal = 0;
+        _tdsAmt = 0; _tcsAmt = 0; _gstAmt = 0;
+        _grandTotal    = _totalAmountEntered;
+        _totalItemCount = 0;
+      });
+      debugPrint('🔵 [ADVANCE] grandTotal=$_totalAmountEntered items=NONE');
+      return;
+    }
     double billsTotal = _bills.fold(0, (s, b) => s + b.paymentAmount);
     double sub = 0;
     for (final item in _items) {
@@ -434,7 +451,14 @@ Future<void> _loadAllAccounts() async {
               })
           .toList();
 
-      final validItems = _items.where((i) => i.itemDetails.trim().isNotEmpty).toList();
+      final validItems = _paymentType == 'ADVANCE'
+          ? <_Item>[]
+          : _items.where((i) => i.itemDetails.trim().isNotEmpty).toList();
+
+      debugPrint('🔵 [SAVE] paymentType=$_paymentType');
+      debugPrint('🔵 [SAVE] grandTotal=$_grandTotal');
+      debugPrint('🔵 [SAVE] validItems count=${validItems.length}');
+      debugPrint('🔵 [SAVE] billsApplied count=${billsApplied.length}');
 
       final payload = {
         'vendorId':        _vendorId,
@@ -462,8 +486,12 @@ Future<void> _loadAllAccounts() async {
       } else {
         final created = await PaymentMadeService.createPayment(payload);
         _showSuccess('Payment Recorded ✓');
+        // Pass paymentNumber as journalRef so uncategorize can find COA entries
+        final journalRef = created.paymentNumber.isNotEmpty
+            ? created.paymentNumber
+            : created.id;
         if (mounted) Navigator.of(context).pop(true);
-        widget.onSavedCallback?.call(created.id);
+        widget.onSavedCallback?.call(journalRef);
         return;
       }
 

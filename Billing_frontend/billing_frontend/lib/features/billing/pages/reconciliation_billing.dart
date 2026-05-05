@@ -11,10 +11,22 @@
 //   Report   → Reconciliation Status Report (3 sections + export)
 // ============================================================================
 
+import 'dart:io' show File, Platform;
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:excel/excel.dart' as xl;
+import 'package:path_provider/path_provider.dart';
+import 'package:universal_html/html.dart' as html show Blob, Url, AnchorElement;
 import '../../../core/services/bank_transaction_service.dart';
+import '../../../core/finance_secure_storage.dart';
+import '../../../app/config/api_config.dart';
 
 // ── colours ──────────────────────────────────────────────────────────────────
 const Color _navy       = Color(0xFF0D1B3E);
@@ -182,7 +194,10 @@ class _ReconciliationBillingPageState
           _openWorkingScreen(rec);
         },
       ),
-    );
+    ).then((_) {
+      // Refresh history when dialog is closed (in case of error or cancellation)
+      _loadHistory();
+    });
   }
 
   // ── OPEN WORKING SCREEN ────────────────────────────────────────────────────
@@ -322,14 +337,22 @@ class _ReconciliationBillingPageState
               context,
               MaterialPageRoute(
                 builder: (_) => _ReportScreen(
-                    svc:         _svc,
-                    accountId:   widget.accountId,
-                    accountName: widget.accountName),
+                    svc:              _svc,
+                    accountId:        widget.accountId,
+                    accountName:      widget.accountName,
+                    reconciliationId: _history.isNotEmpty ? _history.first['_id']?.toString() : null),
               ),
             ),
             icon:  const Icon(Icons.bar_chart_outlined, size: 16, color: _blue),
             label: const Text('Report',
                 style: TextStyle(fontSize: 12, color: _blue)),
+          ),
+          const SizedBox(width: 8),
+          // Refresh button
+          IconButton(
+            onPressed: _loadHistory,
+            icon: const Icon(Icons.refresh_rounded, color: _navyAccent),
+            tooltip: 'Refresh',
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
@@ -636,6 +659,30 @@ class _InitiateDialogState extends State<_InitiateDialog> {
       if (r['success'] == true) {
         widget.onCreated(Map<String, dynamic>.from(r['data']));
       } else {
+        // Check if there's already a reconciliation in progress
+        if (r['message']?.toString().contains('already in progress') == true) {
+          setState(() => _saving = false);
+          // Close the dialog and trigger a refresh to show the in-progress reconciliation
+          Navigator.pop(context);
+          // Show a snackbar to inform the user
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text('A reconciliation is already in progress. Please complete or delete it first.'),
+              backgroundColor: _orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'Refresh',
+                textColor: Colors.white,
+                onPressed: () {
+                  // The parent page will be refreshed when we return
+                },
+              ),
+            ));
+          }
+          return;
+        }
         setState(() => _error = r['message'] ?? 'Failed to initiate');
       }
     } catch (e) {
@@ -2107,45 +2154,744 @@ class _ReportScreenState extends State<_ReportScreen> {
     }
   }
 
-  void _exportCSV() {
-    if (_report == null) return;
-    final sections = _report!['sections'] as Map<String, dynamic>;
-    final summary  = _report!['summary']  as Map<String, dynamic>;
-    final buf      = StringBuffer();
+  // ── helpers ──────────────────────────────────────────────────────────────
 
-    buf.writeln('Reconciliation Status Report — ${widget.accountName}');
-    buf.writeln('Opening Balance,${summary['openingBalance']}');
-    buf.writeln('Closing Balance,${summary['closingBalance']}');
-    buf.writeln('Difference,${summary['difference']}');
-    buf.writeln();
+  /// Summary card widget for PDF export
+  pw.Widget _summaryCard(String label, String value, PdfColor color) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.white,
+          borderRadius: pw.BorderRadius.circular(4),
+          border: pw.Border.all(color: color, width: 0.5),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              label,
+              style: pw.TextStyle(
+                fontSize: 7,
+                color: const PdfColor.fromInt(0xFF7F8C8D),
+              ),
+            ),
+            pw.SizedBox(height: 3),
+            pw.Text(
+              value,
+              style: pw.TextStyle(
+                fontSize: 9,
+                fontWeight: pw.FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Builds the flat list of rows used by both PDF and Excel exports.
+  /// Returns: { openingBalance, closingBalance, reconciledOn, rows, period }
+  Map<String, dynamic> _buildExportData() {
+    final summary  = _report!['summary']  as Map<String, dynamic>;
+    final sections = _report!['sections'] as Map<String, dynamic>;
+    final period   = _report!['period']   as Map<String, dynamic>;
+
+    final openingBalance = (summary['openingBalance'] ?? 0).toDouble();
+    final closingBalance = (summary['closingBalance'] ?? 0).toDouble();
+    final reconciledOn   = _report!['reconciledAt'] ?? _report!['updatedAt'];
+
+    final List<Map<String, dynamic>> rows = [];
 
     for (final sectionKey in ['cleared', 'unmatched', 'outstanding']) {
-      final sec = sections[sectionKey] as Map<String, dynamic>;
-      buf.writeln(sec['label']);
-      buf.writeln('Date,Type,Description,Reference,Deposits,Withdrawals');
-      for (final t
-          in List<Map<String, dynamic>>.from(sec['transactions'] ?? [])) {
-        final date   = _parseDate(t['transactionDate']);
+      final sec  = sections[sectionKey] as Map<String, dynamic>;
+      final txns = List<Map<String, dynamic>>.from(sec['transactions'] ?? []);
+      for (final t in txns) {
         final isCredit = t['transactionType'] == 'CREDIT';
         final amount   = (t['amount'] ?? 0).toDouble();
-        buf.writeln(
-            '${_ifmt.format(date)},'
-            '${t['categoryLabel'] ?? t['reconciliationStatus'] ?? ''},'
-            '${t['description']   ?? ''},'
-            '${t['referenceNumber'] ?? ''},'
-            '${isCredit ? amount : ''},'
-            '${!isCredit ? amount : ''}');
+        final date     = _parseDate(t['transactionDate']);
+
+        // Build "Transaction Details" — description + optional ref
+        final desc = t['description']?.toString() ?? '';
+        final ref  = t['referenceNumber']?.toString() ?? '';
+
+        // Build "Type" — category + optional vendor/customer sub-line
+        final typeMain = t['categoryLabel']?.toString() ?? '';
+        final typeSub  = t['vendorName']?.toString() ??
+                         t['customerName']?.toString() ?? '';
+
+        rows.add({
+          'date':      date,
+          'desc':      desc,
+          'ref':       ref,
+          'typeMain':  typeMain,
+          'typeSub':   typeSub,
+          'deposit':   isCredit ? amount : 0.0,
+          'withdrawal': !isCredit ? amount : 0.0,
+        });
       }
-      buf.writeln();
     }
 
-    // Copy to clipboard as CSV
-    Clipboard.setData(ClipboardData(text: buf.toString()));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content:         Text('CSV data copied to clipboard'),
-      backgroundColor: _green,
-      behavior:        SnackBarBehavior.floating,
-    ));
+    // Sort by date ascending
+    rows.sort((a, b) =>
+        (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+
+    return {
+      'openingBalance': openingBalance,
+      'closingBalance': closingBalance,
+      'reconciledOn':   reconciledOn,
+      'rows':           rows,
+      'period':         period,
+    };
+  }
+
+  // ── PDF Export ────────────────────────────────────────────────────────────
+  Future<void> _exportPDF() async {
+    if (_report == null) return;
+    try {
+      final data           = _buildExportData();
+      final rows           = data['rows'] as List<Map<String, dynamic>>;
+      final openingBalance = data['openingBalance'] as double;
+      final closingBalance = data['closingBalance'] as double;
+      final reconciledOn   = data['reconciledOn'];
+      final period         = data['period'] as Map<String, dynamic>;
+
+      final startDate = _parseDate(period['startDate']);
+      final endDate   = _parseDate(period['endDate']);
+
+      // ── Fetch org/branch info for header ──
+      final orgName    = await FinanceSecureStorage.getOrgName()    ?? widget.accountName;
+      final orgLogoUrl = await FinanceSecureStorage.getOrgLogoUrl();
+
+      // ── Try to load logo bytes ──
+      pw.MemoryImage? logoImage;
+      if (orgLogoUrl != null && orgLogoUrl.isNotEmpty) {
+        try {
+          final fullUrl = orgLogoUrl.startsWith('http')
+              ? orgLogoUrl
+              : '${ApiConfig.baseUrl}$orgLogoUrl';
+          final response = await http.get(Uri.parse(fullUrl));
+          if (response.statusCode == 200) {
+            logoImage = pw.MemoryImage(response.bodyBytes);
+          }
+        } catch (_) {}
+      }
+
+      final pdf = pw.Document();
+
+      // ── colour palette ──
+      const headerBg    = PdfColor.fromInt(0xFF0D1B3E); // navy
+      const headerFg    = PdfColors.white;
+      const accentBlue  = PdfColor.fromInt(0xFF1E3A8A);
+      const rowAlt      = PdfColor.fromInt(0xFFF4F6F9);
+      const borderCol   = PdfColor.fromInt(0xFFDDE4EF);
+      const greenCol    = PdfColor.fromInt(0xFF27AE60);
+      const redCol      = PdfColor.fromInt(0xFFE74C3C);
+      const greyCol     = PdfColor.fromInt(0xFF7F8C8D);
+      const lightBg     = PdfColor.fromInt(0xFFF7F9FC);
+      const summaryBg   = PdfColor.fromInt(0xFFF0F4FF);
+
+      final summary = _report!['summary'] as Map<String, dynamic>;
+      final totalClearedCredits = (summary['totalClearedCredits'] ?? 0).toDouble();
+      final totalClearedDebits  = (summary['totalClearedDebits']  ?? 0).toDouble();
+      final difference          = (summary['difference']          ?? 0).toDouble();
+      final recStatus           = summary['reconciliationStatus']?.toString() ?? 'IN_PROGRESS';
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+          header: (ctx) => pw.Container(
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(bottom: pw.BorderSide(color: borderCol, width: 0.5)),
+            ),
+            padding: const pw.EdgeInsets.only(bottom: 8),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  orgName.toUpperCase(),
+                  style: pw.TextStyle(fontSize: 7, color: greyCol, letterSpacing: 0.5),
+                ),
+                pw.Text(
+                  'Reconciliation Report - ${_ifmt.format(startDate)} to ${_ifmt.format(endDate)}',
+                  style: pw.TextStyle(fontSize: 7, color: greyCol),
+                ),
+              ],
+            ),
+          ),
+          footer: (ctx) => pw.Container(
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: borderCol, width: 0.5)),
+            ),
+            padding: const pw.EdgeInsets.only(top: 6),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Generated on ${_ifmt.format(DateTime.now())}',
+                  style: pw.TextStyle(fontSize: 7, color: greyCol),
+                ),
+                pw.Text(
+                  'Page ${ctx.pageNumber} of ${ctx.pagesCount}',
+                  style: pw.TextStyle(fontSize: 7, color: greyCol),
+                ),
+              ],
+            ),
+          ),
+          build: (ctx) {
+            final tableRows = <List<String>>[];
+
+            // Opening balance row
+            tableRows.add([
+              _ifmt.format(startDate),
+              'Opening Balance',
+              '',
+              '',
+              'Rs. ${_fmt.format(openingBalance)}',
+            ]);
+
+            // Transaction rows
+            for (final r in rows) {
+              final date       = r['date']       as DateTime;
+              final desc       = r['desc']       as String;
+              final ref        = r['ref']        as String;
+              final typeMain   = r['typeMain']   as String;
+              final deposit    = (r['deposit']   as double);
+              final withdrawal = (r['withdrawal'] as double);
+
+              final detailCell = ref.isNotEmpty ? '$desc\nRef: $ref' : desc;
+
+              tableRows.add([
+                _ifmt.format(date),
+                detailCell,
+                typeMain,
+                deposit    > 0 ? 'Rs. ${_fmt.format(deposit)}'    : '',
+                withdrawal > 0 ? 'Rs. ${_fmt.format(withdrawal)}' : '',
+              ]);
+            }
+
+            // Closing balance row
+            tableRows.add([
+              _ifmt.format(endDate),
+              'Closing Balance',
+              '',
+              '',
+              'Rs. ${_fmt.format(closingBalance)}',
+            ]);
+
+            return [
+              // ══════════════════════════════════════════════════════════════
+              // HEADER — Logo + Company + Report Title
+              // ══════════════════════════════════════════════════════════════
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  // Logo
+                  if (logoImage != null) ...[
+                    pw.Container(
+                      width: 70,
+                      height: 70,
+                      decoration: pw.BoxDecoration(
+                        borderRadius: pw.BorderRadius.circular(6),
+                        border: pw.Border.all(color: borderCol, width: 0.5),
+                      ),
+                      child: pw.ClipRRect(
+                        horizontalRadius: 6,
+                        verticalRadius: 6,
+                        child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                      ),
+                    ),
+                    pw.SizedBox(width: 16),
+                  ],
+                  // Company info
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          orgName.toUpperCase(),
+                          style: pw.TextStyle(
+                            fontSize: 16,
+                            fontWeight: pw.FontWeight.bold,
+                            color: headerBg,
+                          ),
+                        ),
+                        pw.SizedBox(height: 3),
+                        pw.Text(
+                          'BANKING & RECONCILIATION',
+                          style: pw.TextStyle(
+                            fontSize: 7,
+                            color: greyCol,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Report title block (right side)
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: pw.BoxDecoration(
+                      color: headerBg,
+                      borderRadius: pw.BorderRadius.circular(6),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          'RECONCILIATION REPORT',
+                          style: pw.TextStyle(
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                            color: headerFg,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          widget.accountName,
+                          style: pw.TextStyle(fontSize: 9, color: headerFg),
+                        ),
+                        pw.SizedBox(height: 2),
+                        pw.Text(
+                          '${_ifmt.format(startDate)} to ${_ifmt.format(endDate)}',
+                          style: pw.TextStyle(fontSize: 8, color: PdfColor.fromInt(0xFFADD8E6)),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: pw.BoxDecoration(
+                            color: recStatus == 'RECONCILED' ? greenCol : PdfColor.fromInt(0xFFE67E22),
+                            borderRadius: pw.BorderRadius.circular(10),
+                          ),
+                          child: pw.Text(
+                            recStatus == 'RECONCILED' ? 'RECONCILED' : 'IN PROGRESS',
+                            style: pw.TextStyle(
+                              fontSize: 7,
+                              fontWeight: pw.FontWeight.bold,
+                              color: headerFg,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              pw.SizedBox(height: 20),
+
+              // ══════════════════════════════════════════════════════════════
+              // SUMMARY CARDS
+              // ══════════════════════════════════════════════════════════════
+              pw.Container(
+                decoration: pw.BoxDecoration(
+                  color: lightBg,
+                  borderRadius: pw.BorderRadius.circular(6),
+                  border: pw.Border.all(color: borderCol, width: 0.5),
+                ),
+                padding: const pw.EdgeInsets.all(12),
+                child: pw.Row(
+                  children: [
+                    _summaryCard('Opening Balance', 'Rs. ${_fmt.format(openingBalance)}', accentBlue),
+                    pw.SizedBox(width: 8),
+                    _summaryCard('Closing Balance', 'Rs. ${_fmt.format(closingBalance)}', accentBlue),
+                    pw.SizedBox(width: 8),
+                    _summaryCard('Total Credits', 'Rs. ${_fmt.format(totalClearedCredits)}', greenCol),
+                    pw.SizedBox(width: 8),
+                    _summaryCard('Total Debits', 'Rs. ${_fmt.format(totalClearedDebits)}', redCol),
+                    pw.SizedBox(width: 8),
+                    _summaryCard(
+                      'Difference',
+                      'Rs. ${_fmt.format(difference)}',
+                      difference == 0 ? greenCol : redCol,
+                    ),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 20),
+
+              // ══════════════════════════════════════════════════════════════
+              // TRANSACTIONS TABLE
+              // ══════════════════════════════════════════════════════════════
+              pw.Text(
+                'TRANSACTION DETAILS',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                  color: greyCol,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+
+              pw.Table(
+                border: pw.TableBorder.all(color: borderCol, width: 0.5),
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(68),   // DATE
+                  1: const pw.FlexColumnWidth(3.5),   // TRANSACTION DETAILS
+                  2: const pw.FlexColumnWidth(2),     // TYPE
+                  3: const pw.FixedColumnWidth(75),   // DEPOSITS
+                  4: const pw.FixedColumnWidth(75),   // WITHDRAWALS
+                },
+                children: [
+                  // Header row
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: headerBg),
+                    children: [
+                      'DATE',
+                      'TRANSACTION DETAILS',
+                      'TYPE',
+                      'DEPOSITS',
+                      'WITHDRAWALS',
+                    ].asMap().entries.map((e) => pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      child: pw.Text(
+                        e.value,
+                        style: pw.TextStyle(
+                          fontSize: 8,
+                          fontWeight: pw.FontWeight.bold,
+                          color: headerFg,
+                        ),
+                        textAlign: e.key >= 3 ? pw.TextAlign.right : pw.TextAlign.left,
+                      ),
+                    )).toList(),
+                  ),
+
+                  // Data rows
+                  ...tableRows.asMap().entries.map((entry) {
+                    final idx      = entry.key;
+                    final row      = entry.value;
+                    final isOpen   = row[1] == 'Opening Balance';
+                    final isClose  = row[1] == 'Closing Balance';
+                    final isSpecial = isOpen || isClose;
+                    final bg = isSpecial
+                        ? summaryBg
+                        : (idx % 2 == 0 ? PdfColors.white : rowAlt);
+
+                    return pw.TableRow(
+                      decoration: pw.BoxDecoration(color: bg),
+                      children: row.asMap().entries.map((cell) {
+                        final colIdx = cell.key;
+                        final val    = cell.value;
+                        final isAmt  = colIdx >= 3;
+                        final isDeposit    = colIdx == 3;
+                        final isWithdrawal = colIdx == 4;
+
+                        final textColor = isDeposit && val.isNotEmpty
+                            ? greenCol
+                            : isWithdrawal && val.isNotEmpty
+                                ? redCol
+                                : isSpecial
+                                    ? headerBg
+                                    : PdfColors.black;
+
+                        return pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                          child: pw.Text(
+                            val,
+                            style: pw.TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: isSpecial ? pw.FontWeight.bold : pw.FontWeight.normal,
+                              color: textColor,
+                            ),
+                            textAlign: isAmt ? pw.TextAlign.right : pw.TextAlign.left,
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  }),
+                ],
+              ),
+
+              pw.SizedBox(height: 16),
+
+              // ══════════════════════════════════════════════════════════════
+              // FOOTER NOTE
+              // ══════════════════════════════════════════════════════════════
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  if (reconciledOn != null)
+                    pw.Text(
+                      'Reconciled on: ${_ifmt.format(_parseDate(reconciledOn))}',
+                      style: pw.TextStyle(fontSize: 8, color: greenCol, fontWeight: pw.FontWeight.bold),
+                    )
+                  else
+                    pw.Text(
+                      'Status: In Progress',
+                      style: pw.TextStyle(fontSize: 8, color: PdfColor.fromInt(0xFFE67E22)),
+                    ),
+                  pw.Text(
+                    'Difference: Rs. ${_fmt.format(difference)}',
+                    style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                      color: difference == 0 ? greenCol : redCol,
+                    ),
+                  ),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+      final bytes    = await pdf.save();
+      final filename =
+          'reconciliation_${widget.accountName.replaceAll(' ', '_')}_'
+          '${DateFormat('yyyyMMdd').format(startDate)}.pdf';
+
+      if (kIsWeb) {
+        final blob   = html.Blob([bytes], 'application/pdf');
+        final url    = html.Url.createObjectUrlFromBlob(blob);
+        final anchor = html.AnchorElement(href: url)
+          ..setAttribute('download', filename)
+          ..click();
+        html.Url.revokeObjectUrl(url);
+      } else {
+        final dir  = await getApplicationDocumentsDirectory();
+        final file = File('${dir.path}/$filename');
+        await file.writeAsBytes(bytes);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:         const Text('PDF exported successfully'),
+          backgroundColor: _green,
+          behavior:        SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:         Text('PDF export failed: $e'),
+          backgroundColor: _red,
+          behavior:        SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  // ── Excel Export ──────────────────────────────────────────────────────────
+  Future<void> _exportExcel() async {
+    if (_report == null) return;
+    try {
+      final data           = _buildExportData();
+      final rows           = data['rows'] as List<Map<String, dynamic>>;
+      final openingBalance = data['openingBalance'] as double;
+      final closingBalance = data['closingBalance'] as double;
+      final reconciledOn   = data['reconciledOn'];
+      final period         = data['period'] as Map<String, dynamic>;
+
+      final startDate = _parseDate(period['startDate']);
+      final endDate   = _parseDate(period['endDate']);
+
+      final book  = xl.Excel.createExcel();
+      final sheet = book['Reconciliation Details'];
+      book.delete('Sheet1');
+
+      // ── styles ──
+      final titleStyle = xl.CellStyle(
+        bold:      true,
+        fontSize:  16,
+        horizontalAlign: xl.HorizontalAlign.Center,
+      );
+      final subStyle = xl.CellStyle(
+        bold:      true,
+        fontSize:  12,
+        horizontalAlign: xl.HorizontalAlign.Center,
+      );
+      final periodStyle = xl.CellStyle(
+        fontSize:  10,
+        horizontalAlign: xl.HorizontalAlign.Center,
+        fontColorHex: xl.ExcelColor.fromHexString('#7F8C8D'),
+      );
+      final headerStyle = xl.CellStyle(
+        bold:             true,
+        fontSize:         10,
+        backgroundColorHex: xl.ExcelColor.fromHexString('#0D1B3E'),
+        fontColorHex:     xl.ExcelColor.fromHexString('#FFFFFF'),
+        horizontalAlign:  xl.HorizontalAlign.Left,
+      );
+      final specialRowStyle = xl.CellStyle(
+        bold:             true,
+        fontSize:         9,
+        backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
+      );
+      final amtGreenStyle = xl.CellStyle(
+        fontSize:         9,
+        fontColorHex:     xl.ExcelColor.fromHexString('#27AE60'),
+        horizontalAlign:  xl.HorizontalAlign.Right,
+      );
+      final amtRedStyle = xl.CellStyle(
+        fontSize:         9,
+        fontColorHex:     xl.ExcelColor.fromHexString('#E74C3C'),
+        horizontalAlign:  xl.HorizontalAlign.Right,
+      );
+      final normalStyle = xl.CellStyle(fontSize: 9);
+
+      int r = 0;
+
+      // ── Title rows ──
+      void _setCell(int row, int col, dynamic value, xl.CellStyle? style) {
+        final cell = sheet.cell(
+            xl.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+        cell.value = xl.TextCellValue(value.toString());
+        if (style != null) cell.cellStyle = style;
+      }
+
+      _setCell(r, 0, widget.accountName, titleStyle);
+      sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
+                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+      r++;
+
+      _setCell(r, 0, 'Reconciliation Details', subStyle);
+      sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
+                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+      r++;
+
+      _setCell(r, 0, widget.accountName, subStyle);
+      sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
+                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+      r++;
+
+      _setCell(r, 0, 'Reconciliation Period', periodStyle);
+      sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
+                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+      r++;
+
+      _setCell(r, 0,
+          '${_ifmt.format(startDate)} To ${_ifmt.format(endDate)}',
+          periodStyle);
+      sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
+                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+      r++;
+      r++; // blank row
+
+      // ── Column headers ──
+      final headers = ['DATE', 'TRANSACTION DETAILS', 'TYPE', 'DEPOSITS', 'WITHDRAWALS'];
+      for (int c = 0; c < headers.length; c++) {
+        _setCell(r, c, headers[c], headerStyle);
+      }
+      r++;
+
+      // ── Opening balance ──
+      _setCell(r, 0, _ifmt.format(startDate), specialRowStyle);
+      _setCell(r, 1, '***Opening Balance***', specialRowStyle);
+      _setCell(r, 2, '', specialRowStyle);
+      _setCell(r, 3, '', specialRowStyle);
+      _setCell(r, 4, '₹${_fmt.format(openingBalance)}',
+          xl.CellStyle(
+            bold: true, fontSize: 9,
+            backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
+            fontColorHex: xl.ExcelColor.fromHexString('#E74C3C'),
+            horizontalAlign: xl.HorizontalAlign.Right,
+          ));
+      r++;
+
+      // ── Transaction rows ──
+      for (final row in rows) {
+        final date       = row['date'] as DateTime;
+        final desc       = row['desc'] as String;
+        final ref        = row['ref']  as String;
+        final typeMain   = row['typeMain'] as String;
+        final typeSub    = row['typeSub']  as String;
+        final deposit    = (row['deposit']    as double);
+        final withdrawal = (row['withdrawal'] as double);
+
+        final detailCell = ref.isNotEmpty ? '$desc\nRef#: $ref' : desc;
+        final typeCell   = typeSub.isNotEmpty ? '$typeMain\n$typeSub' : typeMain;
+
+        _setCell(r, 0, _ifmt.format(date), normalStyle);
+        _setCell(r, 1, detailCell, normalStyle);
+        _setCell(r, 2, typeCell, normalStyle);
+        _setCell(r, 3,
+            deposit > 0 ? '₹${_fmt.format(deposit)}' : '',
+            deposit > 0 ? amtGreenStyle : normalStyle);
+        _setCell(r, 4,
+            withdrawal > 0 ? '₹${_fmt.format(withdrawal)}' : '',
+            withdrawal > 0 ? amtRedStyle : normalStyle);
+        r++;
+      }
+
+      // ── Closing balance ──
+      _setCell(r, 0, _ifmt.format(endDate), specialRowStyle);
+      _setCell(r, 1, '***Closing Balance***', specialRowStyle);
+      _setCell(r, 2, '', specialRowStyle);
+      _setCell(r, 3, '', specialRowStyle);
+      _setCell(r, 4, '₹${_fmt.format(closingBalance)}',
+          xl.CellStyle(
+            bold: true, fontSize: 9,
+            backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
+            fontColorHex: xl.ExcelColor.fromHexString('#E74C3C'),
+            horizontalAlign: xl.HorizontalAlign.Right,
+          ));
+      r++;
+      r++; // blank row
+
+      // ── Reconciled On ──
+      if (reconciledOn != null) {
+        _setCell(r, 3, 'Reconciled On:', periodStyle);
+        _setCell(r, 4,
+            _ifmt.format(_parseDate(reconciledOn)),
+            xl.CellStyle(
+              fontSize: 9,
+              fontColorHex: xl.ExcelColor.fromHexString('#7F8C8D'),
+              horizontalAlign: xl.HorizontalAlign.Right,
+            ));
+      }
+
+      // ── Column widths ──
+      sheet.setColumnWidth(0, 14);
+      sheet.setColumnWidth(1, 36);
+      sheet.setColumnWidth(2, 28);
+      sheet.setColumnWidth(3, 16);
+      sheet.setColumnWidth(4, 16);
+
+      final bytes    = Uint8List.fromList(book.encode()!);
+      final filename =
+          'reconciliation_${widget.accountName.replaceAll(' ', '_')}_'
+          '${DateFormat('yyyyMMdd').format(startDate)}.xlsx';
+
+      if (kIsWeb) {
+        final blob   = html.Blob(
+            [bytes],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        final url    = html.Url.createObjectUrlFromBlob(blob);
+        final anchor = html.AnchorElement(href: url)
+          ..setAttribute('download', filename)
+          ..click();
+        html.Url.revokeObjectUrl(url);
+      } else {
+        final dir  = await getApplicationDocumentsDirectory();
+        final file = File('${dir.path}/$filename');
+        await file.writeAsBytes(bytes);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:         const Text('Excel exported successfully'),
+          backgroundColor: _green,
+          behavior:        SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:         Text('Excel export failed: $e'),
+          backgroundColor: _red,
+          behavior:        SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
   @override
@@ -2168,11 +2914,18 @@ class _ReportScreenState extends State<_ReportScreen> {
         ]),
         actions: [
           TextButton.icon(
-            onPressed: _exportCSV,
-            icon:  const Icon(Icons.download_outlined,
-                size: 14, color: _blue),
-            label: const Text('Export CSV',
-                style: TextStyle(fontSize: 12, color: _blue)),
+            onPressed: _exportPDF,
+            icon:  const Icon(Icons.picture_as_pdf_outlined,
+                size: 14, color: _red),
+            label: const Text('Export PDF',
+                style: TextStyle(fontSize: 12, color: _red)),
+          ),
+          TextButton.icon(
+            onPressed: _exportExcel,
+            icon:  const Icon(Icons.table_chart_outlined,
+                size: 14, color: _green),
+            label: const Text('Export Excel',
+                style: TextStyle(fontSize: 12, color: _green)),
           ),
           const SizedBox(width: 12),
         ],

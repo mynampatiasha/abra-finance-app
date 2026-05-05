@@ -77,6 +77,7 @@ function getLogoPath(orgId = null) {
 
 const deliveryChallanSchema = new mongoose.Schema({
   orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   challanNumber: {
     type: String,
     required: true,
@@ -289,7 +290,7 @@ deliveryChallanSchema.methods._updateStatusBasedOnQuantities = function() {
 
 
 // Add this after the schema definition, before the model creation
-deliveryChallanSchema.index({ orgId: 1, challanNumber: 1 }, { unique: true });
+deliveryChallanSchema.index({ orgId: 1, branchId: 1, challanNumber: 1 }, { unique: true });
 const DeliveryChallan = mongoose.models.DeliveryChallan || mongoose.model('DeliveryChallan', deliveryChallanSchema);
 
 // ============================================================================
@@ -314,26 +315,37 @@ function numberToWords(n) {
   return s.trim();
 }
 
-async function generateChallanNumber(orgId = null) {
+async function generateChallanNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(DeliveryChallan, 'challanNumber', 'DC', orgId);
+  return generateNumber(DeliveryChallan, 'challanNumber', 'DC', orgId, branchId);
 }
 
 // ============================================================================
 // PDF GENERATION
 // ============================================================================
 
-async function generateChallanPDF(challan, orgId) {
-  // Fetch org details
+// Branch-aware org data helper for challans
+const { getEffectiveOrgData } = require('./branches');
+
+async function getDcOrgData(orgId, branchId = null) {
+  try {
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    if (!db) return null;
+    return await getEffectiveOrgData(orgId, branchId, db);
+  } catch (_) { return null; }
+}
+
+async function generateChallanPDF(challan, orgId, branchId = null) {
+  // Fetch org details — branch-aware
   let orgName    = 'Your Company';
   let orgGST     = '';
   let orgAddr    = '';
   let orgEmail   = '';
   let orgPhone   = '';
+  let orgData    = null;
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const orgData = await OrgModel.findOne({ orgId }).lean();
+    orgData = await getDcOrgData(orgId, branchId);
     if (orgData) {
       orgName  = orgData.orgName    || orgName;
       orgGST   = orgData.gstNumber  || '';
@@ -345,7 +357,7 @@ async function generateChallanPDF(challan, orgId) {
 
   return new Promise((resolve, reject) => {
     try {
-      console.log('?? Starting PDF generation for challan:', challan.challanNumber);
+      console.log('📄 Starting PDF generation for challan:', challan.challanNumber);
 
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'challans');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -357,8 +369,15 @@ async function generateChallanPDF(challan, orgId) {
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
 
-      const pageW    = 515;
-      const logoPath = getLogoPath(orgId);
+      const pageW = 515;
+
+      // Use branch logo if available, otherwise fall back to org logo
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getLogoPath(orgId);
 
       // -- Header (white background, invoice style) -------------------------
       let logoLoaded = false;
@@ -380,11 +399,18 @@ async function generateChallanPDF(challan, orgId) {
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let cY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, cY, { width: 240 }); cY += 9; });
+      let cY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, cY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        cY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('DELIVERY CHALLAN', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -397,7 +423,7 @@ async function generateChallanPDF(challan, orgId) {
          .text(`Status: ${challan.status.replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // -- Meta boxes ------------------------------------------------------
-      const metaY    = 132;
+      const metaY    = Math.max(132, cY + 8);
       const metaBoxW = pageW / 2;
 
       const deliveryAddrParts = challan.deliveryAddress
@@ -518,11 +544,40 @@ async function generateChallanPDF(challan, orgId) {
 
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _dcSigRelPath = orgData?.digitalSignaturePath;
+      const _dcSigSize    = 200;
+      let   _dcActualSigH = _dcSigSize;
+      if (_dcSigRelPath) {
+        try {
+          const _dcSigAbs = path.join(__dirname, '..', _dcSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_dcSigAbs)) {
+            let _dcW = _dcSigSize, _dcH = _dcSigSize;
+            try {
+              const _dcBuf = fs.readFileSync(_dcSigAbs);
+              const _dcExt = path.extname(_dcSigAbs).toLowerCase();
+              if (_dcExt === '.png' && _dcBuf.length > 24) { _dcW = _dcBuf.readUInt32BE(16); _dcH = _dcBuf.readUInt32BE(20); }
+              else if ((_dcExt === '.jpg' || _dcExt === '.jpeg') && _dcBuf.length > 4) {
+                let _dci = 2;
+                while (_dci < _dcBuf.length - 8) {
+                  if (_dcBuf[_dci] === 0xFF && _dcBuf[_dci+1] >= 0xC0 && _dcBuf[_dci+1] <= 0xC3) { _dcH = _dcBuf.readUInt16BE(_dci+5); _dcW = _dcBuf.readUInt16BE(_dci+7); break; }
+                  _dci += 2 + _dcBuf.readUInt16BE(_dci + 2);
+                }
+              }
+            } catch (_) {}
+            const _dcScale = Math.min(_dcSigSize / _dcW, _dcSigSize / _dcH);
+            _dcActualSigH  = Math.round(_dcH * _dcScale);
+            const _dcActualSigW = Math.round(_dcW * _dcScale);
+            doc.image(_dcSigAbs, authBoxX + (signBoxW - _dcActualSigW) / 2, signSectionY + 10, { width: _dcActualSigW, height: _dcActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _dcSigLineY = signSectionY + 10 + _dcActualSigH + 14;
+      doc.moveTo(authBoxX, _dcSigLineY).lineTo(authBoxX + signBoxW, _dcSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _dcSigLineY + 3, { width: signBoxW, align: 'center' });
 
       // -- Footer ------------------------------------------------------------
       const footY = 760;
@@ -563,8 +618,8 @@ const emailTransporter = nodemailer.createTransport({
   }
 });
 
-async function sendChallanEmail(challan, pdfPath, orgId) {
-  console.log('?? Preparing to send challan email to:', challan.customerEmail);
+async function sendChallanEmail(challan, pdfPath, orgId, branchId = null) {
+  console.log('📧 Preparing to send challan email to:', challan.customerEmail);
 
   let orgName  = 'Billing Team';
   let orgGST   = '';
@@ -572,9 +627,7 @@ async function sendChallanEmail(challan, pdfPath, orgId) {
   let orgPhone = '';
   let orgAddr  = '';
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const orgData = await OrgModel.findOne({ orgId }).lean();
+    const orgData = await getDcOrgData(orgId, branchId);
     if (orgData) {
       orgName  = orgData.orgName    || orgName;
       orgGST   = orgData.gstNumber  || '';
@@ -686,6 +739,7 @@ router.get('/', async (req, res) => {
     
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     
     if (status) query.status = status;
     if (customerId) query.customerId = customerId;
@@ -724,7 +778,10 @@ router.get('/', async (req, res) => {
 // Get statistics
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const stats = await DeliveryChallan.aggregate([
       { $match: orgFilter },
       {
@@ -757,7 +814,8 @@ router.get('/:id', async (req, res) => {
   try {
     const challan = await DeliveryChallan.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!challan) {
@@ -783,12 +841,13 @@ router.post('/', async (req, res) => {
     
     // Generate challan number if not provided
     if (!challanData.challanNumber) {
-      challanData.challanNumber = await generateChallanNumber(req.user?.orgId || null);
+      challanData.challanNumber = await generateChallanNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     }
     
     // Set created by
     challanData.createdBy = req.user?.email || req.user?.uid || 'system';
     challanData.orgId = req.user?.orgId || null;
+    challanData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     
     const challan = new DeliveryChallan(challanData);
     await challan.save();
@@ -809,7 +868,7 @@ router.post('/', async (req, res) => {
 // Update delivery challan
 router.put('/:id', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -844,7 +903,7 @@ router.put('/:id', async (req, res) => {
 // Mark as Sent (no email — status change only)
 router.patch('/:id/mark-as-sent', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!challan) return res.status(404).json({ success: false, error: 'Delivery challan not found' });
 
     challan.status    = 'OPEN';
@@ -862,7 +921,7 @@ router.patch('/:id/mark-as-sent', async (req, res) => {
 // Mark as Open (dispatch)
 router.post('/:id/dispatch', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -899,7 +958,7 @@ router.post('/:id/dispatch', async (req, res) => {
 // Mark as Delivered
 router.post('/:id/delivered', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -937,7 +996,7 @@ router.post('/:id/delivered', async (req, res) => {
 // Convert to Invoice (AUTOMATIC)
 router.post('/:id/convert-to-invoice', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
 
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -961,7 +1020,7 @@ router.post('/:id/convert-to-invoice', async (req, res) => {
 
     // ? Generate real invoice number
     const { generateNumber } = require('../utils/numberGenerator');
-    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', req.user?.orgId || null);
+    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     // ? Calculate due date (Net 30)
     const invoiceDate = new Date();
@@ -1058,6 +1117,7 @@ if (subTotal === 0) {
     const invoice = new Invoice({
       invoiceNumber,
       orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       customerId,
       customerName:       challan.customerName,
       customerEmail:      challan.customerEmail  || '',
@@ -1125,6 +1185,7 @@ if (subTotal === 0) {
       if (arId) await postTransactionToCOA({
         accountId:       arId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Invoice ${invoiceNumber} from Challan ${challan.challanNumber} - ${challan.customerName}`,
         referenceType:   'Invoice',
@@ -1138,6 +1199,7 @@ if (subTotal === 0) {
       if (salesId) await postTransactionToCOA({
         accountId:       salesId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Invoice ${invoiceNumber} from Challan ${challan.challanNumber} - ${challan.customerName}`,
         referenceType:   'Invoice',
@@ -1151,6 +1213,7 @@ if (subTotal === 0) {
       if (taxId && gst > 0) await postTransactionToCOA({
         accountId:       taxId,
         orgId:           currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `GST on Invoice ${invoiceNumber}`,
         referenceType:   'Invoice',
@@ -1186,7 +1249,7 @@ if (subTotal === 0) {
 // Record Partial Return
 router.post('/:id/partial-return', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -1231,7 +1294,7 @@ router.post('/:id/partial-return', async (req, res) => {
 // Mark as Returned (Full)
 router.post('/:id/returned', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -1261,7 +1324,7 @@ router.post('/:id/returned', async (req, res) => {
 // Send challan via email
 router.post('/:id/send', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -1277,7 +1340,7 @@ router.post('/:id/send', async (req, res) => {
     // Generate PDF if not exists
     let pdfInfo;
     if (!challan.pdfPath || !fs.existsSync(challan.pdfPath)) {
-      pdfInfo = await generateChallanPDF(challan, req.user?.orgId);
+      pdfInfo = await generateChallanPDF(challan, req.user?.orgId, challan.branchId);
       challan.pdfPath = pdfInfo.filepath;
       challan.pdfGeneratedAt = new Date();
     }
@@ -1304,7 +1367,7 @@ router.post('/:id/send', async (req, res) => {
       });
     } else {
       // Send email
-      await sendChallanEmail(challan, challan.pdfPath, req.user?.orgId);
+      await sendChallanEmail(challan, challan.pdfPath, req.user?.orgId, challan.branchId);
     }
     
     // Update status if draft
@@ -1351,7 +1414,7 @@ router.get('/:id/pdf', async (req, res) => {
     }
   }
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -1359,7 +1422,7 @@ router.get('/:id/pdf', async (req, res) => {
     
     // Generate PDF if not exists
     if (!challan.pdfPath || !fs.existsSync(challan.pdfPath)) {
-      const pdfInfo = await generateChallanPDF(challan, req.user?.orgId);
+      const pdfInfo = await generateChallanPDF(challan, req.user?.orgId, challan.branchId);
       challan.pdfPath = pdfInfo.filepath;
       challan.pdfGeneratedAt = new Date();
       await challan.save();
@@ -1377,7 +1440,7 @@ router.get('/:id/pdf', async (req, res) => {
 // Get download URL
 router.get('/:id/download-url', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });
@@ -1385,7 +1448,7 @@ router.get('/:id/download-url', async (req, res) => {
     
     // Generate PDF if not exists
     if (!challan.pdfPath || !fs.existsSync(challan.pdfPath)) {
-      const pdfInfo = await generateChallanPDF(challan, req.user?.orgId);
+      const pdfInfo = await generateChallanPDF(challan, req.user?.orgId, challan.branchId);
       challan.pdfPath = pdfInfo.filepath;
       challan.pdfGeneratedAt = new Date();
       await challan.save();
@@ -1409,11 +1472,9 @@ router.get('/:id/download-url', async (req, res) => {
 // GET /api/delivery-challans/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!challan) return res.status(404).json({ success: false, error: 'Delivery challan not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const org = await getDcOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     const orgName  = org?.orgName    || '';
     const orgGST   = org?.gstNumber  || '';
     const orgPhone = org?.phone      || '';
@@ -1514,7 +1575,7 @@ router.get('/:id/email-preview', async (req, res) => {
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!challan) return res.status(404).json({ success: false, error: 'Delivery challan not found' });
     if (to !== undefined)      challan.customEmailTo      = to;
     if (subject !== undefined) challan.customEmailSubject = subject;
@@ -1529,7 +1590,7 @@ router.patch('/:id/email-preview', async (req, res) => {
 // Delete delivery challan
 router.delete('/:id', async (req, res) => {
   try {
-    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const challan = await DeliveryChallan.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     
     if (!challan) {
       return res.status(404).json({ success: false, error: 'Delivery challan not found' });

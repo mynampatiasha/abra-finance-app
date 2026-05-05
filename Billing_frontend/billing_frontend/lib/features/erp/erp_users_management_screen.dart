@@ -126,6 +126,7 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
   final int _itemsPerPage = 20;
 
   // ── scroll ─────────────────────────────────────────────────────────────────
+  bool _isTableView = true;
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
 
@@ -361,7 +362,7 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
               ? const SizedBox(height: 400, child: Center(child: CircularProgressIndicator(color: _navy)))
               : _filtered.isEmpty
                   ? SizedBox(height: 400, child: _buildEmptyState())
-                  : _buildTable(),
+                  : _isTableView ? _buildTable() : _buildUserListView(),
           if (!_loading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -404,6 +405,7 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _loading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     if (_canManage)
       _actionBtn('Add User', Icons.person_add_rounded, _navy, () => _showAddEditDialog()),
   ]);
@@ -423,7 +425,14 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
     ]),
     if (_canManage) ...[
       const SizedBox(height: 10),
-      _actionBtn('Add User', Icons.person_add_rounded, _navy, () => _showAddEditDialog()),
+      Row(children: [
+        _buildViewToggle(), const SizedBox(width: 10),
+        _actionBtn('Add User', Icons.person_add_rounded, _navy, () => _showAddEditDialog()),
+      ]),
+    ],
+    if (!_canManage) ...[
+      const SizedBox(height: 10),
+      _buildViewToggle(),
     ],
   ]);
 
@@ -436,6 +445,7 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _statusDropdown(),
       const SizedBox(width: 8),
       _roleDropdown(),
@@ -679,6 +689,107 @@ class _FinanceERPUsersScreenState extends State<FinanceERPUsersScreen> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ===========================================================================
+  //  VIEW TOGGLE
+  // ===========================================================================
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ===========================================================================
+  //  LIST VIEW
+  // ===========================================================================
+
+  Widget _buildUserListView() {
+    final items = _currentPageItems;
+    if (items.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildUserListCard(i, items[i]),
+      ),
+    );
+  }
+
+  Widget _buildUserListCard(int index, FinanceBillingUser u) {
+    final isSel = _selectedRows.contains(index);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _showDetails(u), borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              const SizedBox(width: 4),
+              _avatar(u.name, 32),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(u.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark), overflow: TextOverflow.ellipsis),
+                Text(u.role[0].toUpperCase() + u.role.substring(1), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ])),
+              const SizedBox(width: 8),
+              _statusBadge(u.status),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Icon(Icons.email_outlined, size: 13, color: Colors.grey[500]),
+              const SizedBox(width: 4),
+              Expanded(child: Text(u.email, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+            ]),
+            if (u.phone.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(children: [
+                Icon(Icons.phone_outlined, size: 13, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(u.phone, style: const TextStyle(fontSize: 12)),
+              ]),
+            ],
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            const SizedBox(height: 10),
+            if (_canManage)
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _rowBtn(icon: Icons.share, label: 'Share', color: _blue, onTap: () => _shareUser(u)),
+                _rowBtn(icon: Icons.chat, label: 'WhatsApp', color: const Color(0xFF25D366), onTap: () => _whatsApp(u)),
+                _rowBtn(icon: Icons.security_rounded, label: 'Permissions', color: _teal, onTap: () => _openPermissions(u)),
+                _rowBtn(icon: Icons.edit_outlined, label: 'Edit', color: _orange, onTap: () => _showAddEditDialog(user: u)),
+                _rowBtn(icon: Icons.confirmation_number_outlined, label: 'Ticket', color: _purple, onTap: () => _raiseTicket(u)),
+                _rowBtn(icon: Icons.person_remove_outlined, label: 'Remove', color: _red, onTap: () => _confirmRemove(u)),
+              ]),
+          ]),
+        ),
+      ),
     );
   }
 
@@ -1327,6 +1438,11 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
 
   final List<String> _roles = ['admin', 'accountant', 'staff'];
 
+  // ── Branch access control ──────────────────────────────────────────────────
+  List<Map<String, dynamic>> _branches = [];
+  Set<String> _selectedBranchIds = {};
+  bool _loadingBranches = true;
+
   @override
   void initState() {
     super.initState();
@@ -1336,6 +1452,35 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
     _pwCtrl    = TextEditingController();
     _role      = widget.user?.role ?? 'staff';
     if (!_roles.contains(_role)) _role = 'staff';
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    if (!mounted) return;
+    setState(() => _loadingBranches = true);
+    try {
+      final branches = await FinanceSecureStorage.getBranches();
+      Set<String> preSelected = {};
+      // If editing, pre-select the user's allowed branches for this org
+      if (widget.user != null) {
+        final currentOrgId = await FinanceSecureStorage.getOrgId() ?? '';
+        final orgEntry = widget.user!.organizations.firstWhere(
+          (o) => (o as Map)['orgId'] == currentOrgId,
+          orElse: () => <String, dynamic>{},
+        );
+        final allowed = List<String>.from((orgEntry as Map)['allowedBranches'] ?? []);
+        preSelected = allowed.toSet();
+      }
+      if (!mounted) return;
+      setState(() {
+        _branches = branches;
+        _selectedBranchIds = preSelected;
+        _loadingBranches = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingBranches = false);
+    }
   }
 
   @override
@@ -1396,6 +1541,61 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
                   onChanged: (v) => setState(() => _role = v!),
                 ),
                 const SizedBox(height: 14),
+                // ── Branch access control (only for non-admin roles) ──────────
+                if (_role != 'admin') ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Row(children: [
+                      const Icon(Icons.account_tree_outlined, size: 16, color: Color(0xFF2463AE)),
+                      const SizedBox(width: 6),
+                      const Text('Branch Access', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF0D1B3E))),
+                      const SizedBox(width: 6),
+                      Text('(leave all unchecked = access to all branches)',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  _loadingBranches
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                        )
+                      : _branches.isEmpty
+                          ? Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(color: const Color(0xFFF7F9FC), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFDDE3EE))),
+                              child: Text('No branches set up yet', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                            )
+                          : Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF7F9FC),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFDDE3EE)),
+                              ),
+                              child: Column(
+                                children: _branches.map((branch) {
+                                  final branchId   = branch['branchId']   as String? ?? '';
+                                  final branchName = branch['branchName'] as String? ?? '';
+                                  final city       = branch['city']       as String? ?? '';
+                                  final isChecked  = _selectedBranchIds.contains(branchId);
+                                  return CheckboxListTile(
+                                    dense: true,
+                                    value: isChecked,
+                                    activeColor: const Color(0xFF2463AE),
+                                    title: Text(branchName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                    subtitle: city.isNotEmpty ? Text(city, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)) : null,
+                                    onChanged: (v) {
+                                      setState(() {
+                                        if (v == true) _selectedBranchIds.add(branchId);
+                                        else _selectedBranchIds.remove(branchId);
+                                      });
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                  const SizedBox(height: 8),
+                ],
                 TextFormField(
                   controller: _pwCtrl, obscureText: _obscure,
                   decoration: _dec(isEdit ? 'New password (leave blank to keep)' : 'Password', Icons.lock_outline).copyWith(
@@ -1462,6 +1662,8 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
       'email': _emailCtrl.text.trim(),
       'phone': _phoneCtrl.text.trim(),
       'role':  _role,
+      // admins always get full access — send empty list to clear any restriction
+      'allowedBranches': _role == 'admin' ? [] : _selectedBranchIds.toList(),
       if (_pwCtrl.text.isNotEmpty) 'password': _pwCtrl.text,
     };
     await widget.onSave(data);

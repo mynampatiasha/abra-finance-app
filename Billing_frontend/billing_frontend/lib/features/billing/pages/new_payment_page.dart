@@ -29,6 +29,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../app/config/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
@@ -36,6 +37,7 @@ import '../../../../core/services/billing_api_service.dart';
 import '../../../../core/services/payment_service.dart';
 import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/add_account_service.dart';
+import '../../../../core/finance_secure_storage.dart';
 import 'new_customer.dart';
 import '../widgets/document_preview_buttons.dart';
 
@@ -59,6 +61,7 @@ class NewPaymentPage extends StatefulWidget {
   final String? prefilledReference;
   final String? providerTransactionId;
   final bool showAppBar;
+  final bool isAdvance; // true → Customer Advance mode
   final Function(String recordId)? onSavedCallback;
 
   const NewPaymentPage({
@@ -71,6 +74,7 @@ class NewPaymentPage extends StatefulWidget {
     this.prefilledReference,
     this.providerTransactionId,
     this.showAppBar = true,
+    this.isAdvance = false,
     this.onSavedCallback,
   }) : super(key: key);
 
@@ -119,6 +123,11 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
   List<Map<String, String>>  depositOptions = [];
   String? selectedDepositToId;
   bool    isLoadingBankAccounts = true;
+
+  // Unused credits
+  double  _customerUnusedCredits = 0.0;
+  double  _creditsToApply        = 0.0;
+  bool    _isLoadingCredits      = false;
 
   // Tax toggles (sidebar — new addition matching new_payment_made.dart)
   bool   _enableGST = false; double _gstRate = 18;
@@ -239,6 +248,11 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
       });
       // Load unpaid invoices for the customer
       if (selectedCustomerId != null) await _loadUnpaidInvoices();
+
+      // Restore credits applied from saved payment
+      if (p['creditsApplied'] != null) {
+        setState(() => _creditsToApply = (p['creditsApplied'] as num).toDouble());
+      }
     } catch (e) {
       _showError('Failed to load payment: $e');
     }
@@ -260,12 +274,14 @@ Future<void> _loadBankAccounts() async {
   try {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     
     final response = await http.get(
       Uri.parse('${ApiConfig.baseUrl}/api/finance/banking'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
+        'x-branch-ids': branchHdr,
       },
     );
     
@@ -308,8 +324,10 @@ Future<void> _loadBankAccounts() async {
       orElse: () => customers.first,
     );
     setState(() {
-      selectedCustomerId   = customer.id;
-      selectedCustomerName = customer.customerName;
+      selectedCustomerId     = customer.id;
+      selectedCustomerName   = customer.customerName;
+      _creditsToApply        = 0.0;
+      _customerUnusedCredits = 0.0;
     });
     _loadUnpaidInvoices();
   }
@@ -334,12 +352,21 @@ Future<void> _loadBankAccounts() async {
 
   Future<void> _loadUnpaidInvoices() async {
     if (selectedCustomerId == null) return;
-    setState(() => isLoadingInvoices = true);
+    setState(() { isLoadingInvoices = true; _isLoadingCredits = true; });
     try {
-      final response = await PaymentService.getUnpaidInvoices(selectedCustomerId!);
-      setState(() { unpaidInvoices = response; isLoadingInvoices = false; });
+      final results = await Future.wait([
+        PaymentService.getUnpaidInvoices(selectedCustomerId!),
+        PaymentService.getCustomerUnusedCredits(selectedCustomerId!),
+      ]);
+      setState(() {
+        unpaidInvoices          = results[0] as List<Invoice>;
+        _customerUnusedCredits  = results[1] as double;
+        _creditsToApply         = 0.0; // reset applied credits on customer change
+        isLoadingInvoices       = false;
+        _isLoadingCredits       = false;
+      });
     } catch (e) {
-      setState(() => isLoadingInvoices = false);
+      setState(() { isLoadingInvoices = false; _isLoadingCredits = false; });
       debugPrint('Failed to load unpaid invoices: $e');
     }
   }
@@ -361,7 +388,8 @@ Future<void> _loadBankAccounts() async {
     final received = _calculateAmountReceived();
     final used     = _calculateTotal();
     final charges  = _calculateBankCharges();
-    return received - used - charges;
+    // credits applied reduce the excess (they were already counted as "received")
+    return received - used - charges - _creditsToApply;
   }
 
   // Tax helpers (applied on items subtotal — mirrors new_payment_made logic)
@@ -399,6 +427,60 @@ Future<void> _loadBankAccounts() async {
       setState(() => paymentProofFiles.removeAt(index));
 
   // ── mark as sent ─────────────────────────────────────────────────────────────
+
+  Future<void> _downloadPdf() async {
+    if (_savedPaymentId == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final url = '${ApiConfig.baseUrl}/api/finance/payments-received/$_savedPaymentId/pdf'
+          '?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showError('Could not open PDF');
+      }
+    } catch (e) {
+      _showError('Download failed: $e');
+    }
+  }
+
+  Future<void> _sendEmail() async {
+    if (_savedPaymentId == null) return;
+    final customerEmail = _getSelectedCustomerEmail();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Send Payment Receipt?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          customerEmail.isNotEmpty
+              ? 'Send payment receipt email to $customerEmail?'
+              : 'Send payment receipt email to the customer?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _green, foregroundColor: Colors.white),
+            child: const Text('Send Email'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _isSaving = true);
+    try {
+      await PaymentService.sendPaymentEmail(_savedPaymentId!);
+      _showSuccess('Payment receipt email sent');
+    } catch (e) {
+      _showError('Failed to send email: $e');
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
 
   Future<void> _markAsSent() async {
     if (!_formKey.currentState!.validate()) return;
@@ -470,12 +552,18 @@ Future<void> _loadBankAccounts() async {
     );
 
     try {
+      // Determine if this is a pure credit application (no new cash received)
+      final isCreditOnly = !widget.isAdvance &&
+          _creditsToApply > 0 &&
+          (_calculateAmountReceived() == 0.0 ||
+           _calculateAmountReceived() <= _creditsToApply);
+
       final paymentData = {
         'customerId':       selectedCustomerId,
         'customerName':     selectedCustomerName,
         'customerEmail':    _getSelectedCustomerEmail(),
-        'amountReceived':   _calculateAmountReceived(),
-        'bankCharges':      _calculateBankCharges(),
+        'amountReceived':   isCreditOnly ? 0.0 : _calculateAmountReceived(),
+        'bankCharges':      isCreditOnly ? 0.0 : _calculateBankCharges(),
         'paymentDate':      _paymentDateController.text,
         'paymentNumber':    _paymentNumberController.text,
         'paymentMode':      selectedPaymentMode,
@@ -484,7 +572,11 @@ Future<void> _loadBankAccounts() async {
         'taxDeduction':     selectedTaxDeduction,
         'notes':            _notesController.text,
         'sendThankYouNote': sendThankYouNote,
-        'invoicePayments':  invoicePayments,
+        'invoicePayments':  widget.isAdvance ? {} : invoicePayments,
+        'creditsApplied':   widget.isAdvance ? 0.0 : _creditsToApply,
+        'paymentType':      widget.isAdvance
+            ? 'advance'
+            : (isCreditOnly ? 'credit_application' : 'payment'),
         'gstRate':          _enableGST ? _gstRate : 0,
         'tdsRate':          _enableTDS ? _tdsRate : 0,
         'tcsRate':          _enableTCS ? _tcsRate : 0,
@@ -514,7 +606,9 @@ Future<void> _loadBankAccounts() async {
     if (selectedCustomerId == null) { _showError('Please select a customer'); return; }
     final id = await _doSavePayment();
     if (id == null) return;
-    _showSuccess(_isEdit ? 'Payment updated successfully' : 'Payment recorded successfully');
+    _showSuccess(_isEdit
+        ? (widget.isAdvance ? 'Advance updated successfully' : 'Payment updated successfully')
+        : (widget.isAdvance ? 'Advance recorded successfully' : 'Payment recorded successfully'));
     Navigator.pop(context, true);
   }
 
@@ -599,7 +693,9 @@ Future<void> _loadBankAccounts() async {
         elevation: 0,
         foregroundColor: Colors.white,
         title: Text(
-          _isEdit ? 'Edit Payment' : 'Record Payment',
+          _isEdit
+              ? (widget.isAdvance ? 'Edit Advance' : 'Edit Payment')
+              : (widget.isAdvance ? 'Record Customer Advance' : 'Record Payment'),
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
@@ -616,6 +712,11 @@ Future<void> _loadBankAccounts() async {
               ),
             ),
             IconButton(
+              tooltip: 'Download PDF',
+              icon: const Icon(Icons.download_outlined, color: Colors.white70, size: 20),
+              onPressed: () => _downloadPdf(),
+            ),
+            IconButton(
               tooltip: 'Preview Email',
               icon: const Icon(Icons.email_outlined, color: Colors.white70, size: 20),
               onPressed: () => openEmailPreview(
@@ -624,6 +725,11 @@ Future<void> _loadBankAccounts() async {
                 emailEndpoint: '/api/finance/payments-received',
                 sendEndpoint: '/api/finance/payments-received',
               ),
+            ),
+            IconButton(
+              tooltip: 'Send Email',
+              icon: const Icon(Icons.send_outlined, color: Colors.white70, size: 20),
+              onPressed: _isSaving ? null : _sendEmail,
             ),
           ],
           TextButton.icon(
@@ -645,7 +751,9 @@ Future<void> _loadBankAccounts() async {
           ElevatedButton.icon(
             onPressed: _savePayment,
             icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: Text(_isEdit ? 'Update Payment' : 'Save Payment'),
+            label: Text(_isEdit
+                ? (widget.isAdvance ? 'Update Advance' : 'Update Payment')
+                : (widget.isAdvance ? 'Save Advance' : 'Save Payment')),
             style: ElevatedButton.styleFrom(
               backgroundColor: _navyAccent,
               foregroundColor: Colors.white,
@@ -667,7 +775,10 @@ Future<void> _loadBankAccounts() async {
       const SizedBox(height: 20),
       _buildPaymentDetailsSection(),
       const SizedBox(height: 20),
-      _buildUnpaidInvoicesSection(),
+      if (widget.isAdvance)
+        _buildAdvanceBanner()
+      else
+        _buildUnpaidInvoicesSection(),
       const SizedBox(height: 20),
       _buildNotesSection(),
       const SizedBox(height: 20),
@@ -675,6 +786,84 @@ Future<void> _loadBankAccounts() async {
       const SizedBox(height: 20),
     ]),
   );
+
+  // ── Advance banner — shown instead of unpaid invoices when isAdvance=true ──
+  Widget _buildAdvanceBanner() => _card(child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _sectionTitle('Customer Advance', Icons.account_balance_wallet_outlined),
+      const SizedBox(height: 16),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.green.shade50, Colors.teal.shade50],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade300),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.info_outline, color: Colors.green.shade700, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'This is an advance payment — no invoice is required.',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green.shade800),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(
+            'The full amount (minus bank charges) will be credited to this customer\'s account as unused credits. '
+            'When invoices are raised later, you can apply these credits directly from the payment form.',
+            style: TextStyle(fontSize: 13, color: Colors.green.shade700),
+          ),
+          if (selectedCustomerId != null && _customerUnusedCredits > 0) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(children: [
+                Icon(Icons.account_balance_wallet, color: Colors.green.shade600, size: 16),
+                const SizedBox(width: 8),
+                Text(
+                  'Existing unused credits: ₹${_customerUnusedCredits.toStringAsFixed(2)}',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.green.shade700),
+                ),
+              ]),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Builder(builder: (_) {
+            final amt = _calculateAmountReceived();
+            final charges = _calculateBankCharges();
+            final net = amt - charges;
+            if (amt <= 0) return const SizedBox.shrink();
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('Credit to be added:', style: TextStyle(fontSize: 13, color: Colors.green.shade700)),
+                Text('₹${net.toStringAsFixed(2)}',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+              ]),
+            );
+          }),
+        ]),
+      ),
+    ],
+  ));
 
   // ============================================================================
   // CUSTOMER SECTION
@@ -815,6 +1004,8 @@ Future<void> _loadBankAccounts() async {
                                     setState(() {
                                       selectedCustomerId   = c.id;
                                       selectedCustomerName = c.customerName;
+                                      _creditsToApply      = 0.0;
+                                      _customerUnusedCredits = 0.0;
                                     });
                                     Navigator.pop(ctx);
                                     _loadUnpaidInvoices();
@@ -1166,6 +1357,12 @@ Future<void> _loadBankAccounts() async {
       ]),
       const SizedBox(height: 16),
 
+      // ── Unused Credits Banner ──────────────────────────────────────────────
+      if (selectedCustomerId != null && (_customerUnusedCredits > 0 || _isLoadingCredits)) ...[
+        _buildUnusedCreditsWidget(),
+        const SizedBox(height: 16),
+      ],
+
       if (isLoadingInvoices)
         const Center(child: Padding(
             padding: EdgeInsets.all(24),
@@ -1256,6 +1453,113 @@ Future<void> _loadBankAccounts() async {
       ],
     ],
   ));
+
+  Widget _buildUnusedCreditsWidget() {
+    if (_isLoadingCredits) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade200),
+        ),
+        child: const Row(children: [
+          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 10),
+          Text('Loading unused credits...', style: TextStyle(fontSize: 13)),
+        ]),
+      );
+    }
+
+    final maxApplicable = _customerUnusedCredits;
+    final fmt = (double v) => '₹${v.toStringAsFixed(2)}';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade50, Colors.teal.shade50],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.shade300),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.account_balance_wallet_outlined,
+              color: Colors.green.shade700, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            'Unused Credits Available: ${fmt(maxApplicable)}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.green.shade800,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: TextFormField(
+              initialValue: _creditsToApply > 0
+                  ? _creditsToApply.toStringAsFixed(2) : '',
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+              decoration: InputDecoration(
+                labelText: 'Apply Credits',
+                hintText: '0.00',
+                prefixText: '₹',
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.green.shade600, width: 2),
+                ),
+                helperText: 'Max: ${fmt(maxApplicable)}',
+                helperStyle: TextStyle(color: Colors.green.shade700, fontSize: 11),
+              ),
+              onChanged: (v) {
+                final entered = double.tryParse(v) ?? 0.0;
+                setState(() {
+                  _creditsToApply = entered > maxApplicable ? maxApplicable : entered;
+                });
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton(
+            onPressed: () => setState(() => _creditsToApply = maxApplicable),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.green.shade700,
+              side: BorderSide(color: Colors.green.shade400),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            ),
+            child: const Text('Apply All'),
+          ),
+          const SizedBox(width: 6),
+          if (_creditsToApply > 0)
+            OutlinedButton(
+              onPressed: () => setState(() => _creditsToApply = 0.0),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red.shade600,
+                side: BorderSide(color: Colors.red.shade300),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+              child: const Text('Clear'),
+            ),
+        ]),
+        if (_creditsToApply > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Applying ${fmt(_creditsToApply)} — remaining after this payment: ${fmt(maxApplicable - _creditsToApply)}',
+            style: TextStyle(fontSize: 12, color: Colors.green.shade700),
+          ),
+        ],
+      ]),
+    );
+  }
 
   Widget _buildInvoiceRow(int index) {
     final invoice = unpaidInvoices[index];
@@ -1588,12 +1892,17 @@ Future<void> _loadBankAccounts() async {
         final amountInExcess = _calculateAmountInExcess();
 
         return Column(children: [
-          if (total > 0) ...[
+          if (total > 0 && !widget.isAdvance) ...[
             _summaryRow('Invoices Allocated', total, color: _navyMid),
             const SizedBox(height: 6),
           ],
-          _summaryRow('Amount Received', amountReceived),
+          _summaryRow(widget.isAdvance ? 'Advance Amount' : 'Amount Received', amountReceived),
           const SizedBox(height: 6),
+          if (_creditsToApply > 0 && !widget.isAdvance) ...[
+            _summaryRow('Credits Applied', _creditsToApply,
+                color: Colors.green.shade700),
+            const SizedBox(height: 6),
+          ],
           if (bankCharges > 0) ...[
             _summaryRow('Bank Charges', bankCharges,
                 color: Colors.red[700]),
@@ -1619,9 +1928,14 @@ Future<void> _loadBankAccounts() async {
           ],
           const Divider(thickness: 2),
           const SizedBox(height: 6),
-          _summaryRow('Amount in Excess', amountInExcess,
-              isBold: true, isTotal: true,
-              color: amountInExcess < 0 ? Colors.red : null),
+          if (widget.isAdvance) ...[
+            _summaryRow('Credit to Customer', amountReceived - bankCharges,
+                isBold: true, isTotal: true, color: Colors.green.shade700),
+          ] else ...[
+            _summaryRow('Amount in Excess', amountInExcess,
+                isBold: true, isTotal: true,
+                color: amountInExcess < 0 ? Colors.red : null),
+          ],
 
           const SizedBox(height: 16),
 
@@ -1675,7 +1989,7 @@ Future<void> _loadBankAccounts() async {
             child: ElevatedButton.icon(
               onPressed: _savePayment,
               icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Save Payment'),
+              label: Text(widget.isAdvance ? 'Save Advance' : 'Save Payment'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 foregroundColor: Colors.white,

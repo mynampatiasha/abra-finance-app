@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/finance_secure_storage.dart';
 import '../../../../app/config/api_config.dart';
 import '../../../../core/services/timer_service.dart';
 import '../app_top_bar.dart';
@@ -44,11 +45,16 @@ class _ProjectDashboardPageState extends State<ProjectDashboardPage> {
   Future<void> _load() async {
     setState(() { _isLoading = true; _error = null; });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/projects/${widget.projectId}/dashboard'),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'x-branch-ids': branchHdr,
+        },
       );
       final body = json.decode(res.body) as Map<String, dynamic>;
       if (body['success'] == true) {

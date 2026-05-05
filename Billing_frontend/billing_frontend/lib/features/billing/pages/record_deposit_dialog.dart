@@ -23,6 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../app/config/api_config.dart';
 import '../../../core/services/bank_transaction_service.dart';
 import '../../../core/services/add_account_service.dart';
+import '../../../core/finance_secure_storage.dart';
 
 const Color _navy   = Color(0xFF1e3a8a);
 const Color _green  = Color(0xFF27AE60);
@@ -95,11 +96,13 @@ class _RecordDepositDialogState extends State<RecordDepositDialog> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/banking'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
+          'x-branch-ids': branchHdr,
         },
       );
       if (response.statusCode == 200) {

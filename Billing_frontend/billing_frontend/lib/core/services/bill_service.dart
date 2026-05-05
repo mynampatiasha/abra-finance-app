@@ -10,6 +10,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
+import '../finance_secure_storage.dart';
 
 class BillService {
   static final ApiService _api = ApiService();
@@ -119,6 +120,19 @@ class BillService {
     }
   }
 
+  /// Mark bill as OPEN without sending email
+  static Future<Bill> markAsSent(String billId) async {
+    try {
+      print('📤 PATCH: $_baseEndpoint/$billId/mark-as-sent');
+      final data = await _api.patch('$_baseEndpoint/$billId/mark-as-sent');
+      print('✅ Bill marked as sent: ${data['data']['billNumber']}');
+      return Bill.fromJson(data['data']);
+    } catch (e) {
+      print('❌ Error marking bill as sent: $e');
+      rethrow;
+    }
+  }
+
   /// Void a bill
   static Future<Bill> voidBill(String billId) async {
     try {
@@ -165,9 +179,10 @@ class BillService {
   /// Download bill PDF — returns authenticated URL with token in query param
   static Future<String> downloadPDF(String billId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwt_token') ?? '';
-      final url = '${_api.baseUrl}$_baseEndpoint/$billId/pdf?token=$token';
+      final prefs     = await SharedPreferences.getInstance();
+      final token     = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final url = '${_api.baseUrl}$_baseEndpoint/$billId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
       print('✅ Bill PDF URL: $url');
       return url;
     } catch (e) {
@@ -212,6 +227,54 @@ class BillService {
       return data;
     } catch (e) {
       print('❌ Error bulk importing bills: $e');
+      rethrow;
+    }
+  }
+
+  // ============================================================================
+  // APPLY CREDITS (VENDOR ADVANCE) METHODS
+  // ============================================================================
+
+  /// Fetch available vendor advances for a bill
+  static Future<List<VendorAdvance>> getAvailableCredits(String billId) async {
+    try {
+      print('📤 GET: $_baseEndpoint/$billId/available-credits');
+      final data = await _api.get('$_baseEndpoint/$billId/available-credits');
+      return (data['data'] as List? ?? [])
+          .map((a) => VendorAdvance.fromJson(a))
+          .toList();
+    } catch (e) {
+      print('❌ Error fetching available credits: $e');
+      rethrow;
+    }
+  }
+
+  /// Apply a vendor advance to a bill
+  static Future<Bill> applyCredit(String billId, String advanceId, double amount) async {
+    try {
+      print('📤 POST: $_baseEndpoint/$billId/apply-credits');
+      final data = await _api.post(
+        '$_baseEndpoint/$billId/apply-credits',
+        body: {'advanceId': advanceId, 'amount': amount},
+      );
+      print('✅ Credit applied: ₹$amount');
+      return Bill.fromJson(data['data']['bill']);
+    } catch (e) {
+      print('❌ Error applying credit: $e');
+      rethrow;
+    }
+  }
+
+  /// Remove (reverse) an applied credit from a bill
+  static Future<Bill> removeCredit(String billId, String creditEntryId) async {
+    try {
+      print('📤 DELETE: $_baseEndpoint/$billId/apply-credits/$creditEntryId');
+      final data = await _api.delete(
+          '$_baseEndpoint/$billId/apply-credits/$creditEntryId');
+      print('✅ Credit reversed');
+      return Bill.fromJson(data['data']['bill']);
+    } catch (e) {
+      print('❌ Error removing credit: $e');
       rethrow;
     }
   }
@@ -396,6 +459,7 @@ class Bill {
   final double amountPaid;
   final double amountDue;
   final List<BillPayment> payments;
+  final List<AppliedCredit> vendorCreditsApplied;
 
   // Recurring
   final bool isRecurring;
@@ -434,6 +498,7 @@ class Bill {
     required this.amountPaid,
     required this.amountDue,
     required this.payments,
+    this.vendorCreditsApplied = const [],
     required this.isRecurring,
     required this.createdAt,
     required this.updatedAt,
@@ -473,6 +538,8 @@ class Bill {
       amountPaid: (json['amountPaid'] ?? 0).toDouble(),
       amountDue: (json['amountDue'] ?? 0).toDouble(),
       payments: (json['payments'] as List? ?? []).map((p) => BillPayment.fromJson(p)).toList(),
+      vendorCreditsApplied: (json['vendorCreditsApplied'] as List? ?? [])
+          .map((c) => AppliedCredit.fromJson(c)).toList(),
       isRecurring: json['isRecurring'] ?? false,
       createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
       updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
@@ -489,6 +556,15 @@ class BillItem {
   final double discount;
   final String discountType;
   final double amount;
+  // GST / HSN fields
+  final String hsnCode;
+  final String sacCode;
+  final String unit;
+  final double itemGstRate;
+  final double taxableAmount;
+  final double cgstAmount;
+  final double sgstAmount;
+  final double igstAmount;
 
   BillItem({
     required this.itemDetails,
@@ -498,29 +574,122 @@ class BillItem {
     required this.discount,
     required this.discountType,
     required this.amount,
+    this.hsnCode = '',
+    this.sacCode = '',
+    this.unit = 'Nos',
+    this.itemGstRate = 0,
+    this.taxableAmount = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   factory BillItem.fromJson(Map<String, dynamic> json) {
     return BillItem(
-      itemDetails: json['itemDetails'] ?? '',
-      account: json['account'],
-      quantity: (json['quantity'] ?? 0).toDouble(),
-      rate: (json['rate'] ?? 0).toDouble(),
-      discount: (json['discount'] ?? 0).toDouble(),
-      discountType: json['discountType'] ?? 'percentage',
-      amount: (json['amount'] ?? 0).toDouble(),
+      itemDetails:   json['itemDetails'] ?? '',
+      account:       json['account'],
+      quantity:      (json['quantity']     ?? 0).toDouble(),
+      rate:          (json['rate']         ?? 0).toDouble(),
+      discount:      (json['discount']     ?? 0).toDouble(),
+      discountType:  json['discountType']  ?? 'percentage',
+      amount:        (json['amount']       ?? 0).toDouble(),
+      hsnCode:       json['hsnCode']       ?? '',
+      sacCode:       json['sacCode']       ?? '',
+      unit:          json['unit']          ?? 'Nos',
+      itemGstRate:   (json['itemGstRate']  ?? 0).toDouble(),
+      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
+      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
+      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
+      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails': itemDetails,
-    'account': account,
-    'quantity': quantity,
-    'rate': rate,
-    'discount': discount,
-    'discountType': discountType,
-    'amount': amount,
+    'itemDetails':   itemDetails,
+    'account':       account,
+    'quantity':      quantity,
+    'rate':          rate,
+    'discount':      discount,
+    'discountType':  discountType,
+    'amount':        amount,
+    'hsnCode':       hsnCode,
+    'sacCode':       sacCode,
+    'unit':          unit,
+    'itemGstRate':   itemGstRate,
+    'taxableAmount': taxableAmount,
+    'cgstAmount':    cgstAmount,
+    'sgstAmount':    sgstAmount,
+    'igstAmount':    igstAmount,
   };
+}
+
+/// Applied Credit (vendor advance applied to a bill)
+class AppliedCredit {
+  final String id;
+  final String creditId;
+  final String? paymentNumber;
+  final double amount;
+  final DateTime appliedDate;
+
+  AppliedCredit({
+    required this.id,
+    required this.creditId,
+    this.paymentNumber,
+    required this.amount,
+    required this.appliedDate,
+  });
+
+  factory AppliedCredit.fromJson(Map<String, dynamic> json) {
+    return AppliedCredit(
+      id:            json['_id']?.toString() ?? '',
+      creditId:      json['creditId']?.toString() ?? '',
+      paymentNumber: json['paymentNumber'],
+      amount:        (json['amount'] ?? 0).toDouble(),
+      appliedDate:   DateTime.tryParse(json['appliedDate'] ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+/// Vendor Advance (available to apply)
+class VendorAdvance {
+  final String id;
+  final String paymentNumber;
+  final DateTime paymentDate;
+  final String paymentMode;
+  final double amount;
+  final double amountApplied;
+  final double amountUnused;
+  final String status;
+  final String referenceNumber;
+  final String notes;
+
+  VendorAdvance({
+    required this.id,
+    required this.paymentNumber,
+    required this.paymentDate,
+    required this.paymentMode,
+    required this.amount,
+    required this.amountApplied,
+    required this.amountUnused,
+    required this.status,
+    required this.referenceNumber,
+    required this.notes,
+  });
+
+  factory VendorAdvance.fromJson(Map<String, dynamic> json) {
+    return VendorAdvance(
+      id:             json['_id']?.toString() ?? '',
+      paymentNumber:  json['paymentNumber'] ?? '',
+      paymentDate:    DateTime.tryParse(json['paymentDate'] ?? '') ?? DateTime.now(),
+      paymentMode:    json['paymentMode'] ?? '',
+      amount:         (json['amount'] ?? 0).toDouble(),
+      amountApplied:  (json['amountApplied'] ?? 0).toDouble(),
+      amountUnused:   (json['amountUnused'] ?? 0).toDouble(),
+      status:         json['status'] ?? '',
+      referenceNumber: json['referenceNumber'] ?? '',
+      notes:          json['notes'] ?? '',
+    );
+  }
 }
 
 /// Bill Payment
@@ -855,36 +1024,69 @@ class MutableBillItem {
   double discount;
   String discountType;
   double amount;
+  // GST / HSN fields
+  String hsnCode;
+  String sacCode;
+  String unit;
+  double itemGstRate;
+  double taxableAmount;
+  double cgstAmount;
+  double sgstAmount;
+  double igstAmount;
 
   MutableBillItem({
-    this.itemDetails = '',
+    this.itemDetails  = '',
     this.account,
-    this.quantity = 0,
-    this.rate = 0,
-    this.discount = 0,
+    this.quantity     = 0,
+    this.rate         = 0,
+    this.discount     = 0,
     this.discountType = 'percentage',
-    this.amount = 0,
+    this.amount       = 0,
+    this.hsnCode      = '',
+    this.sacCode      = '',
+    this.unit         = 'Nos',
+    this.itemGstRate  = 18,
+    this.taxableAmount= 0,
+    this.cgstAmount   = 0,
+    this.sgstAmount   = 0,
+    this.igstAmount   = 0,
   });
 
   Map<String, dynamic> toJson() => {
-    'itemDetails': itemDetails,
-    'account': account,
-    'quantity': quantity,
-    'rate': rate,
-    'discount': discount,
-    'discountType': discountType,
-    'amount': amount,
+    'itemDetails':   itemDetails,
+    'account':       account,
+    'quantity':      quantity,
+    'rate':          rate,
+    'discount':      discount,
+    'discountType':  discountType,
+    'amount':        amount,
+    'hsnCode':       hsnCode,
+    'sacCode':       sacCode,
+    'unit':          unit,
+    'itemGstRate':   itemGstRate,
+    'taxableAmount': taxableAmount,
+    'cgstAmount':    cgstAmount,
+    'sgstAmount':    sgstAmount,
+    'igstAmount':    igstAmount,
   };
 
   factory MutableBillItem.fromBillItem(BillItem item) {
     return MutableBillItem(
-      itemDetails: item.itemDetails,
-      account: item.account,
-      quantity: item.quantity,
-      rate: item.rate,
-      discount: item.discount,
-      discountType: item.discountType,
-      amount: item.amount,
+      itemDetails:   item.itemDetails,
+      account:       item.account,
+      quantity:      item.quantity,
+      rate:          item.rate,
+      discount:      item.discount,
+      discountType:  item.discountType,
+      amount:        item.amount,
+      hsnCode:       item.hsnCode,
+      sacCode:       item.sacCode,
+      unit:          item.unit,
+      itemGstRate:   item.itemGstRate,
+      taxableAmount: item.taxableAmount,
+      cgstAmount:    item.cgstAmount,
+      sgstAmount:    item.sgstAmount,
+      igstAmount:    item.igstAmount,
     );
   }
 }

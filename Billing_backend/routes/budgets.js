@@ -202,7 +202,7 @@ router.get('/', authenticate, async (req, res) => {
     const { isActive, financialYear, budgetPeriod, search, page = 1, limit = 20 } = req.query;
 
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {}); Object.assign(query, req.branchFilter || {});
     if (isActive !== undefined && isActive !== 'null') query.isActive = isActive === 'true';
     if (financialYear && financialYear !== 'All') query.financialYear = financialYear;
     if (budgetPeriod && budgetPeriod !== 'All') query.budgetPeriod = budgetPeriod;
@@ -250,7 +250,7 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const budget = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
     const enriched = await enrichWithActuals(budget, req.user?.orgId);
@@ -265,7 +265,7 @@ router.get('/:id/actuals', authenticate, async (req, res) => {
   try {
     const budget = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
     const enriched = await enrichWithActuals(budget, req.user?.orgId);
@@ -296,7 +296,7 @@ router.post('/', authenticate, async (req, res) => {
         if (!line.accountId && line.accountName) {
           const acc = await ChartOfAccount.findOne({
             accountName: { $regex: `^${line.accountName}$`, $options: 'i' },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
           }).lean();
           if (acc) {
             line.accountId   = acc._id;
@@ -308,7 +308,8 @@ router.post('/', authenticate, async (req, res) => {
 
     const budget = await Budget.create({
       ...data,
-      orgId: req.user?.orgId || null,
+      orgId:     req.user?.orgId || null,
+      branchId:  req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user?.email || 'system',
     });
 
@@ -325,7 +326,7 @@ router.put('/:id', authenticate, async (req, res) => {
   try {
     const budget = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
 
@@ -359,7 +360,7 @@ router.patch('/:id/toggle-active', authenticate, async (req, res) => {
   try {
     const budget = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
 
@@ -378,7 +379,7 @@ router.post('/:id/clone', authenticate, async (req, res) => {
   try {
     const original = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!original) return res.status(404).json({ success: false, message: 'Budget not found' });
 
@@ -393,6 +394,7 @@ router.post('/:id/clone', authenticate, async (req, res) => {
       isActive:      true,
       accountLines:  original.accountLines.map((l) => ({ ...l, _id: undefined })),
       orgId:         req.user?.orgId || null,
+      branchId:      req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy:     req.user?.email || 'system',
     });
 
@@ -408,7 +410,7 @@ router.delete('/:id', authenticate, async (req, res) => {
   try {
     const budget = await Budget.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
     await budget.deleteOne();
@@ -435,7 +437,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
         if (!item.accountId && item.accountName) {
           const acc = await ChartOfAccount.findOne({
             accountName: { $regex: `^${item.accountName}$`, $options: 'i' },
-            ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+            ...req.orgFilter,
           }).lean();
           if (acc) { item.accountId = acc._id; item.accountType = acc.accountType; }
         }
@@ -444,7 +446,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
         let budget = await Budget.findOne({
           budgetName: item.budgetName,
           financialYear: item.financialYear,
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+          ...req.orgFilter,
         });
         if (!budget) {
           budget = await Budget.create({
@@ -456,6 +458,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
             isActive:      true,
             accountLines:  [],
             orgId:         req.user?.orgId || null,
+            branchId:      req.branchIds?.length > 0 ? req.branchIds[0] : null,
             createdBy:     req.user?.email || 'system',
           });
         }

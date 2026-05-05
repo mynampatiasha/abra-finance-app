@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // RECURRING EXPENSES SYSTEM - COMPLETE BACKEND IMPLEMENTATION (UPDATED)
 // ============================================================================
 // File: backend/routes/recurring_expenses.js
@@ -288,10 +288,10 @@ const RecurringExpense = mongoose.models.RecurringExpense || mongoose.model('Rec
 // });
 
 // Check if model already exists to avoid OverwriteModelError
-// ✅ Force save to MAIN "expenses" collection so it shows in Expenses list
+// ? Force save to MAIN "expenses" collection so it shows in Expenses list
 const expenseLooseSchema = new mongoose.Schema({}, { 
   strict: false, 
-  collection: 'expenses'   // ← same collection as expenses.js
+  collection: 'expenses'   // ? same collection as expenses.js
 });
 const RecurringGeneratedExpense = mongoose.models.RecurringGeneratedExpense
   || mongoose.model('RecurringGeneratedExpense', expenseLooseSchema);
@@ -361,7 +361,7 @@ function shouldGenerateExpense(profile) {
 
 // Run every hour to check for expenses to generate
 cron.schedule('0 * * * *', async () => {
-  console.log('🔄 Running automatic expense generation check...');
+  console.log('?? Running automatic expense generation check...');
   
   try {
     // Find all active profiles that need generation
@@ -370,20 +370,20 @@ cron.schedule('0 * * * *', async () => {
       nextExpenseDate: { $lte: new Date() }
     });
     
-    console.log(`📊 Found ${profiles.length} profiles to process`);
+    console.log(`?? Found ${profiles.length} profiles to process`);
     
     for (const profile of profiles) {
       try {
         if (shouldGenerateExpense(profile)) {
           await generateExpenseFromProfile(profile, 'system-cron');
-          console.log(`✅ Generated expense for profile: ${profile.profileName}`);
+          console.log(`? Generated expense for profile: ${profile.profileName}`);
         }
       } catch (error) {
-        console.error(`❌ Error generating expense for ${profile.profileName}:`, error);
+        console.error(`? Error generating expense for ${profile.profileName}:`, error);
       }
     }
   } catch (error) {
-    console.error('❌ Error in automatic expense generation:', error);
+    console.error('? Error in automatic expense generation:', error);
   }
 });
 
@@ -398,7 +398,7 @@ async function generateExpenseFromProfile(profile, createdBy = 'system') {
   const gstAmount   = gstBase * (gstRate / 100);
   const totalAmount = profile.amount + taxAmount + gstAmount;
 
-  // ✅ Handle vendorId safely — convert to ObjectId only if valid
+  // ? Handle vendorId safely � convert to ObjectId only if valid
   let vendorId;
   try {
     vendorId = mongoose.Types.ObjectId.isValid(profile.vendorId)
@@ -411,10 +411,12 @@ async function generateExpenseFromProfile(profile, createdBy = 'system') {
 const expense = new RecurringGeneratedExpense({
   expenseNumber,
   recurringProfileId:    profile._id,
-  isRecurring:           true,              // ✅ badge flag for UI
+  orgId:                 profile.orgId  || null,
+  branchId:              profile.branchId || null,
+  isRecurring:           true,              // ? badge flag for UI
   recurringProfileName:  profile.profileName,
   vendorId,
-  vendor:                profile.vendorName, // ✅ expenses.js uses "vendor" not "vendorName"
+  vendor:                profile.vendorName, // ? expenses.js uses "vendor" not "vendorName"
   vendorName:            profile.vendorName,
   expenseAccount:        profile.expenseAccount,
   paidThrough:           profile.paidThrough,
@@ -425,11 +427,11 @@ const expense = new RecurringGeneratedExpense({
   tax:                   taxAmount,
   gstRate,
   gstAmount,
-  total:                 totalAmount,        // ✅ expenses.js requires "total"
+  total:                 totalAmount,        // ? expenses.js requires "total"
   totalAmount,
   subtotal:              profile.amount,
   date: new Date(profile.nextExpenseDate)
-          .toISOString().split('T')[0],      // ✅ expenses.js stores date as "YYYY-MM-DD" string
+          .toISOString().split('T')[0],      // ? expenses.js stores date as "YYYY-MM-DD" string
   status,
   isBilled:              false,
   notes:                 `Auto-generated from recurring profile: ${profile.profileName}`,
@@ -438,7 +440,7 @@ const expense = new RecurringGeneratedExpense({
 
   await expense.save();
 
-  // ✅ COA Posting
+  // ? COA Posting
   try {
     const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
@@ -461,8 +463,7 @@ const expense = new RecurringGeneratedExpense({
         currentBalance:  0,
         currency:        'INR',
         transactions:    [],
-        orgId:           coaOrgId,
-      });
+        orgId:           coaOrgId,       });
       expAccId = newAcc._id;
     }
 
@@ -476,8 +477,7 @@ const expense = new RecurringGeneratedExpense({
 
     if (expAccId) await postTransactionToCOA({
       accountId:       expAccId,
-      orgId:           coaOrgId,
-      date:            txnDate,
+      orgId:           coaOrgId,       date:            txnDate,
       description,
       referenceType:   'Expense',
       referenceId:     expense._id,
@@ -488,8 +488,7 @@ const expense = new RecurringGeneratedExpense({
 
     if (paidAccId) await postTransactionToCOA({
       accountId:       paidAccId,
-      orgId:           coaOrgId,
-      date:            txnDate,
+      orgId:           coaOrgId,       date:            txnDate,
       description,
       referenceType:   'Expense',
       referenceId:     expense._id,
@@ -498,9 +497,9 @@ const expense = new RecurringGeneratedExpense({
       credit:          totalAmount,
     });
 
-    console.log(`✅ COA posted for recurring expense: ${expense.expenseNumber}`);
+    console.log(`? COA posted for recurring expense: ${expense.expenseNumber}`);
   } catch (coaErr) {
-    console.error('⚠️ COA post error (recurring expense):', coaErr.message);
+    console.error('?? COA post error (recurring expense):', coaErr.message);
   }
 
   // Update profile
@@ -567,28 +566,28 @@ function getLogoBase64() {
       }
     }
   } catch (error) {
-    console.error('❌ Error reading logo:', error);
+    console.error('? Error reading logo:', error);
   }
   return null;
 }
 
 // Send expense generated email (UPDATED WITH TAX INFO)
 async function sendExpenseGeneratedEmail(profile, expense) {
-  // Fetch org details from DB
+  // Fetch org details — branch-aware
   let orgName  = '';
   let orgGST   = '';
   let orgPhone = '';
   let orgEmail = '';
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: profile.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(profile.orgId, profile.branchId || null, db) : null;
     orgName  = org?.orgName   || '';
     orgGST   = org?.gstNumber || '';
     orgPhone = org?.phone     || '';
     orgEmail = org?.email     || '';
   } catch (e) {
-    console.warn('⚠️ Could not fetch org details for email:', e.message);
+    console.warn('Could not fetch org details for email:', e.message);
   }
 
   const taxAmount = expense.tax      || 0;
@@ -713,7 +712,7 @@ router.get('/:id', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -745,7 +744,8 @@ router.post('/', async (req, res) => {
     
     // Set creator
     profileData.createdBy = req.user?.email || req.user?.uid || 'system';
-    profileData.orgId = req.user?.orgId || null;
+    profileData.orgId     = req.user?.orgId || null;
+    profileData.branchId  = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     
     // Set initial nextExpenseDate to startDate
     if (!profileData.nextExpenseDate) {
@@ -763,7 +763,7 @@ router.post('/', async (req, res) => {
     const profile = new RecurringExpense(profileData);
     await profile.save();
     
-    console.log(`✅ Recurring expense profile created: ${profile.profileName}`);
+    console.log(`? Recurring expense profile created: ${profile.profileName}`);
     
     res.status(201).json({
       success: true,
@@ -781,7 +781,7 @@ router.put('/:id', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -802,7 +802,7 @@ router.put('/:id', async (req, res) => {
     Object.assign(profile, updates);
     await profile.save();
     
-    console.log(`✅ Recurring expense updated: ${profile.profileName}`);
+    console.log(`? Recurring expense updated: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -820,7 +820,7 @@ router.post('/:id/pause', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -835,7 +835,7 @@ router.post('/:id/pause', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`⏸️ Recurring expense paused: ${profile.profileName}`);
+    console.log(`?? Recurring expense paused: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -853,7 +853,7 @@ router.post('/:id/resume', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -868,7 +868,7 @@ router.post('/:id/resume', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`▶️ Recurring expense resumed: ${profile.profileName}`);
+    console.log(`?? Recurring expense resumed: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -886,7 +886,7 @@ router.post('/:id/stop', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -897,7 +897,7 @@ router.post('/:id/stop', async (req, res) => {
     profile.updatedBy = req.user?.email || req.user?.uid || 'system';
     await profile.save();
     
-    console.log(`⏹️ Recurring expense stopped: ${profile.profileName}`);
+    console.log(`?? Recurring expense stopped: ${profile.profileName}`);
     
     res.json({
       success: true,
@@ -915,7 +915,7 @@ router.post('/:id/generate', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -925,7 +925,7 @@ router.post('/:id/generate', async (req, res) => {
     const createdBy = req.user?.email || req.user?.uid || 'manual-generation';
     const expense = await generateExpenseFromProfile(profile, createdBy);
     
-    console.log(`✅ Manual expense generated: ${expense.expenseNumber}`);
+    console.log(`? Manual expense generated: ${expense.expenseNumber}`);
     
     res.status(201).json({
       success: true,
@@ -963,11 +963,11 @@ router.get('/:id/child-expenses', async (req, res) => {
 // GET /api/recurring-expenses/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const profile = await RecurringExpense.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const profile = await RecurringExpense.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!profile) return res.status(404).json({ success: false, error: 'Profile not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
     const orgName = org?.orgName || '';
     const orgGST  = org?.gstNumber || '';
     const orgPhone = org?.phone || '';
@@ -984,13 +984,13 @@ router.get('/:id/email-preview', async (req, res) => {
 <tr><td>Profile</td><td>${profile.profileName}</td></tr>
 <tr><td>Expense Account</td><td>${profile.expenseAccount || ''}</td></tr>
 <tr><td>Paid Through</td><td>${profile.paidThrough || ''}</td></tr>
-<tr><td>Amount</td><td>₹${(profile.amount || 0).toFixed(2)}</td></tr>
-${profile.tax > 0 ? `<tr><td>Tax</td><td>₹${profile.tax.toFixed(2)}</td></tr>` : ''}
+<tr><td>Amount</td><td>?${(profile.amount || 0).toFixed(2)}</td></tr>
+${profile.tax > 0 ? `<tr><td>Tax</td><td>?${profile.tax.toFixed(2)}</td></tr>` : ''}
 </table>
 </div>
 <div class="footer"><strong>${orgName}</strong><br>${orgGST ? 'GST: ' + orgGST + ' | ' : ''}${orgPhone ? 'Ph: ' + orgPhone + ' | ' : ''}${orgEmail}</div>
 </div></body></html>`;
-    res.json({ success: true, data: { subject: `Recurring Expense — ${profile.profileName}`, html, to: profile.vendorEmail } });
+    res.json({ success: true, data: { subject: `Recurring Expense � ${profile.profileName}`, html, to: profile.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1001,7 +1001,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const profile = await RecurringExpense.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     
     if (!profile) {
@@ -1010,7 +1010,7 @@ router.delete('/:id', async (req, res) => {
     
     await profile.deleteOne();
     
-    console.log(`✅ Recurring expense deleted: ${profile.profileName}`);
+    console.log(`? Recurring expense deleted: ${profile.profileName}`);
     
     res.json({
       success: true,

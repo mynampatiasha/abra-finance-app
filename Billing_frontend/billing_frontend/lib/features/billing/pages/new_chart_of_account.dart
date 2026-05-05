@@ -29,7 +29,19 @@ const List<String> _kCurrencies   = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', '
 // ============================================================================
 class NewChartOfAccountScreen extends StatefulWidget {
   final String? accountId;
-  const NewChartOfAccountScreen({Key? key, this.accountId}) : super(key: key);
+  final String? initialName;
+  final String? initialType;
+  final String? initialSubType;
+  final bool    showAppBar;
+
+  const NewChartOfAccountScreen({
+    Key? key,
+    this.accountId,
+    this.initialName,
+    this.initialType,
+    this.initialSubType,
+    this.showAppBar = true,
+  }) : super(key: key);
 
   @override
   State<NewChartOfAccountScreen> createState() => _NewChartOfAccountScreenState();
@@ -63,7 +75,17 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
   void initState() {
     super.initState();
     _loadParentAccounts();
-    if (widget.accountId != null) _loadAccountData();
+    if (widget.accountId != null) {
+      _loadAccountData();
+    } else {
+      // Pre-fill from constructor params (used when launched from banking categorization)
+      if (widget.initialName != null) _nameCtrl.text = widget.initialName!;
+      if (widget.initialType != null) {
+        _accountType = widget.initialType!;
+        _accountSubType = widget.initialSubType
+            ?? (_kSubTypes[widget.initialType!]?.first ?? widget.initialType!);
+      }
+    }
   }
 
   @override
@@ -164,7 +186,7 @@ class _NewChartOfAccountScreenState extends State<NewChartOfAccountScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _buildAppBar(),
+      appBar: widget.showAppBar ? _buildAppBar() : null,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(

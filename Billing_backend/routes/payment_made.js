@@ -44,7 +44,7 @@ async function getSystemAccountId(name, orgId = null) {
 
 const paymentMadeSchema = new mongoose.Schema(
   {
-    paymentNumber: { type: String, required: true, unique: true, index: true },
+    paymentNumber: { type: String, required: true, index: true },
 
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
     vendorName: { type: String, required: true },
@@ -130,6 +130,7 @@ const paymentMadeSchema = new mongoose.Schema(
     pdfGeneratedAt: Date,
 
     orgId: { type: String, index: true, default: null },
+    branchId: { type: String, index: true, default: null },
     providerTransactionId: { type: mongoose.Schema.Types.ObjectId, default: null },
     createdBy: { type: String, required: true },
     updatedBy: String,
@@ -167,6 +168,7 @@ paymentMadeSchema.pre('save', function () {
     this.status = 'RECORDED';
 });
 
+paymentMadeSchema.index({ orgId: 1, branchId: 1, paymentNumber: 1 }, { unique: true });
 paymentMadeSchema.index({ vendorId: 1, paymentDate: -1 });
 paymentMadeSchema.index({ status: 1 });
 paymentMadeSchema.index({ createdAt: -1 });
@@ -177,9 +179,9 @@ const PaymentMade = mongoose.models.PaymentMade || mongoose.model('PaymentMade',
 // HELPERS
 // ============================================================================
 
-async function generatePaymentNumber(orgId = null) {
+async function generatePaymentNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(PaymentMade, 'paymentNumber', 'PMT', orgId);
+  return generateNumber(PaymentMade, 'paymentNumber', 'PMT', orgId, branchId);
 }
 
 function calcItemAmount(item) {
@@ -209,15 +211,54 @@ function findLogoPath() {
   return null;
 }
 
-async function generatePaymentPDF(payment, orgId) {
-  const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-  const org = await OrgModel.findOne({ orgId }).lean();
-  const orgName = org?.orgName || '';
-  const orgGST = org?.gstNumber || '';
-  const orgPhone = org?.phone || '';
-  const orgWhatsapp = org?.whatsappNumber || '';
-  const orgEmail = org?.email || '';
-  const orgAddress = org?.address || '';
+// Org-specific logo lookup (same logic as invoices.js)
+function getPmOrgLogoPath(orgId, branchLogoUrl = null) {
+  // If branch has its own logo URL, use it
+  if (branchLogoUrl) {
+    const branchLogoPath = path.join(__dirname, '..', branchLogoUrl.replace(/^\//, ''));
+    try {
+      if (fs.existsSync(branchLogoPath) && fs.statSync(branchLogoPath).size > 0) return branchLogoPath;
+    } catch (_) {}
+  }
+  if (orgId) {
+    const orgLogoDir = path.join(__dirname, '..', 'uploads', 'org-logos');
+    if (fs.existsSync(orgLogoDir)) {
+      try {
+        const files = fs.readdirSync(orgLogoDir);
+        const match = files.find(f => f.startsWith(`org-${orgId}-`));
+        if (match) {
+          const fullPath = path.join(orgLogoDir, match);
+          const stats    = fs.statSync(fullPath);
+          if (stats.isFile() && stats.size > 0) return fullPath;
+        }
+      } catch (_) {}
+    }
+  }
+  // fallback to generic logo
+  return findLogoPath();
+}
+
+// Branch-aware org data helper
+const { getEffectiveOrgData } = require('./branches');
+
+async function getPmOrgData(orgId, branchId = null) {
+  try {
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    if (!db) return null;
+    return await getEffectiveOrgData(orgId, branchId, db);
+  } catch (_) { return null; }
+}
+
+async function generatePaymentPDF(payment, orgId, branchId = null) {
+  const orgData = await getPmOrgData(orgId, branchId);
+  const orgName    = orgData?.orgName    || '';
+  const orgGST     = orgData?.gstNumber  || '';
+  const orgPhone   = orgData?.phone      || '';
+  const orgEmail   = orgData?.email      || '';
+  const orgAddress = orgData?.address    || '';
+  const logoPath   = getPmOrgLogoPath(orgId, orgData?.logoUrl);
+
   return new Promise((resolve, reject) => {
     try {
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
@@ -228,136 +269,246 @@ async function generatePaymentPDF(payment, orgId) {
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
 
-      // Dark navy header bar matching invoice/bill style
-      const pageW = 515;
-      doc.rect(40, 30, pageW, 90).fill('#0f1e3d');
+      const pageW = 515; // usable width (595 - 40*2)
 
-      doc.fontSize(12).fillColor('#ffffff').font('Helvetica-Bold')
-         .text(orgName.toUpperCase(), 50, 40, { width: 220 });
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
-         .text('PAYMENT MADE', 50, 56, { width: 220, characterSpacing: 1 });
+      // ═══════════════════════════════════════════════════════════════════════
+      // HEADER — white background with logo (invoice.js style)
+      // ═══════════════════════════════════════════════════════════════════════
 
       const contactLines = [orgAddress, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-      doc.fontSize(7).fillColor('rgba(255,255,255,0.85)');
-      let contactY = 68;
+      const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+      const textStartY  = 35;
+      const logoCenterY = textStartY + (textBlockHeight / 2);
+      const logoH = 55;
+      const logoY = logoCenterY - (logoH / 2);
+      const textX = logoPath ? 126 : 50;
+
+      if (logoPath) {
+        try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+      }
+
+      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+         .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
+      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
+      doc.fontSize(7).fillColor('#000000');
+      let contactY = subtitleY + 12;
       contactLines.forEach(line => {
-        doc.text(line, 50, contactY, { width: 240 });
-        contactY += 9;
+        doc.text(line, textX, contactY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
       });
 
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.6)').font('Helvetica-Bold')
+      doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('PAYMENT MADE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
-      doc.fontSize(16).fillColor('#ffffff').font('Helvetica-Bold')
+      doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
          .text(payment.paymentNumber, 380, 52, { width: 170, align: 'right' });
-      doc.fontSize(8).fillColor('rgba(255,255,255,0.8)').font('Helvetica')
-         .text(`Date: ${new Date(payment.paymentDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 74, { width: 170, align: 'right' });
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`Date: ${new Date(payment.paymentDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+         .text(`✓ ${(payment.status || 'RECORDED').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
-      const boxY = 155;
-      doc.rect(40, boxY, 515, 60).fillAndStroke('#F8F9FA', '#DDDDDD');
-      doc.rect(40, boxY, 515, 2).fillAndStroke('#0066CC', '#0066CC');
-      doc.fontSize(8).fillColor('#2C3E50').font('Helvetica-Bold');
-      ['Payment Number:', 'Payment Date:', 'Payment Mode:'].forEach((lbl, i) =>
-        doc.text(lbl, 50, boxY + 12 + i * 15));
-      doc.fillColor('#000000').font('Helvetica');
-      doc.text(payment.paymentNumber, 160, boxY + 12);
-      doc.text(new Date(payment.paymentDate).toLocaleDateString('en-IN', {
-        day: '2-digit', month: 'short', year: 'numeric'
-      }), 160, boxY + 27);
-      doc.text(payment.paymentMode, 160, boxY + 42);
-      doc.fillColor('#2C3E50').font('Helvetica-Bold');
-      ['Reference #:', 'Status:', 'Type:'].forEach((lbl, i) =>
-        doc.text(lbl, 305, boxY + 12 + i * 15));
-      doc.fillColor('#000000').font('Helvetica');
-      doc.text(payment.referenceNumber || 'N/A', 395, boxY + 12);
-      doc.text(payment.status, 395, boxY + 27);
-      doc.text(payment.paymentType, 395, boxY + 42);
+      // ═══════════════════════════════════════════════════════════════════════
+      // META GRID — Paid To | Payment Details (invoice.js style)
+      // ═══════════════════════════════════════════════════════════════════════
+      const metaY = Math.max(132, contactY + 8);
+      const colW  = pageW / 2;
+      const metaH = 80;
 
-      const vY = boxY + 72;
-      doc.fontSize(11).fillColor('#0066CC').font('Helvetica-Bold').text('PAID TO:', 40, vY);
-      doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold').text(payment.vendorName, 40, vY + 18);
+      // Col 1: Paid To
+      const col1X = 40;
+      doc.rect(col1X, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('PAID TO', col1X + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+         .text(payment.vendorName || 'N/A', col1X + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const vendorNameH = doc.heightOfString(payment.vendorName || 'N/A', { width: colW - 16 });
       if (payment.vendorEmail) {
-        doc.fontSize(8).fillColor('#555555').font('Helvetica')
-          .text(`Email: ${payment.vendorEmail}`, 40, vY + 32);
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(payment.vendorEmail, col1X + 8, metaY + 18 + vendorNameH + 2, { width: colW - 16, ellipsis: true });
       }
 
-      // Bills applied section
+      // Col 2: Payment Details
+      const col2X = 40 + colW;
+      doc.rect(col2X, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('PAYMENT DETAILS', col2X + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+      doc.fontSize(7).fillColor('#000000').font('Helvetica')
+         .text(`Payment #: ${payment.paymentNumber}`, col2X + 8, metaY + 18, { width: colW - 16 });
+      doc.text(`Mode: ${payment.paymentMode}`, col2X + 8, metaY + 29, { width: colW - 16 });
+      doc.text(`Type: ${payment.paymentType}`, col2X + 8, metaY + 40, { width: colW - 16 });
+      if (payment.referenceNumber) {
+        doc.text(`Ref #: ${payment.referenceNumber}`, col2X + 8, metaY + 51, { width: colW - 16 });
+      }
+
+      let tableStartY = metaY + metaH + 12;
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // BILLS APPLIED TABLE (if any)
+      // ═══════════════════════════════════════════════════════════════════════
       if (payment.billsApplied && payment.billsApplied.length > 0) {
-        const billsY = vY + 55;
-        doc.fontSize(11).fillColor('#0066CC').font('Helvetica-Bold').text('BILLS PAID:', 40, billsY);
-        let bY = billsY + 18;
-        doc.rect(40, bY, 515, 20).fillAndStroke('#8E44AD', '#8E44AD');
-        doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold');
-        doc.text('Bill #', 50, bY + 6);
-        doc.text('Amount Applied', 400, bY + 6, { width: 145, align: 'right' });
-        bY += 20;
+        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+           .text('BILLS PAID', 40, tableStartY, { characterSpacing: 0.8 });
+        doc.moveTo(40, tableStartY + 9).lineTo(555, tableStartY + 9)
+           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        tableStartY += 14;
+
+        // Bills table header
+        doc.rect(40, tableStartY, pageW, 20).fill('#0f1e3d');
+        doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+        doc.text('BILL #',          52, tableStartY + 7, { width: 200 });
+        doc.text('AMOUNT APPLIED',  52, tableStartY + 7, { width: pageW - 24, align: 'right' });
+        tableStartY += 20;
+
         payment.billsApplied.forEach((b, idx) => {
-          const rc = idx % 2 === 0 ? '#FFFFFF' : '#F8F9FA';
-          doc.rect(40, bY, 515, 20).fillAndStroke(rc, '#E8E8E8');
-          doc.fontSize(8).fillColor('#000000').font('Helvetica');
-          doc.text(b.billNumber || '-', 50, bY + 6);
-          doc.text(`₹${(b.amountApplied || 0).toFixed(2)}`, 400, bY + 6, { width: 145, align: 'right' });
-          bY += 20;
+          const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+          doc.rect(40, tableStartY, pageW, 20).fill(fill);
+          doc.rect(40, tableStartY, pageW, 20).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+          doc.fontSize(7).fillColor('#000000').font('Helvetica');
+          doc.text(b.billNumber || '-', 52, tableStartY + 7, { width: 200 });
+          doc.font('Helvetica-Bold')
+             .text(`Rs. ${(b.amountApplied || 0).toFixed(2)}`, 52, tableStartY + 7, { width: pageW - 24, align: 'right' });
+          tableStartY += 20;
         });
+        tableStartY += 12;
       }
 
-      const tableTop = 370;
-      doc.rect(40, tableTop, 515, 22).fillAndStroke('#2C3E50', '#2C3E50');
-      doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold');
-      doc.text('ITEM DETAILS', 50, tableTop + 8);
-      doc.text('QTY', 330, tableTop + 8, { width: 40, align: 'center' });
-      doc.text('RATE', 380, tableTop + 8, { width: 60, align: 'right' });
-      doc.text('AMOUNT', 455, tableTop + 8, { width: 90, align: 'right' });
+      // ═══════════════════════════════════════════════════════════════════════
+      // ITEMS TABLE
+      // ═══════════════════════════════════════════════════════════════════════
+      if (payment.items && payment.items.length > 0) {
+        // Table header — navy (invoice style)
+        doc.rect(40, tableStartY, pageW, 20).fill('#0f1e3d');
+        doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+        doc.text('ITEM DETAILS', 52,  tableStartY + 7, { width: 260 });
+        doc.text('QTY',          316, tableStartY + 7, { width: 50,  align: 'center' });
+        doc.text('RATE',         366, tableStartY + 7, { width: 70,  align: 'right' });
+        doc.text('AMOUNT',       436, tableStartY + 7, { width: 79,  align: 'right' });
 
-      let yPos = tableTop + 22;
-      (payment.items || []).forEach((item, idx) => {
-        const rc = idx % 2 === 0 ? '#FFFFFF' : '#F8F9FA';
-        doc.rect(40, yPos, 515, 26).fillAndStroke(rc, '#E8E8E8');
-        doc.fontSize(8).fillColor('#000000').font('Helvetica');
-        doc.text(item.itemDetails || 'N/A', 50, yPos + 9, { width: 260, ellipsis: true });
-        doc.text((item.quantity || 0).toString(), 330, yPos + 9, { width: 40, align: 'center' });
-        doc.text(`₹${(item.rate || 0).toFixed(2)}`, 380, yPos + 9, { width: 60, align: 'right' });
-        doc.text(`₹${(item.amount || 0).toFixed(2)}`, 455, yPos + 9, { width: 90, align: 'right' });
-        yPos += 26;
-      });
-
-      const stY = yPos + 20;
-      let curY = stY;
-      const lX = 370, vX = 485;
-      doc.fontSize(8).fillColor('#2C3E50').font('Helvetica-Bold').text('Subtotal:', lX, curY);
-      doc.fillColor('#000000').font('Helvetica')
-        .text(`₹ ${(payment.subTotal || 0).toFixed(2)}`, vX, curY, { width: 70, align: 'right' });
-      curY += 14;
-      if ((payment.cgst || 0) > 0) {
-        doc.fillColor('#2C3E50').font('Helvetica-Bold').text('CGST:', lX, curY);
-        doc.fillColor('#000000').font('Helvetica')
-          .text(`₹ ${payment.cgst.toFixed(2)}`, vX, curY, { width: 70, align: 'right' });
-        curY += 14;
+        let rowY = tableStartY + 20;
+        payment.items.forEach((item, idx) => {
+          const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+          doc.rect(40, rowY, pageW, 22).fill(fill);
+          doc.rect(40, rowY, pageW, 22).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+          doc.fontSize(7).fillColor('#000000').font('Helvetica');
+          doc.text(item.itemDetails || 'N/A', 52,  rowY + 8, { width: 260, ellipsis: true });
+          doc.text(String(item.quantity || 0),  316, rowY + 8, { width: 50,  align: 'center' });
+          doc.text(`Rs. ${(item.rate || 0).toFixed(2)}`,   366, rowY + 8, { width: 70,  align: 'right' });
+          doc.font('Helvetica-Bold')
+             .text(`Rs. ${(item.amount || 0).toFixed(2)}`, 436, rowY + 8, { width: 79,  align: 'right' });
+          rowY += 22;
+        });
+        tableStartY = rowY;
       }
-      if ((payment.sgst || 0) > 0) {
-        doc.fillColor('#2C3E50').font('Helvetica-Bold').text('SGST:', lX, curY);
-        doc.fillColor('#000000').font('Helvetica')
-          .text(`₹ ${payment.sgst.toFixed(2)}`, vX, curY, { width: 70, align: 'right' });
-        curY += 14;
-      }
-      doc.moveTo(370, curY + 3).lineTo(555, curY + 3).strokeColor('#2C3E50').lineWidth(1).stroke();
-      curY += 10;
-      doc.rect(370, curY, 185, 22).strokeColor('#2C3E50').lineWidth(2).stroke();
-      doc.fontSize(10).fillColor('#2C3E50').font('Helvetica-Bold').text('Total Payment:', lX + 5, curY + 6);
-      doc.fontSize(12).fillColor('#27AE60').font('Helvetica-Bold')
-        .text(`₹ ${(payment.totalAmount || 0).toFixed(2)}`, vX, curY + 5, { width: 65, align: 'right' });
 
-      // ── AUTHORIZED SIGNATORY ─────────────────────────────────────────────
-      const signBoxW = 220;
-      const authBoxX = 555 - signBoxW;
-      const signSectionY = yPos + 20;
+      // ═══════════════════════════════════════════════════════════════════════
+      // TOTALS — right-aligned (invoice.js style)
+      // ═══════════════════════════════════════════════════════════════════════
+      const totalsX = 315;
+      const totalsW = 240;
+      let totalsY   = tableStartY + 12;
+      const labelX  = totalsX;
+      const amountX = totalsX + totalsW;
+
+      const tRow = (label, amount, bold = false) => {
+        doc.fontSize(8)
+           .fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(label, labelX, totalsY, { width: 140 });
+        doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
+        doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11)
+           .lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
+        totalsY += 14;
+      };
+
+      tRow('Subtotal:', `Rs. ${(payment.subTotal || 0).toFixed(2)}`);
+      if ((payment.cgst || 0) > 0) tRow('CGST:', `Rs. ${payment.cgst.toFixed(2)}`);
+      if ((payment.sgst || 0) > 0) tRow('SGST:', `Rs. ${payment.sgst.toFixed(2)}`);
+      if ((payment.igst || 0) > 0) tRow('IGST:', `Rs. ${payment.igst.toFixed(2)}`);
+      if ((payment.tdsAmount || 0) > 0) tRow('TDS Deducted:', `- Rs. ${payment.tdsAmount.toFixed(2)}`);
+      if ((payment.tcsAmount || 0) > 0) tRow('TCS Collected:', `Rs. ${payment.tcsAmount.toFixed(2)}`);
+
+      // Grand total box — dark navy (invoice style)
+      totalsY += 4;
+      doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
+      doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
+         .text('Total Payment', labelX + 6, totalsY + 7);
+      doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
+         .text(`Rs. ${(payment.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
+      totalsY += 32;
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // NOTES
+      // ═══════════════════════════════════════════════════════════════════════
+      let notesY = Math.max(tableStartY + 12, totalsY) + 12;
+      if (payment.notes) {
+        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+           .text('NOTES', 40, notesY, { characterSpacing: 0.8 });
+        doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9)
+           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        doc.fontSize(8).fillColor('#000000').font('Helvetica')
+           .text(payment.notes, 40, notesY + 14, { width: pageW });
+        notesY += 40;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // AUTHORIZED SIGNATORY — right-aligned (invoice.js style)
+      // ═══════════════════════════════════════════════════════════════════════
+      const signBoxW     = 220;
+      const authBoxX     = 555 - signBoxW;
+      const signSectionY = Math.max(tableStartY + 12, totalsY) + 12;
+
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const sigRelPath = orgData?.digitalSignaturePath;
+      const sigImgSize = 200;
+      let   actualSigH = sigImgSize;
+      if (sigRelPath) {
+        try {
+          const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(sigAbsPath)) {
+            let imgW = sigImgSize, imgH = sigImgSize;
+            try {
+              const buf = fs.readFileSync(sigAbsPath);
+              const ext = path.extname(sigAbsPath).toLowerCase();
+              if (ext === '.png' && buf.length > 24) {
+                imgW = buf.readUInt32BE(16);
+                imgH = buf.readUInt32BE(20);
+              } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+                let i = 2;
+                while (i < buf.length - 8) {
+                  if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
+                    imgH = buf.readUInt16BE(i + 5);
+                    imgW = buf.readUInt16BE(i + 7);
+                    break;
+                  }
+                  i += 2 + buf.readUInt16BE(i + 2);
+                }
+              }
+            } catch (_) {}
+            const scale      = Math.min(sigImgSize / imgW, sigImgSize / imgH);
+            actualSigH       = Math.round(imgH * scale);
+            const actualSigW = Math.round(imgW * scale);
+            const centeredX  = authBoxX + (signBoxW - actualSigW) / 2;
+            doc.image(sigAbsPath, centeredX, signSectionY + 10, { width: actualSigW, height: actualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const sigLineY = signSectionY + 10 + actualSigH + 14;
+      doc.moveTo(authBoxX, sigLineY).lineTo(authBoxX + signBoxW, sigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, sigLineY + 3, { width: signBoxW, align: 'center' });
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // FOOTER (invoice.js style)
+      // ═══════════════════════════════════════════════════════════════════════
       const footerY = 730;
       doc.moveTo(40, footerY).lineTo(555, footerY).lineWidth(1).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
@@ -384,7 +535,7 @@ const emailTransporter = nodemailer.createTransport({
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
 });
 
-async function sendPaymentEmail(payment, orgId = null) {
+async function sendPaymentEmail(payment, orgId = null, branchId = null) {
   if (!payment.vendorEmail) return;
 
   let orgName  = '';
@@ -392,13 +543,11 @@ async function sendPaymentEmail(payment, orgId = null) {
   let orgPhone = '';
   let orgEmail = '';
   try {
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId }).lean();
-    orgName  = org?.orgName   || '';
-    orgGST   = org?.gstNumber || '';
-    orgPhone = org?.phone     || '';
-    orgEmail = org?.email     || '';
+    const orgData = await getPmOrgData(orgId, branchId);
+    orgName  = orgData?.orgName   || '';
+    orgGST   = orgData?.gstNumber || '';
+    orgPhone = orgData?.phone     || '';
+    orgEmail = orgData?.email     || '';
   } catch (e) {
     console.warn('⚠️ Could not fetch org details for payment email:', e.message);
   }
@@ -464,6 +613,110 @@ router.get('/vendor-bills/:vendorId', async (req, res) => {
   }
 });
 
+// GET /vendor-payments-with-balance/:vendorId
+// Returns all payments for a vendor that still have amountUnused > 0
+// (i.e. eligible for a refund). Used by the Vendor Payment Refund flow.
+router.get('/vendor-payments-with-balance/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
+    }
+
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+      : {};
+
+    const payments = await PaymentMade.find({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      status: { $in: ['RECORDED', 'PARTIALLY_APPLIED', 'APPLIED'] },
+      ...orgFilter,
+      ...(req.branchFilter || {}),
+    })
+      .sort({ paymentDate: -1 })
+      .lean();
+
+    // Filter to only those with a refundable balance
+    const withBalance = payments
+      .map(p => ({
+        _id:             p._id,
+        paymentNumber:   p.paymentNumber,
+        paymentDate:     p.paymentDate,
+        paymentMode:     p.paymentMode,
+        paymentType:     p.paymentType,
+        amount:          p.totalAmount || p.amount || 0,
+        amountApplied:   p.amountApplied || 0,
+        totalRefunded:   p.totalRefunded || 0,
+        amountUnused:    p.amountUnused != null
+          ? p.amountUnused
+          : Math.max(0, (p.totalAmount || p.amount || 0) - (p.amountApplied || 0) - (p.totalRefunded || 0)),
+        status:          p.status,
+        referenceNumber: p.referenceNumber || '',
+        notes:           p.notes || '',
+      }))
+      .filter(p => p.amountUnused > 0.001); // only refundable ones
+
+    res.json({
+      success: true,
+      count: withBalance.length,
+      data: withBalance,
+    });
+  } catch (err) {
+    console.error('Error fetching vendor payments with balance:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /vendor-advances/:vendorId — returns all ADVANCE payments for a vendor
+router.get('/vendor-advances/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
+    }
+
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+      : {};
+
+    const advances = await PaymentMade.find({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      paymentType: 'ADVANCE',
+      ...orgFilter,
+      ...(req.branchFilter || {}),
+    })
+      .sort({ paymentDate: -1 })
+      .lean();
+
+    const result = advances.map(a => ({
+      _id:            a._id,
+      paymentNumber:  a.paymentNumber,
+      paymentDate:    a.paymentDate,
+      paymentMode:    a.paymentMode,
+      amount:         a.totalAmount || a.amount || 0,
+      amountApplied:  a.amountApplied || 0,
+      amountUnused:   a.amountUnused ?? Math.max(0, (a.totalAmount || a.amount || 0) - (a.amountApplied || 0)),
+      status:         a.status,
+      referenceNumber: a.referenceNumber || '',
+      notes:          a.notes || '',
+    }));
+
+    const totalAdvance = result.reduce((s, a) => s + a.amount, 0);
+    const totalUnused  = result.reduce((s, a) => s + a.amountUnused, 0);
+
+    res.json({
+      success: true,
+      count: result.length,
+      totalAdvance,
+      totalUnused,
+      data: result,
+    });
+  } catch (err) {
+    console.error('Error fetching vendor advances:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET all
 router.get('/', async (req, res) => {
   try {
@@ -481,6 +734,7 @@ router.get('/', async (req, res) => {
         { orgId: { $exists: false } },
       ];
     }
+    Object.assign(query, req.branchFilter || {});
     if (status) query.status = status;
     if (vendorId) query.vendorId = vendorId;
     if (paymentMode) query.paymentMode = paymentMode;
@@ -519,9 +773,12 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     // FIX: also include records with orgId: null
-    const orgFilter = req.user?.orgId
-      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
-      : {};
+    const orgFilter = {
+      ...(req.user?.orgId
+        ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+        : {}),
+      ...(req.branchFilter || {}),
+    };
     const stats = await PaymentMade.aggregate([
       { $match: orgFilter },
       {
@@ -553,7 +810,7 @@ router.get('/:id', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     res.json({ success: true, data: payment });
@@ -566,7 +823,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const data = { ...req.body };
-    if (!data.paymentNumber) data.paymentNumber = await generatePaymentNumber(req.user?.orgId || null);
+    if (!data.paymentNumber) data.paymentNumber = await generatePaymentNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     if (!data.vendorId) return res.status(400).json({ success: false, error: 'Vendor is required' });
 
     if (typeof data.vendorId === 'string' && mongoose.Types.ObjectId.isValid(data.vendorId)) {
@@ -577,12 +834,13 @@ router.post('/', async (req, res) => {
     }
     data.createdBy = req.user?.email || req.user?.uid || 'system';
     data.orgId = req.user?.orgId || null;
+    data.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
     const payment = new PaymentMade(data);
     await payment.save();
 
     // ── STEP 1: Deduct balance from paidFromAccount ───────────────────────────
-    if (data.paidFromAccountId) {
+    if (data.paidFromAccountId && !data.providerTransactionId) {
       try {
         const PaymentAccount = mongoose.models.PaymentAccount ||
           mongoose.model('PaymentAccount', new mongoose.Schema(
@@ -638,11 +896,32 @@ router.post('/', async (req, res) => {
           const currentOrgId = req.user?.orgId || null;
 const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
 
-// Use actual paid from account (SBI-Tester etc.) instead of Undeposited Funds
+// Resolve paidFromAccountId → COA ID (may be a PaymentAccount, not a COA directly)
 let bankId = null;
 if (data.paidFromAccountId) {
-  bankId = data.paidFromAccountId; // use the actual bank account selected
-} else {
+  // Try direct COA lookup first
+  const directCOA = await ChartOfAccount.findById(data.paidFromAccountId).lean();
+  if (directCOA) {
+    bankId = directCOA._id;
+  } else {
+    // paidFromAccountId is a PaymentAccount — resolve by name
+    const PaymentAccount = mongoose.models.PaymentAccount ||
+      mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+    const pa = await PaymentAccount.findById(data.paidFromAccountId).lean();
+    if (pa) {
+      const coa = await ChartOfAccount.findOne({
+        accountName: pa.accountName,
+        $or: [
+          { orgId: currentOrgId },
+          { orgId: null },
+          { orgId: { $exists: false } }
+        ]
+      }).lean();
+      if (coa) bankId = coa._id;
+    }
+  }
+}
+if (!bankId) {
   bankId = await getSystemAccountId('Undeposited Funds', currentOrgId);
 }
           const txnDate = new Date(payment.paymentDate);
@@ -650,6 +929,7 @@ if (data.paidFromAccountId) {
             await postTransactionToCOA({
               accountId: apId,
               orgId: currentOrgId,
+              branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
               date: txnDate,
               description: `Payment ${payment.paymentNumber} - ${bill.billNumber}`,
               referenceType: 'Payment',
@@ -663,6 +943,7 @@ if (data.paidFromAccountId) {
             await postTransactionToCOA({
               accountId: bankId,
               orgId: currentOrgId,
+              branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
               date: txnDate,
               description: `Payment ${payment.paymentNumber} - ${bill.billNumber}`,
               referenceType: 'Payment',
@@ -683,9 +964,127 @@ if (data.paidFromAccountId) {
       }
     }
 
+    // ── STEP 2b: COA for ADVANCE payment (no bills) ──────────────────────────
+    if (payment.paymentType === 'ADVANCE' && billsApplied.length === 0) {
+      console.log('🔵 [ADVANCE COA] Starting advance COA posting...');
+      console.log('🔵 [ADVANCE COA] paymentNumber:', payment.paymentNumber);
+      console.log('🔵 [ADVANCE COA] amount:', payment.totalAmount);
+      console.log('🔵 [ADVANCE COA] paidFromAccountId:', data.paidFromAccountId);
+      console.log('🔵 [ADVANCE COA] orgId:', req.user?.orgId);
+
+      try {
+        const currentOrgId = req.user?.orgId || null;
+        const txnDate = new Date(payment.paymentDate);
+
+        // ── Find Advance to Vendor COA (NOT system account lookup) ──
+        const advanceAcc = await ChartOfAccount.findOne({
+          accountName: 'Advance to Vendor',
+          $or: [
+            { orgId: currentOrgId },
+            { orgId: null },
+            { orgId: { $exists: false } }
+          ]
+        }).lean();
+
+        console.log('🔵 [ADVANCE COA] advanceAcc found:',
+          advanceAcc ? `YES — id=${advanceAcc._id}` : 'NO ❌');
+
+        // ── Find Bank COA account ──
+        let bankCOAId   = null;
+        let bankCOAName = null;
+
+        if (data.paidFromAccountId) {
+          // Try direct COA lookup first
+          const directCOA = await ChartOfAccount.findById(data.paidFromAccountId).lean();
+
+          if (directCOA) {
+            bankCOAId   = directCOA._id;
+            bankCOAName = directCOA.accountName;
+            console.log('🔵 [ADVANCE COA] bankCOA direct hit:', bankCOAName);
+          } else {
+            // paidFromAccountId is a PaymentAccount — resolve by name
+            const PaymentAccount = mongoose.models.PaymentAccount ||
+              mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+
+            const pa = await PaymentAccount.findById(data.paidFromAccountId).lean();
+            console.log('🔵 [ADVANCE COA] PaymentAccount found:',
+              pa ? pa.accountName : 'NO ❌');
+
+            if (pa) {
+              const coa = await ChartOfAccount.findOne({
+                accountName: pa.accountName,
+                $or: [
+                  { orgId: currentOrgId },
+                  { orgId: null },
+                  { orgId: { $exists: false } }
+                ]
+              }).lean();
+
+              if (coa) {
+                bankCOAId   = coa._id;
+                bankCOAName = coa.accountName;
+                console.log('🔵 [ADVANCE COA] bankCOA via name lookup:', bankCOAName);
+              } else {
+                console.log('🔵 [ADVANCE COA] bankCOA NOT found by name:', pa.accountName, '❌');
+              }
+            }
+          }
+        }
+
+        console.log('🔵 [ADVANCE COA] Final IDs — advanceAccId:',
+          advanceAcc?._id, '| bankCOAId:', bankCOAId);
+
+        if (!advanceAcc?._id) {
+          console.error('❌ [ADVANCE COA] Advance to Vendor account missing!');
+        }
+        if (!bankCOAId) {
+          console.error('❌ [ADVANCE COA] Bank COA account missing!');
+        }
+
+        if (advanceAcc?._id && bankCOAId) {
+          // DEBIT: Advance to Vendor (Asset increases)
+          await postTransactionToCOA({
+            accountId:       advanceAcc._id,
+            orgId:           currentOrgId,
+            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date:            txnDate,
+            description:     `Vendor Advance ${payment.paymentNumber} - ${payment.vendorName}`,
+            referenceType:   'PaymentMade',
+            referenceId:     payment._id,
+            referenceNumber: payment.paymentNumber,
+            debit:           payment.totalAmount,
+            credit:          0,
+          });
+          console.log('✅ [ADVANCE COA] Dr Advance to Vendor:', payment.totalAmount);
+
+          // CREDIT: Bank Account (Asset decreases)
+          await postTransactionToCOA({
+            accountId:       bankCOAId,
+            orgId:           currentOrgId,
+            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date:            txnDate,
+            description:     `Vendor Advance ${payment.paymentNumber} - ${payment.vendorName}`,
+            referenceType:   'PaymentMade',
+            referenceId:     payment._id,
+            referenceNumber: payment.paymentNumber,
+            debit:           0,
+            credit:          payment.totalAmount,
+          });
+          console.log('✅ [ADVANCE COA] Cr Bank:', bankCOAName, payment.totalAmount);
+          console.log('✅ [ADVANCE COA] Complete for:', payment.paymentNumber);
+        }
+      } catch (coaErr) {
+        console.error('❌ [ADVANCE COA] Error:', coaErr.message);
+      }
+    }
+
     // ── STEP 3: COA for payment_made record (items-based portion) ─────────────
     // Only posts if there are line items (advance / extra payment)
-    if (payment.items && payment.items.length > 0 && payment.subTotal > 0) {
+    if (payment.items && payment.items.length > 0 && payment.subTotal > 0 && payment.paymentType !== 'ADVANCE') {
+      console.log('🔵 [STEP3] Running items COA for:', payment.paymentNumber,
+        '| type:', payment.paymentType,
+        '| items:', payment.items?.length,
+        '| subTotal:', payment.subTotal);
       try {
         const currentOrgId = req.user?.orgId || null;
         const [expenseId, apId] = await Promise.all([
@@ -697,6 +1096,7 @@ if (data.paidFromAccountId) {
           await postTransactionToCOA({
             accountId: expenseId,
             orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
             date: txnDate,
             description: `Payment Made ${payment.paymentNumber} - ${payment.vendorName} (items)`,
             referenceType: 'PaymentMade',
@@ -710,6 +1110,7 @@ if (data.paidFromAccountId) {
           await postTransactionToCOA({
             accountId: apId,
             orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
             date: txnDate,
             description: `Payment Made ${payment.paymentNumber} - ${payment.vendorName} (items)`,
             referenceType: 'PaymentMade',
@@ -726,16 +1127,22 @@ if (data.paidFromAccountId) {
     }
 
     // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    // Skip if this payment was created from the banking categorization flow
+    // (providerTransactionId present means the original bank txn already exists
+    //  and will be marked via /mark-categorized — creating a duplicate here
+    //  would cause ghost entries that survive uncategorization)
     try {
       const ProviderTransaction = mongoose.models.ProviderTransaction
         || mongoose.model('ProviderTransaction',
             new mongoose.Schema({}, { strict: false }),
             'providertransactions');
 
-      if (data.paidFromAccountId && mongoose.Types.ObjectId.isValid(data.paidFromAccountId)) {
+      if (data.paidFromAccountId && mongoose.Types.ObjectId.isValid(data.paidFromAccountId)
+          && !data.providerTransactionId) {
         await ProviderTransaction.create({
           accountId:            new mongoose.Types.ObjectId(data.paidFromAccountId),
           orgId:                req.user?.orgId || null,
+          branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
           transactionDate:      new Date(payment.paymentDate),
           description:          `Vendor Payment: ${payment.vendorName}`,
           amount:               payment.totalAmount || payment.amount || 0,
@@ -758,7 +1165,7 @@ if (data.paidFromAccountId) {
     }
     // ── END PROVIDER TRANSACTION ─────────────────────────────────────────────
 
-    try { await sendPaymentEmail(payment, req.user?.orgId || null); } catch (_) {}
+    try { await sendPaymentEmail(payment, req.user?.orgId || null, payment.branchId || null); } catch (_) {}
 
     console.log(`✅ Payment Made created: ${payment.paymentNumber}`);
     res.status(201).json({ success: true, message: 'Payment recorded', data: payment });
@@ -776,16 +1183,81 @@ router.put('/:id', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (payment.status === 'APPLIED')
       return res.status(400).json({ success: false, error: 'Cannot edit fully applied payments' });
+
+    const oldAmount      = payment.totalAmount || payment.amount || 0;
+    const oldPaidFromId  = payment.paidFromAccountId;
+
     const updates = { ...req.body };
     if (updates.items) updates.items = updates.items.map((item) => ({ ...item, amount: calcItemAmount(item) }));
     updates.updatedBy = req.user?.email || 'system';
     Object.assign(payment, updates);
     await payment.save();
+
+    const newAmount     = payment.totalAmount || payment.amount || 0;
+    const newPaidFromId = payment.paidFromAccountId;
+    const orgId         = req.user?.orgId || null;
+
+    // ── BALANCE ADJUSTMENT ────────────────────────────────────────────────────
+    try {
+      const paidFromChanged = newPaidFromId?.toString() !== oldPaidFromId?.toString();
+      if (paidFromChanged) {
+        if (oldPaidFromId) await PaymentAccount.findByIdAndUpdate(oldPaidFromId, { $inc: { currentBalance: oldAmount } });
+        if (newPaidFromId) await PaymentAccount.findByIdAndUpdate(newPaidFromId, { $inc: { currentBalance: -newAmount } });
+      } else {
+        const diff = newAmount - oldAmount;
+        if (diff !== 0 && newPaidFromId) {
+          await PaymentAccount.findByIdAndUpdate(newPaidFromId, { $inc: { currentBalance: -diff } });
+        }
+      }
+    } catch (balErr) {
+      console.error('⚠️ Balance adjustment error (payment_made update):', balErr.message);
+    }
+
+    // ── COA ADJUSTMENT ────────────────────────────────────────────────────────
+    try {
+      const diff = newAmount - oldAmount;
+      if (diff !== 0) {
+        const apCOA = await ChartOfAccount.findOne({
+          accountName: 'Accounts Payable', ...(orgId ? { orgId } : {}),
+        }).lean();
+        let bankCOAId = null;
+        if (newPaidFromId) {
+          bankCOAId = await ChartOfAccount.findById(newPaidFromId).then(a => a?._id).catch(() => null);
+          if (!bankCOAId && payment.paidFromAccountName) {
+            bankCOAId = await ChartOfAccount.findOne({
+              accountName: payment.paidFromAccountName, ...(orgId ? { orgId } : {}),
+            }).then(a => a?._id).catch(() => null);
+          }
+        }
+        const txnDate = new Date(payment.paymentDate || new Date());
+        const desc = `UPDATED - Payment ${payment.paymentNumber} - ${payment.vendorName}`;
+        if (apCOA) await postTransactionToCOA({
+          accountId: apCOA._id, orgId, date: txnDate,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          description: desc,
+          referenceType: 'Bill', referenceId: payment._id,
+          referenceNumber: payment.paymentNumber,
+          debit: diff > 0 ? diff : 0, credit: diff < 0 ? Math.abs(diff) : 0,
+        });
+        if (bankCOAId) await postTransactionToCOA({
+          accountId: bankCOAId, orgId, date: txnDate,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          description: desc,
+          referenceType: 'Bill', referenceId: payment._id,
+          referenceNumber: payment.paymentNumber,
+          debit: diff < 0 ? Math.abs(diff) : 0, credit: diff > 0 ? diff : 0,
+        });
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA adjustment error (payment_made update):', coaErr.message);
+    }
+    // ── END COA ADJUSTMENT ────────────────────────────────────────────────────
+
     res.json({ success: true, message: 'Payment updated', data: payment });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -797,7 +1269,7 @@ router.post('/:id/apply', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     const { bills } = req.body;
@@ -820,7 +1292,7 @@ router.post('/:id/refund', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     const { amount, refundMode, referenceNumber, notes } = req.body;
@@ -844,11 +1316,9 @@ router.post('/:id/refund', async (req, res) => {
 // GET /api/payments-made/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const payment = await PaymentMade.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const payment = await PaymentMade.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const org = await getPmOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     const orgName = org?.orgName || '';
     const orgGST  = org?.gstNumber || '';
     const orgPhone = org?.phone || '';
@@ -883,7 +1353,7 @@ ${payment.notes ? `<div class="st">Notes</div><p style="font-size:12px;line-heig
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const payment = await PaymentMade.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const payment = await PaymentMade.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (to !== undefined)      payment.set('customEmailTo',      to);
     if (subject !== undefined) payment.set('customEmailSubject', subject);
@@ -900,7 +1370,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (!['DRAFT', 'RECORDED'].includes(payment.status)) {
@@ -929,6 +1399,42 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
+    // ── CLEAN UP PROVIDER TRANSACTIONS ──────────────────────────────────────
+    try {
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+            new mongoose.Schema({}, { strict: false }),
+            'providertransactions');
+
+      // Delete any system-created ProviderTransaction linked to this payment
+      await ProviderTransaction.deleteMany({
+        linkedRecordId:   payment._id,
+        linkedRecordType: 'PaymentMade',
+        source:           'SYSTEM_ENTRY',
+        ...req.orgFilter,
+      });
+
+      // If this payment was created from the banking flow, reset the original
+      // imported bank ProviderTransaction back to UNCATEGORIZED
+      if (payment.providerTransactionId) {
+        await ProviderTransaction.findByIdAndUpdate(payment.providerTransactionId, {
+          $set: {
+            reconciliationStatus: 'UNCATEGORIZED',
+            categorizedAt:    null,
+            categorizedBy:    null,
+            journalRef:       null,
+            categoryLabel:    null,
+            linkedRecordId:   null,
+            linkedRecordType: null,
+          }
+        });
+      }
+      console.log(`✅ ProviderTransaction cleaned up for payment made: ${payment._id}`);
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction cleanup error (payment made delete):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION CLEANUP ─────────────────────────────────────
+
     res.json({ success: true, message: 'Payment deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -940,11 +1446,11 @@ router.get('/:id/pdf', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (!payment.pdfPath || !fs.existsSync(payment.pdfPath)) {
-      const info = await generatePaymentPDF(payment, req.user?.orgId);
+      const info = await generatePaymentPDF(payment, req.user?.orgId, payment.branchId || null);
       payment.pdfPath = info.filepath;
       payment.pdfGeneratedAt = new Date();
       await payment.save();
@@ -960,11 +1466,11 @@ router.get('/:id/download-url', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (!payment.pdfPath || !fs.existsSync(payment.pdfPath)) {
-    const info = await generatePaymentPDF(payment, req.user?.orgId || null);
+    const info = await generatePaymentPDF(payment, req.user?.orgId || null, payment.branchId || null);
       payment.pdfPath = info.filepath;
       payment.pdfGeneratedAt = new Date();
       await payment.save();
@@ -989,12 +1495,71 @@ router.post('/bulk-import', importUpload.single('file'), async (req, res) => {
     const results = { totalProcessed: paymentsData.length, successCount: 0, failedCount: 0, errors: [] };
     for (const [i, pd] of paymentsData.entries()) {
       try {
-        pd.paymentNumber = await generatePaymentNumber(req.user?.orgId || null);
+        pd.paymentNumber = await generatePaymentNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         pd.createdBy = req.user?.email || 'import';
         pd.orgId = req.user?.orgId || null;
+        pd.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
         if (!pd.vendorId) pd.vendorId = new mongoose.Types.ObjectId();
         const p = new PaymentMade(pd);
         await p.save();
+
+        const orgId = req.user?.orgId || null;
+
+        // ── STEP 1: Deduct PaymentAccount balance ─────────────────────────────
+        if (pd.paidFromAccountId) {
+          try {
+            const PaymentAccount = mongoose.models.PaymentAccount ||
+              mongoose.model('PaymentAccount', new mongoose.Schema({ currentBalance: { type: Number, default: 0 } }, { strict: false }));
+            const deductAmt = p.totalAmount || p.amount || 0;
+            await PaymentAccount.findByIdAndUpdate(pd.paidFromAccountId, {
+              $inc: { currentBalance: -deductAmt }, $set: { updatedAt: new Date() }
+            });
+          } catch (balErr) {
+            console.error(`⚠️ Balance deduction error (bulk import row ${i + 2}):`, balErr.message);
+          }
+        }
+
+        // ── STEP 2: Apply to bills + COA per bill ─────────────────────────────
+        const billsApplied = pd.billsApplied || [];
+        for (const ba of billsApplied) {
+          if (!ba.billId || !ba.amountApplied || ba.amountApplied <= 0) continue;
+          try {
+            const Bill = mongoose.models.Bill;
+            if (!Bill) continue;
+            const bill = await Bill.findById(ba.billId);
+            if (!bill) continue;
+            bill.payments = bill.payments || [];
+            bill.payments.push({ paymentId: p._id, amount: ba.amountApplied, paymentDate: p.paymentDate, paymentMode: p.paymentMode, referenceNumber: p.paymentNumber, recordedBy: pd.createdBy, recordedAt: new Date() });
+            bill.amountPaid = (bill.amountPaid || 0) + ba.amountApplied;
+            await bill.save();
+
+            // COA: Dr AP / Cr Bank
+            const apId = await getSystemAccountId('Accounts Payable', orgId);
+            const bankId = pd.paidFromAccountId || await getSystemAccountId('Undeposited Funds', orgId);
+            const txnDate = new Date(p.paymentDate);
+            if (apId)   await postTransactionToCOA({ accountId: apId,   orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: `Payment ${p.paymentNumber} - ${bill.billNumber}`, referenceType: 'Payment', referenceId: p._id, referenceNumber: p.paymentNumber, debit: ba.amountApplied, credit: 0 });
+            if (bankId) await postTransactionToCOA({ accountId: bankId, orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: `Payment ${p.paymentNumber} - ${bill.billNumber}`, referenceType: 'Payment', referenceId: p._id, referenceNumber: p.paymentNumber, debit: 0, credit: ba.amountApplied });
+          } catch (billErr) {
+            console.error(`⚠️ Bill update error (bulk import row ${i + 2}):`, billErr.message);
+          }
+        }
+
+        // ── STEP 3: COA for items-based portion ───────────────────────────────
+        if (p.items && p.items.length > 0 && p.subTotal > 0) {
+          try {
+            const [expenseId, apId] = await Promise.all([
+              getSystemAccountId('Cost of Goods Sold', orgId),
+              getSystemAccountId('Accounts Payable',   orgId),
+            ]);
+            const txnDate = new Date(p.paymentDate);
+            if (expenseId) await postTransactionToCOA({ accountId: expenseId, orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: `Payment Made ${p.paymentNumber} - ${p.vendorName} (items)`, referenceType: 'PaymentMade', referenceId: p._id, referenceNumber: p.paymentNumber, debit: p.subTotal, credit: 0 });
+            if (apId)      await postTransactionToCOA({ accountId: apId,      orgId, date: txnDate, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, description: `Payment Made ${p.paymentNumber} - ${p.vendorName} (items)`, referenceType: 'PaymentMade', referenceId: p._id, referenceNumber: p.paymentNumber, debit: 0, credit: p.subTotal });
+          } catch (coaErr) {
+            console.error(`⚠️ COA post error (bulk import row ${i + 2}):`, coaErr.message);
+          }
+        }
+
+        console.log(`   ✅ Row ${i + 2}: imported payment ${p.paymentNumber}`);
         results.successCount++;
       } catch (e) {
         results.failedCount++;
@@ -1013,7 +1578,7 @@ router.patch('/:id/mark-sent', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     payment.status = 'RECORDED';
@@ -1033,7 +1598,7 @@ router.get('/:id/vendor-phone', async (req, res) => {
   try {
     const payment = await PaymentMade.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).select('vendorId vendorName');
     if (!payment) {
       return res.status(404).json({ success: false, error: 'Payment not found' });

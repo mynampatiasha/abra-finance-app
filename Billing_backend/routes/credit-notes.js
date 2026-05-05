@@ -23,6 +23,7 @@ const path = require('path');
 const multer = require('multer');
 const csv = require('csv-parser');
 const { Parser } = require('json2csv');
+const { sendMail } = require('../utils/mailer');
 
 
 // Import Invoice model — reuse the already-registered model (invoices.js must be required first)
@@ -35,6 +36,7 @@ const Invoice = mongoose.models.Invoice ||
 
 const creditNoteSchema = new mongoose.Schema({
   orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   creditNoteNumber: {
     type: String,
     required: true,
@@ -54,6 +56,7 @@ const creditNoteSchema = new mongoose.Schema({
   },
   customerEmail: String,
   customerPhone: String,
+  customerGSTIN: { type: String, default: '' },
   billingAddress: {
     street: String,
     city: String,
@@ -297,6 +300,7 @@ creditNoteSchema.pre('save', function() {
 creditNoteSchema.index({ customerId: 1, creditNoteDate: -1 });
 creditNoteSchema.index({ status: 1, creditNoteDate: -1 });
 creditNoteSchema.index({ createdAt: -1 });
+creditNoteSchema.index({ orgId: 1, branchId: 1, creditNoteNumber: 1 }, { unique: true });
 
 const CreditNote = mongoose.models.CreditNote || mongoose.model('CreditNote', creditNoteSchema);
 
@@ -305,9 +309,9 @@ const CreditNote = mongoose.models.CreditNote || mongoose.model('CreditNote', cr
 // ============================================================================
 
 // Generate credit note number
-async function generateCreditNoteNumber(orgId = null) {
+async function generateCreditNoteNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(CreditNote, 'creditNoteNumber', 'CN', orgId);
+  return generateNumber(CreditNote, 'creditNoteNumber', 'CN', orgId, branchId);
 }
 
 // Calculate item amount
@@ -393,7 +397,22 @@ function numberToWords(n) {
 // PDF GENERATION - CREDIT NOTE (invoices.js style)
 // ============================================================================
 
-async function generateCreditNotePDF(creditNote, orgId) {
+// Branch-aware org data helper
+const { getEffectiveOrgData } = require('./branches');
+
+async function getCnOrgData(orgId, branchId = null) {
+  try {
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    if (!db) return null;
+    return await getEffectiveOrgData(orgId, branchId, db);
+  } catch (e) {
+    console.warn('⚠️ getCnOrgData error (orgId=%s branchId=%s):', orgId, branchId, e.message);
+    return null;
+  }
+}
+
+async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
   return new Promise(async (resolve, reject) => {
     try {
       console.log('📄 Generating Credit Note PDF:', creditNote.creditNoteNumber);
@@ -404,11 +423,10 @@ async function generateCreditNotePDF(creditNote, orgId) {
       const filename = `credit-note-${creditNote.creditNoteNumber}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      let orgName = 'Your Company', orgGST = '', orgAddr = '', orgEmail = '', orgPhone = '', orgTagline = '';
+      let orgName = 'Your Company', orgGST = '', orgAddr = '', orgEmail = '', orgPhone = '', orgTagline = '', orgData = null;
       try {
-        const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        const org = await OrgModel.findOne({ orgId }).lean();
-        if (org) { orgName = org.orgName || orgName; orgGST = org.gstNumber || ''; orgAddr = org.address || ''; orgEmail = org.email || ''; orgPhone = org.phone || ''; orgTagline = org.tagline || org.slogan || ''; }
+        orgData = await getCnOrgData(orgId, branchId);
+        if (orgData) { orgName = orgData.orgName || orgName; orgGST = orgData.gstNumber || ''; orgAddr = orgData.address || ''; orgEmail = orgData.email || ''; orgPhone = orgData.phone || ''; orgTagline = orgData.tagline || orgData.slogan || ''; }
       } catch (e) { console.warn('⚠️ Org fetch failed:', e.message); }
 
       const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
@@ -417,7 +435,13 @@ async function generateCreditNotePDF(creditNote, orgId) {
       const pageW = 515;
 
       // ── Header (plain white background, like invoices.js) ──────────────────────
-      const logoPath = getLogoPath(orgId);
+      // Use branch logo if available, otherwise fall back to org logo
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getLogoPath(orgId);
       let logoLoaded = false;
 
       const textX = logoPath ? 126 : 50;
@@ -438,12 +462,18 @@ async function generateCreditNotePDF(creditNote, orgId) {
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
-
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let contactY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+      let contactY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, contactY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('CREDIT NOTE', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -455,9 +485,8 @@ async function generateCreditNotePDF(creditNote, orgId) {
          .text(`${(creditNote.status || 'DRAFT').replace(/_/g,' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // 3-column meta grid (like invoices.js)
-      const metaY = 132;
+      const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 3;
-      const metaH = 90;
 
       const billingStr = [
         creditNote.billingAddress?.street,
@@ -466,20 +495,33 @@ async function generateCreditNotePDF(creditNote, orgId) {
         creditNote.billingAddress?.pincode,
       ].filter(Boolean).join(', ');
 
+      // Dynamic box height
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _custNameH = doc.heightOfString(creditNote.customerName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const _gstH  = creditNote.customerGSTIN ? 10 : 0;
+      const metaH  = Math.max(90, 18 + _custNameH + 2 + _addrH + _gstH + 10);
+
       // Col 1: Bill To
       const billX = 40;
       doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-         .text(creditNote.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+         .text(creditNote.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const custNameH = doc.heightOfString(creditNote.customerName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + custNameH + 2;
       if (billingStr) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
-      if (creditNote.customerEmail) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(creditNote.customerEmail, billX + 8, metaY + 60, { width: colW - 16, ellipsis: true });
+      if (creditNote.customerGSTIN) {
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000')
+           .text(`GSTIN: ${creditNote.customerGSTIN}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16 });
       }
 
       // Col 2: Ship To (same as bill to for credit notes)
@@ -661,11 +703,40 @@ async function generateCreditNotePDF(creditNote, orgId) {
 
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _cnSigRelPath = orgData?.digitalSignaturePath;
+      const _cnSigSize    = 200;
+      let   _cnActualSigH = _cnSigSize;
+      if (_cnSigRelPath) {
+        try {
+          const _cnSigAbs = path.join(__dirname, '..', _cnSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_cnSigAbs)) {
+            let _cnW = _cnSigSize, _cnH = _cnSigSize;
+            try {
+              const _cnBuf = fs.readFileSync(_cnSigAbs);
+              const _cnExt = path.extname(_cnSigAbs).toLowerCase();
+              if (_cnExt === '.png' && _cnBuf.length > 24) { _cnW = _cnBuf.readUInt32BE(16); _cnH = _cnBuf.readUInt32BE(20); }
+              else if ((_cnExt === '.jpg' || _cnExt === '.jpeg') && _cnBuf.length > 4) {
+                let _cni = 2;
+                while (_cni < _cnBuf.length - 8) {
+                  if (_cnBuf[_cni] === 0xFF && _cnBuf[_cni+1] >= 0xC0 && _cnBuf[_cni+1] <= 0xC3) { _cnH = _cnBuf.readUInt16BE(_cni+5); _cnW = _cnBuf.readUInt16BE(_cni+7); break; }
+                  _cni += 2 + _cnBuf.readUInt16BE(_cni + 2);
+                }
+              }
+            } catch (_) {}
+            const _cnScale = Math.min(_cnSigSize / _cnW, _cnSigSize / _cnH);
+            _cnActualSigH  = Math.round(_cnH * _cnScale);
+            const _cnActualSigW = Math.round(_cnW * _cnScale);
+            doc.image(_cnSigAbs, authBoxX + (signBoxW - _cnActualSigW) / 2, signSectionY + 10, { width: _cnActualSigW, height: _cnActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _cnSigLineY = signSectionY + 10 + _cnActualSigH + 14;
+      doc.moveTo(authBoxX, _cnSigLineY).lineTo(authBoxX + signBoxW, _cnSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _cnSigLineY + 3, { width: signBoxW, align: 'center' });
 
       // Footer
       const footY = 760;
@@ -690,23 +761,12 @@ async function generateCreditNotePDF(creditNote, orgId) {
 // EMAIL SERVICE
 // ============================================================================
 
-const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASSWORD
-  }
-});
-
-async function sendCreditNoteEmail(creditNote, pdfPath, orgId) {
+async function sendCreditNoteEmail(creditNote, pdfPath, orgId, branchId = null) {
   console.log('📧 Sending credit note email to:', creditNote.customerEmail);
 
   let orgName = '', orgGST = '', orgPhone = '', orgEmail = '', orgData = null;
   try {
-    const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    orgData = await OrgModel.findOne({ orgId }).lean();
+    orgData = await getCnOrgData(orgId, branchId);
     if (orgData) { orgName = orgData.orgName || ''; orgGST = orgData.gstNumber || ''; orgPhone = orgData.phone || ''; orgEmail = orgData.email || ''; }
   } catch (_) {}
 
@@ -791,7 +851,13 @@ async function sendCreditNoteEmail(creditNote, pdfPath, orgId) {
   };
 
   console.log('   📤 Sending credit note email...');
-  const result = await emailTransporter.sendMail(mailOptions);
+  const result = await sendMail({
+    orgId, branchId, db: mongoose.connection.db,
+    to:          creditNote.customerEmail,
+    subject:     mailOptions.subject,
+    html:        mailOptions.html,
+    attachments: mailOptions.attachments,
+  });
   console.log('   ✅ Email sent! Message ID:', result.messageId);
   return result;
 }
@@ -807,6 +873,7 @@ router.get('/', async (req, res) => {
     
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     
     if (status) query.status = status;
     if (customerId) query.customerId = customerId;
@@ -852,7 +919,10 @@ router.get('/', async (req, res) => {
 // GET statistics
 router.get('/stats', async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     const stats = await CreditNote.aggregate([
       { $match: orgFilter },
       {
@@ -897,7 +967,8 @@ router.get('/:id', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -932,7 +1003,7 @@ router.post('/', async (req, res) => {
     
     // Generate credit note number
     if (!creditNoteData.creditNoteNumber) {
-      creditNoteData.creditNoteNumber = await generateCreditNoteNumber(req.user?.orgId || null);
+      creditNoteData.creditNoteNumber = await generateCreditNoteNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     }
     
     // Calculate item amounts
@@ -945,6 +1016,7 @@ router.post('/', async (req, res) => {
     
     creditNoteData.createdBy = req.user?.email || req.user?.uid || 'system';
     creditNoteData.orgId = req.user?.orgId || null;
+    creditNoteData.branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
     if (creditNoteData.providerTransactionId && typeof creditNoteData.providerTransactionId === 'string' && mongoose.Types.ObjectId.isValid(creditNoteData.providerTransactionId)) {
       creditNoteData.providerTransactionId = new mongoose.Types.ObjectId(creditNoteData.providerTransactionId);
     }
@@ -973,7 +1045,8 @@ router.post('/', async (req, res) => {
       // Debit Sales (reverse revenue)
       if (salesId) await postTransactionToCOA({
         accountId:       salesId,
-        orgId:           currentOrgId,
+        orgId: currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
         referenceType:   'Credit Note',
@@ -986,7 +1059,8 @@ router.post('/', async (req, res) => {
       // Credit Accounts Receivable (reduce AR)
       if (arId) await postTransactionToCOA({
         accountId:       arId,
-        orgId:           currentOrgId,
+        orgId: currentOrgId,
+        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
         date:            txnDate,
         description:     `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
         referenceType:   'Credit Note',
@@ -1006,7 +1080,8 @@ router.post('/', async (req, res) => {
 
         if (taxId) await postTransactionToCOA({
           accountId:       taxId,
-          orgId:           currentOrgId,
+          orgId: currentOrgId,
+          branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
           date:            txnDate,
           description:     `GST Reversal - Credit Note ${creditNote.creditNoteNumber}`,
           referenceType:   'Credit Note',
@@ -1022,6 +1097,56 @@ router.post('/', async (req, res) => {
       console.error('⚠️ COA post error (credit note):', coaErr.message);
       // Non-critical — credit note already saved
     }
+
+    // ── Update Customer Profile ──────────────────────────────────────────────
+    // Add the credit note amount to customer's unusedCredits ONLY if status is OPEN
+    // DRAFT credit notes should NOT add to unused credits until they are finalized
+    console.log('═══════════════════════════════════════════════════════════════════');
+    console.log('🔍 [CREDIT NOTE CREATION] Starting customer unusedCredits update check');
+    console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+    console.log(`   Credit Note ID: ${creditNote._id}`);
+    console.log(`   Customer ID: ${creditNote.customerId}`);
+    console.log(`   Customer Name: ${creditNote.customerName}`);
+    console.log(`   Credit Note Status: ${creditNote.status}`);
+    console.log(`   Credit Note Amount: ₹${creditNote.totalAmount}`);
+    console.log(`   Credit Balance: ₹${creditNote.creditBalance}`);
+    console.log('═══════════════════════════════════════════════════════════════════');
+    
+    try {
+      const Customer = mongoose.models.BillingCustomer
+        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+      
+      if (creditNote.status === 'OPEN') {
+        console.log(`✅ [CN Creation] Status is OPEN - WILL UPDATE customer unusedCredits`);
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Creation] Customer BEFORE update:`);
+        console.log(`   - Customer Name: ${customerBefore?.customerDisplayName || 'N/A'}`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        console.log(`   - Outstanding Receivables: ₹${customerBefore?.outstandingReceivables || 0}`);
+        
+        console.log(`🔄 [CN Creation] Incrementing unusedCredits by ₹${creditNote.totalAmount}...`);
+        
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: creditNote.totalAmount }
+        });
+        
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Creation] Customer AFTER update:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`   - Change: +₹${creditNote.totalAmount}`);
+        console.log(`   - Calculation: ₹${customerBefore?.unusedCredits || 0} + ₹${creditNote.totalAmount} = ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`✅ [CN Creation] Customer unusedCredits SUCCESSFULLY UPDATED!`);
+      } else {
+        console.log(`⚠️ [CN Creation] Status is ${creditNote.status} - NOT UPDATING customer unusedCredits`);
+        console.log(`   Reason: Only OPEN credit notes add to unusedCredits`);
+        console.log(`   Action: Credit will be added when status changes to OPEN`);
+      }
+    } catch (custErr) {
+      console.error('❌ [CN Creation] ERROR updating customer unusedCredits:', custErr.message);
+      console.error('   Stack:', custErr.stack);
+    }
+    console.log('═══════════════════════════════════════════════════════════════════\n');
     
     res.status(201).json({
       success: true,
@@ -1039,7 +1164,8 @@ router.put('/:id', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1054,6 +1180,8 @@ router.put('/:id', async (req, res) => {
     }
     
     const updates = req.body;
+    const oldStatus = creditNote.status;
+    const oldTotalAmount = creditNote.totalAmount;
     
     // Calculate item amounts
     if (updates.items) {
@@ -1069,6 +1197,81 @@ router.put('/:id', async (req, res) => {
     await creditNote.save();
     
     console.log(`✅ Credit Note updated: ${creditNote.creditNoteNumber}`);
+    
+    // ── Handle Status Change: DRAFT → OPEN ────────────────────────────────────
+    // When credit note changes from DRAFT to OPEN, add to customer's unusedCredits
+    if (oldStatus === 'DRAFT' && creditNote.status === 'OPEN') {
+      console.log('═══════════════════════════════════════════════════════════════════');
+      console.log('🔍 [CREDIT NOTE UPDATE] Status changed DRAFT → OPEN');
+      console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+      console.log(`   Customer ID: ${creditNote.customerId}`);
+      console.log(`   Customer Name: ${creditNote.customerName}`);
+      console.log(`   Credit Amount: ₹${creditNote.totalAmount}`);
+      console.log('═══════════════════════════════════════════════════════════════════');
+      
+      try {
+        const Customer = mongoose.models.BillingCustomer
+          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Update] Customer BEFORE status change:`);
+        console.log(`   - Customer Name: ${customerBefore?.customerDisplayName || 'N/A'}`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        
+        console.log(`🔄 [CN Update] Adding ₹${creditNote.totalAmount} to unusedCredits...`);
+        
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: creditNote.totalAmount }
+        });
+        
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Update] Customer AFTER status change:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`   - Change: +₹${creditNote.totalAmount}`);
+        console.log(`✅ [CN Update] Customer unusedCredits SUCCESSFULLY UPDATED!`);
+      } catch (custErr) {
+        console.error('❌ [CN Update] ERROR updating customer unusedCredits:', custErr.message);
+        console.error('   Stack:', custErr.stack);
+      }
+      console.log('═══════════════════════════════════════════════════════════════════\n');
+    }
+    // ── Handle Amount Change for OPEN Credit Notes ────────────────────────────
+    // If credit note is OPEN and amount changed, adjust customer's unusedCredits
+    else if (creditNote.status === 'OPEN' && oldTotalAmount !== creditNote.totalAmount) {
+      console.log('═══════════════════════════════════════════════════════════════════');
+      console.log('🔍 [CREDIT NOTE UPDATE] Amount changed for OPEN credit note');
+      console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+      console.log(`   Old Amount: ₹${oldTotalAmount}`);
+      console.log(`   New Amount: ₹${creditNote.totalAmount}`);
+      console.log(`   Difference: ₹${creditNote.totalAmount - oldTotalAmount}`);
+      console.log('═══════════════════════════════════════════════════════════════════');
+      
+      try {
+        const Customer = mongoose.models.BillingCustomer
+          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+        
+        const amountDiff = creditNote.totalAmount - oldTotalAmount;
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Update] Customer BEFORE amount change:`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        
+        console.log(`🔄 [CN Update] Adjusting unusedCredits by ₹${amountDiff}...`);
+        
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: amountDiff }
+        });
+        
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Update] Customer AFTER amount change:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`✅ [CN Update] Customer unusedCredits adjusted!`);
+      } catch (custErr) {
+        console.error('❌ [CN Update] ERROR adjusting customer unusedCredits:', custErr.message);
+        console.error('   Stack:', custErr.stack);
+      }
+      console.log('═══════════════════════════════════════════════════════════════════\n');
+    }
     
     res.json({
       success: true,
@@ -1086,7 +1289,8 @@ router.post('/:id/send', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1100,13 +1304,16 @@ router.post('/:id/send', async (req, res) => {
     // Generate PDF if not exists
     let pdfInfo;
     if (!creditNote.pdfPath || !fs.existsSync(creditNote.pdfPath)) {
-      pdfInfo = await generateCreditNotePDF(creditNote, req.user?.orgId);
+      pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
       creditNote.pdfPath = pdfInfo.filepath;
       creditNote.pdfGeneratedAt = new Date();
     }
     
     // Send email
-    await sendCreditNoteEmail(creditNote, creditNote.pdfPath, req.user?.orgId);
+    await sendCreditNoteEmail(creditNote, creditNote.pdfPath, creditNote.orgId, creditNote.branchId);
+    
+    // Track old status before update
+    const oldStatus = creditNote.status;
     
     // Update status
     if (creditNote.status === 'DRAFT') {
@@ -1120,6 +1327,45 @@ router.post('/:id/send', async (req, res) => {
     });
     
     await creditNote.save();
+    
+    // ── Handle Status Change: DRAFT → OPEN ────────────────────────────────────
+    // When credit note is sent and changes from DRAFT to OPEN, add to customer's unusedCredits
+    if (oldStatus === 'DRAFT' && creditNote.status === 'OPEN') {
+      console.log('═══════════════════════════════════════════════════════════════════');
+      console.log('🔍 [CREDIT NOTE SEND] Status changed DRAFT → OPEN via email send');
+      console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+      console.log(`   Customer ID: ${creditNote.customerId}`);
+      console.log(`   Customer Name: ${creditNote.customerName}`);
+      console.log(`   Customer Email: ${creditNote.customerEmail}`);
+      console.log(`   Credit Amount: ₹${creditNote.totalAmount}`);
+      console.log('═══════════════════════════════════════════════════════════════════');
+      
+      try {
+        const Customer = mongoose.models.BillingCustomer
+          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Send] Customer BEFORE send:`);
+        console.log(`   - Customer Name: ${customerBefore?.customerDisplayName || 'N/A'}`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        
+        console.log(`🔄 [CN Send] Adding ₹${creditNote.totalAmount} to unusedCredits...`);
+        
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: creditNote.totalAmount }
+        });
+        
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Send] Customer AFTER send:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`   - Change: +₹${creditNote.totalAmount}`);
+        console.log(`✅ [CN Send] Customer unusedCredits SUCCESSFULLY UPDATED!`);
+      } catch (custErr) {
+        console.error('❌ [CN Send] ERROR updating customer unusedCredits:', custErr.message);
+        console.error('   Stack:', custErr.stack);
+      }
+      console.log('═══════════════════════════════════════════════════════════════════\n');
+    }
     
     console.log(`✅ Credit Note sent: ${creditNote.creditNoteNumber}`);
     
@@ -1137,14 +1383,55 @@ router.post('/:id/send', async (req, res) => {
 // MARK AS SENT (no email)
 router.patch('/:id/mark-as-sent', async (req, res) => {
   try {
-    const creditNote = await CreditNote.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const creditNote = await CreditNote.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!creditNote) return res.status(404).json({ success: false, error: 'Credit note not found' });
     if (['VOID', 'CANCELLED'].includes(creditNote.status)) {
       return res.status(400).json({ success: false, error: `Cannot mark a ${creditNote.status} credit note as sent` });
     }
+    
+    const oldStatus = creditNote.status;
     creditNote.status    = creditNote.status === 'DRAFT' ? 'OPEN' : creditNote.status;
     creditNote.updatedBy = req.user?.email || req.user?.uid || 'system';
     await creditNote.save();
+    
+    // ── Handle Status Change: DRAFT → OPEN ────────────────────────────────────
+    // When credit note is marked as sent and changes from DRAFT to OPEN, add to customer's unusedCredits
+    if (oldStatus === 'DRAFT' && creditNote.status === 'OPEN') {
+      console.log('═══════════════════════════════════════════════════════════════════');
+      console.log('🔍 [CREDIT NOTE MARK SENT] Status changed DRAFT → OPEN via mark as sent');
+      console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+      console.log(`   Customer ID: ${creditNote.customerId}`);
+      console.log(`   Customer Name: ${creditNote.customerName}`);
+      console.log(`   Credit Amount: ₹${creditNote.totalAmount}`);
+      console.log('═══════════════════════════════════════════════════════════════════');
+      
+      try {
+        const Customer = mongoose.models.BillingCustomer
+          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Mark Sent] Customer BEFORE mark sent:`);
+        console.log(`   - Customer Name: ${customerBefore?.customerDisplayName || 'N/A'}`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        
+        console.log(`🔄 [CN Mark Sent] Adding ₹${creditNote.totalAmount} to unusedCredits...`);
+        
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: creditNote.totalAmount }
+        });
+        
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Mark Sent] Customer AFTER mark sent:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`   - Change: +₹${creditNote.totalAmount}`);
+        console.log(`✅ [CN Mark Sent] Customer unusedCredits SUCCESSFULLY UPDATED!`);
+      } catch (custErr) {
+        console.error('❌ [CN Mark Sent] ERROR updating customer unusedCredits:', custErr.message);
+        console.error('   Stack:', custErr.stack);
+      }
+      console.log('═══════════════════════════════════════════════════════════════════\n');
+    }
+    
     console.log(`✅ Credit note marked as sent (no email): ${creditNote.creditNoteNumber}`);
     res.json({ success: true, message: 'Credit note marked as sent', data: creditNote });
   } catch (error) {
@@ -1158,7 +1445,8 @@ router.post('/:id/refund', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1191,15 +1479,149 @@ router.post('/:id/refund', async (req, res) => {
     
     creditNote.refunds.push(refund);
     await creditNote.save();
+
+    // ── COA Posting ──────────────────────────────────────────────────────────
+    // Dr Accounts Receivable  (clearing the customer liability)
+    // Cr Bank Account         (money leaving the bank)
+    // If bankAccountId is provided (called from bank transaction categorization),
+    // use the actual bank COA; otherwise fall back to a generic Bank account.
+    try {
+      const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+      const currentOrgId = req.user?.orgId || null;
+      const branchId     = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+      const txnDate      = refundDate ? new Date(refundDate) : new Date();
+      const desc         = `Credit Note ${creditNote.creditNoteNumber} refund to ${creditNote.customerName}`;
+
+      // Resolve AR account
+      const arId = await ChartOfAccount.findOne({
+        accountName: { $regex: /^Accounts Receivable$/i },
+        isActive: true,
+        $or: [{ orgId: currentOrgId }, { orgId: null }],
+      }).select('_id').lean().then(a => a?._id);
+
+      // Resolve bank/cash account — prefer the specific bank account passed in body
+      let bankId = null;
+      const { bankAccountId } = req.body;
+      if (bankAccountId) {
+        // bankAccountId is a PaymentAccount _id — resolve its linked COA
+        const PaymentAccount = mongoose.models.PaymentAccount
+          || mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+        const pa = await PaymentAccount.findById(bankAccountId).lean();
+        if (pa) {
+          bankId = await ChartOfAccount.findOne({
+            accountName: pa.accountName,
+            $or: [{ orgId: currentOrgId }, { orgId: null }],
+          }).select('_id').lean().then(a => a?._id);
+        }
+      }
+      if (!bankId) {
+        // Fallback to generic Bank / Cash account
+        bankId = await ChartOfAccount.findOne({
+          accountName: { $regex: /^(Bank|Cash)$/i },
+          isActive: true,
+          $or: [{ orgId: currentOrgId }, { orgId: null }],
+        }).select('_id').lean().then(a => a?._id);
+      }
+
+      const newRefundDoc = creditNote.refunds[creditNote.refunds.length - 1];
+      const refundRef    = newRefundDoc?._id?.toString() || creditNote.creditNoteNumber;
+
+      if (arId) await postTransactionToCOA({
+        accountId:       arId,
+        orgId:           currentOrgId,
+        branchId,
+        date:            txnDate,
+        description:     desc,
+        referenceType:   'CreditNote',
+        referenceId:     creditNote._id,
+        referenceNumber: refundRef,
+        debit:           parseFloat(amount),
+        credit:          0,
+      });
+
+      if (bankId) await postTransactionToCOA({
+        accountId:       bankId,
+        orgId:           currentOrgId,
+        branchId,
+        date:            txnDate,
+        description:     desc,
+        referenceType:   'CreditNote',
+        referenceId:     creditNote._id,
+        referenceNumber: refundRef,
+        debit:           0,
+        credit:          parseFloat(amount),
+      });
+
+      console.log(`✅ COA posted for credit note refund: ${creditNote.creditNoteNumber}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA error (credit note refund):', coaErr.message);
+    }
+
+    // ── Update PaymentAccount Balance ────────────────────────────────────────
+    // Reduce the bank account balance when refund is issued
+    const { bankAccountId } = req.body;
+    if (bankAccountId) {
+      try {
+        const PaymentAccount = mongoose.models.PaymentAccount
+          || mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+        
+        console.log(`🔍 [CN Refund] Updating PaymentAccount balance: accountId=${bankAccountId}, amount=-₹${amount}`);
+        
+        const accountBefore = await PaymentAccount.findById(bankAccountId).lean();
+        console.log(`🔍 [CN Refund] PaymentAccount BEFORE: currentBalance = ₹${accountBefore?.currentBalance}`);
+        
+        await PaymentAccount.findByIdAndUpdate(bankAccountId, {
+          $inc: { currentBalance: -parseFloat(amount) }
+        });
+        
+        const accountAfter = await PaymentAccount.findById(bankAccountId).lean();
+        console.log(`✅ [CN Refund] PaymentAccount balance reduced: -₹${amount} → new balance: ₹${accountAfter?.currentBalance}`);
+      } catch (paErr) {
+        console.error('⚠️ PaymentAccount update error (credit note refund):', paErr.message);
+      }
+    } else {
+      console.log('⚠️ [CN Refund] No bankAccountId provided, skipping PaymentAccount balance update');
+    }
+
+    // ── ProviderTransaction Handling ─────────────────────────────────────────
+    // NOTE: ProviderTransaction should be created/updated by the caller:
+    // - If called from bank categorization: caller uses mark-categorized endpoint
+    // - If standalone refund: caller creates ProviderTransaction separately
+    // We do NOT create it here to avoid duplicates.
+    console.log(`✅ [CN Refund] Refund recorded. ProviderTransaction should be handled by caller.`);
+
+    // ── Update Customer Profile ──────────────────────────────────────────────
+    // Reduce unusedCredits (credit consumed by refund)
+    try {
+      const Customer = mongoose.models.BillingCustomer
+        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+      
+      console.log(`🔍 [CN Refund] Updating customer unusedCredits: customerId=${creditNote.customerId}, amount=-₹${amount}`);
+      
+      const customerBefore = await Customer.findById(creditNote.customerId).lean();
+      console.log(`🔍 [CN Refund] Customer BEFORE: unusedCredits = ₹${customerBefore?.unusedCredits || 0}`);
+      
+      await Customer.findByIdAndUpdate(creditNote.customerId, {
+        $inc: { unusedCredits: -parseFloat(amount) }
+      });
+      
+      const customerAfter = await Customer.findById(creditNote.customerId).lean();
+      console.log(`✅ [CN Refund] Customer unusedCredits updated: -₹${amount} → new balance: ₹${customerAfter?.unusedCredits || 0}`);
+    } catch (custErr) {
+      console.error('⚠️ Customer unusedCredits update error (credit note refund):', custErr.message);
+    }
     
     console.log(`✅ Refund recorded: ${creditNote.creditNoteNumber} - ₹${amount}`);
-    
+
+    // Return the credit note AND the new refund sub-doc _id so the frontend
+    // can store it as journalRef for precise reversal on uncategorize.
+    const newRefund = creditNote.refunds[creditNote.refunds.length - 1];
     res.json({
       success: true,
       message: 'Refund recorded successfully',
       data: {
-        creditNote,
-        refund
+        ...creditNote.toObject(),
+        refundId: newRefund?._id?.toString() || null,
       }
     });
   } catch (error) {
@@ -1214,7 +1636,8 @@ router.post('/:id/apply', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1346,7 +1769,37 @@ router.post('/:id/apply', async (req, res) => {
     console.log(`✅ Invoice updated: ${invoice.invoiceNumber} — Paid ₹${newAmountPaid}, Due ₹${newAmountDue}, Status: ${newStatus}`);
 
     // ================================================================
-    // STEP 4 — COA Posting
+    // STEP 4 — Update Customer Profile
+    // ================================================================
+    // Reduce unusedCredits (credit consumed) and outstanding (invoice due reduced)
+    try {
+      const Customer = mongoose.models.BillingCustomer
+        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+      
+      console.log(`🔍 [CN Apply] Updating customer profile: customerId=${creditNote.customerId}`);
+      console.log(`  - unusedCredits: -₹${applyAmount}`);
+      console.log(`  - outstanding: -₹${applyAmount}`);
+      
+      const customerBefore = await Customer.findById(creditNote.customerId).lean();
+      console.log(`🔍 [CN Apply] Customer BEFORE: unusedCredits=₹${customerBefore?.unusedCredits || 0}, outstanding=₹${customerBefore?.outstanding || 0}`);
+      
+      await Customer.findByIdAndUpdate(creditNote.customerId, {
+        $inc: { 
+          unusedCredits: -applyAmount,  // Credit consumed
+          outstanding: -applyAmount      // Invoice due reduced
+        }
+      });
+      
+      const customerAfter = await Customer.findById(creditNote.customerId).lean();
+      console.log(`✅ [CN Apply] Customer profile updated:`);
+      console.log(`  - unusedCredits: ₹${customerBefore?.unusedCredits || 0} → ₹${customerAfter?.unusedCredits || 0}`);
+      console.log(`  - outstanding: ₹${customerBefore?.outstanding || 0} → ₹${customerAfter?.outstanding || 0}`);
+    } catch (custErr) {
+      console.error('⚠️ Customer profile update error (credit note apply):', custErr.message);
+    }
+
+    // ================================================================
+    // STEP 5 — COA Posting
     // No new COA entry needed here because:
     // - When CN was created: Sales debited + AR credited already
     // - The AR reduction already happened at CN creation
@@ -1355,7 +1808,7 @@ router.post('/:id/apply', async (req, res) => {
     console.log(`✅ COA already handled at Credit Note creation — no additional entry needed`);
 
     // ================================================================
-    // STEP 5 — Return response
+    // STEP 6 — Return response
     // ================================================================
     res.json({
       success: true,
@@ -1385,13 +1838,228 @@ router.post('/:id/apply', async (req, res) => {
   }
 });
 
+// ============================================================================
+// DELETE APPLICATION (UNAPPLY CREDIT FROM INVOICE) — PART 5
+// ============================================================================
+// DELETE /api/finance/credit-notes/:id/applications/:appId
+// Reverses a credit application — restores invoice due, credit note balance,
+// and customer profile (unusedCredits + outstanding).
+// NO COA posting needed (AR to AR was net zero at application time).
+// ============================================================================
+router.delete('/:id/applications/:appId', async (req, res) => {
+  try {
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log(`🔍 [DELETE Application] START — creditNoteId=${req.params.id} appId=${req.params.appId}`);
+    console.log('═══════════════════════════════════════════════════════════════');
+
+    // ================================================================
+    // STEP 1 — Find and validate credit note
+    // ================================================================
+    const creditNote = await CreditNote.findOne({
+      _id: req.params.id,
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
+    });
+
+    if (!creditNote) {
+      return res.status(404).json({ success: false, error: 'Credit note not found' });
+    }
+
+    console.log(`🔍 [DELETE Application] Credit Note: ${creditNote.creditNoteNumber}`);
+    console.log(`  - Status: ${creditNote.status}`);
+    console.log(`  - Total: ₹${creditNote.totalAmount}`);
+    console.log(`  - Used: ₹${creditNote.creditUsed}`);
+    console.log(`  - Balance: ₹${creditNote.creditBalance}`);
+    console.log(`  - Applications: ${creditNote.creditApplications?.length || 0}`);
+
+    // ================================================================
+    // STEP 2 — Find the application in creditApplications array
+    // ================================================================
+    const appId = req.params.appId;
+    const appIndex = creditNote.creditApplications.findIndex(
+      app => app._id.toString() === appId
+    );
+
+    if (appIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        error: `Application ${appId} not found in credit note ${creditNote.creditNoteNumber}`
+      });
+    }
+
+    const application = creditNote.creditApplications[appIndex];
+    const appliedAmount = application.amount;
+    const invoiceId = application.invoiceId;
+    const invoiceNumber = application.invoiceNumber;
+
+    console.log(`🔍 [DELETE Application] Found application:`, {
+      appId,
+      invoiceId: invoiceId?.toString(),
+      invoiceNumber,
+      amount: appliedAmount,
+      appliedDate: application.appliedDate,
+    });
+
+    // ================================================================
+    // STEP 3 — Find and validate the invoice
+    // ================================================================
+    const invoice = await Invoice.findById(invoiceId);
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: `Invoice ${invoiceNumber || invoiceId} not found`
+      });
+    }
+
+    console.log(`🔍 [DELETE Application] Invoice BEFORE:`, {
+      invoiceNumber: invoice.invoiceNumber,
+      totalAmount: invoice.totalAmount,
+      amountPaid: invoice.amountPaid,
+      amountDue: invoice.amountDue,
+      status: invoice.status,
+    });
+
+    // ================================================================
+    // STEP 4 — Restore Invoice (reduce amountPaid, increase amountDue)
+    // ================================================================
+    const newAmountPaid = Math.max(0, (invoice.amountPaid || 0) - appliedAmount);
+    const newAmountDue = invoice.totalAmount - newAmountPaid;
+
+    // Determine new invoice status
+    let newStatus = invoice.status;
+    if (newAmountDue >= invoice.totalAmount) {
+      newStatus = 'OPEN';
+    } else if (newAmountPaid > 0 && newAmountDue > 0) {
+      newStatus = 'PARTIALLY_PAID';
+    } else if (newAmountDue <= 0) {
+      newStatus = 'PAID';
+    }
+
+    // Remove the payment record from invoice.payments array
+    await Invoice.findByIdAndUpdate(
+      invoice._id,
+      {
+        $set: {
+          amountPaid: newAmountPaid,
+          amountDue: newAmountDue,
+          status: newStatus,
+          updatedAt: new Date()
+        },
+        $pull: {
+          payments: { referenceNumber: creditNote.creditNoteNumber }
+        }
+      },
+      { new: true }
+    );
+
+    console.log(`✅ [DELETE Application] Invoice AFTER:`, {
+      invoiceNumber: invoice.invoiceNumber,
+      amountPaid: newAmountPaid,
+      amountDue: newAmountDue,
+      status: newStatus,
+    });
+
+    // ================================================================
+    // STEP 5 — Remove application from credit note
+    // ================================================================
+    creditNote.creditApplications.splice(appIndex, 1);
+    await creditNote.save(); // pre-save hook recalculates creditUsed + creditBalance
+
+    console.log(`✅ [DELETE Application] Credit Note AFTER:`, {
+      creditNoteNumber: creditNote.creditNoteNumber,
+      totalAmount: creditNote.totalAmount,
+      creditUsed: creditNote.creditUsed,
+      creditBalance: creditNote.creditBalance,
+      status: creditNote.status,
+      applications: creditNote.creditApplications.length,
+    });
+
+    // ================================================================
+    // STEP 6 — Restore Customer Profile (unusedCredits + outstanding)
+    // ================================================================
+    try {
+      const Customer = mongoose.models.BillingCustomer
+        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+
+      console.log(`🔍 [DELETE Application] Updating customer profile: customerId=${creditNote.customerId}`);
+      console.log(`  - unusedCredits: +₹${appliedAmount}`);
+      console.log(`  - outstanding: +₹${appliedAmount}`);
+
+      const customerBefore = await Customer.findById(creditNote.customerId).lean();
+      console.log(`🔍 [DELETE Application] Customer BEFORE:`, {
+        unusedCredits: customerBefore?.unusedCredits || 0,
+        outstanding: customerBefore?.outstanding || 0,
+      });
+
+      await Customer.findByIdAndUpdate(creditNote.customerId, {
+        $inc: {
+          unusedCredits: appliedAmount,  // Restore credit
+          outstanding: appliedAmount      // Restore invoice due
+        }
+      });
+
+      const customerAfter = await Customer.findById(creditNote.customerId).lean();
+      console.log(`✅ [DELETE Application] Customer AFTER:`, {
+        unusedCredits: customerAfter?.unusedCredits || 0,
+        outstanding: customerAfter?.outstanding || 0,
+      });
+    } catch (custErr) {
+      console.error('⚠️ [DELETE Application] Customer profile update error:', custErr.message);
+    }
+
+    // ================================================================
+    // STEP 7 — NO COA Posting (AR to AR was net zero)
+    // ================================================================
+    console.log(`✅ [DELETE Application] NO COA posting needed (AR to AR net zero)`);
+
+    // ================================================================
+    // STEP 8 — Return response
+    // ================================================================
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log(`✅ [DELETE Application] COMPLETE — Application deleted successfully`);
+    console.log('═══════════════════════════════════════════════════════════════');
+
+    res.json({
+      success: true,
+      message: `Credit application of ₹${appliedAmount} removed from ${invoice.invoiceNumber} successfully`,
+      data: {
+        creditNote: {
+          creditNoteNumber: creditNote.creditNoteNumber,
+          totalAmount: creditNote.totalAmount,
+          creditUsed: creditNote.creditUsed,
+          creditBalance: creditNote.creditBalance,
+          status: creditNote.status,
+        },
+        invoice: {
+          invoiceNumber: invoice.invoiceNumber,
+          totalAmount: invoice.totalAmount,
+          amountPaid: newAmountPaid,
+          amountDue: newAmountDue,
+          status: newStatus,
+        },
+        deletedApplication: {
+          appId,
+          amount: appliedAmount,
+          invoiceNumber,
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [DELETE Application] Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 // DOWNLOAD PDF
 router.get('/:id/pdf', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1399,7 +2067,7 @@ router.get('/:id/pdf', async (req, res) => {
     }
     
     if (!creditNote.pdfPath || !fs.existsSync(creditNote.pdfPath)) {
-      const pdfInfo = await generateCreditNotePDF(creditNote, req.user?.orgId);
+      const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
       creditNote.pdfPath = pdfInfo.filepath;
       creditNote.pdfGeneratedAt = new Date();
       await creditNote.save();
@@ -1417,7 +2085,8 @@ router.get('/:id/download-url', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
     
     if (!creditNote) {
@@ -1425,7 +2094,7 @@ router.get('/:id/download-url', async (req, res) => {
     }
     
     if (!creditNote.pdfPath || !fs.existsSync(creditNote.pdfPath)) {
-      const pdfInfo = await generateCreditNotePDF(creditNote, req.user?.orgId);
+      const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
       creditNote.pdfPath = pdfInfo.filepath;
       creditNote.pdfGeneratedAt = new Date();
       await creditNote.save();
@@ -1448,10 +2117,9 @@ router.get('/:id/download-url', async (req, res) => {
 // GET /api/credit-notes/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const creditNote = await CreditNote.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    const creditNote = await CreditNote.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!creditNote) return res.status(404).json({ success: false, error: 'Credit note not found' });
-    const OrgModel = mongoose.models.Organization || mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const org = await getCnOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     const orgName = org?.orgName || ''; const orgGST = org?.gstNumber || ''; const orgPhone = org?.phone || ''; const orgEmail = org?.email || '';
     const dateStr = new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
     const html = `<!DOCTYPE html>
@@ -1534,7 +2202,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const creditNote = await CreditNote.findOne({
       _id: req.params.id,
-      orgId: req.user?.orgId
+      orgId: req.user?.orgId,
+      ...(req.branchFilter || {}),
     });
 
     if (!creditNote) {
@@ -1590,14 +2259,14 @@ router.delete('/:id', async (req, res) => {
 
       // Cr Sales (reverses the Dr posted at creation)
       if (salesId) await postTransactionToCOA({
-        accountId: salesId, orgId: currentOrgId, date: txnDate, description: desc,
+        accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
         referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
         debit: 0, credit: creditNote.subTotal,
       });
 
       // Dr Accounts Receivable (reverses the Cr posted at creation)
       if (arId) await postTransactionToCOA({
-        accountId: arId, orgId: currentOrgId, date: txnDate, description: desc,
+        accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
         referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
         debit: creditNote.totalAmount, credit: 0,
       });
@@ -1607,7 +2276,7 @@ router.delete('/:id', async (req, res) => {
         const taxId = await ChartOfAccount.findOne({ accountName: 'Tax Payable', isSystemAccount: true, orgId: currentOrgId })
           .select('_id').lean().then(a => a?._id);
         if (taxId) await postTransactionToCOA({
-          accountId: taxId, orgId: currentOrgId, date: txnDate, description: desc,
+          accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
           referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
           debit: 0, credit: (creditNote.cgst || 0) + (creditNote.sgst || 0),
         });
@@ -1619,7 +2288,54 @@ router.delete('/:id', async (req, res) => {
     }
     // ── END COA REVERSAL ─────────────────────────────────────────────────────
 
-    // ── STEP 3: DELETE ───────────────────────────────────────────────────────
+    // ── STEP 3: UPDATE CUSTOMER PROFILE ──────────────────────────────────────
+    // Remove the unused credit balance from customer's unusedCredits
+    // ONLY if the credit note was OPEN (DRAFT credit notes never added to unusedCredits)
+    console.log('═══════════════════════════════════════════════════════════════════');
+    console.log('🔍 [CREDIT NOTE DELETE] Checking if unusedCredits should be removed');
+    console.log(`   Credit Note Number: ${creditNote.creditNoteNumber}`);
+    console.log(`   Credit Note Status: ${creditNote.status}`);
+    console.log(`   Credit Balance: ₹${creditNote.creditBalance || 0}`);
+    console.log(`   Customer ID: ${creditNote.customerId}`);
+    console.log('═══════════════════════════════════════════════════════════════════');
+    
+    try {
+      const Customer = mongoose.models.BillingCustomer
+        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+
+      const unusedBalance = creditNote.creditBalance || 0;
+
+      if (creditNote.status === 'OPEN' || creditNote.status === 'CLOSED') {
+        console.log(`✅ [CN Delete] Status is ${creditNote.status} - WILL REMOVE from unusedCredits`);
+        
+        const customerBefore = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Delete] Customer BEFORE delete:`);
+        console.log(`   - Customer Name: ${customerBefore?.customerDisplayName || 'N/A'}`);
+        console.log(`   - Current unusedCredits: ₹${customerBefore?.unusedCredits || 0}`);
+        
+        console.log(`🔄 [CN Delete] Removing ₹${unusedBalance} from unusedCredits...`);
+
+        await Customer.findByIdAndUpdate(creditNote.customerId, {
+          $inc: { unusedCredits: -unusedBalance }
+        });
+
+        const customerAfter = await Customer.findById(creditNote.customerId).lean();
+        console.log(`📊 [CN Delete] Customer AFTER delete:`);
+        console.log(`   - New unusedCredits: ₹${customerAfter?.unusedCredits || 0}`);
+        console.log(`   - Change: -₹${unusedBalance}`);
+        console.log(`✅ [CN Delete] Customer unusedCredits SUCCESSFULLY UPDATED!`);
+      } else {
+        console.log(`⚠️ [CN Delete] Status is ${creditNote.status} - NOT REMOVING from unusedCredits`);
+        console.log(`   Reason: DRAFT credit notes never added to unusedCredits`);
+      }
+    } catch (custErr) {
+      console.error('❌ [CN Delete] ERROR updating customer unusedCredits:', custErr.message);
+      console.error('   Stack:', custErr.stack);
+    }
+    console.log('═══════════════════════════════════════════════════════════════════\n');
+    // ── END CUSTOMER UPDATE ──────────────────────────────────────────────────
+
+    // ── STEP 4: DELETE ───────────────────────────────────────────────────────
     await creditNote.deleteOne();
 
     console.log(`✅ Credit Note deleted: ${creditNote.creditNoteNumber}`);
@@ -1759,18 +2475,47 @@ router.post('/import', upload.single('file'), async (req, res) => {
           status: 'OPEN',
           createdBy: req.user?.email || 'import',
           orgId: req.user?.orgId || null,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
         };
         
         // Calculate item amount
         creditNoteData.items[0].amount = calculateItemAmount(creditNoteData.items[0]);
         
         // Generate credit note number
-        creditNoteData.creditNoteNumber = await generateCreditNoteNumber(req.user?.orgId || null);
+        creditNoteData.creditNoteNumber = await generateCreditNoteNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         
         // Create credit note
         const creditNote = new CreditNote(creditNoteData);
         await creditNote.save();
-        
+
+        // ── COA posting (same as regular create) ─────────────────────────────
+        try {
+          const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+          const currentOrgId = req.user?.orgId || null;
+          const [salesId, arId] = await Promise.all([
+            ChartOfAccount.findOne({ accountName: 'Sales', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
+            ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
+          ]);
+          const txnDate = new Date(creditNote.creditNoteDate);
+          const desc    = `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`;
+
+          // Dr Sales (reverse revenue)
+          if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber, debit: creditNote.subTotal, credit: 0 });
+          // Cr Accounts Receivable (reduce AR)
+          if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc, referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber, debit: 0, credit: creditNote.totalAmount });
+
+          // Dr Tax Payable if GST exists
+          const gstTotal = (creditNote.cgst || 0) + (creditNote.sgst || 0) + (creditNote.igst || 0);
+          if (gstTotal > 0) {
+            const taxId = await ChartOfAccount.findOne({ accountName: 'Tax Payable', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id);
+            if (taxId) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST Reversal - ${desc}`, referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber, debit: gstTotal, credit: 0 });
+          }
+          console.log(`   ✅ COA posted for imported credit note: ${creditNote.creditNoteNumber}`);
+        } catch (coaErr) {
+          console.error(`   ⚠️ COA post error (credit note import line ${lineNumber}):`, coaErr.message);
+        }
+        // ── END COA ──────────────────────────────────────────────────────────
+
         results.push({
           line: lineNumber,
           creditNoteNumber: creditNote.creditNoteNumber,
@@ -1820,6 +2565,7 @@ router.get('/export', async (req, res) => {
     
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     
     if (status) query.status = status;
     if (customerId) query.customerId = customerId;

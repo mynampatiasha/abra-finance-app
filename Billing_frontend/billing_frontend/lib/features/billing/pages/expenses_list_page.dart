@@ -108,6 +108,9 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   final Set<String> _selectedIds = {};
   bool _selectAll = false;
 
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── scroll ────────────────────────────────────────────────────────────────
   final ScrollController _tableHScrollCtrl = ScrollController();
   final ScrollController _statsHScrollCtrl = ScrollController();
@@ -721,7 +724,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -819,6 +822,8 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree, _showLifecycleDialog, tooltip: 'View Process', color: _navy, bg: _navy.withOpacity(0.08)),
+    const SizedBox(width: 10),
+    _buildViewToggle(),
     const Spacer(),
     _actionBtn('New Expense', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
@@ -853,6 +858,8 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(),
+      const SizedBox(width: 8),
       _actionBtn('New Expense', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -888,6 +895,8 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
       _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
       const SizedBox(width: 6),
       _iconBtn(Icons.account_tree, _showLifecycleDialog, tooltip: 'View Process', color: _navy, bg: _navy.withOpacity(0.08)),
+      const SizedBox(width: 6),
+      _buildViewToggle(),
       const SizedBox(width: 6),
       _compactBtn('Import', _purple, _isLoading ? null : _handleImport),
       const SizedBox(width: 6),
@@ -1099,6 +1108,300 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
               ])),
             ]),
     );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(
+          icon: Icons.view_list_rounded,
+          label: 'List',
+          isSelected: !_isTableView,
+          onTap: () => setState(() => _isTableView = false),
+        ),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(
+          icon: Icons.table_chart_rounded,
+          label: 'Table',
+          isSelected: _isTableView,
+          onTap: () => setState(() => _isTableView = true),
+        ),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected ? Colors.white : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    final items = _currentPageItems;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (_, i) => _buildListCard(items[i]),
+      ),
+    );
+  }
+
+  Widget _buildListCard(Expense expense) {
+    DateTime? expDate;
+    try { expDate = DateTime.parse(expense.date); } catch (_) {}
+    final isSel = _selectedIds.contains(expense.id);
+
+    return GestureDetector(
+      onTap: () => _viewDetails(expense),
+      child: Container(
+      decoration: BoxDecoration(
+        color: isSel ? _navy.withOpacity(0.04) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.3) : Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header row ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 0),
+            child: Row(
+              children: [
+                // Checkbox — stop tap propagation
+                GestureDetector(
+                  onTap: () => _toggleRow(expense.id),
+                  behavior: HitTestBehavior.opaque,
+                  child: SizedBox(
+                    width: 24, height: 24,
+                    child: Checkbox(
+                      value: isSel,
+                      onChanged: (_) => _toggleRow(expense.id),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      activeColor: _navy,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Date
+                Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Text(
+                  expDate != null ? DateFormat('dd MMM yyyy').format(expDate) : expense.date,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                // Billable badge
+                if (expense.isBillable)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade300),
+                    ),
+                    child: Text('Billable', style: TextStyle(fontSize: 10, color: Colors.green.shade800, fontWeight: FontWeight.w600)),
+                  ),
+                const SizedBox(width: 6),
+                // 3-dot menu — stop tap propagation so it doesn't trigger _viewDetails
+                GestureDetector(
+                  onTap: () {}, // absorb tap
+                  behavior: HitTestBehavior.opaque,
+                  child: PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, size: 20, color: Colors.grey.shade600),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    itemBuilder: (_) => [
+                      _menuItem('view',    Icons.visibility_outlined,          _blue,   'View Details'),
+                      _menuItem('proof',   Icons.verified_outlined,             _teal,
+                          expense.proofFile != null ? 'View / Replace Proof' : 'Upload Proof'),
+                      _menuItem('edit',    Icons.edit_outlined,                _navy,   'Edit'),
+                      if (expense.receiptFile != null)
+                        _menuItem('receipt', Icons.download_outlined,          _green,  'Download Receipt'),
+                      _menuItem('share',   Icons.share_outlined,               _blue,   'Share'),
+                      _menuItem('ticket',  Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                      _menuItem('delete',  Icons.delete_outline,               _red,    'Delete', textColor: _red),
+                    ],
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'view':    _viewDetails(expense);     break;
+                        case 'proof':   _openProof(expense);       break;
+                        case 'edit':    _openEdit(expense.id);     break;
+                        case 'receipt': _downloadReceipt(expense); break;
+                        case 'share':   _share(expense);           break;
+                        case 'ticket':  _raiseTicket(expense);     break;
+                        case 'delete':  _delete(expense);          break;
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // ── Account name ─────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Text(
+              expense.expenseAccount,
+              style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: _navy,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          // ── Vendor / Customer ────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(children: [
+              if (expense.vendor != null && expense.vendor!.isNotEmpty) ...[
+                Icon(Icons.store_outlined, size: 13, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Flexible(child: Text(expense.vendor!, style: TextStyle(fontSize: 12, color: Colors.grey.shade700), overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 12),
+              ],
+              if (expense.customerName != null && expense.customerName!.isNotEmpty) ...[
+                Icon(Icons.person_outline, size: 13, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Flexible(child: Text(expense.customerName!, style: TextStyle(fontSize: 12, color: Colors.grey.shade700), overflow: TextOverflow.ellipsis)),
+              ],
+            ]),
+          ),
+          if (expense.invoiceNumber != null && expense.invoiceNumber!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(children: [
+                Icon(Icons.receipt_outlined, size: 13, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Text('Invoice: ${expense.invoiceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              ]),
+            ),
+          ],
+          const SizedBox(height: 10),
+          const Divider(height: 1, indent: 14, endIndent: 14),
+          // ── Amounts row ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            child: Row(
+              children: [
+                // Amount
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Amount', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 3),
+                  Text('₹${expense.amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                ])),
+                // Tax
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Tax', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 3),
+                  Text('₹${expense.tax.toStringAsFixed(2)}', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+                ])),
+                // Total
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Total', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 3),
+                  Text('₹${expense.total.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
+                ])),
+                // Paid Through
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Paid Via', style: TextStyle(fontSize: 10, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 3),
+                  Text(expense.paidThrough, style: TextStyle(fontSize: 12, color: Colors.grey.shade700), overflow: TextOverflow.ellipsis),
+                ])),
+                // Proof / Receipt icons — stop tap propagation
+                GestureDetector(
+                  onTap: () {}, // absorb so card tap doesn't fire
+                  behavior: HitTestBehavior.opaque,
+                  child: Row(children: [
+                    if (expense.receiptFile != null)
+                      Tooltip(
+                        message: 'Receipt: ${expense.receiptFile!.originalName}',
+                        child: InkWell(
+                          onTap: () => _downloadReceipt(expense),
+                          child: Container(
+                            width: 30, height: 30,
+                            decoration: BoxDecoration(color: _green.withOpacity(0.10), borderRadius: BorderRadius.circular(6)),
+                            child: const Icon(Icons.attach_file, color: _green, size: 16),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 6),
+                    expense.proofFile != null
+                        ? Tooltip(
+                            message: 'Proof: ${expense.proofFile!.originalName}',
+                            child: InkWell(
+                              onTap: () => _openProof(expense),
+                              child: Container(
+                                width: 30, height: 30,
+                                decoration: BoxDecoration(color: _teal.withOpacity(0.10), borderRadius: BorderRadius.circular(6)),
+                                child: const Icon(Icons.verified_outlined, color: _teal, size: 16),
+                              ),
+                            ),
+                          )
+                        : Tooltip(
+                            message: 'No proof — tap to upload',
+                            child: InkWell(
+                              onTap: () => _uploadProof(expense),
+                              child: Container(
+                                width: 30, height: 30,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: _orange.withOpacity(0.3)),
+                                ),
+                                child: Icon(Icons.upload_outlined, color: _orange.withOpacity(0.7), size: 16),
+                              ),
+                            ),
+                          ),
+                  ]),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ));
   }
 
   // ── table ─────────────────────────────────────────────────────────────────

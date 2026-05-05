@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
 import 'project_service.dart' show Project;
+import '../finance_secure_storage.dart';
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
@@ -166,7 +167,8 @@ class TimesheetService {
   static Future<Map<String, String>> _headers() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
-    return {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'};
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
+    return {'Authorization': 'Bearer $token', 'Content-Type': 'application/json', 'x-branch-ids': branchHdr};
   }
 
   static String get _base => ApiConfig.baseUrl;

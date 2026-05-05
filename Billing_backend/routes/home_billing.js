@@ -12,6 +12,7 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
+const { ChartOfAccount } = require('./chart_of_accounts'); // ✅ FIX: Import ChartOfAccount
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -128,13 +129,13 @@ function parsePaymentDate(paymentDate) {
 // CALCULATE TOTAL RECEIVABLES
 // ============================================================================
 
-async function calculateReceivables() {
+async function calculateReceivables(orgFilter = {}) {
   try {
     console.log('📊 Calculating Total Receivables...');
     
     const db = mongoose.connection.db;
     
-    const unpaidInvoices = await db.collection('invoices').find({
+    const unpaidInvoices = await db.collection('invoices').find({ ...orgFilter,
       status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] }
     }).toArray();
     
@@ -182,7 +183,7 @@ async function calculateReceivables() {
 // CALCULATE TOTAL PAYABLES
 // ============================================================================
 
-async function calculatePayables() {
+async function calculatePayables(orgFilter = {}) {
   try {
     console.log('📊 Calculating Total Payables...');
     
@@ -205,7 +206,7 @@ async function calculatePayables() {
 // CALCULATE CASH FLOW WITH MONTHLY BREAKDOWN - ✅ WITH CUMULATIVE BALANCE
 // ============================================================================
 
-async function calculateCashFlow(period = 'fiscal_year') {
+async function calculateCashFlow(orgFilter = {}, period = 'fiscal_year') {
   try {
     console.log(`\n📊 Calculating Cash Flow with Monthly Breakdown for: ${period}...`);
     console.log('='.repeat(80));
@@ -228,7 +229,7 @@ async function calculateCashFlow(period = 'fiscal_year') {
     }));
     
     // ✅ STEP 1: Calculate OPENING BALANCE (payments received BEFORE fiscal year start)
-    const allPayments = await db.collection('payments_received').find({
+    const allPayments = await db.collection('payments_received').find({ ...orgFilter,
       status: { $ne: 'void' }
     }).toArray();
     
@@ -336,7 +337,7 @@ async function calculateCashFlow(period = 'fiscal_year') {
 // CALCULATE INCOME AND EXPENSE WITH MONTHLY BREAKDOWN - ✅ FIXED FOR ANY DATE FORMAT
 // ============================================================================
 
-async function calculateIncomeAndExpense(period = 'fiscal_year', basis = 'accrual') {
+async function calculateIncomeAndExpense(orgFilter = {}, period = 'fiscal_year', basis = 'accrual') {
   try {
     console.log(`\n📊 Calculating Income and Expense (${basis}) with Monthly Breakdown for: ${period}...`);
     
@@ -358,7 +359,7 @@ async function calculateIncomeAndExpense(period = 'fiscal_year', basis = 'accrua
       // ✅ ACCRUAL BASIS: Based on invoice date
       console.log('   Using Accrual Basis (based on invoice date)...');
       
-      const allInvoices = await db.collection('invoices').find({}).toArray();
+      const allInvoices = await db.collection('invoices').find({ ...orgFilter }).toArray();
       
       console.log(`   Found ${allInvoices.length} total invoices in database`);
       
@@ -378,11 +379,39 @@ async function calculateIncomeAndExpense(period = 'fiscal_year', basis = 'accrua
         }
       });
       
+      // ✅ FIX BUG 2: Add expense calculation - ONLY from actual Expense account types
+      const allExpenses = await db.collection('expenses').find({ ...orgFilter }).toArray();
+      console.log(`   Found ${allExpenses.length} total expenses in database`);
+      
+      // Filter expenses to ONLY include actual expense account types (not Asset, Liability, Equity)
+      for (const expense of allExpenses) {
+        const expenseDate = parsePaymentDate(expense.date);
+        if (!expenseDate) continue;
+        
+        // Get the expense account type from COA
+        const expAcc = await ChartOfAccount.findOne({
+          accountName: expense.expenseAccount,
+          ...(orgFilter.orgId ? { orgId: orgFilter.orgId } : {}),
+        }).select('accountType').lean();
+        
+        // ✅ ONLY count as expense if it's an actual expense account type
+        if (expAcc && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(expAcc.accountType)) {
+          const monthIndex = fiscalMonths.findIndex(month => {
+            return expenseDate >= month.startDate && expenseDate <= month.endDate;
+          });
+          
+          if (monthIndex !== -1) {
+            monthlyData[monthIndex].expense += expense.total || 0;
+            monthlyData[monthIndex].net = monthlyData[monthIndex].income - monthlyData[monthIndex].expense;
+          }
+        }
+      }
+      
     } else {
       // ✅ CASH BASIS: Based on actual payment date
       console.log('   Using Cash Basis (based on payment date)...');
       
-      const allPayments = await db.collection('payments_received').find({
+      const allPayments = await db.collection('payments_received').find({ ...orgFilter,
         status: { $ne: 'void' }
       }).toArray();
       
@@ -449,7 +478,7 @@ async function calculateIncomeAndExpense(period = 'fiscal_year', basis = 'accrua
 // CALCULATE PROJECTS SUMMARY
 // ============================================================================
 
-async function calculateProjectsSummary() {
+async function calculateProjectsSummary(orgFilter = {}) {
   try {
     console.log('📊 Calculating Projects Summary...');
     
@@ -467,7 +496,7 @@ async function calculateProjectsSummary() {
 // CALCULATE BANK ACCOUNTS SUMMARY
 // ============================================================================
 
-async function calculateBankAccountsSummary() {
+async function calculateBankAccountsSummary(orgFilter = {}) {
   try {
     console.log('📊 Calculating Bank Accounts Summary...');
     
@@ -486,7 +515,7 @@ async function calculateBankAccountsSummary() {
 // CALCULATE ACCOUNT WATCHLIST
 // ============================================================================
 
-async function calculateAccountWatchlist(basis = 'accrual') {
+async function calculateAccountWatchlist(orgFilter = {}, basis = 'accrual') {
   try {
     console.log(`📊 Calculating Account Watchlist (${basis})...`);
     
@@ -516,18 +545,11 @@ router.get('/summary', async (req, res) => {
     console.log('📊'.repeat(50));
     
     const { basis = 'accrual' } = req.query;
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
     
     // Calculate all dashboard components in parallel
     const [receivables, payables, cashFlow, incomeExpense, projects, bankAccounts, watchlist] = 
-      await Promise.all([
-        calculateReceivables(),
-        calculatePayables(),
-        calculateCashFlow('fiscal_year'),
-        calculateIncomeAndExpense('fiscal_year', basis),
-        calculateProjectsSummary(),
-        calculateBankAccountsSummary(),
-        calculateAccountWatchlist(basis)
-      ]);
+      await Promise.all([calculateReceivables(orgFilter),calculatePayables(orgFilter),calculateCashFlow('fiscal_year', orgFilter),calculateIncomeAndExpense('fiscal_year', basis, orgFilter),calculateProjectsSummary(orgFilter),calculateBankAccountsSummary(orgFilter),calculateAccountWatchlist(basis, orgFilter)]);
     
     const dashboardData = {
       receivables,
@@ -563,7 +585,7 @@ router.get('/summary', async (req, res) => {
  */
 router.get('/receivables', async (req, res) => {
   try {
-    const receivables = await calculateReceivables();
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const receivables = await calculateReceivables(orgFilter);
     res.json({ success: true, data: receivables });
   } catch (error) {
     console.error('❌ Error calculating receivables:', error);
@@ -580,7 +602,7 @@ router.get('/receivables', async (req, res) => {
  */
 router.get('/payables', async (req, res) => {
   try {
-    const payables = await calculatePayables();
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const payables = await calculatePayables(orgFilter);
     res.json({ success: true, data: payables });
   } catch (error) {
     console.error('❌ Error calculating payables:', error);
@@ -599,7 +621,7 @@ router.get('/payables', async (req, res) => {
 router.get('/cash-flow', async (req, res) => {
   try {
     const { period = 'fiscal_year' } = req.query;
-    const cashFlow = await calculateCashFlow(period);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const cashFlow = await calculateCashFlow(orgFilter, period);
     res.json({ success: true, data: cashFlow });
   } catch (error) {
     console.error('❌ Error calculating cash flow:', error);
@@ -619,7 +641,7 @@ router.get('/cash-flow', async (req, res) => {
 router.get('/income-expense', async (req, res) => {
   try {
     const { period = 'fiscal_year', basis = 'accrual' } = req.query;
-    const incomeExpense = await calculateIncomeAndExpense(period, basis);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const incomeExpense = await calculateIncomeAndExpense(orgFilter, period, basis);
     res.json({ success: true, data: incomeExpense });
   } catch (error) {
     console.error('❌ Error calculating income and expense:', error);
@@ -636,7 +658,7 @@ router.get('/income-expense', async (req, res) => {
  */
 router.get('/projects', async (req, res) => {
   try {
-    const projects = await calculateProjectsSummary();
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const projects = await calculateProjectsSummary(orgFilter);
     res.json({ success: true, data: projects });
   } catch (error) {
     console.error('❌ Error calculating projects:', error);
@@ -653,7 +675,7 @@ router.get('/projects', async (req, res) => {
  */
 router.get('/bank-accounts', async (req, res) => {
   try {
-    const bankAccounts = await calculateBankAccountsSummary();
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const bankAccounts = await calculateBankAccountsSummary(orgFilter);
     res.json({ success: true, data: bankAccounts });
   } catch (error) {
     console.error('❌ Error calculating bank accounts:', error);
@@ -671,7 +693,7 @@ router.get('/bank-accounts', async (req, res) => {
 router.get('/watchlist', async (req, res) => {
   try {
     const { basis = 'accrual' } = req.query;
-    const watchlist = await calculateAccountWatchlist(basis);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const watchlist = await calculateAccountWatchlist(orgFilter, basis);
     res.json({ success: true, data: watchlist });
   } catch (error) {
     console.error('❌ Error calculating watchlist:', error);
@@ -729,7 +751,7 @@ router.get('/income-expense-detail', async (req, res) => {
     if (type === 'income') {
       if (basis === 'accrual') {
         // Accrual: Based on invoice date
-        const invoices = await db.collection('invoices').find({
+        const invoices = await db.collection('invoices').find({ ...orgFilter,
           invoiceDate: {
             $gte: monthStart,
             $lte: monthEnd

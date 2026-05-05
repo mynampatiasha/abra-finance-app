@@ -16,11 +16,13 @@ class BillingApiService {
   static String get _base => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _headers() async {
-    final token = await FinanceSecureStorage.getToken();
+    final token      = await FinanceSecureStorage.getToken();
+    final branchHdr  = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
 

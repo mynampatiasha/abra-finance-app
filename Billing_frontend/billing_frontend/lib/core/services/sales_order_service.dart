@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 class SalesOrderService {
   static String get baseUrl => ApiConfig.baseUrl;
@@ -17,10 +18,21 @@ class SalesOrderService {
   static Future<String?> _getToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString('jwt_token');
+      return prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token');
     } catch (e) {
       return null;
     }
+  }
+
+  // Build headers with branch context
+  static Future<Map<String, String>> _headers() async {
+    final token = await _getToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
+    };
   }
   
   // ============================================================================
@@ -36,8 +48,6 @@ class SalesOrderService {
     DateTime? toDate,
   }) async {
     try {
-      final token = await _getToken();
-      
       final queryParams = {
         'page': page.toString(),
         'limit': limit.toString(),
@@ -63,10 +73,7 @@ class SalesOrderService {
       
       final response = await http.get(
         uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode == 200) {
@@ -86,14 +93,9 @@ class SalesOrderService {
   
   static Future<SalesOrderStats> getStats() async {
     try {
-      final token = await _getToken();
-      
       final response = await http.get(
         Uri.parse('$baseUrl/api/finance/sales-orders/stats'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode == 200) {
@@ -113,14 +115,9 @@ class SalesOrderService {
   
   static Future<SalesOrder> getSalesOrder(String id) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.get(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode == 200) {
@@ -140,14 +137,9 @@ class SalesOrderService {
   
   static Future<SalesOrder> createSalesOrder(Map<String, dynamic> salesOrderData) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
         body: json.encode(salesOrderData),
       );
       
@@ -168,14 +160,9 @@ class SalesOrderService {
   
   static Future<SalesOrder> updateSalesOrder(String id, Map<String, dynamic> salesOrderData) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.put(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
         body: json.encode(salesOrderData),
       );
       
@@ -196,14 +183,9 @@ class SalesOrderService {
   
   static Future<void> deleteSalesOrder(String id) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.delete(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode != 200) {
@@ -220,14 +202,9 @@ class SalesOrderService {
   
   static Future<void> sendSalesOrder(String id) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/send'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode != 200) {
@@ -244,9 +221,10 @@ class SalesOrderService {
   
   static Future<String> downloadPDF(String id) async {
     try {
-      final token = await _getToken();
-      
-      return '$baseUrl/api/finance/sales-orders/$id/download?token=$token';
+      final token     = await _getToken();
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+
+      return '$baseUrl/api/finance/sales-orders/$id/download?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
     } catch (e) {
       throw Exception('Error preparing PDF download: $e');
     }
@@ -258,14 +236,9 @@ class SalesOrderService {
   
   static Future<void> confirmSalesOrder(String id) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/confirm'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode != 200) {
@@ -282,14 +255,9 @@ class SalesOrderService {
   
   static Future<Map<String, dynamic>> convertToInvoice(String id) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/convert-to-invoice'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       
       if (response.statusCode == 200) {
@@ -309,13 +277,9 @@ class SalesOrderService {
 
   static Future<void> markAsSent(String id) async {
     try {
-      final token = await _getToken();
       final response = await http.patch(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/mark-as-sent'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
       );
       if (response.statusCode != 200) {
         throw Exception('Failed to mark as sent: ${response.body}');
@@ -331,14 +295,9 @@ class SalesOrderService {
   
   static Future<Map<String, dynamic>> bulkImportSalesOrders(List<Map<String, dynamic>> salesOrders) async {
     try {
-      final token = await _getToken();
-      
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/bulk-import'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: await _headers(),
         body: json.encode({
           'salesOrders': salesOrders,
         }),

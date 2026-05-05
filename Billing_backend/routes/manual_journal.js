@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // MANUAL JOURNALS - COMPLETE BACKEND
 // ============================================================================
 // File: backend/routes/manual_journal.js
@@ -13,7 +13,7 @@ const path     = require('path');
 const fs       = require('fs');
 const PDFDocument = require('pdfkit');
 
-// ── COA Integration ──────────────────────────────────────────────────────────
+// -- COA Integration ----------------------------------------------------------
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
 async function getAccountById(id) {
@@ -39,8 +39,9 @@ const journalLineSchema = new mongoose.Schema({
 }, { _id: true });
 
 const manualJournalSchema = new mongoose.Schema({
-  orgId: { type: String, index: true, default: null },
-  journalNumber: { type: String, required: true, unique: true, index: true },
+  orgId:    { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
+  journalNumber: { type: String, required: true, index: true },
   date:          { type: Date, required: true, default: Date.now },
   referenceNumber: { type: String, default: '' },
   notes:         { type: String, default: '' },
@@ -107,6 +108,7 @@ const manualJournalSchema = new mongoose.Schema({
   companyId: { type: String, default: 'default' },
 }, { timestamps: true });
 
+manualJournalSchema.index({ orgId: 1, branchId: 1, journalNumber: 1 }, { unique: true });
 manualJournalSchema.index({ date: -1 });
 manualJournalSchema.index({ status: 1, date: -1 });
 manualJournalSchema.index({ journalNumber: 1 });
@@ -148,13 +150,13 @@ const JournalTemplate = mongoose.models.JournalTemplate
 // HELPERS
 // ============================================================================
 
-async function generateJournalNumber(orgId = null) {
+async function generateJournalNumber(orgId = null, branchId = null) {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(ManualJournal, 'journalNumber', 'JNL', orgId);
+  return generateNumber(ManualJournal, 'journalNumber', 'JNL', orgId, branchId);
 }
 
 // Reverse COA entries for void
-async function reverseCOAEntries(journal, orgId) {
+async function reverseCOAEntries(journal, orgId, branchId = null) {
   try {
     for (const line of journal.lineItems) {
       if (!line.accountId) continue;
@@ -162,7 +164,7 @@ async function reverseCOAEntries(journal, orgId) {
       if (line.debit > 0) {
         await postTransactionToCOA({
           accountId: line.accountId,
-          orgId: orgId || null,
+          orgId: orgId || null, branchId: branchId || null,
           date: new Date(),
           description: `VOID: ${journal.journalNumber} - ${line.description || line.accountName}`,
           referenceType: 'Journal',
@@ -174,7 +176,7 @@ async function reverseCOAEntries(journal, orgId) {
       if (line.credit > 0) {
         await postTransactionToCOA({
           accountId: line.accountId,
-          orgId: orgId || null,
+          orgId: orgId || null, branchId: branchId || null,
           date: new Date(),
           description: `VOID: ${journal.journalNumber} - ${line.description || line.accountName}`,
           referenceType: 'Journal',
@@ -184,21 +186,21 @@ async function reverseCOAEntries(journal, orgId) {
         });
       }
     }
-    console.log(`✅ COA reversed for void: ${journal.journalNumber}`);
+    console.log(`? COA reversed for void: ${journal.journalNumber}`);
   } catch (e) {
     console.error('COA reverse error:', e.message);
   }
 }
 
 // Publish to COA
-async function publishToCOA(journal, orgId) {
+async function publishToCOA(journal, orgId, branchId = null) {
   try {
     for (const line of journal.lineItems) {
       if (!line.accountId) continue;
       if (line.debit > 0 || line.credit > 0) {
         await postTransactionToCOA({
           accountId: line.accountId,
-          orgId: orgId || null,
+          orgId: orgId || null, branchId: branchId || null,
           date: new Date(journal.date),
           description: line.description || `Journal ${journal.journalNumber} - ${line.accountName}`,
           referenceType: 'Journal',
@@ -209,7 +211,7 @@ async function publishToCOA(journal, orgId) {
         });
       }
     }
-    console.log(`✅ COA posted for journal: ${journal.journalNumber}`);
+    console.log(`? COA posted for journal: ${journal.journalNumber}`);
   } catch (e) {
     console.error('COA post error:', e.message);
   }
@@ -239,7 +241,7 @@ const attachUpload = multer({
 });
 
 // ============================================================================
-// ROUTES — STATS
+// ROUTES � STATS
 // ============================================================================
 
 router.get('/stats', authenticate, async (req, res) => {
@@ -263,14 +265,14 @@ const [total, draft, published, voided, agg] = await Promise.all([
 });
 
 // ============================================================================
-// ROUTES — LIST
+// ROUTES � LIST
 // ============================================================================
 
 router.get('/', authenticate, async (req, res) => {
   try {
     const { status, fromDate, toDate, search, page = 1, limit = 50 } = req.query;
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {}); Object.assign(query, req.branchFilter || {});
 
     if (status && status !== 'All') query.status = status;
     if (fromDate || toDate) {
@@ -305,14 +307,14 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — SINGLE
+// ROUTES � SINGLE
 // ============================================================================
 
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const j = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!j) return res.status(404).json({ success: false, message: 'Journal not found' });
     res.json({ success: true, data: { ...j, id: j._id } });
@@ -322,7 +324,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — CREATE
+// ROUTES � CREATE
 // ============================================================================
 
 router.post('/', authenticate, async (req, res) => {
@@ -332,16 +334,17 @@ router.post('/', authenticate, async (req, res) => {
     if (!data.lineItems || data.lineItems.length === 0)
       return res.status(400).json({ success: false, message: 'At least one line item is required' });
 
-    if (!data.journalNumber) data.journalNumber = await generateJournalNumber(req.user?.orgId);
+    if (!data.journalNumber) data.journalNumber = await generateJournalNumber(req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     const journal = await ManualJournal.create({
       ...data,
       status: data.status || 'Draft',
-      orgId: req.user?.orgId || null,
+      orgId:    req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user?.email || 'system',
     });
 
-    console.log(`✅ Journal created: ${journal.journalNumber}`);
+    console.log(`? Journal created: ${journal.journalNumber}`);
     res.status(201).json({ success: true, message: 'Journal created', data: { ...journal.toObject(), id: journal._id } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -349,14 +352,14 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — UPDATE
+// ROUTES � UPDATE
 // ============================================================================
 
 router.put('/:id', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
     if (journal.status !== 'Draft')
@@ -374,14 +377,14 @@ router.put('/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — PUBLISH
+// ROUTES � PUBLISH
 // ============================================================================
 
 router.post('/:id/publish', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
     if (journal.status === 'Published')
@@ -403,7 +406,7 @@ router.post('/:id/publish', authenticate, async (req, res) => {
     await journal.save();
 
     // Post to COA
-    await publishToCOA(journal, req.user?.orgId);
+    await publishToCOA(journal, req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     res.json({ success: true, message: 'Journal published and posted to Chart of Accounts', data: { ...journal.toObject(), id: journal._id } });
   } catch (e) {
@@ -412,14 +415,14 @@ router.post('/:id/publish', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — VOID
+// ROUTES � VOID
 // ============================================================================
 
 router.post('/:id/void', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
     if (journal.status === 'Void')
@@ -435,7 +438,7 @@ router.post('/:id/void', authenticate, async (req, res) => {
     await journal.save();
 
     // Reverse COA entries if it was published
-    if (wasPublished) await reverseCOAEntries(journal, req.user?.orgId);
+    if (wasPublished) await reverseCOAEntries(journal, req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 
     res.json({ success: true, message: 'Journal voided and COA entries reversed', data: { ...journal.toObject(), id: journal._id } });
   } catch (e) {
@@ -444,19 +447,19 @@ router.post('/:id/void', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — CLONE
+// ROUTES � CLONE
 // ============================================================================
 
 router.post('/:id/clone', authenticate, async (req, res) => {
   try {
     const source = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!source) return res.status(404).json({ success: false, message: 'Journal not found' });
 
-    const newNumber = await generateJournalNumber(req.user?.orgId);
-// REPLACE WITH — add orgId:
+    const newNumber = await generateJournalNumber(req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
+// REPLACE WITH � add orgId:
 const clone = await ManualJournal.create({
   journalNumber:    newNumber,
   date:             new Date(),
@@ -478,8 +481,7 @@ const clone = await ManualJournal.create({
   status:           'Draft',
   clonedFromId:     source._id,
   clonedFromNumber: source.journalNumber,
-  orgId:            req.user?.orgId || null,
-  createdBy:        req.user?.email || 'system',
+  orgId:            req.user?.orgId || null,   createdBy:        req.user?.email || 'system',
 });
 
     res.status(201).json({ success: true, message: `Journal cloned as ${newNumber}`, data: { ...clone.toObject(), id: clone._id } });
@@ -489,14 +491,14 @@ const clone = await ManualJournal.create({
 });
 
 // ============================================================================
-// ROUTES — APPLY CREDITS (Link to Invoice or Bill)
+// ROUTES � APPLY CREDITS (Link to Invoice or Bill)
 // ============================================================================
 
 router.post('/:id/apply-credits', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
     if (journal.status !== 'Published')
@@ -522,14 +524,14 @@ router.post('/:id/apply-credits', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — PDF
+// ROUTES � PDF
 // ============================================================================
 
 router.get('/:id/pdf', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     }).lean();
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
 
@@ -539,9 +541,11 @@ router.get('/:id/pdf', authenticate, async (req, res) => {
     const filename = `journal-${journal.journalNumber}.pdf`;
     const filepath = path.join(uploadsDir, filename);
 
-    const OrgModel = mongoose.models.Organisation ||
-      mongoose.model('Organisation', new mongoose.Schema({}, { strict: false }));
-    const orgData = journal.orgId ? await OrgModel.findOne({ orgId: journal.orgId }).lean() : null;
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const orgData = (journal.orgId && db)
+      ? await getEffectiveOrgData(journal.orgId, journal.branchId || null, db)
+      : null;
     const orgName = orgData?.orgName || orgData?.name || 'Your Organisation';
 
     await generateJournalPDF(journal, filepath, orgName);
@@ -598,10 +602,10 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
       doc.text(line.description || '-', 190, y + 7, { width: 135, ellipsis: true });
       doc.text(line.contactName || '-', 330, y + 7, { width: 80, ellipsis: true });
       if (line.debit > 0)
-        doc.fillColor('#DC2626').text(`₹${line.debit.toFixed(2)}`, 415, y + 7, { width: 55, align: 'right' });
+        doc.fillColor('#DC2626').text(`?${line.debit.toFixed(2)}`, 415, y + 7, { width: 55, align: 'right' });
       else doc.fillColor('#94A3B8').text('-', 415, y + 7, { width: 55, align: 'right' });
       if (line.credit > 0)
-        doc.fillColor('#16A34A').text(`₹${line.credit.toFixed(2)}`, 470, y + 7, { width: 65, align: 'right' });
+        doc.fillColor('#16A34A').text(`?${line.credit.toFixed(2)}`, 470, y + 7, { width: 65, align: 'right' });
       else doc.fillColor('#94A3B8').text('-', 470, y + 7, { width: 65, align: 'right' });
       y += 22;
     });
@@ -609,12 +613,12 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
     // Totals
     y += 10;
     doc.fontSize(9).fillColor('#374151').font('Helvetica-Bold');
-    doc.text('Sub Total', 350, y); doc.text(`₹${journal.totalDebit.toFixed(2)}`, 415, y, { width: 55, align: 'right' });
-    doc.text(`₹${journal.totalCredit.toFixed(2)}`, 470, y, { width: 65, align: 'right' });
+    doc.text('Sub Total', 350, y); doc.text(`?${journal.totalDebit.toFixed(2)}`, 415, y, { width: 55, align: 'right' });
+    doc.text(`?${journal.totalCredit.toFixed(2)}`, 470, y, { width: 65, align: 'right' });
     y += 15;
     doc.text('Difference', 350, y);
     doc.fillColor(Math.abs(journal.difference) < 0.01 ? '#16A34A' : '#DC2626');
-    doc.text(`₹${journal.difference.toFixed(2)}`, 415, y, { width: 120, align: 'right' });
+    doc.text(`?${journal.difference.toFixed(2)}`, 415, y, { width: 120, align: 'right' });
 
     // Applied credits
     if (journal.appliedCredits && journal.appliedCredits.length > 0) {
@@ -623,7 +627,7 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
       y += 16;
       journal.appliedCredits.forEach(c => {
         doc.fontSize(9).fillColor('#374151').font('Helvetica');
-        doc.text(`${c.type} ${c.referenceNumber} — ₹${c.amount.toFixed(2)}`, 60, y);
+        doc.text(`${c.type} ${c.referenceNumber} � ?${c.amount.toFixed(2)}`, 60, y);
         y += 15;
       });
     }
@@ -639,14 +643,14 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
 }
 
 // ============================================================================
-// ROUTES — ATTACHMENTS
+// ROUTES � ATTACHMENTS
 // ============================================================================
 
 router.post('/:id/attachments', authenticate, attachUpload.array('files', 5), async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
 
@@ -670,7 +674,7 @@ router.delete('/:id/attachments/:attachId', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
 
@@ -691,7 +695,7 @@ router.delete('/:id/attachments/:attachId', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — TEMPLATES
+// ROUTES � TEMPLATES
 // ============================================================================
 
 router.get('/templates/list', authenticate, async (req, res) => {
@@ -722,7 +726,7 @@ router.delete('/templates/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES — IMPORT
+// ROUTES � IMPORT
 // ============================================================================
 
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -736,7 +740,7 @@ router.post('/import', authenticate, importUpload.single('file'), async (req, re
     for (let i = 0; i < journalsData.length; i++) {
       const item = journalsData[i];
       try {
-        if (!item.journalNumber) item.journalNumber = await generateJournalNumber(req.user?.orgId);
+        if (!item.journalNumber) item.journalNumber = await generateJournalNumber(req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
 item.createdBy = req.user?.email || 'system';
 item.orgId = req.user?.orgId || null;
 await ManualJournal.create(item);
@@ -758,14 +762,14 @@ await ManualJournal.create(item);
 });
 
 // ============================================================================
-// ROUTES — DELETE (Draft only)
+// ROUTES � DELETE (Draft only)
 // ============================================================================
 
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const journal = await ManualJournal.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!journal) return res.status(404).json({ success: false, message: 'Journal not found' });
     if (journal.status !== 'Draft')

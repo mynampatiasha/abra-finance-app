@@ -172,8 +172,8 @@ async function applyRulesToBatch(transactions, accountId, orgId = null) {
           const expCOA = await ChartOfAccount.findById(action.coaAccountId).lean();
           if (!expCOA) continue;
 
-          await postTransactionToCOA({ accountId: expCOA._id, orgId, date: txn.transactionDate, description: `${expCOA.accountName}${action.vendorName ? ' - ' + action.vendorName : ''} [Rule: ${rule.name}] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
-          await postTransactionToCOA({ accountId: bankCOA._id, orgId, date: txn.transactionDate, description: `${expCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
+          await postTransactionToCOA({ accountId: expCOA._id, orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txn.transactionDate, description: `${expCOA.accountName}${action.vendorName ? ' - ' + action.vendorName : ''} [Rule: ${rule.name}] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
+          await postTransactionToCOA({ accountId: bankCOA._id, orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txn.transactionDate, description: `${expCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Expense', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
 
           await Expense.create({ orgId, expenseNumber: journalRef, date: new Date(txn.transactionDate).toISOString().split('T')[0], expenseAccount: expCOA.accountName, expenseAccountId: expCOA._id, paidThrough: bankCOA.accountName, paidThroughAccountId: bankCOA._id, vendor: action.vendorName || null, amount: txn.amount, total: txn.amount, notes: action.notes || `Auto-categorized by rule: ${rule.name}`, providerTransactionId: txn._id, journalRef, ruleId: rule._id, createdBy: 'rule-engine' });
           await PaymentAccount.findByIdAndUpdate(accountId, { $inc: { currentBalance: -txn.amount } });
@@ -182,8 +182,8 @@ async function applyRulesToBatch(transactions, accountId, orgId = null) {
           const incCOA = await ChartOfAccount.findById(action.coaAccountId).lean();
           if (!incCOA) continue;
 
-          await postTransactionToCOA({ accountId: bankCOA._id, orgId, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
-          await postTransactionToCOA({ accountId: incCOA._id, orgId, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
+          await postTransactionToCOA({ accountId: bankCOA._id, orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: txn.amount, credit: 0 });
+          await postTransactionToCOA({ accountId: incCOA._id, orgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txn.transactionDate, description: `${incCOA.accountName} [Rule] | ${journalRef}`, referenceType: 'Payment', referenceId: txn._id, referenceNumber: journalRef, debit: 0, credit: txn.amount });
           await PaymentAccount.findByIdAndUpdate(accountId, { $inc: { currentBalance: txn.amount } });
 
         } else if (action.type === 'exclude') {
@@ -268,8 +268,7 @@ router.post('/', async (req, res) => {
 
     const rule = await TransactionRule.create({
       ...data,
-      orgId:     req.user?.orgId || null,
-      createdBy: req.user?.email || 'system',
+      orgId:     req.user?.orgId || null,       createdBy: req.user?.email || 'system',
     });
 
     console.log(`✅ Transaction rule created: ${rule.name}`);
@@ -284,7 +283,7 @@ router.put('/:id', async (req, res) => {
   try {
     const rule = await TransactionRule.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!rule) return res.status(404).json({ success: false, message: 'Rule not found' });
 
@@ -310,7 +309,7 @@ router.delete('/:id', async (req, res) => {
   try {
     await TransactionRule.findOneAndDelete({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     res.json({ success: true, message: 'Rule deleted' });
   } catch (err) {
@@ -323,7 +322,7 @@ router.patch('/:id/toggle', async (req, res) => {
   try {
     const rule = await TransactionRule.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
     });
     if (!rule) return res.status(404).json({ success: false, message: 'Rule not found' });
     rule.isActive = !rule.isActive;

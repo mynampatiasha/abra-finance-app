@@ -116,6 +116,7 @@ const quoteSchema = new mongoose.Schema({
     index: true,
   },
   orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
   quoteNumber: {
     type: String,
     required: true,
@@ -274,7 +275,7 @@ const quoteSchema = new mongoose.Schema({
   updatedBy: {
     type: String,
   },
-  // Custom email fields — saved when user edits email preview before sending
+  // Custom email fields � saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -283,7 +284,7 @@ const quoteSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-quoteSchema.index({ orgId: 1, quoteNumber: 1 }, { unique: true });
+quoteSchema.index({ orgId: 1, branchId: 1, quoteNumber: 1 }, { unique: true });
 quoteSchema.index({ orgId: 1, customerId: 1 });
 quoteSchema.index({ orgId: 1, status: 1 });
 quoteSchema.index({ orgId: 1, quoteDate: -1 });
@@ -384,9 +385,9 @@ function numberToWords(n) {
 }
 
 // Generate unique quote number
-const generateQuoteNumber = async (organizationId) => {
+const generateQuoteNumber = async (organizationId, branchId = null) => {
   const { generateNumber } = require('../utils/numberGenerator');
-  return generateNumber(Quote, 'quoteNumber', 'QT', organizationId || null);
+  return generateNumber(Quote, 'quoteNumber', 'QT', organizationId || null, branchId);
 };
 
 // Calculate quote totals
@@ -442,11 +443,11 @@ const calculateQuoteTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18) => 
   };
 };
 
-// Generate PDF for quote — styled identical to invoices.js
-const generateQuotePDF = async (quote, orgId = null) => {
+// Generate PDF for quote � styled identical to invoices.js
+const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log('📄 Starting PDF generation for quote:', quote.quoteNumber);
+      console.log('?? Starting PDF generation for quote:', quote.quoteNumber);
 
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'quotes');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -454,7 +455,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
       const filename = `quote-${quote.quoteNumber}.pdf`;
       const filepath = path.join(uploadsDir, filename);
 
-      // ── Fetch org details ──────────────────────────────────────────────────
+      // -- Fetch org details --------------------------------------------------
       let orgName  = 'Your Company';
       let orgGST   = '';
       let orgAddr  = '';
@@ -463,9 +464,9 @@ const generateQuotePDF = async (quote, orgId = null) => {
       let orgTagline = '';
       let orgData  = null;
       try {
-        const OrgModel = mongoose.models.Organization ||
-          mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-        orgData = await OrgModel.findOne({ orgId }).lean();
+        const { getEffectiveOrgData } = require('./branches');
+        const db = mongoose.connection.db;
+        if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
         if (orgData) {
           orgName    = orgData.orgName    || orgName;
           orgGST     = orgData.gstNumber  || '';
@@ -474,7 +475,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
           orgPhone   = orgData.phone      || '';
           orgTagline = orgData.tagline    || orgData.slogan || '';
         }
-      } catch (e) { console.warn('⚠️ Could not fetch org details:', e.message); }
+      } catch (e) { console.warn('Could not fetch org details:', e.message); }
 
       const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
       const stream = fs.createWriteStream(filepath);
@@ -482,8 +483,13 @@ const generateQuotePDF = async (quote, orgId = null) => {
 
       const pageW = 515;
 
-      // ── HEADER — plain white background like invoices.js ─────────────────
-      const logoPath = getLogoPath(orgId);
+      // -- HEADER - plain white background like invoices.js -----------------
+      let logoPath = null;
+      if (orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      }
+      if (!logoPath) logoPath = getLogoPath(orgId);
       let logoLoaded = false;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
@@ -497,16 +503,23 @@ const generateQuotePDF = async (quote, orgId = null) => {
         try {
           doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
           logoLoaded = true;
-        } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+        } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      doc.fontSize(12).font('Helvetica-Bold');
+      const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+      const subtitleY = textStartY + orgNameH + 2;
       doc.fontSize(7).fillColor('#444444').font('Helvetica')
-         .text('BILLING & FINANCE', textX, textStartY + 14, { width: 200, characterSpacing: 1 });
+         .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
       doc.fontSize(7).fillColor('#000000');
-      let contactY = textStartY + 26;
-      contactLines.forEach(line => { doc.text(line, textX, contactY, { width: 240 }); contactY += 9; });
+      let contactY = subtitleY + 12;
+      contactLines.forEach(line => {
+        doc.text(line, textX, contactY, { width: 240 });
+        const lineH = doc.heightOfString(line, { width: 240 });
+        contactY += Math.max(lineH, 9) + 1;
+      });
 
       doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
          .text('QUOTATION', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
@@ -517,13 +530,12 @@ const generateQuotePDF = async (quote, orgId = null) => {
                380, 76, { width: 170, align: 'right' });
       const status = quote.status || 'DRAFT';
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`Valid Until: ${new Date(quote.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })} · ${status}`,
+         .text(`Valid Until: ${new Date(quote.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })} � ${status}`,
                380, 92, { width: 170, align: 'right' });
 
-      // ── META GRID — 3 columns: Quote To | Ship To | Quote Details ─────────
-      const metaY = 132;
+      // -- META GRID � 3 columns: Quote To | Ship To | Quote Details ---------
+      const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 3;
-      const metaH = 90;
 
       const billingStr = [
         quote.billingAddress?.street,
@@ -534,18 +546,30 @@ const generateQuotePDF = async (quote, orgId = null) => {
 
       // Col 1: Quote To
       const billX = 40;
+      // Dynamic box height
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _custNameH = doc.heightOfString(quote.customerName || 'N/A', { width: colW - 16 });
+      doc.fontSize(7).font('Helvetica');
+      const _addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+      const metaH  = Math.max(90, 18 + _custNameH + 2 + _addrH + 20);
+
       doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('QUOTE TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
-         .text(quote.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+         .text(quote.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
+      doc.fontSize(9).font('Helvetica-Bold');
+      const custNameH = doc.heightOfString(quote.customerName || 'N/A', { width: colW - 16 });
+      const billAddrY = metaY + 18 + custNameH + 2;
       if (billingStr) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, billX + 8, metaY + 30, { width: colW - 16, ellipsis: true });
+           .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (quote.customerEmail) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(quote.customerEmail, billX + 8, metaY + 60, { width: colW - 16, ellipsis: true });
+        doc.fontSize(7).font('Helvetica');
+        const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+        doc.fillColor('#000000')
+           .text(quote.customerEmail, billX + 8, billAddrY + addrH + 2, { width: colW - 16, ellipsis: true });
       }
 
       // Col 2: Ship To
@@ -579,7 +603,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
 
       let tableStartY = metaY + metaH + 12;
 
-      // ── ITEMS TABLE — full invoice-style columns ──────────────────────────
+      // -- ITEMS TABLE � full invoice-style columns --------------------------
       const cols = {
         num:     { x: 40,  w: 16  },
         desc:    { x: 56,  w: 90  },
@@ -626,7 +650,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '—';
+          : '�';
 
         // Calculate GST for display (quotes use single gstRate, always intra-state CGST+SGST)
         const gstRate  = item.itemGstRate || quote.gstRate || 18;
@@ -653,7 +677,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
         rowY += rowH;
       });
 
-      // ── TOTALS ────────────────────────────────────────────────────────────
+      // -- TOTALS ------------------------------------------------------------
       const totalsX = 315;
       const totalsW = 240;
       const labelX  = totalsX;
@@ -693,7 +717,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
          .text(`In Words: ${numberToWords(Math.round(quote.totalAmount || 0))} Only`,
                48, wordsY + 5, { width: pageW - 16 });
 
-      // ── Tagline ───────────────────────────────────────────────────────────
+      // -- Tagline -----------------------------------------------------------
       let notesY = wordsY + 28;
       if (orgTagline) {
         doc.rect(40, notesY, pageW, 18).fill('#f7f9fc');
@@ -702,7 +726,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
         notesY += 28;
       }
 
-      // ── Notes ─────────────────────────────────────────────────────────────
+      // -- Notes -------------------------------------------------------------
       if (quote.customerNotes) {
         doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
            .text('NOTES', 40, notesY, { characterSpacing: 0.8 });
@@ -713,7 +737,7 @@ const generateQuotePDF = async (quote, orgId = null) => {
         notesY += 40;
       }
 
-      // ── Terms & Conditions ────────────────────────────────────────────────
+      // -- Terms & Conditions ------------------------------------------------
       if (quote.termsAndConditions) {
         const tcY = notesY + 6;
         doc.rect(40, tcY, pageW, 14).fill('#f9f9f9').stroke();
@@ -724,27 +748,56 @@ const generateQuotePDF = async (quote, orgId = null) => {
         notesY = tcY + 30;
       }
 
-      // ── Authorized Signatory ──────────────────────────────────────────────
+      // -- Authorized Signatory ----------------------------------------------
       const signSectionY = notesY + 10;
       const signBoxW     = 220;
       const authBoxX     = 555 - signBoxW;
 
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
-      doc.moveTo(authBoxX, signSectionY + 30)
-         .lineTo(authBoxX + signBoxW, signSectionY + 30)
+
+      const _qSigRelPath = orgData?.digitalSignaturePath;
+      const _qSigSize    = 200;
+      let   _qActualSigH = _qSigSize;
+      if (_qSigRelPath) {
+        try {
+          const _qSigAbs = path.join(__dirname, '..', _qSigRelPath.replace(/^\//, ''));
+          if (fs.existsSync(_qSigAbs)) {
+            let _qW = _qSigSize, _qH = _qSigSize;
+            try {
+              const _qBuf = fs.readFileSync(_qSigAbs);
+              const _qExt = path.extname(_qSigAbs).toLowerCase();
+              if (_qExt === '.png' && _qBuf.length > 24) { _qW = _qBuf.readUInt32BE(16); _qH = _qBuf.readUInt32BE(20); }
+              else if ((_qExt === '.jpg' || _qExt === '.jpeg') && _qBuf.length > 4) {
+                let _qi = 2;
+                while (_qi < _qBuf.length - 8) {
+                  if (_qBuf[_qi] === 0xFF && _qBuf[_qi+1] >= 0xC0 && _qBuf[_qi+1] <= 0xC3) { _qH = _qBuf.readUInt16BE(_qi+5); _qW = _qBuf.readUInt16BE(_qi+7); break; }
+                  _qi += 2 + _qBuf.readUInt16BE(_qi + 2);
+                }
+              }
+            } catch (_) {}
+            const _qScale = Math.min(_qSigSize / _qW, _qSigSize / _qH);
+            _qActualSigH  = Math.round(_qH * _qScale);
+            const _qActualSigW = Math.round(_qW * _qScale);
+            doc.image(_qSigAbs, authBoxX + (signBoxW - _qActualSigW) / 2, signSectionY + 10, { width: _qActualSigW, height: _qActualSigH });
+          }
+        } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+      }
+
+      const _qSigLineY = signSectionY + 10 + _qActualSigH + 14;
+      doc.moveTo(authBoxX, _qSigLineY).lineTo(authBoxX + signBoxW, _qSigLineY)
          .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
       doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-         .text('Authorized Signatory', authBoxX, signSectionY + 33, { width: signBoxW, align: 'center' });
+         .text('Authorized Signatory', authBoxX, _qSigLineY + 3, { width: signBoxW, align: 'center' });
 
-      // ═══════════════════════════════════════════════════════════════════════
+      // -----------------------------------------------------------------------
       // FOOTER
-      // ═══════════════════════════════════════════════════════════════════════
+      // -----------------------------------------------------------------------
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY)
          .lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} · ${orgGST ? 'GSTIN: ' + orgGST + ' · ' : ''}${quote.quoteNumber}`,
+         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${quote.quoteNumber}`,
                40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
                40, footY + 6, { width: pageW, align: 'right' });
@@ -752,13 +805,13 @@ const generateQuotePDF = async (quote, orgId = null) => {
       doc.end();
 
       stream.on('finish', () => {
-        console.log(`✅ Quote PDF generated: ${filename}`);
+        console.log(`? Quote PDF generated: ${filename}`);
         resolve({ filename, filepath, relativePath: `/uploads/quotes/${filename}` });
       });
       stream.on('error', reject);
 
     } catch (error) {
-      console.error('❌ Quote PDF generation error:', error);
+      console.error('? Quote PDF generation error:', error);
       reject(error);
     }
   });
@@ -776,11 +829,11 @@ const getEmailTransporter = () => {
   });
 };
 
-// Send quote email — styled identical to invoices.js
-const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null) => {
+// Send quote email � styled identical to invoices.js
+const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
-      console.log('⚠️  SMTP not configured - skipping email send');
+      console.log('??  SMTP not configured - skipping email send');
       return;
     }
 
@@ -791,9 +844,9 @@ const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null) => {
     let orgTagline = '';
     let orgData    = null;
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-      orgData = await OrgModel.findOne({ orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(orgId, branchId, db);
       if (orgData) {
         orgName    = orgData.orgName    || orgName;
         orgGST     = orgData.gstNumber  || '';
@@ -907,20 +960,20 @@ const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null) => {
     const mailOptions = {
       from: `"Accounts" <${process.env.SMTP_USER}>`,
       to: quote.customerEmail,
-      subject: `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`,
+      subject: `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`,
       html: htmlBody,
       attachments: [attachment],
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`✅ Quote email sent to ${quote.customerEmail}`);
+    console.log(`? Quote email sent to ${quote.customerEmail}`);
   } catch (error) {
-    console.error('⚠️  Error sending quote email:', error.message);
+    console.error('??  Error sending quote email:', error.message);
   }
 };
 
 // Send acceptance email
-const sendAcceptanceEmail = async (quote, orgId = null) => {
+const sendAcceptanceEmail = async (quote, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) return;
     if (!quote.customerEmail) return;
@@ -930,9 +983,9 @@ const sendAcceptanceEmail = async (quote, orgId = null) => {
     let orgEmail = '';
     let orgPhone = '';
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-      const orgData = await OrgModel.findOne({ orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      const orgData = db ? await getEffectiveOrgData(orgId, branchId, db) : null;
       if (orgData) {
         orgName  = orgData.orgName   || orgName;
         orgGST   = orgData.gstNumber || '';
@@ -945,10 +998,10 @@ const sendAcceptanceEmail = async (quote, orgId = null) => {
     await transporter.sendMail({
       from: `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
       to: quote.customerEmail,
-      subject: `Quotation ${quote.quoteNumber} - Accepted ✅`,
+      subject: `Quotation ${quote.quoteNumber} - Accepted ?`,
       html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
         <div style="background:#0f1e3d;color:white;padding:20px;text-align:center;border-radius:8px 8px 0 0;">
-          <h2 style="margin:0;">✅ Quote Accepted</h2>
+          <h2 style="margin:0;">? Quote Accepted</h2>
           <p style="margin:4px 0 0 0;opacity:0.8;font-size:13px;">${orgName}</p>
         </div>
         <div style="padding:30px;background:#f8f9fa;border-radius:0 0 8px 8px;">
@@ -967,14 +1020,14 @@ const sendAcceptanceEmail = async (quote, orgId = null) => {
         </div>
       </div>`,
     });
-    console.log(`✅ Acceptance email sent to ${quote.customerEmail}`);
+    console.log(`? Acceptance email sent to ${quote.customerEmail}`);
   } catch (error) {
-    console.error('⚠️  Error sending acceptance email:', error.message);
+    console.error('??  Error sending acceptance email:', error.message);
   }
 };
 
 // Send decline email
-const sendDeclineEmail = async (quote, reason, orgId = null) => {
+const sendDeclineEmail = async (quote, reason, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) return;
     if (!quote.customerEmail) return;
@@ -984,9 +1037,9 @@ const sendDeclineEmail = async (quote, reason, orgId = null) => {
     let orgEmail = '';
     let orgPhone = '';
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-      const orgData = await OrgModel.findOne({ orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      const orgData = db ? await getEffectiveOrgData(orgId, branchId, db) : null;
       if (orgData) {
         orgName  = orgData.orgName   || orgName;
         orgGST   = orgData.gstNumber || '';
@@ -1022,9 +1075,9 @@ const sendDeclineEmail = async (quote, reason, orgId = null) => {
         </div>
       </div>`,
     });
-    console.log(`✅ Decline email sent to ${quote.customerEmail}`);
+    console.log(`? Decline email sent to ${quote.customerEmail}`);
   } catch (error) {
-    console.error('⚠️  Error sending decline email:', error.message);
+    console.error('??  Error sending decline email:', error.message);
   }
 };
 
@@ -1044,9 +1097,10 @@ router.get('/', async (req, res) => {
       toDate
     } = req.query;
     
-    // ✅ FIX: Use orgId from JWT token
+    // ? FIX: Use orgId from JWT token
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
+    Object.assign(query, req.branchFilter || {});
     
     if (status && status !== 'All') {
       query.status = status;
@@ -1107,8 +1161,11 @@ router.get('/', async (req, res) => {
 // GET /api/quotes/stats - Get quote statistics
 router.get('/stats', async (req, res) => {
   try {
-    // ✅ FIX: Use orgId from JWT token
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    // ? FIX: Use orgId from JWT token
+    const orgFilter = {
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
+    };
     
     const [
       totalQuotes,
@@ -1164,7 +1221,8 @@ router.get('/:id', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1190,12 +1248,12 @@ router.get('/:id', [
 
 router.post('/', quoteValidationRules, validateRequest, async (req, res) => {
   try {
-    // ✅ Use orgId from JWT token
+    // ? Use orgId from JWT token
     const orgId = req.user?.orgId || null;
     
-    console.log('✅ Creating quote with orgId:', orgId);
+    console.log('? Creating quote with orgId:', orgId);
     
-    const quoteNumber = await generateQuoteNumber(orgId);
+    const quoteNumber = await generateQuoteNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     const totals = calculateQuoteTotals(
       req.body.items,
       req.body.tdsRate || 0,
@@ -1203,18 +1261,19 @@ router.post('/', quoteValidationRules, validateRequest, async (req, res) => {
       req.body.gstRate || 18
     );
     
-    // ✅ Create quote with orgId from token
+    // ? Create quote with orgId from token
     const quote = new Quote({
       ...req.body,
       quoteNumber,
-      orgId,  // ✅ Auto-populated from JWT token
-      createdBy: req.user.userId,
+      orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            createdBy: req.user.userId,
       ...totals,
     });
     
     await quote.save();
     
-    console.log('✅ Quote created successfully:', quote.quoteNumber);
+    console.log('? Quote created successfully:', quote.quoteNumber);
     
     res.status(201).json({
       success: true,
@@ -1222,7 +1281,7 @@ router.post('/', quoteValidationRules, validateRequest, async (req, res) => {
       data: quote,
     });
   } catch (error) {
-    console.error('❌ Error creating quote:', error);
+    console.error('? Error creating quote:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to create quote', 
@@ -1232,7 +1291,7 @@ router.post('/', quoteValidationRules, validateRequest, async (req, res) => {
 });
 
 // ============================================================================
-// 🆕 NEW ENDPOINT: BULK IMPORT QUOTES
+// ?? NEW ENDPOINT: BULK IMPORT QUOTES
 // ============================================================================
 
 router.post('/bulk-import', [
@@ -1244,7 +1303,7 @@ router.post('/bulk-import', [
     const userId = req.user.userId;
     const quotesData = req.body.quotes;
     
-    console.log(`\n📦 Starting bulk import for ${quotesData.length} quotes...`);
+    console.log(`\n?? Starting bulk import for ${quotesData.length} quotes...`);
     console.log(`   Org ID: ${orgId}`);
     console.log(`   User ID: ${userId}`);
     
@@ -1260,7 +1319,7 @@ router.post('/bulk-import', [
       const quoteData = quotesData[i];
       
       try {
-        console.log(`\n🔄 Processing quote ${i + 1}/${quotesData.length}...`);
+        console.log(`\n?? Processing quote ${i + 1}/${quotesData.length}...`);
         
         // Validate required fields
         if (!quoteData.customerName) {
@@ -1297,13 +1356,13 @@ router.post('/bulk-import', [
         // Generate quote number
         let quoteNumber = quoteData.quoteNumber;
         if (!quoteNumber) {
-          quoteNumber = await generateQuoteNumber(orgId);
+          quoteNumber = await generateQuoteNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
         } else {
           // Check if quote number already exists
           const existingQuote = await Quote.findOne({ orgId, quoteNumber });
           if (existingQuote) {
-            quoteNumber = await generateQuoteNumber(orgId);
-            console.log(`   ⚠️  Quote number ${quoteData.quoteNumber} already exists, generated new: ${quoteNumber}`);
+            quoteNumber = await generateQuoteNumber(orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
+            console.log(`   ??  Quote number ${quoteData.quoteNumber} already exists, generated new: ${quoteNumber}`);
           }
         }
         
@@ -1328,6 +1387,7 @@ router.post('/bulk-import', [
         // Create quote
         const quote = new Quote({
           orgId,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
           quoteNumber,
           referenceNumber: quoteData.referenceNumber || '',
           customerId,
@@ -1359,20 +1419,20 @@ router.post('/bulk-import', [
         await quote.save();
         
         results.successCount++;
-        console.log(`   ✅ Successfully imported quote: ${quoteNumber}`);
+        console.log(`   ? Successfully imported quote: ${quoteNumber}`);
         
       } catch (error) {
         results.failedCount++;
         const errorMsg = `Quote ${i + 1} (${quoteData.quoteNumber || 'N/A'}): ${error.message}`;
         results.errors.push(errorMsg);
-        console.log(`   ❌ Failed to import: ${errorMsg}`);
+        console.log(`   ? Failed to import: ${errorMsg}`);
       }
     }
     
-    console.log(`\n📊 Bulk import completed:`);
-    console.log(`   ✅ Success: ${results.successCount}`);
-    console.log(`   ❌ Failed: ${results.failedCount}`);
-    console.log(`   📦 Total: ${results.totalProcessed}`);
+    console.log(`\n?? Bulk import completed:`);
+    console.log(`   ? Success: ${results.successCount}`);
+    console.log(`   ? Failed: ${results.failedCount}`);
+    console.log(`   ?? Total: ${results.totalProcessed}`);
     
     res.status(200).json({
       success: true,
@@ -1381,7 +1441,7 @@ router.post('/bulk-import', [
     });
     
   } catch (error) {
-    console.error('❌ Error in bulk import:', error);
+    console.error('? Error in bulk import:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to process bulk import',
@@ -1399,7 +1459,8 @@ router.put('/:id', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1449,12 +1510,12 @@ router.put('/:id', [
 // GET /api/quotes/:id/email-preview
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const quote = await Quote.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const quote = await Quote.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!quote) return res.status(404).json({ success: false, error: 'Quote not found' });
 
-    const OrgModel = mongoose.models.Organization ||
-      mongoose.model('Organization', new mongoose.Schema({}, { strict: false }), 'organizations');
-    const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
 
     const orgName    = org?.orgName    || '';
     const orgGST     = org?.gstNumber  || '';
@@ -1546,17 +1607,17 @@ router.get('/:id/email-preview', async (req, res) => {
 </body>
 </html>`;
 
-    res.json({ success: true, data: { subject: `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`, html, to: quote.customerEmail } });
+    res.json({ success: true, data: { subject: `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`, html, to: quote.customerEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview — save custom email content
+// PATCH /:id/email-preview � save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
-    const quote = await Quote.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const quote = await Quote.findOne({ _id: req.params.id, ...req.orgFilter });
     if (!quote) return res.status(404).json({ success: false, message: 'Quote not found' });
     if (to !== undefined)      quote.customEmailTo      = to;
     if (subject !== undefined) quote.customEmailSubject = subject;
@@ -1576,7 +1637,8 @@ router.delete('/:id', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1609,10 +1671,11 @@ router.post('/:id/send', [
   validateRequest,
 ], async (req, res) => {
   try {
-    // ✅ FIX: Use orgId from JWT token
+    // ? FIX: Use orgId from JWT token
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1630,7 +1693,7 @@ router.post('/:id/send', [
     }
     
     // Generate PDF
-    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId);
+    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
 
     // Use custom email content if the user edited it in the preview dialog
     const customTo      = quote.customEmailTo;
@@ -1648,13 +1711,13 @@ router.post('/:id/send', [
       await transporter.sendMail({
         from: `"Accounts" <${process.env.SMTP_USER}>`,
         to: sendTo,
-        subject: customSubject || `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`,
+        subject: customSubject || `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`,
         html: customHtml,
         attachments: [{ filename: `${quote.quoteNumber}.pdf`, path: pdfInfo.filepath }],
       });
     } else {
       // Send email
-      await sendQuoteEmail(quote, pdfInfo.filepath, req.user?.orgId);
+      await sendQuoteEmail(quote, pdfInfo.filepath, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     }
     
     // Update quote status
@@ -1685,13 +1748,24 @@ router.get('/:id/pdf', async (req, res) => {
       req.user  = jwt.verify(req.query.token, process.env.FINANCE_JWT_SECRET || process.env.JWT_SECRET);
     } catch (e) { return res.status(401).json({ success: false, message: 'Invalid token' }); }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     if (!quote) return res.status(404).json({ success: false, message: 'Quote not found' });
-    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId);
+    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     quote.pdfPath        = pdfInfo.filepath;
     quote.pdfGeneratedAt = new Date();
     await quote.save();
@@ -1707,7 +1781,7 @@ router.get('/:id/download', [
   param('id').isMongoId().withMessage('Invalid quote ID'),
   validateRequest,
 ], async (req, res) => {
-  // ✅ Support token from query param for PDF download
+  // ? Support token from query param for PDF download
   if (!req.user && req.query.token) {
     try {
       const jwt = require('jsonwebtoken');
@@ -1723,7 +1797,8 @@ router.get('/:id/download', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1734,7 +1809,7 @@ router.get('/:id/download', [
     }
     
     // Generate PDF
-    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId);
+    const pdfInfo = await generateQuotePDF(quote, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     
     // Set response headers
     res.setHeader('Content-Type', 'application/pdf');
@@ -1759,7 +1834,8 @@ router.post('/:id/accept', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1774,7 +1850,7 @@ router.post('/:id/accept', [
     await quote.save();
     
     // Send acceptance email to customer
-    await sendAcceptanceEmail(quote, req.user?.orgId);
+    await sendAcceptanceEmail(quote, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     
     res.json({
       success: true,
@@ -1799,7 +1875,8 @@ router.post('/:id/decline', [
   try {
     const quote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!quote) {
@@ -1819,7 +1896,7 @@ router.post('/:id/decline', [
     await quote.save();
     
     // Send decline email to customer
-    await sendDeclineEmail(quote, req.body.declineReason, req.user?.orgId);
+    await sendDeclineEmail(quote, req.body.declineReason, req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null);
     
     res.json({
       success: true,
@@ -1844,7 +1921,8 @@ router.post('/:id/clone', [
   try {
     const originalQuote = await Quote.findOne({
       _id: req.params.id,
-      ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      ...req.orgFilter,
+      ...(req.branchFilter || {}),
     });
     
     if (!originalQuote) {
@@ -1855,13 +1933,15 @@ router.post('/:id/clone', [
     }
     
     // Generate new quote number
-    const quoteNumber = await generateQuoteNumber(req.user?.orgId || null);
+    const quoteNumber = await generateQuoteNumber(req.user?.orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     
     // Create new quote
     const newQuote = new Quote({
       ...originalQuote.toObject(),
       _id: undefined,
       quoteNumber,
+      orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       status: 'DRAFT',
       quoteDate: new Date(),
       expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
@@ -1898,7 +1978,7 @@ router.post('/:id/convert-to-invoice', [
   try {
     const orgId = req.user?.orgId || null;
     
-    const quote = await Quote.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const quote = await Quote.findOne({ _id: req.params.id, ...req.orgFilter });
     
     if (!quote) {
       return res.status(404).json({ 
@@ -1907,7 +1987,7 @@ router.post('/:id/convert-to-invoice', [
       });
     }
     
-    // ✅ FIX: Allow ACCEPTED or SENT quotes to be converted
+    // ? FIX: Allow ACCEPTED or SENT quotes to be converted
     if (quote.status !== 'ACCEPTED' && quote.status !== 'SENT') {
       return res.status(400).json({ 
         success: false, 
@@ -1928,7 +2008,7 @@ router.post('/:id/convert-to-invoice', [
     
     // Generate invoice number
     const { generateNumber } = require('../utils/numberGenerator');
-    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId || null);
+    const invoiceNumber = await generateNumber(Invoice, 'invoiceNumber', 'INV', orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     
     // Calculate due date (default Net 30)
     const currentDate = new Date();
@@ -1939,6 +2019,7 @@ router.post('/:id/convert-to-invoice', [
     // Create invoice from quote data
     const invoice = new Invoice({
       orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       invoiceNumber,
       customerId: quote.customerId,
       customerName: quote.customerName,
@@ -1978,7 +2059,7 @@ router.post('/:id/convert-to-invoice', [
     
 await invoice.save();
 
-// ✅ COA Posting
+// ? COA Posting
 try {
   const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
@@ -1993,7 +2074,7 @@ try {
   const gst = (invoice.cgst || 0) + (invoice.sgst || 0);
 
   if (arId) await postTransactionToCOA({
-    accountId: arId, orgId: currentOrgId, date: txnDate,
+    accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
     referenceType: 'Invoice', referenceId: invoice._id,
     referenceNumber: invoice.invoiceNumber,
@@ -2001,7 +2082,7 @@ try {
   });
 
   if (salesId) await postTransactionToCOA({
-    accountId: salesId, orgId: currentOrgId, date: txnDate,
+    accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`,
     referenceType: 'Invoice', referenceId: invoice._id,
     referenceNumber: invoice.invoiceNumber,
@@ -2009,16 +2090,16 @@ try {
   });
 
   if (taxId && gst > 0) await postTransactionToCOA({
-    accountId: taxId, orgId: currentOrgId, date: txnDate,
+    accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
     description: `GST on Invoice ${invoice.invoiceNumber}`,
     referenceType: 'Invoice', referenceId: invoice._id,
     referenceNumber: invoice.invoiceNumber,
     debit: 0, credit: gst,
   });
 
-  console.log(`✅ COA posted for converted invoice: ${invoice.invoiceNumber}`);
+  console.log(`? COA posted for converted invoice: ${invoice.invoiceNumber}`);
 } catch (coaErr) {
-  console.error('⚠️ COA post error (quote convert):', coaErr.message);
+  console.error('?? COA post error (quote convert):', coaErr.message);
 }
 
 // Update quote status
@@ -2027,7 +2108,7 @@ quote.convertedToInvoice = true;
 quote.convertedDate = currentDate;
 await quote.save();
 
-console.log(`✅ Quote ${quote.quoteNumber} converted to invoice ${invoiceNumber}`);
+console.log(`? Quote ${quote.quoteNumber} converted to invoice ${invoiceNumber}`);
     
     res.json({
       success: true,
@@ -2038,7 +2119,7 @@ console.log(`✅ Quote ${quote.quoteNumber} converted to invoice ${invoiceNumber
       },
     });
   } catch (error) {
-    console.error('❌ Error converting quote to invoice:', error);
+    console.error('? Error converting quote to invoice:', error);
     console.error('   Error details:', error.message);
     console.error('   Stack trace:', error.stack);
     res.status(500).json({ 
@@ -2057,7 +2138,7 @@ router.post('/:id/convert-to-sales-order', [
   try {
     const orgId = req.user?.orgId || null;
     
-    const quote = await Quote.findOne({ _id: req.params.id, ...(req.user?.orgId ? { orgId: req.user.orgId } : {}) });
+    const quote = await Quote.findOne({ _id: req.params.id, ...req.orgFilter });
     
     if (!quote) {
       return res.status(404).json({ 
@@ -2066,7 +2147,7 @@ router.post('/:id/convert-to-sales-order', [
       });
     }
     
-    // ✅ FIX: Allow ACCEPTED or SENT quotes to be converted
+    // ? FIX: Allow ACCEPTED or SENT quotes to be converted
     if (quote.status !== 'ACCEPTED' && quote.status !== 'SENT') {
       return res.status(400).json({ 
         success: false, 
@@ -2087,7 +2168,7 @@ router.post('/:id/convert-to-sales-order', [
     
     // Generate unique sales order number
     const { generateNumber } = require('../utils/numberGenerator');
-    const salesOrderNumber = await generateNumber(SalesOrder, 'salesOrderNumber', 'SO', orgId || null);
+    const salesOrderNumber = await generateNumber(SalesOrder, 'salesOrderNumber', 'SO', orgId || null, req.branchIds?.length > 0 ? req.branchIds[0] : null);
     
     // Convert quote items to sales order items format
     const salesOrderItems = quote.items.map(item => ({
@@ -2102,19 +2183,20 @@ router.post('/:id/convert-to-sales-order', [
       quantityInvoiced: 0,
     }));
     
-    // ✅ FIX: Create proper date object
+    // ? FIX: Create proper date object
     const currentDate = new Date();
     
     // Create sales order from quote data
     const salesOrder = new SalesOrder({
       orgId,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       salesOrderNumber,
       referenceNumber: quote.referenceNumber || quote.quoteNumber,
       customerId: quote.customerId,
       customerName: quote.customerName,
       customerEmail: quote.customerEmail || '',
       customerPhone: quote.customerPhone || '',
-      salesOrderDate: currentDate,  // ✅ Use proper Date object
+      salesOrderDate: currentDate,  // ? Use proper Date object
       expectedShipmentDate: null,
       paymentTerms: 'Net 30',
       deliveryMethod: '',
@@ -2143,7 +2225,7 @@ router.post('/:id/convert-to-sales-order', [
     
     await salesOrder.save();
     
-    console.log('✅ Sales order created from quote:', salesOrderNumber);
+    console.log('? Sales order created from quote:', salesOrderNumber);
     
     // Update quote status
     quote.status = 'CONVERTED';
@@ -2160,7 +2242,7 @@ router.post('/:id/convert-to-sales-order', [
       },
     });
   } catch (error) {
-    console.error('❌ Error converting quote to sales order:', error);
+    console.error('? Error converting quote to sales order:', error);
     console.error('   Error details:', error.message);
     console.error('   Stack trace:', error.stack);
     res.status(500).json({ 
@@ -2168,6 +2250,25 @@ router.post('/:id/convert-to-sales-order', [
       message: 'Failed to convert quote to sales order', 
       error: error.message 
     });
+  }
+});
+
+// PATCH /:id/mark-as-sent — mark quote as SENT without sending email
+router.patch('/:id/mark-as-sent', async (req, res) => {
+  try {
+    const quote = await Quote.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
+    if (!quote) return res.status(404).json({ success: false, error: 'Quote not found' });
+    if (['ACCEPTED', 'DECLINED', 'CANCELLED'].includes(quote.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark a ${quote.status} quote as sent` });
+    }
+    quote.status    = 'SENT';
+    quote.updatedBy = req.user?.email || req.user?.uid || 'system';
+    await quote.save();
+    console.log(`✅ Quote marked as sent (no email): ${quote.quoteNumber}`);
+    res.json({ success: true, message: 'Quote marked as sent', data: quote });
+  } catch (error) {
+    console.error('Error marking quote as sent:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

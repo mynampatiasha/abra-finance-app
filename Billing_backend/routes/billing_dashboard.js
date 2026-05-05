@@ -124,7 +124,12 @@ const generateId = (prefix) => {
 
 // Get organization ID from request
 const getOrganizationId = (req) => {
-  return req.user?.organizationId || req.headers['x-organization-id'] || 'default-org';
+  return req.user?.orgId || req.headers['x-organization-id'] || 'default-org';
+};
+
+// Get branch filter from request
+const getBranchFilter = (req) => {
+  return req.branchFilter || {};
 };
 
 // Format currency
@@ -193,7 +198,7 @@ router.get('/dashboard/summary', async (req, res) => {
     ] = await Promise.all([
       // Receivables Summary
       Invoice.aggregate([
-        { $match: { organizationId } },
+        { $match: { organizationId, ...getBranchFilter(req) } },
         {
           $group: {
             _id: null,
@@ -215,7 +220,7 @@ router.get('/dashboard/summary', async (req, res) => {
 
       // Payables Summary
       Bill.aggregate([
-        { $match: { organizationId } },
+        { $match: { organizationId, ...getBranchFilter(req) } },
         {
           $group: {
             _id: null,
@@ -237,7 +242,7 @@ router.get('/dashboard/summary', async (req, res) => {
 
       // Cash Flow Data
       Transaction.aggregate([
-        { $match: { organizationId, date: { $gte: start, $lte: end } } },
+        { $match: { organizationId, date: { $gte: start, $lte: end }, ...getBranchFilter(req) } },
         {
           $group: {
             _id: '$type',
@@ -248,13 +253,13 @@ router.get('/dashboard/summary', async (req, res) => {
       ]),
 
       // Projects Data
-      Project.find({ organizationId }).limit(10),
+      Project.find({ organizationId, ...getBranchFilter(req) }).limit(10),
 
       // Bank Accounts Data
-      BankAccount.find({ organizationId, isActive: true }),
+      BankAccount.find({ organizationId, isActive: true, ...getBranchFilter(req) }),
 
       // Account Watchlist Data
-      AccountWatchlist.find({ organizationId, isActive: true }).limit(10)
+      AccountWatchlist.find({ organizationId, isActive: true, ...getBranchFilter(req) }).limit(10)
     ]);
 
     // Process receivables
@@ -397,7 +402,7 @@ router.get('/receivables/summary', async (req, res) => {
     const organizationId = getOrganizationId(req);
     
     const summary = await Invoice.aggregate([
-      { $match: { organizationId } },
+      { $match: { organizationId, ...getBranchFilter(req) } },
       {
         $group: {
           _id: null,
@@ -440,7 +445,7 @@ router.get('/payables/summary', async (req, res) => {
     const organizationId = getOrganizationId(req);
     
     const summary = await Bill.aggregate([
-      { $match: { organizationId } },
+      { $match: { organizationId, ...getBranchFilter(req) } },
       {
         $group: {
           _id: null,
@@ -485,7 +490,7 @@ router.get('/cash-flow', async (req, res) => {
     const { start, end } = getDateRange(period);
 
     const cashFlowData = await Transaction.aggregate([
-      { $match: { organizationId, date: { $gte: start, $lte: end } } },
+      { $match: { organizationId, date: { $gte: start, $lte: end }, ...getBranchFilter(req) } },
       {
         $group: {
           _id: '$type',
@@ -525,7 +530,7 @@ router.get('/projects', async (req, res) => {
     const organizationId = getOrganizationId(req);
     const { limit = 10, status } = req.query;
     
-    const filter = { organizationId };
+    const filter = { organizationId, ...getBranchFilter(req) };
     if (status) filter.status = status;
 
     const projects = await Project.find(filter).limit(parseInt(limit));
@@ -558,7 +563,7 @@ router.get('/bank-accounts', async (req, res) => {
   try {
     const organizationId = getOrganizationId(req);
     
-    const accounts = await BankAccount.find({ organizationId, isActive: true });
+    const accounts = await BankAccount.find({ organizationId, isActive: true, ...getBranchFilter(req) });
     
     res.json({
       success: true,
@@ -591,7 +596,8 @@ router.get('/account-watchlist', async (req, res) => {
     const accounts = await AccountWatchlist.find({ 
       organizationId, 
       isActive: true,
-      basis 
+      basis,
+      ...getBranchFilter(req),
     }).limit(10);
     
     res.json({

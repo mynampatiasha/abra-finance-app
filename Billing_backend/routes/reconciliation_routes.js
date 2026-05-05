@@ -38,7 +38,9 @@ const PaymentAccount = mongoose.models.PaymentAccount
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function orgFilter(req) {
-  return req.user?.orgId ? { orgId: req.user.orgId } : {};
+  // Reconciliation model only has orgId, not branchId
+  // So we only filter by orgId, not branch
+  return req.orgFilter || {};
 }
 
 // Recalculate clearedAmount from the cleared transaction IDs
@@ -98,10 +100,23 @@ router.get('/:accountId/history', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid accountId' });
     }
 
-    const recs = await Reconciliation.find({
+    const filter = {
       accountId,
       ...orgFilter(req),
-    }).sort({ endDate: -1 }).lean();
+    };
+    
+    console.log('📋 Reconciliation history request:');
+    console.log('  - Account ID:', accountId);
+    console.log('  - Filter:', JSON.stringify(filter, null, 2));
+    console.log('  - User:', req.user?.email);
+    console.log('  - Branch IDs:', req.branchIds);
+
+    const recs = await Reconciliation.find(filter).sort({ endDate: -1 }).lean();
+    
+    console.log('  - Found reconciliations:', recs.length);
+    if (recs.length > 0) {
+      console.log('  - Sample:', JSON.stringify(recs[0], null, 2));
+    }
 
     res.json({ success: true, count: recs.length, data: recs });
   } catch (err) {
@@ -117,9 +132,17 @@ router.get('/:accountId/history', async (req, res) => {
 // ============================================================================
 router.post('/initiate', async (req, res) => {
   try {
+    console.log('📥 Reconciliation initiate request received');
+    console.log('  - Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('  - Body:', JSON.stringify(req.body, null, 2));
+    console.log('  - User:', JSON.stringify(req.user, null, 2));
+    console.log('  - Branch IDs:', req.branchIds);
+    console.log('  - Branch Filter:', req.branchFilter);
+    
     const { accountId, startDate, endDate, closingBalance } = req.body;
 
     if (!accountId || !startDate || !endDate || closingBalance === undefined) {
+      console.error('❌ Missing required fields:', { accountId, startDate, endDate, closingBalance });
       return res.status(400).json({
         success: false,
         message: 'accountId, startDate, endDate and closingBalance are required',
@@ -160,6 +183,7 @@ router.post('/initiate', async (req, res) => {
     const rec = new Reconciliation({
       accountId:      accountObjId,
       orgId,
+      branchId:       req.branchIds?.length > 0 ? req.branchIds[0] : null,
       startDate:      start,
       endDate:        end,
       openingBalance,
@@ -341,14 +365,12 @@ router.post('/:id/add-transaction', async (req, res) => {
     if (type === 'CREDIT') {
       // Money IN → Dr Bank / Cr Other (income/refund etc.)
       await postTransactionToCOA({
-        accountId: bankCOA._id, orgId: req.user?.orgId || null,
-        date: txnDate, description: desc,
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,         date: txnDate, description: desc,
         referenceType: 'Journal', referenceNumber: journalRef,
         debit: txnAmount, credit: 0,
       });
       await postTransactionToCOA({
-        accountId: otherCOA._id, orgId: req.user?.orgId || null,
-        date: txnDate, description: desc,
+        accountId: otherCOA._id, orgId: req.user?.orgId || null,         date: txnDate, description: desc,
         referenceType: 'Journal', referenceNumber: journalRef,
         debit: 0, credit: txnAmount,
       });
@@ -356,14 +378,12 @@ router.post('/:id/add-transaction', async (req, res) => {
     } else {
       // Money OUT → Dr Other (expense/charge) / Cr Bank
       await postTransactionToCOA({
-        accountId: otherCOA._id, orgId: req.user?.orgId || null,
-        date: txnDate, description: desc,
+        accountId: otherCOA._id, orgId: req.user?.orgId || null,         date: txnDate, description: desc,
         referenceType: 'Journal', referenceNumber: journalRef,
         debit: txnAmount, credit: 0,
       });
       await postTransactionToCOA({
-        accountId: bankCOA._id, orgId: req.user?.orgId || null,
-        date: txnDate, description: desc,
+        accountId: bankCOA._id, orgId: req.user?.orgId || null,         date: txnDate, description: desc,
         referenceType: 'Journal', referenceNumber: journalRef,
         debit: 0, credit: txnAmount,
       });
@@ -374,6 +394,7 @@ router.post('/:id/add-transaction', async (req, res) => {
     const newTxn = await ProviderTransaction.create({
       accountId:            rec.accountId,
       orgId:                req.user?.orgId || null,
+      branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
       transactionDate:      txnDate,
       amount:               txnAmount,
       transactionType:      type,
@@ -626,6 +647,12 @@ router.get('/:accountId/report', async (req, res) => {
     const { accountId } = req.params;
     const { startDate, endDate, reconciliationId } = req.query;
 
+    console.log('📊 Reconciliation report request:');
+    console.log('  - Account ID:', accountId);
+    console.log('  - Reconciliation ID:', reconciliationId);
+    console.log('  - Start Date:', startDate);
+    console.log('  - End Date:', endDate);
+
     if (!mongoose.Types.ObjectId.isValid(accountId)) {
       return res.status(400).json({ success: false, message: 'Invalid accountId' });
     }
@@ -634,6 +661,11 @@ router.get('/:accountId/report', async (req, res) => {
     let start, end, rec;
     if (reconciliationId) {
       rec   = await Reconciliation.findOne({ _id: reconciliationId, ...orgFilter(req) }).lean();
+      console.log('  - Found reconciliation:', rec ? 'YES' : 'NO');
+      if (rec) {
+        console.log('  - Reconciliation status:', rec.status);
+        console.log('  - Cleared transaction IDs:', rec.clearedTxnIds);
+      }
       start = rec?.startDate;
       end   = rec?.endDate;
     } else {
@@ -641,17 +673,31 @@ router.get('/:accountId/report', async (req, res) => {
       end   = endDate   ? new Date(endDate)   : new Date();
     }
 
+    console.log('  - Date range:', start, 'to', end);
+
     const pa = await PaymentAccount.findById(accountId).lean();
     if (!pa) return res.status(404).json({ success: false, message: 'Account not found' });
 
-    // ── Section 1: CLEARED (RECONCILED status transactions in date range) ─────
-    const clearedTxns = await ProviderTransaction.find({
-      accountId,
-      transactionDate:      { $gte: start, $lte: end },
-      reconciliationStatus: 'RECONCILED',
-      isExcluded:           { $ne: true },
-      ...orgFilter(req),
-    }).sort({ transactionDate: 1 }).lean();
+    // ── Section 1: CLEARED (transactions checked in this reconciliation) ─────
+    let clearedTxns = [];
+    if (rec && rec.clearedTxnIds && rec.clearedTxnIds.length > 0) {
+      // For in-progress or completed reconciliation, show the transactions that were cleared
+      clearedTxns = await ProviderTransaction.find({
+        _id: { $in: rec.clearedTxnIds },
+        isExcluded: { $ne: true },
+      }).sort({ transactionDate: 1 }).lean();
+      console.log('  - Cleared transactions (from clearedTxnIds):', clearedTxns.length);
+    } else {
+      // If no specific reconciliation, show all RECONCILED transactions in the date range
+      clearedTxns = await ProviderTransaction.find({
+        accountId,
+        transactionDate:      { $gte: start, $lte: end },
+        reconciliationStatus: 'RECONCILED',
+        isExcluded:           { $ne: true },
+        ...orgFilter(req),
+      }).sort({ transactionDate: 1 }).lean();
+      console.log('  - Cleared transactions (RECONCILED status):', clearedTxns.length);
+    }
 
     // ── Section 2: UNMATCHED / UNCATEGORIZED (on bank statement but not categorized) ─
     const unmatchedTxns = await ProviderTransaction.find({

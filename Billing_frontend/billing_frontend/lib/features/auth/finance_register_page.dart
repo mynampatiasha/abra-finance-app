@@ -35,6 +35,7 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
   final _nameCtrl      = TextEditingController();
   final _emailCtrl     = TextEditingController();
   final _phoneCtrl     = TextEditingController();
+  final _entityNameCtrl = TextEditingController();  // ✅ NEW: Entity/Group name
   final _orgNameCtrl   = TextEditingController();
   final _pwCtrl        = TextEditingController();
   final _confirmPwCtrl = TextEditingController();
@@ -66,7 +67,7 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
   @override
   void dispose() {
     for (final c in [
-      _nameCtrl, _emailCtrl, _phoneCtrl,
+      _nameCtrl, _emailCtrl, _phoneCtrl, _entityNameCtrl,
       _orgNameCtrl, _pwCtrl, _confirmPwCtrl,
     ]) { c.dispose(); }
     _orbitCtrl.dispose();
@@ -80,11 +81,12 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     setState(() { _loading = true; _error = null; });
 
     final res = await FinanceAuthService.register(
-      name:     _nameCtrl.text.trim(),
-      email:    _emailCtrl.text.trim(),
-      password: _pwCtrl.text,
-      phone:    _phoneCtrl.text.trim(),
-      orgName:  _orgNameCtrl.text.trim(),
+      name:       _nameCtrl.text.trim(),
+      email:      _emailCtrl.text.trim(),
+      password:   _pwCtrl.text,
+      phone:      _phoneCtrl.text.trim(),
+      orgName:    _orgNameCtrl.text.trim(),
+      entityName: _entityNameCtrl.text.trim(),  // ✅ NEW: Pass entity name
     );
 
     if (!mounted) return;
@@ -94,14 +96,15 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       final data = res['data'] as Map<String, dynamic>;
       final user = data['user'] as Map<String, dynamic>;
       await FinanceSecureStorage.saveSession(
-        token:   data['token'],
-        userId:  user['id'].toString(),
-        name:    user['name'] ?? '',
-        email:   user['email'] ?? '',
-        phone:   user['phone'] ?? '',
-        role:    user['role'] ?? 'owner',
-        orgId:   user['orgId'] ?? '',
-        orgName: user['orgName'] ?? '',
+        token:      data['token'],
+        userId:     user['id'].toString(),
+        name:       user['name'] ?? '',
+        email:      user['email'] ?? '',
+        phone:      user['phone'] ?? '',
+        role:       user['role'] ?? 'owner',
+        orgId:      user['orgId'] ?? '',
+        orgName:    user['orgName'] ?? '',
+        entityName: user['entityName'] ?? _entityNameCtrl.text.trim(),  // ✅ NEW: Save entity name
       );
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/finance/dashboard');
@@ -335,6 +338,11 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                         return null;
                       }),
                   const SizedBox(height: 14),
+                  _field(ctrl: _entityNameCtrl, label: 'Entity / Group Name (Optional)',
+                      icon: Icons.business_center_rounded,
+                      hint: 'e.g., ABC Group',
+                      required: false),
+                  const SizedBox(height: 14),
                   _field(ctrl: _orgNameCtrl, label: 'Organisation / Company Name',
                       icon: Icons.business_outlined, required: true,
                       validator: _req('Organisation name')),
@@ -374,6 +382,11 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                       if (!v.contains('@')) return 'Enter a valid email';
                       return null;
                     }),
+                const SizedBox(height: 14),
+                _field(ctrl: _entityNameCtrl, label: 'Entity / Group Name (Optional)',
+                    icon: Icons.business_center_rounded,
+                    hint: 'e.g., ABC Group',
+                    required: false),
                 const SizedBox(height: 14),
                 _field(ctrl: _orgNameCtrl, label: 'Organisation / Company Name',
                     icon: Icons.business_outlined, required: true,
@@ -455,6 +468,7 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     TextInputType keyboard = TextInputType.text,
     bool required = false,
     String? Function(String?)? validator,
+    String? hint,  // ✅ NEW: Optional hint text
   }) {
     return TextFormField(
       controller: ctrl,
@@ -464,6 +478,8 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       decoration: InputDecoration(
         labelText: required ? '$label *' : label,
         labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
+        hintText: hint,  // ✅ NEW: Add hint text
+        hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),  // ✅ Hint style
         prefixIcon: Icon(icon, color: Colors.white, size: 17),
         filled: true,
         fillColor: Colors.white.withOpacity(0.07),

@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 // ============================================================================
 // MODELS
@@ -362,13 +363,13 @@ class VendorCreditService {
   static Future<Map<String, String>> _getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
+      'x-branch-ids': branchHdr,
     };
   }
-
-  // GET all vendor credits with filters
   static Future<VendorCreditsResponse> getVendorCredits({
     String? status,
     int page = 1,
@@ -493,8 +494,8 @@ class VendorCreditService {
     }
   }
 
-  // REFUND vendor credit
-  static Future<void> refundCredit(String creditId, Map<String, dynamic> body) async {
+  // REFUND vendor credit — returns the refund sub-doc _id for journalRef
+  static Future<String> refundCredit(String creditId, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse('$_base/$creditId/refund'),
@@ -505,6 +506,8 @@ class VendorCreditService {
     if (response.statusCode != 200 || data['success'] != true) {
       throw Exception(data['message'] ?? 'Failed to process refund');
     }
+    // Return the refund sub-doc _id so the caller can use it as journalRef
+    return data['data']?['refundId']?.toString() ?? creditId;
   }
 
   // GET stats

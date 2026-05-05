@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import '../../app/config/api_config.dart';
+import '../finance_secure_storage.dart';
 
 class AddAccountService {
   // Uses centralized API configuration
@@ -39,8 +40,10 @@ class AddAccountService {
   /// Get headers with JWT token
   Future<Map<String, String>> _getHeaders() async {
     final token = await _getAuthToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     final headers = {
       'Content-Type': 'application/json',
+      'x-branch-ids': branchHdr,
     };
     
     if (token != null && token.isNotEmpty) {
@@ -106,15 +109,14 @@ class AddAccountService {
   }
 
   /// Get all accounts
-  Future<List<Map<String, dynamic>>> getAllAccounts() async {
+  Future<List<Map<String, dynamic>>> getAllAccounts({bool allBranches = false}) async {
     try {
       final headers = await _getHeaders();
-      
+      final uri = Uri.parse(
+        '$baseUrl/accounts${allBranches ? '?allBranches=true' : ''}',
+      );
       final response = await http
-          .get(
-            Uri.parse('$baseUrl/accounts'),
-            headers: headers,
-          )
+          .get(uri, headers: headers)
           .timeout(timeout);
 
       if (response.statusCode == 200) {

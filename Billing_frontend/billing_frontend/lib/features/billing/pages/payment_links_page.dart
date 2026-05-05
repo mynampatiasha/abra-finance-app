@@ -31,6 +31,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/config/api_config.dart';
+import '../../../../core/finance_secure_storage.dart';
 import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'finance_profile_page.dart';
@@ -52,9 +53,11 @@ String get _base => ApiConfig.baseUrl;
 Future<Map<String, String>> _authHeaders() async {
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString('jwt_token') ?? '';
+  final branchHdr = await FinanceSecureStorage.getBranchHeader();
   return {
     'Content-Type': 'application/json',
     'Authorization': 'Bearer $token',
+    'x-branch-ids': branchHdr,
   };
 }
 
@@ -242,6 +245,7 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
   bool _selectAll = false;
 
   // ── scroll ────────────────────────────────────────────────────────────────
+  bool _isTableView = true;
   final ScrollController _tableHScroll = ScrollController();
   final ScrollController _statsHScroll = ScrollController();
   Timer? _autoRefreshTimer;
@@ -576,7 +580,7 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildLinkListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -621,6 +625,7 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Link', Icons.add_rounded, _navy, _openNewLinkDialog),
     const SizedBox(width: 8),
     _actionBtn('Export', Icons.download_rounded, _blue, _filtered.isEmpty ? null : _exportExcel),
@@ -646,6 +651,7 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New Link', Icons.add_rounded, _navy, _openNewLinkDialog),
       const SizedBox(width: 8),
       _actionBtn('Export', Icons.download_rounded, _blue, _filtered.isEmpty ? null : _exportExcel),
@@ -662,6 +668,7 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 8),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFrom),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickTo),
@@ -797,6 +804,145 @@ class _PaymentLinksListPageState extends State<PaymentLinksListPage> {
                 Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
               ])),
             ]),
+    );
+  }
+
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildLinkListView() {
+    final items = _pageItems;
+    if (items.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildLinkListCard(i, items[i]),
+      ),
+    );
+  }
+
+  Widget _buildLinkListCard(int index, PaymentLink l) {
+    final isSel = _selectedRows.contains(index);
+    final isExpired = l.expirationDate.isBefore(DateTime.now()) && l.status != 'PAID' && l.status != 'CANCELED';
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Row 1: Checkbox + Reference # + Status
+          Row(children: [
+            Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+            const SizedBox(width: 4),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(l.referenceNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy), overflow: TextOverflow.ellipsis),
+              if (l.emailSentAt != null)
+                Text('Emailed ${DateFormat('dd MMM').format(l.emailSentAt!)}', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            ])),
+            const SizedBox(width: 8),
+            _statusBadge(l.status),
+          ]),
+          const SizedBox(height: 10),
+          // Row 2: Customer avatar + name + email
+          Row(children: [
+            Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                child: Center(child: Text(l.customerName.isNotEmpty ? l.customerName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(l.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis),
+              if (l.customerEmail.isNotEmpty)
+                Text(l.customerEmail, style: TextStyle(fontSize: 11, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
+            ])),
+          ]),
+          if (l.description.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(l.description, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          const SizedBox(height: 10),
+          // Row 3: Amount + Expiry + Actions
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+              const SizedBox(height: 3),
+              Text('₹${_fmt(l.amount)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              if (l.status == 'PAID')
+                Text('Paid: ₹${_fmt(l.paidAmount)}', style: const TextStyle(fontSize: 11, color: _green, fontWeight: FontWeight.w600)),
+            ])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Expiry', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+              const SizedBox(height: 3),
+              Text(DateFormat('dd MMM yyyy').format(l.expirationDate), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isExpired ? _red : const Color(0xFF374151))),
+              if (isExpired) const Text('Expired', style: TextStyle(fontSize: 10, color: _red, fontWeight: FontWeight.w600)),
+            ])),
+            // Actions
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Tooltip(message: 'Copy Link', child: InkWell(
+                onTap: () => _copyLink(l), borderRadius: BorderRadius.circular(8),
+                child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _navy.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.copy, size: 16, color: _navy)),
+              )),
+              const SizedBox(width: 6),
+              Tooltip(message: 'Share', child: InkWell(
+                onTap: () => _shareLink(l), borderRadius: BorderRadius.circular(8),
+                child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+              )),
+              const SizedBox(width: 6),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                itemBuilder: (_) => [
+                  if (l.status != 'PAID' && l.status != 'CANCELED') ...[
+                    _menuItem('send_email',    Icons.email_outlined,       _teal,   'Send Email'),
+                    _menuItem('mark_paid',     Icons.check_circle_outline, _green,  'Mark as Paid'),
+                    _menuItem('change_expiry', Icons.event_outlined,       _blue,   'Change Expiry'),
+                    _menuItem('cancel',        Icons.cancel_outlined,      _orange, 'Cancel Link', textColor: _orange),
+                  ],
+                  _menuItem('delete', Icons.delete_outline, _red, 'Delete', textColor: _red),
+                ],
+                onSelected: (v) {
+                  switch (v) {
+                    case 'send_email':    _sendEmail(l);      break;
+                    case 'mark_paid':     _markAsPaid(l);     break;
+                    case 'change_expiry': _changeExpiry(l);   break;
+                    case 'cancel':        _cancelLink(l);     break;
+                    case 'delete':        _deleteLink(l);     break;
+                  }
+                },
+              ),
+            ]),
+          ]),
+        ]),
+      ),
     );
   }
 

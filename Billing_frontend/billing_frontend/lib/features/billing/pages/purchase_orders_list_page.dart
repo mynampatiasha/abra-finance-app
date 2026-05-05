@@ -68,6 +68,9 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
   bool    _isLoading   = true;
   String? _errorMessage;
 
+  // ── view mode ─────────────────────────────────────────────────────────────
+  bool _isTableView = true;
+
   // ── filters ───────────────────────────────────────────────────────────────
   String   _selectedStatus = 'All';
   DateTime? _fromDate;
@@ -253,6 +256,20 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
       _showSuccess('Purchase order issued');
       _refresh();
     } catch (e) { _showError('Failed to issue: $e'); }
+  }
+
+  Future<void> _markPOAsSent(PurchaseOrder po) async {
+    final ok = await _confirmDialog(
+      title: 'Mark as Sent',
+      message: 'Mark ${po.purchaseOrderNumber} as Sent (Issued) without sending an email?',
+      confirmLabel: 'Mark as Sent', confirmColor: _teal,
+    );
+    if (ok != true) return;
+    try {
+      await PurchaseOrderService.markAsSent(po.id);
+      _showSuccess('Purchase order marked as sent');
+      _refresh();
+    } catch (e) { _showError('Failed to mark as sent: $e'); }
   }
 
   void _recordReceive(PurchaseOrder po) {
@@ -568,7 +585,7 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _purchaseOrders.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _buildTable(),
+                      : _isTableView ? _buildTable() : _buildListView(),
           if (!_isLoading && _purchaseOrders.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -611,6 +628,7 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.account_tree_rounded, _showLifecycle, tooltip: 'View PO Process', color: _blue, bg: _blue.withOpacity(0.08)),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New PO', Icons.add_rounded, _navy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -638,6 +656,7 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
     ]),
     const SizedBox(height: 10),
     Row(children: [
+      _buildViewToggle(), const SizedBox(width: 10),
       _actionBtn('New PO', Icons.add_rounded, _navy, _openNew),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
@@ -656,6 +675,7 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
     ]),
     const SizedBox(height: 10),
     SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _buildViewToggle(), const SizedBox(width: 6),
       _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
       const SizedBox(width: 6),
       _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
@@ -865,6 +885,194 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
     );
   }
 
+  // ── view toggle ───────────────────────────────────────────────────────────
+
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey.shade300),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+        Container(width: 1, height: 24, color: Colors.grey.shade300),
+        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+      ],
+    ),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildListView() {
+    if (_purchaseOrders.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _purchaseOrders.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildListCard(_purchaseOrders[i]),
+      ),
+    );
+  }
+
+  Widget _buildListCard(PurchaseOrder po) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _viewDetails(po),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Row 1: PO # + Status
+              Row(children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _openEdit(po.id),
+                    child: Text(po.purchaseOrderNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _statusBadge(po.status),
+              ]),
+              const SizedBox(height: 10),
+              // Row 2: Vendor avatar + name + email
+              Row(children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(child: Text(po.vendorName.isNotEmpty ? po.vendorName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(po.vendorName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis),
+                  if (po.vendorEmail != null && po.vendorEmail!.isNotEmpty)
+                    Text(po.vendorEmail!, style: TextStyle(fontSize: 12, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
+                ])),
+                if (po.referenceNumber != null && po.referenceNumber!.isNotEmpty)
+                  Text('Ref: ${po.referenceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              ]),
+              const SizedBox(height: 10),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              const SizedBox(height: 10),
+              // Row 3: Dates
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('PO Date', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(DateFormat('dd MMM yyyy').format(po.purchaseOrderDate), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                  ]),
+                ])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Expected Delivery', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.local_shipping_outlined, size: 12, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(
+                      po.expectedDeliveryDate != null ? DateFormat('dd MMM yyyy').format(po.expectedDeliveryDate!) : '—',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+                    ),
+                  ]),
+                ])),
+              ]),
+              const SizedBox(height: 10),
+              // Row 4: Amount + Actions
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Total Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 3),
+                  Text('₹${po.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                ])),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _sharePO(po),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    itemBuilder: (_) => [
+                      _menuItem('view',    Icons.visibility_outlined,          _blue,   'View Details'),
+                      _menuItem('edit',    Icons.edit_outlined,                _navy,   'Edit'),
+                      if (po.status == 'DRAFT')
+                        _menuItem('issue',  Icons.send_outlined,              _green,  'Issue & Send'),
+                      if (po.status == 'DRAFT')
+                        _menuItem('mark_sent', Icons.mark_email_read_outlined, _teal,  'Mark as Sent'),
+                      if (po.status == 'DRAFT' || po.status == 'ISSUED')
+                        _menuItem('send',   Icons.email_outlined,             _orange, 'Send Email'),
+                      _menuItem('download', Icons.download_outlined,          _teal,   'Download PDF'),
+                      if (po.status == 'ISSUED' || po.status == 'PARTIALLY_RECEIVED')
+                        _menuItem('receive', Icons.inventory_2_outlined,      _teal,   'Record Receive'),
+                      if (po.status == 'RECEIVED' || po.status == 'PARTIALLY_RECEIVED' || po.status == 'PARTIALLY_BILLED')
+                        _menuItem('convert_bill', Icons.receipt_long_outlined, _green, 'Convert to Bill'),
+                      _menuItem('ticket',  Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
+                      if (po.status != 'CANCELLED' && po.status != 'CLOSED' && po.status != 'BILLED')
+                        _menuItem('cancel', Icons.cancel_outlined,            _orange, 'Cancel PO', textColor: _orange),
+                      if (po.status == 'DRAFT')
+                        _menuItem('delete', Icons.delete_outline,             _red,    'Delete', textColor: _red),
+                    ],
+                    onSelected: (v) async {
+                      switch (v) {
+                        case 'view':         _viewDetails(po);    break;
+                        case 'edit':         _openEdit(po.id);    break;
+                        case 'issue':        _issuePO(po);        break;
+                        case 'mark_sent':    _markPOAsSent(po);   break;
+                        case 'send':         _sendPO(po);         break;
+                        case 'download':     _downloadPDF(po);    break;
+                        case 'receive':      _recordReceive(po);  break;
+                        case 'convert_bill': _convertToBill(po);  break;
+                        case 'ticket':       _raiseTicket(po);    break;
+                        case 'cancel':       _cancelPO(po);       break;
+                        case 'delete':       _deletePO(po);       break;
+                      }
+                    },
+                  ),
+                ]),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── table ─────────────────────────────────────────────────────────────────
 
   Widget _buildTable() {
@@ -985,6 +1193,8 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
               _menuItem('edit',    Icons.edit_outlined,                _navy,   'Edit'),
               if (po.status == 'DRAFT')
                 _menuItem('issue',  Icons.send_outlined,              _green,  'Issue & Send'),
+              if (po.status == 'DRAFT')
+                _menuItem('mark_sent', Icons.mark_email_read_outlined, _teal,  'Mark as Sent'),
               if (po.status == 'DRAFT' || po.status == 'ISSUED')
                 _menuItem('send',   Icons.email_outlined,             _orange, 'Send Email'),
               _menuItem('download', Icons.download_outlined,          _teal,   'Download PDF'),
@@ -1000,16 +1210,17 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
             ],
             onSelected: (v) async {
               switch (v) {
-                case 'view':         _viewDetails(po);   break;
-                case 'edit':         _openEdit(po.id);   break;
-                case 'issue':        _issuePO(po);       break;
-                case 'send':         _sendPO(po);        break;
-                case 'download':     _downloadPDF(po);   break;
-                case 'receive':      _recordReceive(po); break;
-                case 'convert_bill': _convertToBill(po); break;
-                case 'ticket':       _raiseTicket(po);   break;
-                case 'cancel':       _cancelPO(po);      break;
-                case 'delete':       _deletePO(po);      break;
+                case 'view':         _viewDetails(po);    break;
+                case 'edit':         _openEdit(po.id);    break;
+                case 'issue':        _issuePO(po);        break;
+                case 'mark_sent':    _markPOAsSent(po);   break;
+                case 'send':         _sendPO(po);         break;
+                case 'download':     _downloadPDF(po);    break;
+                case 'receive':      _recordReceive(po);  break;
+                case 'convert_bill': _convertToBill(po);  break;
+                case 'ticket':       _raiseTicket(po);    break;
+                case 'cancel':       _cancelPO(po);       break;
+                case 'delete':       _deletePO(po);       break;
               }
             },
           ),

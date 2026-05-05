@@ -65,6 +65,7 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
   final Set<String> _selectedEntries = {};
   bool _selectAll = false;
 
+  bool _isTableView = true;
   final ScrollController _tableHScroll = ScrollController();
   final ScrollController _statsHScroll = ScrollController();
 
@@ -352,7 +353,7 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
                 ? SizedBox(height: 400, child: _buildErrorState())
                 : _timesheets.isEmpty
                     ? SizedBox(height: 400, child: _buildEmptyState())
-                    : _buildTable(),
+                    : _isTableView ? _buildTable() : _buildTimesheetListView(),
         if (!_isLoading && _timesheets.isNotEmpty) _buildPagination(),
       ])),
     );
@@ -382,6 +383,7 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
     const SizedBox(width: 6),
     _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
     const Spacer(),
+    _buildViewToggle(), const SizedBox(width: 12),
     _actionBtn('New Entry', Icons.add_rounded, _tsNavy, _openNew),
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _tsPurple, _isLoading ? null : _handleImport),
@@ -396,13 +398,13 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
         if (_hasFilters) ...[const SizedBox(width: 4), _iconBtn(Icons.clear, _clearFilters, color: _tsRed, bg: Colors.red[50]!)],
         const SizedBox(width: 6), _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh)]),
     const SizedBox(height: 10),
-    Row(children: [_actionBtn('New Entry', Icons.add_rounded, _tsNavy, _openNew), const SizedBox(width: 8), _actionBtn('Import', Icons.upload_file_rounded, _tsPurple, _isLoading ? null : _handleImport), const SizedBox(width: 8), _actionBtn('Export', Icons.download_rounded, _tsGreen, _timesheets.isEmpty ? null : _exportExcel)]),
+    Row(children: [_buildViewToggle(), const SizedBox(width: 10), _actionBtn('New Entry', Icons.add_rounded, _tsNavy, _openNew), const SizedBox(width: 8), _actionBtn('Import', Icons.upload_file_rounded, _tsPurple, _isLoading ? null : _handleImport), const SizedBox(width: 8), _actionBtn('Export', Icons.download_rounded, _tsGreen, _timesheets.isEmpty ? null : _exportExcel)]),
   ]);
 
   Widget _topBarMobile() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Row(children: [_statusDrop(), const SizedBox(width: 8), Expanded(child: _searchField(width: double.infinity)), const SizedBox(width: 8), _actionBtn('New', Icons.add_rounded, _tsNavy, _openNew)]),
     const SizedBox(height: 10),
-    SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [_projectDrop(), const SizedBox(width: 6), Stack(children: [_iconBtn(Icons.filter_list, _showFilterDialog, color: _hasFilters ? _tsNavy : const Color(0xFF7F8C8D)), if (_hasFilters) Positioned(right: 4, top: 4, child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: _tsNavy, shape: BoxShape.circle)))]),
+    SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [_buildViewToggle(), const SizedBox(width: 8), _projectDrop(), const SizedBox(width: 6), Stack(children: [_iconBtn(Icons.filter_list, _showFilterDialog, color: _hasFilters ? _tsNavy : const Color(0xFF7F8C8D)), if (_hasFilters) Positioned(right: 4, top: 4, child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: _tsNavy, shape: BoxShape.circle)))]),
         if (_hasFilters) ...[const SizedBox(width: 6), _iconBtn(Icons.clear, _clearFilters, color: _tsRed, bg: Colors.red[50]!)],
         const SizedBox(width: 6), _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh),
         const SizedBox(width: 6), _compactBtn('Import', _tsPurple, _handleImport), const SizedBox(width: 6), _compactBtn('Export', _tsGreen, _timesheets.isEmpty ? null : _exportExcel)])),
@@ -488,6 +490,117 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
       child: compact
           ? Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(gradient: LinearGradient(colors: d.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(10)), child: Icon(d.icon, color: Colors.white, size: 20)), const SizedBox(height: 10), Text(d.label, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text(d.value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: d.color))])
           : Row(children: [Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(gradient: LinearGradient(colors: d.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: d.color.withOpacity(0.30), blurRadius: 8, offset: const Offset(0, 3))]), child: Icon(d.icon, color: Colors.white, size: 24)), const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(d.label, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 5), Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color))]))]),
+    );
+  }
+
+  // ── view toggle ──────────────────────────────────────────────────────────
+  Widget _buildViewToggle() => Container(
+    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
+      Container(width: 1, height: 24, color: Colors.grey.shade300),
+      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
+    ]),
+  );
+
+  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: isSelected ? _tsNavy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  // ── list view ─────────────────────────────────────────────────────────────
+
+  Widget _buildTimesheetListView() {
+    if (_timesheets.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    return Container(
+      margin: const EdgeInsets.all(16),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: _timesheets.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) => _buildTimesheetListCard(_timesheets[i]),
+      ),
+    );
+  }
+
+  Widget _buildTimesheetListCard(TimeEntry e) {
+    final isSel = _selectedEntries.contains(e.id);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isSel ? _tsNavy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Checkbox(value: isSel, onChanged: (_) { setState(() { if (isSel) { _selectedEntries.remove(e.id); _selectAll = false; } else { _selectedEntries.add(e.id); if (_selectedEntries.length == _timesheets.length) _selectAll = true; } }); }, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+            const SizedBox(width: 4),
+            Expanded(child: InkWell(onTap: () => _openEdit(e), child: Text(e.entryNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _tsNavy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis))),
+            const SizedBox(width: 8),
+            _statusBadge(e.status),
+            const SizedBox(width: 6),
+            _billableBadge(e.isBillable),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            Container(width: 32, height: 32, decoration: BoxDecoration(color: _tsNavy.withOpacity(0.10), shape: BoxShape.circle),
+                child: Center(child: Text(e.userName.isNotEmpty ? e.userName[0].toUpperCase() : '?', style: const TextStyle(color: _tsNavy, fontWeight: FontWeight.bold, fontSize: 13)))),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(e.userName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis),
+              Text(e.userEmail, style: TextStyle(fontSize: 11, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
+            ])),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.folder_outlined, size: 13, color: Colors.grey[500]),
+            const SizedBox(width: 4),
+            Expanded(child: Text(e.projectName, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+            Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+            const SizedBox(width: 4),
+            Text(DateFormat('dd MMM yyyy').format(e.date), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          ]),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Hours', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+              const SizedBox(height: 3),
+              Text('${e.hours.toStringAsFixed(2)}h', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _tsNavy)),
+            ])),
+            if (e.taskName.isNotEmpty)
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Task', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text(e.taskName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+              ])),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              onSelected: (v) async { switch (v) { case 'edit': _openEdit(e); break; case 'submit': await _submit(e); break; case 'approve': await _approve(e); break; case 'reject': await _reject(e); break; case 'ticket': _raiseTicket(e); break; case 'delete': await _delete(e); break; } },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _tsNavy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                if (e.status == 'Unbilled' || e.status == 'Rejected') const PopupMenuItem(value: 'submit', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _tsBlue), title: Text('Submit'), contentPadding: EdgeInsets.zero)),
+                if (e.status == 'Unbilled' || e.status == 'Rejected') const PopupMenuItem(value: 'approve', child: ListTile(leading: Icon(Icons.check_circle_outline, size: 17, color: _tsGreen), title: Text('Approve'), contentPadding: EdgeInsets.zero)),
+                if (e.status == 'Unbilled' || e.status == 'Approved') const PopupMenuItem(value: 'reject', child: ListTile(leading: Icon(Icons.cancel_outlined, size: 17, color: _tsRed), title: Text('Reject'), contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _tsOrange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+              ],
+            ),
+          ]),
+        ]),
+      ),
     );
   }
 

@@ -124,7 +124,7 @@ router.post('/setup/connect', async (req, res) => {
 // =============================================================================
 router.get('/setup/status', async (req, res) => {
   try {
-    const creds = await EWBCredentials.findOne({ orgId: req.user?.orgId })
+    const creds = await EWBCredentials.findOne({ orgId: req.user?.orgId, ...(req.branchFilter || {}) })
       .select('gstin username isConnected connectedAt lastValidatedAt').lean();
     res.json({
       success: true,
@@ -148,7 +148,7 @@ router.get('/setup/status', async (req, res) => {
 router.delete('/setup/disconnect', async (req, res) => {
   try {
     await EWBCredentials.findOneAndUpdate(
-      { orgId: req.user?.orgId },
+      { orgId: req.user?.orgId, ...(req.branchFilter || {}) },
       { isConnected: false, authToken: null, sek: null }
     );
     res.json({ success: true, message: 'Disconnected from EWB portal' });
@@ -406,6 +406,16 @@ router.get('/:id/print', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid token' });
     }
   }
+  // Set branchFilter from query param (used when opening PDF via direct URL)
+  if (!req.branchFilter) {
+    const branchIds = req.query.branchIds;
+    if (branchIds && branchIds.trim() !== '' && branchIds.trim() !== 'ALL') {
+      const ids = branchIds.split(',').map(s => s.trim()).filter(Boolean);
+      req.branchFilter = ids.length ? { branchId: { $in: ids } } : {};
+    } else {
+      req.branchFilter = {};
+    }
+  }
 
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -415,14 +425,14 @@ router.get('/:id/print', async (req, res) => {
     const ewb = await EWayBill.findOne({ _id: req.params.id, ...orgFilter(req) }).lean();
     if (!ewb) return res.status(404).json({ success: false, message: 'EWB not found' });
 
-    // Fetch org details
+    // Fetch org details — branch-aware
     let orgName  = 'Your Company';
     let orgGSTIN = '';
     let orgAddr  = '';
     try {
-      const OrgModel = mongoose.models.Organization ||
-        mongoose.model('Organization', new mongoose.Schema({ orgId: String, orgName: String, gstNumber: String, address: String, state: String }), 'organizations');
-      const org = await OrgModel.findOne({ orgId: req.user?.orgId }).lean();
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      const org = db ? await getEffectiveOrgData(req.user?.orgId, req.branchIds?.length === 1 ? req.branchIds[0] : null, db) : null;
       if (org) {
         orgName  = org.orgName  || orgName;
         orgGSTIN = org.gstNumber || '';
