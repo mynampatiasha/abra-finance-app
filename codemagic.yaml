@@ -13,20 +13,13 @@ workflows:
           flutter packages pub get
       - name: Flutter build iOS
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --no-tree-shake-icons
       - name: Build unsigned IPA
         script: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -sdk iphoneos \
-            -configuration Release \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CONFIGURATION_BUILD_DIR=$CM_BUILD_DIR/output \
-            clean archive
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/Runner.app
+          zip -r Runner.ipa Payload
     artifacts:
-      - build/ios/ipa/*.ipa
-      - $CM_BUILD_DIR/output/*.app
+      - build/ios/iphoneos/Runner.ipa
       - /tmp/xcodebuild_logs/*.log
