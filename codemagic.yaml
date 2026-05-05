@@ -6,20 +6,17 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.abralogistic.abrafinance
     working_directory: Billing_frontend/billing_frontend
     scripts:
       - name: Flutter packages get
         script: |
           flutter packages pub get
-      - name: Flutter build iOS
+      - name: Flutter build ipa
         script: |
-          flutter build ios --release --no-codesign --build-name=1.0.3 --build-number=19
-      - name: Build unsigned IPA
-        script: |
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -r Runner.app Payload/Runner.app
-          zip -r Runner.ipa Payload
+          flutter build ipa --release --build-name=1.0.3 --build-number=20
     artifacts:
-      - build/ios/iphoneos/Runner.ipa
+      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
