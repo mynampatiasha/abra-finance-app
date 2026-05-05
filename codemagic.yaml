@@ -6,7 +6,7 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
-    working_directory: Abra_finance_system
+    working_directory: Billing_frontend/billing_frontend
     scripts:
       - name: Flutter packages get
         script: |
