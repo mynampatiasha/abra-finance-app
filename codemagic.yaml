@@ -13,7 +13,7 @@ workflows:
           flutter packages pub get
       - name: Flutter build iOS
         script: |
-          flutter build ios --release --no-codesign --no-tree-shake-icons --build-name=1.0.3 --build-number=18
+          flutter build ios --release --no-codesign --build-name=1.0.3 --build-number=19
       - name: Build unsigned IPA
         script: |
           cd build/ios/iphoneos
