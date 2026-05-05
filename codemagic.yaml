@@ -9,8 +9,6 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.abralogistic.abrafinance
-        provisioning_profile: Abra_Finance_App_Store
-        certificate: Abra_Finance_App2
     working_directory: Billing_frontend/billing_frontend
     scripts:
       - name: Flutter packages get
@@ -18,7 +16,12 @@ workflows:
           flutter packages pub get
       - name: Flutter build ipa
         script: |
-          flutter build ipa --release --build-name=1.0.3 --build-number=22
+          flutter build ipa --release --build-name=1.0.3 --build-number=23
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+publishing:
+  app_store_connect:
+    auth: integration
+    api_key: Q88933X8M8
+    submit_to_testflight: false
