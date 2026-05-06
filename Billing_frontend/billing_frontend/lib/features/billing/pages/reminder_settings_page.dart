@@ -104,6 +104,12 @@ class ReminderService {
     return List<Map<String, dynamic>>.from(data['data'] ?? []);
   }
 
+  /// Fetches approved WhatsApp templates from the WABA via backend
+  static Future<List<Map<String, dynamic>>> getWhatsAppTemplates() async {
+    final data = await _api.get('/api/finance/auth/whatsapp-templates');
+    return List<Map<String, dynamic>>.from(data['data']?['templates'] ?? []);
+  }
+
   static Future<void> pauseReminder(String invoiceId) async {
     await _api.patch('$_invoicesBase/$invoiceId/pause-reminder');
   }
@@ -396,10 +402,18 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
   final _ccEmailCtrl         = TextEditingController();
   final _testEmailCtrl       = TextEditingController();
 
+  // ── WhatsApp Meta template selection ─────────────────────────────────────
+  List<Map<String, dynamic>> _waTemplates      = [];
+  bool                       _loadingWaTemplates = false;
+  String? _waOverdueTemplateName;   // selected approved template for overdue
+  String? _waPreDueTemplateName;    // selected approved template for pre-due
+  String  _waTemplateLanguage = 'en';
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadWaTemplates();
   }
 
   @override
@@ -437,10 +451,28 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
         _emailBodyPreCtrl.text    = s['emailTemplatePreDue']  ?? '';
         _waTemplateCtrl.text      = s['whatsappTemplate']     ?? '';
         _waTemplatePreCtrl.text   = s['whatsappTemplatePreDue'] ?? '';
+        // WhatsApp template names
+        _waOverdueTemplateName = (s['whatsappOverdueTemplateName'] as String?)?.isNotEmpty == true
+            ? s['whatsappOverdueTemplateName'] as String
+            : null;
+        _waPreDueTemplateName  = (s['whatsappPreDueTemplateName'] as String?)?.isNotEmpty == true
+            ? s['whatsappPreDueTemplateName'] as String
+            : null;
+        _waTemplateLanguage    = s['whatsappTemplateLanguage'] as String? ?? 'en';
         _loading = false;
       });
     } catch (e) {
       setState(() { _error = e.toString(); _loading = false; });
+    }
+  }
+
+  Future<void> _loadWaTemplates() async {
+    setState(() => _loadingWaTemplates = true);
+    try {
+      final templates = await ReminderService.getWhatsAppTemplates();
+      if (mounted) setState(() { _waTemplates = templates; _loadingWaTemplates = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingWaTemplates = false);
     }
   }
 
@@ -465,6 +497,10 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
         'emailTemplatePreDue':  _emailBodyPreCtrl.text.trim(),
         'whatsappTemplate':         _waTemplateCtrl.text.trim(),
         'whatsappTemplatePreDue':   _waTemplatePreCtrl.text.trim(),
+        // WhatsApp approved template names
+        'whatsappOverdueTemplateName': _waOverdueTemplateName ?? '',
+        'whatsappPreDueTemplateName':  _waPreDueTemplateName  ?? '',
+        'whatsappTemplateLanguage':    _waTemplateLanguage,
       });
       setState(() => _saving = false);
       _snack('Settings saved successfully', success: true);
@@ -707,6 +743,10 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
         Expanded(child: Column(children: [
           _buildCCCard(),
           const SizedBox(height: 16),
+          if (_channel == 'whatsapp' || _channel == 'both') ...[
+            _buildWhatsAppTemplateCard(),
+            const SizedBox(height: 16),
+          ],
           _buildTestEmailCard(),
         ])),
       ]),
@@ -728,6 +768,10 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
         const SizedBox(height: 12),
         _buildCCCard(),
         const SizedBox(height: 12),
+        if (_channel == 'whatsapp' || _channel == 'both') ...[
+          _buildWhatsAppTemplateCard(),
+          const SizedBox(height: 12),
+        ],
         _buildTestEmailCard(),
         const SizedBox(height: 20),
       ]),
@@ -1001,6 +1045,225 @@ class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
         ],
       ]),
     );
+  }
+
+  // ── WhatsApp Template Card ────────────────────────────────────────────────────
+  Widget _buildWhatsAppTemplateCard() {
+    final hasTemplates = _waTemplates.isNotEmpty;
+    final noCredentials = !hasTemplates && !_loadingWaTemplates;
+
+    return _card(
+      title: 'WhatsApp Templates',
+      icon: Icons.chat_rounded,
+      iconColor: const Color(0xFF25D366),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // Info banner
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF25D366).withOpacity(0.07),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF25D366).withOpacity(0.25)),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.info_outline, size: 15, color: Color(0xFF128C7E)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              'WhatsApp requires approved templates for business-initiated messages. '
+              'Select a template for each reminder type below. '
+              'Create templates in Meta Business Manager → WhatsApp Manager → Message Templates.',
+              style: TextStyle(fontSize: 11, color: Colors.grey[700], height: 1.5),
+            )),
+          ]),
+        ),
+
+        const SizedBox(height: 14),
+
+        // Fetch / Refresh button
+        Row(children: [
+          Expanded(child: Text(
+            hasTemplates
+                ? '${_waTemplates.length} approved template(s) loaded'
+                : _loadingWaTemplates
+                    ? 'Loading templates...'
+                    : 'No templates loaded yet',
+            style: TextStyle(
+              fontSize: 12,
+              color: hasTemplates ? const Color(0xFF128C7E) : Colors.grey[500],
+              fontWeight: hasTemplates ? FontWeight.w600 : FontWeight.normal,
+            ),
+          )),
+          GestureDetector(
+            onTap: _loadingWaTemplates ? null : _loadWaTemplates,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF25D366).withOpacity(0.10),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF25D366).withOpacity(0.4)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _loadingWaTemplates
+                    ? const SizedBox(width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF25D366)))
+                    : const Icon(Icons.refresh, size: 14, color: Color(0xFF25D366)),
+                const SizedBox(width: 5),
+                Text(_loadingWaTemplates ? 'Loading...' : 'Refresh',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF25D366), fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ]),
+
+        if (noCredentials) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: _orange.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _orange.withOpacity(0.3)),
+            ),
+            child: Row(children: [
+              Icon(Icons.warning_amber_rounded, size: 15, color: _orange),
+              const SizedBox(width: 8),
+              Expanded(child: Text(
+                'Save your WhatsApp credentials in Settings → WhatsApp Automation first, then refresh.',
+                style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+              )),
+            ]),
+          ),
+        ],
+
+        if (hasTemplates) ...[
+          const SizedBox(height: 16),
+
+          // Overdue template selector
+          _templateDropdownRow(
+            label:       'Overdue Reminder Template',
+            badge:       'OVERDUE',
+            badgeColor:  _red,
+            value:       _waOverdueTemplateName,
+            templates:   _waTemplates,
+            onChanged:   (v) => setState(() => _waOverdueTemplateName = v),
+          ),
+
+          const SizedBox(height: 14),
+
+          // Pre-due template selector
+          _templateDropdownRow(
+            label:       'Pre-Due Reminder Template',
+            badge:       'PRE-DUE',
+            badgeColor:  _orange,
+            value:       _waPreDueTemplateName,
+            templates:   _waTemplates,
+            onChanged:   (v) => setState(() => _waPreDueTemplateName = v),
+          ),
+
+          const SizedBox(height: 14),
+
+          // Language
+          Row(children: [
+            Expanded(child: Text('Template Language Code',
+                style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.w500))),
+            SizedBox(
+              width: 110,
+              child: TextField(
+                controller: TextEditingController(text: _waTemplateLanguage)
+                  ..selection = TextSelection.collapsed(offset: _waTemplateLanguage.length),
+                onChanged: (v) => _waTemplateLanguage = v.trim().isEmpty ? 'en' : v.trim(),
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'e.g. en, en_US',
+                  hintStyle: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  filled: true, fillColor: const Color(0xFFF7F9FC),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  border:        OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF25D366), width: 1.5)),
+                ),
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 10),
+          Text(
+            'Tip: use "en" for English, "en_US" for US English, "hi" for Hindi, etc.',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _templateDropdownRow({
+    required String label,
+    required String badge,
+    required Color  badgeColor,
+    required String? value,
+    required List<Map<String, dynamic>> templates,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Text(label,
+            style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.w500))),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          decoration: BoxDecoration(
+            color: badgeColor.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: badgeColor.withOpacity(0.3)),
+          ),
+          child: Text(badge, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: badgeColor)),
+        ),
+      ]),
+      const SizedBox(height: 6),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F9FC),
+          border: Border.all(color: const Color(0xFFDDE3EE)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: value,
+            isExpanded: true,
+            hint: Text('Select a template (auto-pick if none)',
+                style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('Auto-pick first approved template',
+                    style: TextStyle(fontSize: 13, color: Colors.grey)),
+              ),
+              ...templates.map((t) => DropdownMenuItem<String>(
+                value: t['name'] as String,
+                child: Row(children: [
+                  Expanded(child: Text(t['name'] as String,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                  const SizedBox(width: 6),
+                  Text(t['language'] as String? ?? '',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ]),
+              )),
+            ],
+            onChanged: onChanged,
+          ),
+        ),
+      ),
+      if (value != null) ...[
+        const SizedBox(height: 4),
+        Text('✅ Will use template "$value"',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF128C7E), fontWeight: FontWeight.w500)),
+      ] else ...[
+        const SizedBox(height: 4),
+        Text('Will auto-pick the first approved template at send time.',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+      ],
+    ]);
   }
 
   // ── Test email card ───────────────────────────────────────────────────────────

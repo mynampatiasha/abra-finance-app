@@ -1210,55 +1210,124 @@ router.post('/test-whatsapp', verifyFinanceJWT, async (req, res) => {
       });
     }
 
-    // Format phone number
+    // Format phone number — ensure country code prefix
     let phone = String(testPhone).replace(/[^\d]/g, '');
     if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
 
-    // Send test message via Meta Cloud API using native https
     const https = require('https');
-    const postData = JSON.stringify({
-      messaging_product: 'whatsapp',
-      to:   phone,
-      type: 'template',
-      template: {
-        name:     'hello_world',
-        language: { code: 'en_US' },
-      },
-    });
 
-    const options = {
-      hostname: 'graph.facebook.com',
-      port: 443,
-      path: `/v18.0/${phoneNumberId.trim()}/messages`,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken.trim()}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-    };
-
-    const result = await new Promise((resolve, reject) => {
-      const request = https.request(options, (response) => {
-        let data = '';
-        response.on('data', (chunk) => { data += chunk; });
-        response.on('end', () => {
-          try {
-            resolve({ statusCode: response.statusCode, body: JSON.parse(data) });
-          } catch (e) {
-            reject(new Error('Invalid JSON response'));
-          }
+    // ── Helper: make a GET/POST request to graph.facebook.com ────────────────
+    function metaRequest({ method, path: apiPath, body }) {
+      return new Promise((resolve, reject) => {
+        const postData = body ? JSON.stringify(body) : null;
+        const options = {
+          hostname: 'graph.facebook.com',
+          port: 443,
+          path: apiPath,
+          method,
+          headers: {
+            'Authorization': `Bearer ${accessToken.trim()}`,
+            'Content-Type': 'application/json',
+            ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {}),
+          },
+        };
+        const request = https.request(options, (response) => {
+          let data = '';
+          response.on('data', (chunk) => { data += chunk; });
+          response.on('end', () => {
+            try { resolve({ statusCode: response.statusCode, body: JSON.parse(data) }); }
+            catch (e) { reject(new Error('Invalid JSON from Meta API')); }
+          });
         });
+        request.on('error', reject);
+        if (postData) request.write(postData);
+        request.end();
       });
-      request.on('error', (error) => reject(error));
-      request.write(postData);
-      request.end();
+    }
+
+    // ── Step 1: Fetch approved templates from WABA ────────────────────────────
+    // Skip hello_world — it's a Meta sandbox sample that only delivers to
+    // whitelisted test recipients. We need a real custom approved template.
+    let templateName     = null;
+    let templateLanguage = 'en_US';
+
+    try {
+      const tmplRes = await metaRequest({
+        method: 'GET',
+        path: `/v18.0/${wabaId.trim()}/message_templates?fields=name,status,language,category&limit=50`,
+      });
+      console.log('📋 All templates:', JSON.stringify(tmplRes.body?.data?.map(t => ({
+        name: t.name, status: t.status, language: t.language, category: t.category
+      }))));
+
+      if (tmplRes.statusCode === 200 && Array.isArray(tmplRes.body.data)) {
+        // Exclude hello_world — it's a Meta sample that only works for whitelisted test numbers
+        const approved = tmplRes.body.data.filter(
+          t => t.status === 'APPROVED' && t.name !== 'hello_world'
+        );
+        // Prefer payment_reminder if it exists
+        approved.sort((a, b) => {
+          if (a.name === 'payment_reminder') return -1;
+          if (b.name === 'payment_reminder') return  1;
+          return 0;
+        });
+        console.log(`✅ Usable approved templates (excluding hello_world): ${approved.length}`);
+        if (approved.length > 0) {
+          templateName     = approved[0].name;
+          templateLanguage = approved[0].language || 'en';
+          console.log(`📤 Will use template: "${templateName}" (${templateLanguage})`);
+        } else {
+          console.log('⚠️  No custom approved templates found — will attempt text message (requires 24h window)');
+        }
+      }
+    } catch (tmplErr) {
+      console.warn('⚠️ Could not fetch templates:', tmplErr.message);
+    }
+
+    // ── Step 2: Build message payload ─────────────────────────────────────────
+    // If we found a real approved template → use it (works outside 24h window)
+    // Otherwise fall back to text (only works if recipient messaged you recently)
+    let messagePayload;
+    if (templateName) {
+      console.log(`📋 Sending template: ${templateName} (${templateLanguage})`);
+
+      // Build body components with sample values for the test
+      // payment_reminder: {{1}}=name, {{2}}=invoice, {{3}}=company, {{4}}=amount, {{5}}=date
+      const sampleParams = ['Test User', 'INV-TEST-001', 'Abra Finance', '5,000', 'today'];
+      messagePayload = {
+        messaging_product: 'whatsapp',
+        to:   phone,
+        type: 'template',
+        template: {
+          name:     templateName,
+          language: { code: templateLanguage },
+          components: [{
+            type:       'body',
+            parameters: sampleParams.map(v => ({ type: 'text', text: v })),
+          }],
+        },
+      };
+    } else {
+      console.log('📝 No custom approved template — falling back to text message');
+      messagePayload = {
+        messaging_product: 'whatsapp',
+        to:   phone,
+        type: 'text',
+        text: { body: '✅ WhatsApp connection test from Abra Finance — your integration is working!' },
+      };
+    }
+
+    // ── Step 3: Send the message ──────────────────────────────────────────────
+    const result = await metaRequest({
+      method: 'POST',
+      path:   `/v18.0/${phoneNumberId.trim()}/messages`,
+      body:   messagePayload,
     });
 
-    console.log('Meta API response:', JSON.stringify(result.body));
+    console.log('Meta send response:', JSON.stringify(result.body));
 
     if (result.statusCode === 200 && result.body.messages) {
-      // Save credentials to branch
+      // Save credentials to DB
       const db       = req.db;
       const orgId    = req.user?.orgId;
       const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
@@ -1278,14 +1347,22 @@ router.post('/test-whatsapp', verifyFinanceJWT, async (req, res) => {
         await db.collection('organizations').updateOne({ orgId }, { $set: fields });
       }
 
+      const usedTemplate = templateName ? `using template "${templateName}"` : 'as a text message';
+      console.log(`✅ Message accepted by Meta. messageId: ${result.body.messages[0]?.id}, method: ${usedTemplate}`);
+
+      // Warn if we fell back to text — it may not deliver outside 24h window
+      const warningNote = !templateName
+        ? '\n\n⚠️ Note: No custom approved templates found in your WABA. The test was sent as a plain text message — this only delivers if the recipient has messaged your business number in the last 24 hours. To test reliably, create and approve a template in Meta Business Manager.'
+        : '';
+
       return res.json({
         success: true,
-        message: `✅ WhatsApp message sent successfully to +${phone}. Check your WhatsApp — if you received a "hello world" message, your connection is working perfectly.`,
-        data: { messageId: result.body.messages[0]?.id },
+        message: `✅ WhatsApp message sent successfully to +${phone} (${usedTemplate}). Check your WhatsApp — your connection is working perfectly.${warningNote}`,
+        data: { messageId: result.body.messages[0]?.id, templateUsed: templateName },
       });
     }
 
-    // Meta returned an error — give detailed message
+    // Meta returned an error — surface it clearly
     const errCode    = result.body.error?.code;
     const errMsg     = result.body.error?.message     || 'Unknown error';
     const errDetails = result.body.error?.error_data?.details || '';
@@ -1293,11 +1370,11 @@ router.post('/test-whatsapp', verifyFinanceJWT, async (req, res) => {
     let friendlyMessage = `❌ Meta API Error (${errCode}): ${errMsg}`;
     if (errDetails) friendlyMessage += `\nDetails: ${errDetails}`;
 
-    // Common error guidance
-    if (errCode === 190)  friendlyMessage += '\n\n👉 Your Access Token is invalid or expired. Generate a new one from Meta Developer Console.';
-    if (errCode === 100)  friendlyMessage += '\n\n👉 Phone Number ID is incorrect. Copy it from Meta Developer → WhatsApp → API Setup.';
-    if (errCode === 131030) friendlyMessage += '\n\n👉 This number is not registered on WhatsApp or is not in your allowed test recipients.';
-    if (errCode === 131047) friendlyMessage += '\n\n👉 Payment method missing on Meta Business Account. Add a card to send messages.';
+    if (errCode === 190)    friendlyMessage += '\n\n👉 Access Token is invalid or expired. Generate a new permanent token from Meta Developer Console.';
+    if (errCode === 100)    friendlyMessage += '\n\n👉 Phone Number ID is incorrect. Copy it from Meta Developer → WhatsApp → API Setup.';
+    if (errCode === 131030) friendlyMessage += '\n\n👉 Recipient number is not on WhatsApp or is outside the 24-hour messaging window.';
+    if (errCode === 131047) friendlyMessage += '\n\n👉 Payment method missing on Meta Business Account. Add a card in Meta Business Manager.';
+    if (errCode === 132000) friendlyMessage += '\n\n👉 Template not found or not approved. Check your templates in Meta Business Manager.';
 
     return res.status(400).json({ success: false, message: friendlyMessage });
 
@@ -1346,6 +1423,89 @@ router.put('/save-whatsapp-credentials', verifyFinanceJWT, async (req, res) => {
     });
   } catch (err) {
     console.error('❌ save-whatsapp-credentials error:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── GET /api/finance/auth/whatsapp-templates ─────────────────────────────────
+// Fetches approved message templates from the WABA so the UI can show a dropdown
+// Returns: { success, data: { templates: [{ name, language, category }] } }
+router.get('/whatsapp-templates', verifyFinanceJWT, async (req, res) => {
+  console.log('\n📋 FETCH WHATSAPP TEMPLATES');
+  try {
+    const db       = req.db;
+    const orgId    = req.user?.orgId;
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+    // Load credentials — prefer branch, fall back to org
+    let record;
+    if (branchId) {
+      record = await db.collection('branches').findOne({ branchId, orgId });
+      console.log(`📍 Checking branch ${branchId} for WhatsApp credentials`);
+    }
+    if (!record || !record.whatsappMetaWabaId) {
+      record = await db.collection('organizations').findOne({ orgId });
+      console.log(`📍 Checking org ${orgId} for WhatsApp credentials`);
+    }
+
+    const wabaId    = record?.whatsappMetaWabaId;
+    const rawToken  = record?.whatsappMetaAccessToken;
+
+    if (!wabaId || !rawToken) {
+      console.log('⚠️ No WhatsApp credentials found');
+      return res.json({ success: true, data: { templates: [], warning: 'WhatsApp credentials not configured yet.' } });
+    }
+
+    console.log(`✅ Found credentials — WABA: ${wabaId}`);
+
+    let accessToken;
+    try {
+      const { decrypt } = require('../utils/encryption');
+      accessToken = decrypt(rawToken);
+    } catch (_) {
+      accessToken = rawToken;
+    }
+
+    const https  = require('https');
+    const result = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'graph.facebook.com',
+        port: 443,
+        path: `/v18.0/${wabaId}/message_templates?fields=name,status,language,category&limit=50`,
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      };
+      const request = https.request(options, (response) => {
+        let data = '';
+        response.on('data', c => { data += c; });
+        response.on('end', () => {
+          try { resolve({ statusCode: response.statusCode, body: JSON.parse(data) }); }
+          catch (e) { reject(new Error('Invalid JSON from Meta')); }
+        });
+      });
+      request.on('error', reject);
+      request.end();
+    });
+
+    if (result.statusCode !== 200) {
+      const errMsg = result.body.error?.message || 'Meta API error';
+      console.error(`❌ Meta API error: ${errMsg}`);
+      return res.status(400).json({ success: false, message: `Could not fetch templates: ${errMsg}` });
+    }
+
+    // Return all APPROVED templates, excluding hello_world sandbox template
+    const templates = (result.body.data || [])
+      .filter(t => t.status === 'APPROVED' && t.name !== 'hello_world')
+      .map(t => ({ name: t.name, language: t.language || 'en', category: t.category || '' }));
+
+    console.log(`✅ Fetched ${templates.length} approved template(s) for WABA ${wabaId}`);
+    if (templates.length > 0) {
+      console.log(`   Templates: ${templates.map(t => t.name).join(', ')}`);
+    }
+    return res.json({ success: true, data: { templates } });
+
+  } catch (err) {
+    console.error('❌ whatsapp-templates error:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });

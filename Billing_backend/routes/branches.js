@@ -109,6 +109,12 @@ async function getEffectiveOrgData(orgId, branchId, db) {
       smtpFromName:    pick(branch.smtpFromName,    org.smtpFromName),
       smtpVerified:    pick(branch.smtpVerified,    org.smtpVerified),
 
+      // WhatsApp Meta credentials — branch overrides
+      whatsappMetaPhoneNumberId: pick(branch.whatsappMetaPhoneNumberId, org.whatsappMetaPhoneNumberId),
+      whatsappMetaWabaId:        pick(branch.whatsappMetaWabaId,        org.whatsappMetaWabaId),
+      whatsappMetaAccessToken:   pick(branch.whatsappMetaAccessToken,   org.whatsappMetaAccessToken),
+      whatsappMetaVerified:      pick(branch.whatsappMetaVerified,      org.whatsappMetaVerified),
+
       // Keep a reference to the original org name for display purposes
       _orgName: org.orgName,
     };

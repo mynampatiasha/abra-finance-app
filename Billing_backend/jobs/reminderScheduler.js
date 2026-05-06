@@ -12,37 +12,192 @@ function getInvoiceModel()          { return mongoose.models.Invoice; }
 function getReminderSettingsModel() { return mongoose.models.ReminderSettings; }
 
 // ============================================================================
-// META WHATSAPP SENDER
+// META WHATSAPP — TEMPLATE CACHE
+// Caches approved templates per WABA ID so we don't hit Meta API on every invoice
+// Cache TTL: 30 minutes
 // ============================================================================
 
-async function sendWhatsAppMessage({ phoneNumberId, accessToken, toPhone, message }) {
+const _templateCache = new Map(); // wabaId → { templates: [], fetchedAt: Date }
+const TEMPLATE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+
+async function fetchApprovedTemplates(wabaId, accessToken) {
+  const now     = Date.now();
+  const cached  = _templateCache.get(wabaId);
+  if (cached && (now - cached.fetchedAt) < TEMPLATE_CACHE_TTL_MS) {
+    return cached.templates;
+  }
+
+  try {
+    const https    = require('https');
+    const result   = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'graph.facebook.com',
+        port: 443,
+        path: `/v18.0/${wabaId}/message_templates?fields=name,status,language,category&limit=50`,
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      };
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', c => { data += c; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    // Only keep APPROVED templates, exclude Meta's sandbox hello_world
+    const approved = Array.isArray(result.data)
+      ? result.data.filter(t => t.status === 'APPROVED' && t.name !== 'hello_world')
+      : [];
+
+    // Sort: put payment_reminder first if it exists, so auto-pick always prefers it
+    approved.sort((a, b) => {
+      if (a.name === 'payment_reminder') return -1;
+      if (b.name === 'payment_reminder') return  1;
+      return 0;
+    });
+
+    console.log(`📋 [WA Templates] WABA ${wabaId}: ${approved.length} approved custom template(s) found`);
+    _templateCache.set(wabaId, { templates: approved, fetchedAt: now });
+    return approved;
+  } catch (err) {
+    console.warn(`⚠️ [WA Templates] Could not fetch templates for WABA ${wabaId}:`, err.message);
+    return [];
+  }
+}
+
+// ============================================================================
+// META WHATSAPP SENDER
+// ============================================================================
+// Strategy:
+//   1. If settings has a configured templateName → use that template directly
+//   2. Else auto-pick first approved template from WABA (excluding hello_world)
+//   3. If no approved template found → fall back to text message with a warning
+//      (text only delivers if customer messaged business in last 24h)
+// ============================================================================
+
+async function sendWhatsAppMessage({
+  phoneNumberId,
+  accessToken,
+  wabaId,
+  toPhone,
+  message,
+  templateName,     // optional: specific template name to use
+  templateLanguage, // optional: language code e.g. 'en_US'
+  templateParams,   // optional: array of body parameter values e.g. ['Rajesh', 'INV-001', '5000']
+}) {
   if (!phoneNumberId || !accessToken) {
     return { success: false, error: 'WhatsApp credentials not configured for this branch' };
   }
   if (!toPhone) {
     return { success: false, error: 'Customer phone number not available' };
   }
+
   try {
     let phone = String(toPhone).replace(/[^\d]/g, '');
     if (!phone.startsWith('91') && phone.length === 10) phone = '91' + phone;
-    const fetch  = require('node-fetch');
-    const url    = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
-    const body   = {
-      messaging_product: 'whatsapp',
-      to:   phone,
-      type: 'text',
-      text: { body: message },
-    };
-    const response = await fetch(url, {
-      method:  'POST',
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-    });
-    const result = await response.json();
-    if (response.ok && result.messages) {
-      return { success: true, messageId: result.messages[0]?.id };
+
+    const https = require('https');
+
+    // ── Resolve which template to use ────────────────────────────────────────
+    let resolvedTemplate     = templateName     || null;
+    let resolvedLanguage     = templateLanguage || 'en';
+    let resolvedParams       = templateParams   || null;
+
+    if (!resolvedTemplate && wabaId) {
+      // Auto-pick first approved template
+      const templates = await fetchApprovedTemplates(wabaId, accessToken);
+      if (templates.length > 0) {
+        resolvedTemplate = templates[0].name;
+        resolvedLanguage = templates[0].language || 'en';
+        console.log(`📤 [WA] Auto-selected template: "${resolvedTemplate}" (${resolvedLanguage})`);
+      }
     }
-    return { success: false, error: result.error?.message || 'WhatsApp API error' };
+
+    // ── Build payload ─────────────────────────────────────────────────────────
+    let payload;
+    if (resolvedTemplate) {
+      // Template message — works anytime, no 24h window needed
+      const templateBody = {
+        name:     resolvedTemplate,
+        language: { code: resolvedLanguage },
+      };
+      // If caller provided explicit params, add them as body components
+      if (resolvedParams && resolvedParams.length > 0) {
+        templateBody.components = [{
+          type:       'body',
+          parameters: resolvedParams.map(v => ({ type: 'text', text: String(v) })),
+        }];
+      }
+      payload = {
+        messaging_product: 'whatsapp',
+        to:       phone,
+        type:     'template',
+        template: templateBody,
+      };
+      console.log(`📤 [WA] Sending template "${resolvedTemplate}" to ${phone}`);
+    } else {
+      // No template available — fall back to free text
+      // ⚠️ This will only deliver if recipient messaged business in last 24h
+      console.warn(`⚠️ [WA] No approved template found — sending as text to ${phone}. Message may not deliver outside 24h window.`);
+      payload = {
+        messaging_product: 'whatsapp',
+        to:   phone,
+        type: 'text',
+        text: { body: message },
+      };
+    }
+
+    // ── Send ──────────────────────────────────────────────────────────────────
+    const postData = JSON.stringify(payload);
+    const result   = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'graph.facebook.com',
+        port: 443,
+        path: `/v18.0/${phoneNumberId}/messages`,
+        method: 'POST',
+        headers: {
+          'Authorization':  `Bearer ${accessToken}`,
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      };
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', c => { data += c; });
+        res.on('end', () => {
+          try { resolve({ statusCode: res.statusCode, body: JSON.parse(data) }); }
+          catch (e) { reject(new Error('Invalid JSON from Meta API')); }
+        });
+      });
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    });
+
+    console.log(`📥 [WA] Meta response for ${phone}:`, JSON.stringify(result.body));
+
+    if (result.statusCode === 200 && result.body.messages) {
+      return {
+        success:      true,
+        messageId:    result.body.messages[0]?.id,
+        templateUsed: resolvedTemplate || null,
+        usedText:     !resolvedTemplate,
+      };
+    }
+
+    const errCode = result.body.error?.code;
+    const errMsg  = result.body.error?.message || 'WhatsApp API error';
+    let friendly  = `Meta error ${errCode}: ${errMsg}`;
+    if (errCode === 190)    friendly = 'Access token invalid or expired';
+    if (errCode === 131030) friendly = 'Recipient not on WhatsApp or outside 24h window';
+    if (errCode === 132000) friendly = `Template "${resolvedTemplate}" not found or not approved`;
+    if (errCode === 131047) friendly = 'Payment method missing on Meta Business Account';
+
+    return { success: false, error: friendly, metaCode: errCode };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -436,22 +591,66 @@ async function processInvoice(invoice, settings, orgData, type) {
         ? (settings.whatsappTemplate ? renderTemplate(settings.whatsappTemplate, vars) : defaultWaOverdue)
         : (settings.whatsappTemplatePreDue ? renderTemplate(settings.whatsappTemplatePreDue, vars) : defaultWaPredue);
 
+      // Resolve credentials — prefer branch/org data, fall back to settings
+      const phoneNumberId = orgData?.whatsappMetaPhoneNumberId || settings.whatsappMetaPhoneNumberId;
+      const wabaId        = orgData?.whatsappMetaWabaId        || settings.whatsappMetaWabaId;
+      const rawToken      = orgData?.whatsappMetaAccessToken   || settings.whatsappMetaAccessToken;
+      const accessToken   = (() => {
+        if (!rawToken) return null;
+        try { const { decrypt } = require('../utils/encryption'); return decrypt(rawToken); } catch (_) { return rawToken; }
+      })();
+
+      // Resolve which template to use for this reminder type
+      // Settings can store per-type template names: whatsappOverdueTemplateName / whatsappPreDueTemplateName
+      const templateName     = type === 'overdue'
+        ? (settings.whatsappOverdueTemplateName || settings.whatsappTemplateName || null)
+        : (settings.whatsappPreDueTemplateName  || settings.whatsappTemplateName || null);
+      const templateLanguage = settings.whatsappTemplateLanguage || 'en';
+
+      // Build template parameters matching the payment_reminder template:
+      // {{1}} = customer name, {{2}} = invoice number, {{3}} = company name,
+      // {{4}} = amount due,    {{5}} = due date
+      const templateParams = [
+        vars.customerName,
+        vars.invoiceNumber,
+        vars.companyName,
+        vars.amountDue,
+        vars.dueDate,
+      ];
+
       const waResult = await sendWhatsAppMessage({
-        phoneNumberId: orgData?.whatsappMetaPhoneNumberId || settings.whatsappMetaPhoneNumberId,
-        accessToken:   (() => {
-          const raw = orgData?.whatsappMetaAccessToken || settings.whatsappMetaAccessToken;
-          if (!raw) return null;
-          try { const { decrypt } = require('../utils/encryption'); return decrypt(raw); } catch (_) { return raw; }
-        })(),
-        toPhone:       invoice.customerPhone,
-        message,
+        phoneNumberId,
+        accessToken,
+        wabaId,
+        toPhone:          invoice.customerPhone,
+        message,          // used as fallback text if no template
+        templateName,
+        templateLanguage,
+        templateParams,   // {{1}}..{{5}} values
       });
 
-      logEntries.push({ sentAt: now, channel: 'whatsapp', type, success: waResult.success, failReason: waResult.success ? undefined : waResult.error, recipientPhone: invoice.customerPhone });
-      if (waResult.success) console.log(`✅ WhatsApp sent — ${invoice.invoiceNumber}`);
-      else console.warn(`⚠️ WhatsApp failed — ${invoice.invoiceNumber}: ${waResult.error}`);
+      logEntries.push({
+        sentAt:         now,
+        channel:        'whatsapp',
+        type,
+        success:        waResult.success,
+        failReason:     waResult.success ? undefined : waResult.error,
+        recipientPhone: invoice.customerPhone,
+        templateUsed:   waResult.templateUsed || null,
+      });
+
+      if (waResult.success) {
+        if (waResult.usedText) {
+          console.warn(`⚠️ [WA] ${invoice.invoiceNumber} — sent as TEXT (no approved template). May not deliver.`);
+        } else {
+          console.log(`✅ [WA] ${invoice.invoiceNumber} — sent via template "${waResult.templateUsed}"`);
+        }
+      } else {
+        console.warn(`❌ [WA] ${invoice.invoiceNumber} failed: ${waResult.error}`);
+      }
     } catch (err) {
       logEntries.push({ sentAt: now, channel: 'whatsapp', type, success: false, failReason: err.message });
+      console.error(`❌ [WA] processInvoice error for ${invoice.invoiceNumber}:`, err.message);
     }
   }
 
@@ -500,18 +699,38 @@ async function runReminderJob() {
 
   try {
     const allSettings = await ReminderSettings.find({ enabled: true }).lean();
-    if (!allSettings.length) { console.log('ℹ️ No active reminder settings'); return; }
+    if (!allSettings.length) { console.log('ℹ️ No active reminder settings found'); return; }
+
+    console.log(`📋 Found ${allSettings.length} active reminder setting(s)`);
 
     for (const settings of allSettings) {
+      console.log(`\n⚙️  Processing settings — orgId: ${settings.orgId}, branchId: ${settings.branchId || 'none'}, channel: ${settings.channel}, reminderTime: ${settings.reminderTime}`);
+
       const { blacked } = isBlackedOut(settings);
-      if (blacked) continue;
-      if (!isReminderHour(settings)) continue;
+      if (blacked) { console.log('🚫 Skipping — blackout period'); continue; }
+
+      if (!isReminderHour(settings)) {
+        const now = new Date();
+        console.log(`⏰ Skipping — not reminder time (now: ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}, configured: ${settings.reminderTime})`);
+        continue;
+      }
 
       let orgData = null;
       try {
         const { getEffectiveOrgData } = require('../routes/branches');
         orgData = await getEffectiveOrgData(settings.orgId, settings.branchId, mongoose.connection.db);
       } catch (_) {}
+
+      // Resolve WhatsApp credentials — prefer branch orgData, fall back to settings doc
+      const phoneNumberId = orgData?.whatsappMetaPhoneNumberId || settings.whatsappMetaPhoneNumberId;
+      const wabaId        = orgData?.whatsappMetaWabaId        || settings.whatsappMetaWabaId;
+      const rawToken      = orgData?.whatsappMetaAccessToken   || settings.whatsappMetaAccessToken;
+      const accessToken   = (() => {
+        if (!rawToken) return null;
+        try { const { decrypt } = require('../utils/encryption'); return decrypt(rawToken); } catch (_) { return rawToken; }
+      })();
+
+      console.log(`🔑 WA credentials — phoneNumberId: ${phoneNumberId ? '✅' : '❌ missing'}, wabaId: ${wabaId ? '✅' : '❌ missing'}, token: ${accessToken ? '✅' : '❌ missing'}`);
 
       const now        = new Date();
       const graceDays  = settings.gracePeriodDays ?? 1;
@@ -550,7 +769,10 @@ async function runReminderJob() {
         // Frequency throttle — use <= so exactly freqDays gap is required
         const log          = invoice.reminderLog || [];
         const lastReminder = log.length > 0 ? log[log.length - 1] : null;
-        if (lastReminder && (now - new Date(lastReminder.sentAt)) / 86400000 <= freqDays) continue;
+        if (lastReminder && (now - new Date(lastReminder.sentAt)) / 86400000 <= freqDays) {
+          console.log(`⏭️  Skipping ${invoice.invoiceNumber} — last reminder sent ${((now - new Date(lastReminder.sentAt)) / 3600000).toFixed(1)}h ago (frequency: every ${freqDays} day(s))`);
+          continue;
+        }
 
         // Re-check invoice status right before sending (customer may have paid)
         const freshInvoice = await Invoice.findById(invoice._id).lean();
@@ -649,6 +871,11 @@ const reminderSettingsSchema = new mongoose.Schema({
   whatsappMetaPhoneNumberId: { type: String, default: '' },
   whatsappMetaAccessToken:   { type: String, default: '' },
   whatsappMetaWabaId:        { type: String, default: '' },
+  // ── Template names (approved Meta templates to use for reminders) ──────────
+  whatsappTemplateName:         { type: String, default: '' }, // fallback for both types
+  whatsappOverdueTemplateName:  { type: String, default: '' }, // overdue-specific
+  whatsappPreDueTemplateName:   { type: String, default: '' }, // pre-due-specific
+  whatsappTemplateLanguage:     { type: String, default: 'en' },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
@@ -681,6 +908,8 @@ settingsRouter.get('/', async (req, res) => {
         emailSubjectPreDue: '', emailTemplatePreDue: '',
         whatsappTemplate: '', whatsappTemplatePreDue: '',
         whatsappMetaPhoneNumberId: '', whatsappMetaAccessToken: '', whatsappMetaWabaId: '',
+        whatsappTemplateName: '', whatsappOverdueTemplateName: '', whatsappPreDueTemplateName: '',
+        whatsappTemplateLanguage: 'en',
       };
     }
     if (settings.whatsappMetaAccessToken) settings.whatsappMetaAccessToken = '••••••••';
