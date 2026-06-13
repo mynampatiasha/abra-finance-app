@@ -123,10 +123,10 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
 
     setState(() {
       _myTickets  = myR['success'] == true && myR['data'] != null
-          ? List<Map<String, dynamic>>.from(myR['data'])
+          ? List<Map<String, dynamic>>.from(myR['data']).where((t) => t['status'] != 'closed').toList()
           : [];
       _raisedByMe = raisedR['success'] == true && raisedR['data'] != null
-          ? List<Map<String, dynamic>>.from(raisedR['data'])
+          ? List<Map<String, dynamic>>.from(raisedR['data']).where((t) => t['status'] != 'closed').toList()
           : [];
       _allData    = _myTickets;
       _calcStats();
@@ -1263,12 +1263,12 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
     final subject   = ticket['subject'] ?? 'No Subject';
     final priority  = ticket['priority'] ?? 'medium';
     final status    = ticket['status'] ?? 'Open';
+    final assignedEmail = ticket['assigned_email']?.toString() ?? '';
+    final creatorEmail  = ticket['creator_email']?.toString() ?? '';
     final person    = isRaised
-        ? (ticket['assigned_to_name'] ?? 'Not Assigned')
-        : (ticket['name'] ?? ticket['created_by_name'] ?? 'System');
-    final personEmail = isRaised
-        ? (ticket['assigned_email'] ?? '')
-        : (ticket['creator_email'] ?? '');
+        ? (ticket['assigned_to_name'] ?? (assignedEmail.isNotEmpty ? assignedEmail.split('@')[0] : 'Not Assigned'))
+        : (ticket['name'] ?? ticket['created_by_name'] ?? (creatorEmail.isNotEmpty ? creatorEmail.split('@')[0] : 'System'));
+    final personEmail = '';
 
     // Reply info — shown only on "My Tickets" tab when ticket was actioned
     final replyMessage = ticket['reply_message']?.toString() ?? '';
@@ -1656,8 +1656,8 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
                   Expanded(child: _oSec('Raised By',
                       Icons.person_outline, cInProgress,
                     _personCard(
-                      name: ticket['name'] ?? ticket['created_by_name'] ?? 'System',
-                      email: ticket['creator_email'] ?? '',
+                      name: ticket['name'] ?? ticket['created_by_name'] ?? (ticket['creator_email'] != null && ticket['creator_email'].toString().isNotEmpty ? ticket['creator_email'].toString().split('@')[0] : 'System'),
+                      email: '',
                       tag: ticket['source'] == 'crm' ? 'CRM' : 'Manual',
                       tagColor: cReply,
                     ),
@@ -1666,8 +1666,8 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
                   Expanded(child: _oSec('Assigned To',
                       Icons.person_pin_outlined, cApproved,
                     _personCard(
-                      name: ticket['assigned_to_name'] ?? 'Not Assigned',
-                      email: ticket['assigned_email'] ?? '',
+                      name: ticket['assigned_to_name'] ?? (ticket['assigned_email'] != null && ticket['assigned_email'].toString().isNotEmpty ? ticket['assigned_email'].toString().split('@')[0] : 'Not Assigned'),
+                      email: '',
                     ),
                   )),
                 ]),
