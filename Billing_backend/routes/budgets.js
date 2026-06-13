@@ -623,13 +623,25 @@ async function checkBudgetExceedance(accountId, date, orgId = null, createdByEma
           }
           const ticketNumberStr = `TICKET${String(maxId + 1).padStart(6, '0')}`;
 
-          let message;
-          if (isBreach) {
-             message = `The actual spend for ${line.accountName} this month has reached ₹${actualMonthly.toFixed(2)}, which meets or exceeds the budget limit of ₹${budgetedAmount.toFixed(2)}.\n\nPlease review the transactions.`;
-          } else {
-             const pct = ((actualMonthly / budgetedAmount) * 100).toFixed(1);
-             message = `WARNING: The actual spend for ${line.accountName} this month has reached ₹${actualMonthly.toFixed(2)}, which is ${pct}% of the budget limit of ₹${budgetedAmount.toFixed(2)}.\n\nPlease be careful with further spending.`;
-          }
+          const variance = (budgetedAmount - actualMonthly).toFixed(2);
+          const lineCount = budget.accountLines ? budget.accountLines.length : 0;
+          const statusStr = budget.isActive ? 'Active' : 'Inactive';
+          const notesStr = budget.notes && budget.notes.trim() !== '' ? budget.notes : 'None';
+
+          const message = `Budget "${budget.budgetName}" requires attention.
+
+Budget Details:
+• Budget Name    : ${budget.budgetName}
+• Financial Year : ${budget.financialYear}
+• Period         : ${budget.budgetPeriod}
+• Status         : ${statusStr}
+• Total Budgeted : ₹${budgetedAmount.toFixed(2)}
+• Total Actual   : ₹${actualMonthly.toFixed(2)}
+• Variance       : ₹${variance}
+• Accounts       : ${lineCount} line(s)
+• Notes          : ${notesStr}
+
+Please review and take necessary action.`;
 
           await db.collection('tickets').insertOne({
             ticket_number: ticketNumberStr,
