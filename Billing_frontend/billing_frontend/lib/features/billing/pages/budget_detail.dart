@@ -127,20 +127,6 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.date_range),
-            tooltip: 'Filter Date',
-            onPressed: _pickDateRange,
-          ),
-          if (_startDate != null || _endDate != null)
-            IconButton(
-              icon: const Icon(Icons.filter_alt_off),
-              tooltip: 'Clear Filter',
-              onPressed: () {
-                setState(() { _startDate = null; _endDate = null; });
-                _load();
-              },
-            ),
           if (_budget != null) ...[
             IconButton(
               icon: Icon(
@@ -167,35 +153,7 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
     ),
   );
 
-  Future<void> _pickDateRange() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      initialDateRange: _startDate != null && _endDate != null 
-          ? DateTimeRange(start: _startDate!, end: _endDate!) 
-          : null,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: _navyDark,
-              onPrimary: Colors.white,
-              onSurface: _navyDark,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null) {
-      setState(() {
-        _startDate = picked.start;
-        _endDate = picked.end;
-      });
-      _load();
-    }
-  }
+
 
   Widget _buildError() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
     Icon(Icons.error_outline, size: 60, color: Colors.red.shade300),
@@ -215,6 +173,8 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
       physics: const BouncingScrollPhysics(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _buildHeader(b),
+        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+        _buildFilterBar(),
         _buildSummaryCards(b),
         _buildComparisonTable(b),
         _buildMonthlyBreakdown(b),
@@ -247,11 +207,6 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
             const SizedBox(height: 4),
             Text('${b.financialYear}  •  ${b.budgetPeriod}  •  ${b.currency}',
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-            if (_startDate != null && _endDate != null) ...[
-              const SizedBox(height: 4),
-              Text('Filtered: ${DateFormat('dd MMM yyyy').format(_startDate!)} - ${DateFormat('dd MMM yyyy').format(_endDate!)}',
-                  style: const TextStyle(fontSize: 13, color: _navyAccent, fontWeight: FontWeight.w600)),
-            ],
           ])),
           _badge(b.isActive ? 'Active' : 'Inactive',
               b.isActive ? Colors.green.shade100 : Colors.grey.shade200,
@@ -265,6 +220,87 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
       return info;
     }),
   );
+
+  Widget _buildFilterBar() {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.filter_list, color: Colors.grey, size: 20),
+          const SizedBox(width: 12),
+          InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _startDate ?? DateTime.now(),
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2030),
+              );
+              if (picked != null) setState(() => _startDate = picked);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+              child: Row(children: [
+                const Icon(Icons.calendar_today, size: 14, color: _navyDark), const SizedBox(width: 8),
+                Text(_startDate != null ? DateFormat('dd MMM yyyy').format(_startDate!) : 'Start Date', style: const TextStyle(fontSize: 13)),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('-', style: TextStyle(color: Colors.grey)),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _endDate ?? DateTime.now(),
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2030),
+              );
+              if (picked != null) setState(() => _endDate = picked);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+              child: Row(children: [
+                const Icon(Icons.calendar_today, size: 14, color: _navyDark), const SizedBox(width: 8),
+                Text(_endDate != null ? DateFormat('dd MMM yyyy').format(_endDate!) : 'End Date', style: const TextStyle(fontSize: 13)),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: () {
+              if (_startDate != null && _endDate != null) {
+                _load();
+              } else if (_startDate == null && _endDate == null) {
+                _load();
+              } else {
+                _snack('Please select both Start and End dates', Colors.orange);
+              }
+            },
+            icon: const Icon(Icons.check, size: 14),
+            label: const Text('Apply', style: TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0)),
+          ),
+          if (_startDate != null || _endDate != null) ...[
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () {
+                setState(() { _startDate = null; _endDate = null; });
+                _load();
+              },
+              icon: const Icon(Icons.clear, size: 14),
+              label: const Text('Clear', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   // ── Summary Cards ─────────────────────────────────────────────────────────
 
@@ -491,6 +527,7 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                   return DataCell(SizedBox(width: 75, child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
                       Text(_fmtShort(budg), style: const TextStyle(fontSize: 11, color: _navyDark)),
                       const SizedBox(height: 4),
                       Text(_fmtShort(act), style: TextStyle(fontSize: 10, color: over ? Colors.red : Colors.teal.shade700)),
