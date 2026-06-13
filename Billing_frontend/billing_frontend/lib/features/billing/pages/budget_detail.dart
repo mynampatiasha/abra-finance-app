@@ -434,7 +434,6 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                   ),
                 ),
               ),
-            ),
           );
         }
       ),
@@ -555,13 +554,12 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                     Text(_fmt(line.totalActual), style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
                   ],
                 ))),
-                      ))),
-                    ])).toList(),
-                  ),
-                ),
-              ),
-            );
-          }
+              ])).toList(),
+            ),
+          ),
+        ),
+      );
+    }
         ),
         Padding(
           padding: const EdgeInsets.all(12),
