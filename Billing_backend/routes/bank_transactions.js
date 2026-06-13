@@ -283,7 +283,7 @@ router.get('/all-transactions', async (req, res) => {
     const filter = { accountId: accountObjId, isExcluded: { $ne: true }, ...orgFilter(req) };
     const total  = await ProviderTransaction.countDocuments(filter);
     const txns   = await ProviderTransaction.find(filter)
-      .sort({ categorizedAt: -1, transactionDate: -1 })  // Sort by categorization time first, then transaction date
+      .sort({ transactionDate: -1, categorizedAt: -1 })  // Sort by transaction date first to ensure chronological running balance
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit))
       .lean();

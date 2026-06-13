@@ -492,7 +492,7 @@ const getCustomerOverview = async (req, res) => {
       const receivablesAgg = await Invoice.aggregate([
         {
           $match: {
-            customerId: customer._id?.toString() || customer.customerId,
+            customerId: { $in: [customer._id?.toString(), customer.customerId, customer._id].filter(Boolean) },
             status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
             ...req.orgFilter,
           },
@@ -501,7 +501,7 @@ const getCustomerOverview = async (req, res) => {
       ]);
       outstandingReceivables = receivablesAgg[0]?.total || 0;
 
-      // Monthly income � last 6 months
+      // Monthly income - last 6 months
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
       sixMonthsAgo.setDate(1);
@@ -510,7 +510,7 @@ const getCustomerOverview = async (req, res) => {
       const incomeAgg = await Invoice.aggregate([
         {
           $match: {
-            customerId: customer._id?.toString() || customer.customerId,
+            customerId: { $in: [customer._id?.toString(), customer.customerId, customer._id].filter(Boolean) },
             invoiceDate: { $gte: sixMonthsAgo },
             status: { $nin: ['CANCELLED', 'VOID'] },
             ...req.orgFilter,
@@ -706,47 +706,150 @@ const getCustomerStatement = async (req, res) => {
     const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
     const to   = toDate   ? new Date(toDate)   : new Date();
     to.setHours(23, 59, 59, 999);
+    from.setHours(0, 0, 0, 0);
 
     const Invoice = getInvoiceModel();
     let entries = [];
     let openingBalance = customer.openingBalance || 0;
+    const custIdStr = customer._id?.toString();
+    const custId2   = customer.customerId;
+
+    // Helper to parse dates which might be 'DD/MM/YYYY' strings or Date objects
+    const parseCustomDate = (dateVal, timeSource) => {
+      if (!dateVal) return null;
+      let parsed = null;
+      if (dateVal instanceof Date) {
+        parsed = new Date(dateVal);
+      } else {
+        const str = String(dateVal);
+        if (str.includes('/')) {
+          const parts = str.split('/');
+          if (parts.length === 3) {
+            // DD/MM/YYYY
+            parsed = new Date(parts[2], parts[1] - 1, parts[0]);
+          }
+        } else {
+          parsed = new Date(str);
+        }
+      }
+      
+      if (parsed && !isNaN(parsed.getTime())) {
+        if (timeSource) {
+          const tDate = new Date(timeSource);
+          if (!isNaN(tDate.getTime())) {
+            parsed.setHours(tDate.getHours(), tDate.getMinutes(), tDate.getSeconds());
+          }
+        }
+        return parsed;
+      }
+      return null;
+    };
 
     if (Invoice) {
+      // ── 1. Fetch all invoices in date range ─────────────────────────────
       const invoices = await Invoice.find({
-        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
         invoiceDate: { $gte: from, $lte: to },
         status: { $nin: ['CANCELLED', 'VOID'] },
         ...req.orgFilter,
       }).sort({ invoiceDate: 1 }).lean();
 
+      // Add invoice entries
       for (const inv of invoices) {
         entries.push({
-          date:        inv.invoiceDate,
-          type:        'Invoice',
-          number:      inv.invoiceNumber,
-          details:     inv.subject || inv.orderNumber || '',
-          invoices:    inv.totalAmount,
-          payments:    null,
-          balance:     null,
+          date:     inv.invoiceDate,
+          type:     'Invoice',
+          number:   inv.invoiceNumber,
+          details:  inv.subject || inv.orderNumber || '',
+          invoices: inv.totalAmount,
+          payments: null,
+          balance:  null,
         });
+
+        // ── 2a. Payments embedded inside invoice.payments[] ──────────────
         for (const p of (inv.payments || [])) {
-          if (p.paymentDate >= from && p.paymentDate <= to) {
+          const pDate = parseCustomDate(p.paymentDate || p.recordedAt, p.recordedAt || p.paymentDate);
+          if (!pDate) continue;
+          // include all payments within range
+          if (pDate >= from && pDate <= to) {
             entries.push({
-              date:    p.paymentDate || p.recordedAt,
-              type:    'Payment',
-              number:  inv.invoiceNumber,
-              details: p.paymentMethod,
+              date:     pDate,
+              type:     'Payment',
+              number:   inv.invoiceNumber,
+              details:  p.paymentMethod || p.paymentMode || 'Payment',
               invoices: null,
-              payments: p.amount,
-              balance: null,
+              payments: parseFloat(p.amount || 0),
+              balance:  null,
             });
           }
         }
       }
 
+      // ── 2b. Payments from payments_received collection (account_detail categorizations) ──
+      try {
+        const { getFinanceDb } = require('../config/database');
+        const db = getFinanceDb();
+        // Remove date filter from mongo query because dates are stored as 'DD/MM/YYYY' strings
+        const paymentsReceived = await db.collection('payments_received').find({
+          $or: [{ customerId: custIdStr }, { customerId: custId2 }, { customerId: customer._id }],
+          paymentType: { $ne: 'advance' }, // exclude advance payments from statement
+          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+        }).toArray();
+
+        for (const p of paymentsReceived) {
+          const pDate = parseCustomDate(p.paymentDate || p.createdAt, p.createdAt);
+          if (!pDate) continue;
+
+          
+          // Filter by date manually
+          if (pDate >= from && pDate <= to) {
+            // Avoid duplicates — skip if already added via inv.payments[]
+            const alreadyAdded = entries.some(e =>
+              e.type === 'Payment' &&
+              Math.abs(parseFloat(e.payments || 0) - parseFloat(p.amountReceived || p.netAmount || 0)) < 0.01 &&
+              e.date.toDateString() === pDate.toDateString()
+            );
+            if (alreadyAdded) continue;
+
+            // Find the invoice number for this payment
+            let invoiceNum = '';
+            if (p.invoicePayments && typeof p.invoicePayments === 'object') {
+              const invKeys = Object.keys(p.invoicePayments);
+              if (invKeys.length > 0) {
+                const invId = invKeys[0];
+                const foundInv = invoices.find(i => i._id?.toString() === invId);
+                if (foundInv) {
+                  invoiceNum = foundInv.invoiceNumber;
+                } else {
+                  try {
+                    const fetchedInv = await Invoice.findOne({ _id: invId }).select('invoiceNumber').lean();
+                    if (fetchedInv) invoiceNum = fetchedInv.invoiceNumber;
+                  } catch (e) { /* ignore */ }
+                }
+              }
+            }
+            if (!invoiceNum) invoiceNum = p.paymentNumber || 'PMT';
+
+            entries.push({
+              date:     pDate,
+              type:     'Payment',
+              number:   invoiceNum,
+              details:  p.paymentMode || p.paymentMethod || 'Payment',
+              invoices: null,
+              payments: parseFloat(p.amountReceived || p.netAmount || 0),
+              balance:  null,
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.warn('⚠️ Could not fetch payments_received:', dbErr.message);
+        // Non-fatal — continue with invoice-embedded payments only
+      }
+
+      // ── 3. Sort all entries by date ──────────────────────────────────────
       entries.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      // Running balance
+      // ── 4. Running balance ───────────────────────────────────────────────
       let runningBalance = openingBalance;
       entries = entries.map(e => {
         if (e.invoices) runningBalance += e.invoices;
@@ -767,7 +870,7 @@ const getCustomerStatement = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('? getCustomerStatement:', error);
+    console.error('❌ getCustomerStatement:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

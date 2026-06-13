@@ -1,0 +1,11 @@
+{
+  "expenseOrgId": "6a05b2c6aef99160d927b0bf",
+  "effOrgId": "6a05b2c6aef99160d927b0bf",
+  "expenseBranchId": "6a05b32faef99160d927b0d1",
+  "effBranchId": "6a05b32faef99160d927b0d1",
+  "hasDb": true,
+  "orgData": {
+    "orgName": "Abra E-Logistic - Kasthuri Nagar",
+    "digitalSignaturePath": "/uploads/branch-signatures/bsig-6a05b32faef99160d927b0d1-1781068598415.png"
+  }
+}

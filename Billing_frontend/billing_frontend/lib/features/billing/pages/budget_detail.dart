@@ -377,38 +377,42 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
               style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ]),
       ),
-      Scrollbar(
-        controller: _hScroll,
-        thumbVisibility: true,
-        trackVisibility: true,
-        thickness: 6,
-        child: ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad},
-          ),
-          child: SingleChildScrollView(
+      LayoutBuilder(
+        builder: (context, constraints) {
+          return Scrollbar(
             controller: _hScroll,
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFF0F4FF)),
-              headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _navyDark, letterSpacing: 0.4),
-              headingRowHeight: 44,
-              dataRowMinHeight: 52,
-              dataTextStyle: const TextStyle(fontSize: 13, color: _navyDark),
-              dividerThickness: 0.8,
-              columnSpacing: 20,
-              horizontalMargin: 16,
-              columns: const [
-                DataColumn(label: Text('ACCOUNT')),
-                DataColumn(label: Text('TYPE')),
-                DataColumn(label: Text('BUDGETED'), numeric: true),
-                DataColumn(label: Text('ACTUAL'),   numeric: true),
-                DataColumn(label: Text('VARIANCE'), numeric: true),
-                DataColumn(label: Text('% USED'),   numeric: true),
-                DataColumn(label: Text('PROGRESS')),
-              ],
-              rows: b.accountLines.map((line) {
-                final varianceRaw = line.totalBudgeted - line.totalActual;
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 6,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad},
+              ),
+              child: SingleChildScrollView(
+                controller: _hScroll,
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF0F4FF)),
+                    headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark, letterSpacing: 0.4),
+                    headingRowHeight: 44,
+                    dataRowMinHeight: 56,
+                    dataTextStyle: const TextStyle(fontSize: 14, color: _navyDark),
+                    dividerThickness: 0.8,
+                    columnSpacing: 24,
+                    horizontalMargin: 16,
+                    columns: const [
+                      DataColumn(label: SizedBox(width: 200, child: Text('ACCOUNT'))),
+                      DataColumn(label: SizedBox(width: 100, child: Text('TYPE'))),
+                      DataColumn(label: SizedBox(width: 120, child: Text('BUDGETED', textAlign: TextAlign.right)), numeric: true),
+                      DataColumn(label: SizedBox(width: 120, child: Text('ACTUAL', textAlign: TextAlign.right)), numeric: true),
+                      DataColumn(label: SizedBox(width: 120, child: Text('VARIANCE', textAlign: TextAlign.right)), numeric: true),
+                      DataColumn(label: SizedBox(width: 100, child: Text('% USED', textAlign: TextAlign.right)), numeric: true),
+                      DataColumn(label: SizedBox(width: 150, child: Text('PROGRESS'))),
+                    ],
+                    rows: b.accountLines.map((line) {
+                      final varianceRaw = line.totalBudgeted - line.totalActual;
                 final variance = double.parse(varianceRaw.toStringAsFixed(2));
                 final over = variance < 0;
                 final pct  = double.parse(line.percentUsed.toStringAsFixed(2));
@@ -426,9 +430,13 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                 ]);
               }).toList()
                 ..add(_totalRow(b)),
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        }
       ),
     ]),
   );
@@ -481,43 +489,47 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                 style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
           ]),
         ),
-        Scrollbar(
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFF8F9FA)),
-              headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: _navyDark),
-              headingRowHeight: 42,
-              dataRowMinHeight: 52,
-              dataTextStyle: const TextStyle(fontSize: 11),
-              dividerThickness: 0.8,
-              columnSpacing: 12,
-              horizontalMargin: 12,
-              columns: [
-                const DataColumn(label: SizedBox(width: 160, child: Text('ACCOUNT'))),
-                ...List.generate(12, (i) => DataColumn(
-                  label: SizedBox(width: 75,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center, 
-                      crossAxisAlignment: CrossAxisAlignment.end, 
-                      children: [
-                        Text(_monthLabels[i], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                      ]
-                    ),
-                  ),
-                  numeric: true,
-                )),
-                const DataColumn(
-                  label: SizedBox(
-                    width: 110, 
-                    child: Text('ANNUAL', textAlign: TextAlign.right)
-                  ), 
-                  numeric: true
-                ),
-              ],
-              rows: b.accountLines.map((line) => DataRow(cells: [
-                DataCell(SizedBox(width: 160, child: Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), overflow: TextOverflow.ellipsis))),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF8F9FA)),
+                    headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark),
+                    headingRowHeight: 48,
+                    dataRowMinHeight: 60,
+                    dataTextStyle: const TextStyle(fontSize: 13),
+                    dividerThickness: 0.8,
+                    columnSpacing: 16,
+                    horizontalMargin: 16,
+                    columns: [
+                      const DataColumn(label: SizedBox(width: 200, child: Text('ACCOUNT'))),
+                      ...List.generate(12, (i) => DataColumn(
+                        label: SizedBox(width: 85,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center, 
+                            crossAxisAlignment: CrossAxisAlignment.end, 
+                            children: [
+                              Text(_monthLabels[i], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                            ]
+                          ),
+                        ),
+                        numeric: true,
+                      )),
+                      const DataColumn(
+                        label: SizedBox(
+                          width: 120, 
+                          child: Text('ANNUAL', textAlign: TextAlign.right)
+                        ), 
+                        numeric: true
+                      ),
+                    ],
+                    rows: b.accountLines.map((line) => DataRow(cells: [
+                      DataCell(SizedBox(width: 200, child: Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14), overflow: TextOverflow.ellipsis))),
                 ...List.generate(12, (m) {
                   final budgRaw = m < line.monthlyAmounts.length ? line.monthlyAmounts[m] : 0.0;
                   final actRaw  = m < line.actualMonthly.length  ? line.actualMonthly[m]  : 0.0;
@@ -543,9 +555,13 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                     Text(_fmt(line.totalActual), style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
                   ],
                 ))),
-              ])).toList(),
-            ),
-          ),
+                      ))),
+                    ])).toList(),
+                  ),
+                ),
+              ),
+            );
+          }
         ),
         Padding(
           padding: const EdgeInsets.all(12),

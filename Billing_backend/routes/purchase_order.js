@@ -69,14 +69,21 @@ function getLogoPath(orgId = null) {
 // ? COA Helper
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
-async function getSystemAccountId(name, orgId = null) {
+async function getSystemAccountId(name, orgId = null, branchId = null) {
   try {
-    const acc = await ChartOfAccount.findOne({
-      accountName: name,
-      isSystemAccount: true,
-      ...(orgId ? { orgId } : {}),
-    }).select('_id').lean();
-    return acc ? acc._id : null;
+    let query = { accountName: name, isSystemAccount: true };
+    if (orgId) query.orgId = orgId;
+    
+    if (branchId) {
+      let branchAcc = await ChartOfAccount.findOne({ ...query, branchId }).select('_id').lean();
+      if (branchAcc) return branchAcc._id;
+    }
+    
+    let globalAcc = await ChartOfAccount.findOne({ ...query, branchId: null }).select('_id').lean();
+    if (globalAcc) return globalAcc._id;
+    
+    let legacyAcc = await ChartOfAccount.findOne(query).select('_id').lean();
+    return legacyAcc ? legacyAcc._id : null;
   } catch (e) {
     console.error(`COA lookup error for "${name}":`, e.message);
     return null;
@@ -1174,7 +1181,7 @@ router.post('/', async (req, res) => {
 try {
   const currentOrgId = req.user?.orgId || null;
   const [apId, gstInputId, tdsPayableId, tdsReceivableId] = await Promise.all([
-    getSystemAccountId('Accounts Payable', currentOrgId),
+    getSystemAccountId('Accounts Payable', currentOrgId, branchId),
     getSystemAccountId('GST Input Credit', currentOrgId),
     getSystemAccountId('TDS Payable', currentOrgId),
     getSystemAccountId('TDS Receivable', currentOrgId),
@@ -1940,7 +1947,7 @@ router.post('/bulk-import', async (req, res) => {
         try {
           const currentOrgId = req.user?.orgId || null;
           const [apId, gstInputId, tdsPayableId, tdsReceivableId] = await Promise.all([
-            getSystemAccountId('Accounts Payable',   currentOrgId),
+            getSystemAccountId('Accounts Payable', currentOrgId, branchId),
             getSystemAccountId('GST Input Credit',   currentOrgId),
             getSystemAccountId('TDS Payable',         currentOrgId),
             getSystemAccountId('TDS Receivable',      currentOrgId),

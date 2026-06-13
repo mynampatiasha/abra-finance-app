@@ -39,6 +39,7 @@ const budgetAccountLineSchema = new mongoose.Schema({
 
 const budgetSchema = new mongoose.Schema({
   orgId:         { type: String, index: true, default: null },
+  branchId:      { type: String, index: true, default: null },
   budgetName:    { type: String, required: true, trim: true },
   financialYear: { type: String, required: true, trim: true },  // e.g. "2025-26"
   budgetPeriod:  { type: String, enum: ['Monthly', 'Quarterly', 'Yearly'], default: 'Monthly' },
@@ -95,25 +96,56 @@ function getFYDateRange(financialYear) {
 }
 
 // Pull actual amounts from AccountTransaction for each account line
-async function enrichWithActuals(budget, orgId = null) {
-  const { start, end } = getFYDateRange(budget.financialYear);
+async function enrichWithActuals(budget, orgId = null, filterStartDate = null, filterEndDate = null) {
+  let { start, end } = getFYDateRange(budget.financialYear);
+  const { startYear, endYear } = parseFYRange(budget.financialYear);
+  
+  if (filterStartDate) {
+    const fs = new Date(filterStartDate);
+    fs.setHours(0, 0, 0, 0);
+    start = new Date(Math.max(start.getTime(), fs.getTime()));
+  }
+  if (filterEndDate) {
+    const fe = new Date(filterEndDate);
+    fe.setHours(23, 59, 59, 999);
+    end = new Date(Math.min(end.getTime(), fe.getTime()));
+  }
 
   const enrichedLines = await Promise.all(
     budget.accountLines.map(async (line) => {
       const actualMonthly = Array(12).fill(0);
+      let calculatedBudgeted = 0;
+
+      // Calculate prorated budget based on overlap with each FY month
+      for (let i = 0; i < 12; i++) {
+        const fm = FY_MONTHS[i];
+        const monthYear = fm.month >= 3 ? startYear : endYear;
+        const monthStart = new Date(monthYear, fm.month, 1);
+        const monthEnd = new Date(monthYear, fm.month + 1, 0, 23, 59, 59, 999);
+        
+        const overlapStart = new Date(Math.max(start.getTime(), monthStart.getTime()));
+        const overlapEnd = new Date(Math.min(end.getTime(), monthEnd.getTime()));
+        
+        if (overlapStart <= overlapEnd) {
+          const overlapDays = (overlapEnd.getTime() - overlapStart.getTime() + 1) / (1000 * 60 * 60 * 24);
+          const daysInMonth = monthEnd.getDate();
+          const fraction = Math.min(1, Math.max(0, overlapDays / daysInMonth));
+          calculatedBudgeted += (line.monthlyAmounts[i] || 0) * fraction;
+        }
+      }
 
       if (!line.accountId) {
         return {
           ...line.toObject ? line.toObject() : line,
           actualMonthly,
-          totalBudgeted: line.monthlyAmounts.reduce((s, v) => s + v, 0),
+          totalBudgeted: calculatedBudgeted,
           totalActual: 0,
-          variance: line.monthlyAmounts.reduce((s, v) => s + v, 0),
+          variance: calculatedBudgeted,
           percentUsed: 0,
         };
       }
 
-      // Get all transactions for this account in this FY
+      // Get all transactions for this account in this filtered date range
       const txns = await AccountTransaction.find({
         accountId: line.accountId,
         date: { $gte: start, $lte: end },
@@ -126,8 +158,6 @@ async function enrichWithActuals(budget, orgId = null) {
         const m = d.getMonth(); // 0=Jan … 11=Dec
         const fyIdx = FY_MONTHS.findIndex((fm) => fm.month === m);
         if (fyIdx >= 0) {
-          // For income accounts: actual = credit - debit
-          // For expense/asset accounts: actual = debit - credit
           const isIncomeType = ['Income', 'Other Income'].includes(line.accountType);
           actualMonthly[fyIdx] += isIncomeType
             ? txn.credit - txn.debit
@@ -135,15 +165,14 @@ async function enrichWithActuals(budget, orgId = null) {
         }
       });
 
-      const totalBudgeted = line.monthlyAmounts.reduce((s, v) => s + v, 0);
       const totalActual   = actualMonthly.reduce((s, v) => s + v, 0);
-      const variance      = totalBudgeted - totalActual;
-      const percentUsed   = totalBudgeted > 0 ? (totalActual / totalBudgeted) * 100 : 0;
+      const variance      = calculatedBudgeted - totalActual;
+      const percentUsed   = calculatedBudgeted > 0 ? (totalActual / calculatedBudgeted) * 100 : 0;
 
       return {
         ...line.toObject ? line.toObject() : line,
         actualMonthly,
-        totalBudgeted,
+        totalBudgeted: calculatedBudgeted,
         totalActual,
         variance,
         percentUsed,
@@ -172,24 +201,41 @@ async function enrichWithActuals(budget, orgId = null) {
 // ── GET /stats ────────────────────────────────────────────────────────────────
 router.get('/stats', authenticate, async (req, res) => {
   try {
-    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const scopedFilter = {};
+    if (req.user?.orgId) {
+      scopedFilter.$or = [{ orgId: req.user.orgId }, { orgId: null }];
+    }
+    
+    if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
+      const branchIds = req.branchIds || [];
+      if (scopedFilter.$or) {
+        scopedFilter.$and = [{ $or: scopedFilter.$or }, { $or: [{ branchId: { $in: branchIds } }, { branchId: null }] }];
+        delete scopedFilter.$or;
+      } else {
+        scopedFilter.$or = [{ branchId: { $in: branchIds } }, { branchId: null }];
+      }
+    }
+    
     const [total, active, inactive, budgets] = await Promise.all([
-      Budget.countDocuments(orgFilter),
-      Budget.countDocuments({ ...orgFilter, isActive: true }),
-      Budget.countDocuments({ ...orgFilter, isActive: false }),
-      Budget.find(orgFilter, { accountLines: 1 }).lean(),
+      Budget.countDocuments(scopedFilter),
+      Budget.countDocuments({ ...scopedFilter, isActive: true }),
+      Budget.countDocuments({ ...scopedFilter, isActive: false }),
+      Budget.find(scopedFilter, { accountLines: 1 }).lean(),
     ]);
 
     let totalBudgeted = 0;
-    budgets.forEach((b) => {
-      b.accountLines.forEach((l) => {
-        totalBudgeted += (l.monthlyAmounts || []).reduce((s, v) => s + v, 0);
-      });
+    let totalActual = 0;
+    
+    // We can use enrichWithActuals to get the true total actuals
+    const enrichedBudgets = await Promise.all(budgets.map(b => enrichWithActuals(b, req.user?.orgId)));
+    enrichedBudgets.forEach((b) => {
+      totalBudgeted += b.totalBudgeted;
+      totalActual += b.totalActual;
     });
 
     res.json({
       success: true,
-      data: { totalBudgets: total, activeBudgets: active, inactiveBudgets: inactive, totalBudgeted, totalActual: 0 },
+      data: { totalBudgets: total, activeBudgets: active, inactiveBudgets: inactive, totalBudgeted, totalActual },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -202,7 +248,13 @@ router.get('/', authenticate, async (req, res) => {
     const { isActive, financialYear, budgetPeriod, search, page = 1, limit = 20 } = req.query;
 
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {}); Object.assign(query, req.branchFilter || {});
+    if (req.user?.orgId) query.orgId = req.user.orgId; 
+    
+    // Support treating branchId: null as global across branches
+    if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
+      const branchIds = req.branchIds || [];
+      query.$or = [{ branchId: { $in: branchIds } }, { branchId: null }];
+    }
     if (isActive !== undefined && isActive !== 'null') query.isActive = isActive === 'true';
     if (financialYear && financialYear !== 'All') query.financialYear = financialYear;
     if (budgetPeriod && budgetPeriod !== 'All') query.budgetPeriod = budgetPeriod;
@@ -221,17 +273,12 @@ router.get('/', authenticate, async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Add basic totals (no COA actuals for list — performance)
-    const enriched = budgets.map((b) => {
-      const obj = b.toObject();
-      obj.id = obj._id;
-      obj.totalBudgeted = obj.accountLines.reduce(
-        (s, l) => s + (l.monthlyAmounts || []).reduce((a, v) => a + v, 0), 0
-      );
-      obj.totalActual  = 0;
-      obj.totalVariance = obj.totalBudgeted;
-      return obj;
-    });
+    // Fetch actuals for the list view to ensure dashboard numbers are accurate
+    const enriched = await Promise.all(budgets.map(async (b) => {
+      const e = await enrichWithActuals(b, req.user?.orgId);
+      e.id = e._id;
+      return e;
+    }));
 
     res.json({
       success: true,
@@ -248,12 +295,13 @@ router.get('/', authenticate, async (req, res) => {
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get('/:id', authenticate, async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
     const budget = await Budget.findOne({
       _id: req.params.id,
       ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
-    const enriched = await enrichWithActuals(budget, req.user?.orgId);
+    const enriched = await enrichWithActuals(budget, req.user?.orgId, startDate, endDate);
     res.json({ success: true, data: enriched });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -263,12 +311,13 @@ router.get('/:id', authenticate, async (req, res) => {
 // ── GET /:id/actuals ──────────────────────────────────────────────────────────
 router.get('/:id/actuals', authenticate, async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
     const budget = await Budget.findOne({
       _id: req.params.id,
       ...req.orgFilter,
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
-    const enriched = await enrichWithActuals(budget, req.user?.orgId);
+    const enriched = await enrichWithActuals(budget, req.user?.orgId, startDate, endDate);
     res.json({ success: true, data: enriched });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -492,5 +541,125 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
   }
 });
 
+// ============================================================================
+// BUDGET MONITOR OBSERVER
+// ============================================================================
+
+async function checkBudgetExceedance(accountId, date, orgId = null, createdByEmail = 'system') {
+  try {
+    const d = new Date(date);
+    const m = d.getMonth();
+    const fyIdx = FY_MONTHS.findIndex(fm => fm.month === m);
+    if (fyIdx === -1) return;
+
+    const budgets = await Budget.find({
+      isActive: true,
+      'accountLines.accountId': accountId,
+      ...(orgId ? { orgId } : {})
+    });
+
+    for (const budget of budgets) {
+      const { start, end } = getFYDateRange(budget.financialYear);
+      if (d < start || d > end) continue;
+
+      const line = budget.accountLines.find(l => l.accountId && l.accountId.toString() === accountId.toString());
+      if (!line) continue;
+
+      const budgetedAmount = line.monthlyAmounts[fyIdx] || 0;
+      if (budgetedAmount <= 0) continue;
+
+      const monthYear = m >= 3 ? parseFYRange(budget.financialYear).startYear : parseFYRange(budget.financialYear).endYear;
+      const monthStart = new Date(monthYear, m, 1);
+      const monthEnd = new Date(monthYear, m + 1, 0, 23, 59, 59, 999);
+
+      const txns = await mongoose.models.AccountTransaction.find({
+        accountId: line.accountId,
+        date: { $gte: monthStart, $lte: monthEnd },
+        ...(orgId ? { orgId } : {})
+      }).lean();
+
+      let actualMonthly = 0;
+      txns.forEach(txn => {
+        const isIncomeType = ['Income', 'Other Income'].includes(line.accountType);
+        actualMonthly += isIncomeType ? txn.credit - txn.debit : txn.debit - txn.credit;
+      });
+
+      if (actualMonthly >= budgetedAmount * 0.8) {
+        const db = mongoose.connection.db;
+        const creatorEmailToUse = (budget.createdBy || 'system').toLowerCase();
+        let creator = await db.collection('billing_users').findOne({ email: creatorEmailToUse, 'organizations.orgId': orgId });
+
+        // Fallback: If budget creator not found or is system, assign to the organization owner/admin
+        if (!creator) {
+          creator = await db.collection('billing_users').findOne({ 
+            'organizations.orgId': orgId, 
+            role: { $in: ['owner', 'admin'] } 
+          });
+        }
+
+        if (!creator) {
+          console.error(`[BUDGET OBSERVER] No valid user found to assign ticket in org: ${orgId}`);
+          return; // Can't assign ticket without a user
+        }
+        
+        const creatorId = creator._id;
+        
+        const isBreach = actualMonthly >= budgetedAmount;
+        const subjectPrefix = isBreach ? 'Budget Exceeded' : 'Budget Warning';
+        const fullSubject = `${subjectPrefix}: ${line.accountName}`;
+
+        const existingTicket = await db.collection('tickets').findOne({
+          assigned_email: creator.email,
+          subject: fullSubject,
+          status: { $in: ['Open', 'In Progress'] }
+        });
+
+        if (!existingTicket) {
+          const allTickets = await db.collection('tickets').find({ ticket_number: { $regex: '^TICKET\\d' } }, { projection: { ticket_number: 1 } }).toArray();
+          let maxId = 0;
+          for (const t of allTickets) {
+            const n = parseInt((t.ticket_number || '').slice(6), 10);
+            if (!isNaN(n) && n > maxId) maxId = n;
+          }
+          const ticketNumberStr = `TICKET${String(maxId + 1).padStart(6, '0')}`;
+
+          let message;
+          if (isBreach) {
+             message = `The actual spend for ${line.accountName} this month has reached ₹${actualMonthly.toFixed(2)}, which meets or exceeds the budget limit of ₹${budgetedAmount.toFixed(2)}.\n\nPlease review the transactions.`;
+          } else {
+             const pct = ((actualMonthly / budgetedAmount) * 100).toFixed(1);
+             message = `WARNING: The actual spend for ${line.accountName} this month has reached ₹${actualMonthly.toFixed(2)}, which is ${pct}% of the budget limit of ₹${budgetedAmount.toFixed(2)}.\n\nPlease be careful with further spending.`;
+          }
+
+          await db.collection('tickets').insertOne({
+            ticket_number: ticketNumberStr,
+            name: 'Budget Monitor System',
+            creator_email: 'system@abra-travels.com',
+            assigned_email: creator.email,
+            subject: fullSubject,
+            message: message,
+            priority: isBreach ? 'High' : 'Medium',
+            timeline: 1440,
+            deadline: new Date(Date.now() + 1440 * 60000),
+            status: 'Open',
+            attachment: null,
+            assigned_to: creatorId,
+            created_by: null,
+            org_id: orgId,
+            branch_id: budget.branchId || null,
+            source: 'budget_monitor',
+            created_at: new Date(),
+            updated_at: new Date()
+          });
+          console.log(`🎫 Auto-Ticket created for ${subjectPrefix}: ${line.accountName}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Budget Monitor Error:', err);
+  }
+}
+
 module.exports = router;
 module.exports.Budget = Budget;
+module.exports.checkBudgetExceedance = checkBudgetExceedance;

@@ -1,0 +1,12 @@
+{
+  "count": 0,
+  "query": {
+    "orgId": "69e85f91899a84339ba749a1",
+    "branchId": {
+      "$in": [
+        "69eeecb21234dffba797bee4"
+      ]
+    }
+  },
+  "expenses": []
+}

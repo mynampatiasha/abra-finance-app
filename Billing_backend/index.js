@@ -62,6 +62,16 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/debug-dump', async (req, res) => {
+  try {
+    const DigitalExpense = mongoose.models.DigitalExpense || mongoose.model('DigitalExpense', new mongoose.Schema({}, { strict: false }));
+    const expenses = await DigitalExpense.find({});
+    res.json({ success: true, count: expenses.length, data: expenses });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // ─── PROTECTED ROUTES (JWT required) ─────────────────────────────────────────
 
 // Branches
@@ -76,6 +86,7 @@ app.use('/api/finance/home',          verifyFinanceJWT, require('./routes/home_b
 
 // Sales
 app.use('/api/finance/invoices', verifyFinanceJWT, require('./routes/invoices'));
+app.use('/api/finance/invoices-automation', verifyFinanceJWT, require('./routes/invoices_automation'));
 
 // ── Reminder Settings routes ──────────────────────────────────────────────────
 const { settingsRouter, initReminderScheduler } = require('./jobs/reminderScheduler');
@@ -93,6 +104,7 @@ app.use('/api/finance/payments-received', verifyFinanceJWT, require('./routes/pa
 app.use('/api/finance/bills',         verifyFinanceJWT, require('./routes/bill'));
 app.use('/api/finance/recurring-bills', verifyFinanceJWT, require('./routes/recurring_bill'));
 app.use('/api/finance/expenses',      verifyFinanceJWT, require('./routes/expenses'));
+app.use('/api/finance/digital-expenses', verifyFinanceJWT, require('./routes/digital_expenses'));
 app.use('/api/finance/recurring-expenses', verifyFinanceJWT, require('./routes/recurring_expenses'));
 app.use('/api/finance/purchase-orders', verifyFinanceJWT, require('./routes/purchase_order'));
 app.use('/api/finance/vendors',       verifyFinanceJWT, require('./routes/billing_vendors'));

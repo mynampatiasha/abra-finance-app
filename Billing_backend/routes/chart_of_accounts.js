@@ -281,9 +281,22 @@ router.get('/stats', authenticate, async (req, res) => {
 const orgFilter = req.user?.orgId
   ? { $or: [{ orgId: req.user.orgId }, { orgId: null }] }
   : {};
-// ✅ Scope stats to selected branch(es)
-const branchFilter = (req.branchFilter && Object.keys(req.branchFilter).length > 0) ? req.branchFilter : {};
-const scopedFilter = { ...orgFilter, ...branchFilter };
+
+// ✅ Scope stats to selected branch(es) including global accounts (branchId: null)
+const scopedFilter = {};
+if (req.user?.orgId) {
+  scopedFilter.$or = [{ orgId: req.user.orgId }, { orgId: null }];
+}
+if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
+  const branchIds = req.branchIds || [];
+  if (scopedFilter.$or) {
+    scopedFilter.$and = [{ $or: scopedFilter.$or }, { $or: [{ branchId: { $in: branchIds } }, { branchId: null }] }];
+    delete scopedFilter.$or;
+  } else {
+    scopedFilter.$or = [{ branchId: { $in: branchIds } }, { branchId: null }];
+  }
+}
+
 const [total, active, inactive, byType] = await Promise.all([
   ChartOfAccount.countDocuments(scopedFilter),
   ChartOfAccount.countDocuments({ ...scopedFilter, isActive: true }),
@@ -315,9 +328,17 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user?.orgId) {
       query.$or = [{ orgId: req.user.orgId }, { orgId: null }];
     }
-    // ✅ Scope to selected branch(es) — prevents showing accounts from other branches
+    // ✅ Scope to selected branch(es) — also include branchId:null (system/legacy accounts)
     if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
-      Object.assign(query, req.branchFilter);
+      const branchIds = req.branchIds || [];
+      if (query.$and) {
+        query.$and.push({ $or: [{ branchId: { $in: branchIds } }, { branchId: null }] });
+      } else if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: [{ branchId: { $in: branchIds } }, { branchId: null }] }];
+        delete query.$or;
+      } else {
+        query.$or = [{ branchId: { $in: branchIds } }, { branchId: null }];
+      }
     }
     if (accountType && accountType !== 'All') {
       // Support broad category matching
@@ -688,7 +709,7 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
 // ============================================================================
 // Call this from manual_journal.js, bills.js, invoices.js etc.
 
-async function postTransactionToCOA({ accountId, orgId = null, branchId = null, date, description, referenceType, referenceId, referenceNumber, debit = 0, credit = 0 }) {
+async function postTransactionToCOA({ accountId, orgId = null, branchId = null, date, description, referenceType, referenceId, referenceNumber, debit = 0, credit = 0, createdByEmail = 'system' }) {
   try {
     // Calculate balance scoped to this branch (or org-wide if no branchId)
     // This ensures each branch has its own accurate running balance
@@ -715,6 +736,14 @@ async function postTransactionToCOA({ accountId, orgId = null, branchId = null, 
       closingBalance: newBalance,
       balanceType: newBalance >= 0 ? 'Dr' : 'Cr',
     });
+
+    // Invoke Budget Observer (async, do not block)
+    try {
+      const { checkBudgetExceedance } = require('./budgets');
+      checkBudgetExceedance(accountId, date, orgId, createdByEmail).catch(err => console.error('Budget check observer error:', err));
+    } catch (budgetErr) {
+      console.error('Failed to invoke budget observer:', budgetErr);
+    }
   } catch (err) {
     console.error('COA posting error:', err.message);
   }

@@ -53,14 +53,16 @@ async function getEffectiveOrgData(orgId, branchId, db) {
     if (!db) return null;
 
     // Always fetch org data as the base
-    const org = await db.collection('organizations').findOne({ orgId });
-    if (!org) return null;
+    let org = await db.collection('organizations').findOne({ orgId });
+    if (!org) org = {}; // If org is missing, still allow branch to provide data
 
     // No branch requested → return org data as-is (backward-compatible)
-    if (!branchId) return org;
+    if (!branchId) return Object.keys(org).length > 0 ? org : null;
 
     // Fetch branch data
-    const branch = await db.collection('branches').findOne({ branchId, orgId });
+    const branch = await db.collection('branches').findOne({ branchId });
+    if (!branch && Object.keys(org).length === 0) return null; // neither found
+
     if (!branch) return org; // branch not found → fall back to org
 
     // Merge: branch value wins if it is a non-empty string; otherwise use org value

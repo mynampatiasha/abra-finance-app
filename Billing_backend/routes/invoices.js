@@ -42,16 +42,28 @@ const path = require('path');
 const multer = require('multer');
 
 // ✅ COA Helper
-const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+const { postTransactionToCOA, ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
 const { sendMail } = require('../utils/mailer');
 
-async function getSystemAccountId(name, orgId = null) {
+async function getSystemAccountId(name, orgId = null, branchId = null) {
   try {
-    const acc = await ChartOfAccount.findOne({
+    let acc = await ChartOfAccount.findOne({
       accountName: name,
       isSystemAccount: true,
-      orgId: orgId
+      orgId: orgId,
+      branchId: branchId || null
     }).select('_id').lean();
+    
+    // Fallback: If a branch-specific system account doesn't exist, use the global org one
+    if (!acc && branchId) {
+      acc = await ChartOfAccount.findOne({
+        accountName: name,
+        isSystemAccount: true,
+        orgId: orgId,
+        branchId: null
+      }).select('_id').lean();
+    }
+    
     return acc ? acc._id : null;
   } catch (e) {
     console.error(`COA lookup error for "${name}":`, e.message);
@@ -217,6 +229,8 @@ const invoiceItemSchema = new mongoose.Schema({
   amount:       { type: Number, required: true },
   // Link to billable expense
   expenseId:    { type: mongoose.Schema.Types.ObjectId, default: null },
+  // Link to automated shipment to prevent double billing
+  shipmentTrackingNumber: { type: String, default: null },
 }, { _id: false });
 
 const invoiceSchema = new mongoose.Schema({
@@ -799,7 +813,17 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
         doc.text(`Place of Supply: ${invoice.placeOfSupply}`, detX + 8, metaY + 49, { width: colW - 16 });
       }
 
-      let tableStartY = metaY + metaH + 12;
+      // ── Page-break helper ─
+      const PAGE_BOTTOM = 720; // safe bottom margin
+      const ensureSpace = (currentY, neededHeight = 20) => {
+        if (currentY + neededHeight > PAGE_BOTTOM) {
+          doc.addPage();
+          return 40; // reset to top margin
+        }
+        return currentY;
+      };
+
+      let tableStartY = ensureSpace(metaY + metaH + 12, 40);
 
       // ═══════════════════════════════════════════════════════════════════════
       // ITEMS TABLE — NEW: HSN/SAC + Unit + GST% + CGST/SGST or IGST columns
@@ -844,7 +868,7 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
 
       let rowY = tableStartY + 20;
       (invoice.items || []).forEach((item, idx) => {
-        const descText   = item.itemDetails || 'N/A';
+        const descText   = (item.itemDetails || '').replace(/\n{3,}/g, '\n\n').trim() || 'N/A';
         const descWidth  = cols.desc.w - 4;
         const lineHeight = 9;
         const vPad       = 8; // top + bottom padding
@@ -853,6 +877,8 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
         doc.font('Helvetica').fontSize(7);
         const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
         const rowH  = Math.max(20, descH + vPad * 2);
+
+        rowY = ensureSpace(rowY, rowH);
 
         const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
         doc.rect(40, rowY, 515, rowH).fill(fill);
@@ -892,6 +918,9 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // ═══════════════════════════════════════════════════════════════════════
       const totalsX   = 315;
       const totalsW   = 240;
+      
+      rowY = ensureSpace(rowY, 150); // Ensure space for totals block
+      
       let totalsY = rowY + 12;
       const summaryY  = rowY + 12;
       const labelX  = totalsX;
@@ -952,16 +981,6 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // ═══════════════════════════════════════════════════════════════════════
       const payInfo = getPaymentInfo(invoice, orgData);
       let notesY    = wordsY + 28;
-
-      // ── Page-break helper: if Y is too close to the bottom, add a new page ─
-      const PAGE_BOTTOM = 720; // safe bottom margin (A4 usable ~760, leave room for footer)
-      const ensureSpace = (currentY, neededHeight = 20) => {
-        if (currentY + neededHeight > PAGE_BOTTOM) {
-          doc.addPage();
-          return 40; // reset to top margin
-        }
-        return currentY;
-      };
 
       // Make sure the payment section itself starts on a page with enough room
       notesY = ensureSpace(notesY, 80);
@@ -1503,7 +1522,11 @@ router.get('/', async (req, res) => {
 
     const { status, customerId, fromDate, toDate, page = 1, limit = 20 } = req.query;
     const query = { ...req.orgFilter, ...(req.branchFilter || {}) };
-    if (status)     query.status = status;
+    if (status) {
+      query.status = status;
+    } else {
+      query.status = { $ne: 'AUTOMATION_DRAFT' };
+    }
     if (customerId) query.customerId = customerId;
     if (fromDate || toDate) {
       query.invoiceDate = {};
@@ -1524,16 +1547,19 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const stats = await Invoice.aggregate([
-      { $match: { orgId: req.user?.orgId, ...(req.branchFilter || {}) } },
+      { $match: { orgId: req.user?.orgId, status: { $ne: 'AUTOMATION_DRAFT' }, ...(req.branchFilter || {}) } },
       { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } }
     ]);
     const overallStats = { totalInvoices: 0, totalRevenue: 0, totalPaid: 0, totalDue: 0, byStatus: {} };
     stats.forEach(stat => {
-      overallStats.totalInvoices += stat.count;
-      overallStats.totalRevenue  += stat.totalAmount;
-      overallStats.totalPaid     += stat.totalPaid;
-      overallStats.totalDue      += stat.totalDue;
       overallStats.byStatus[stat._id] = { count: stat.count, amount: stat.totalAmount };
+      
+      if (stat._id !== 'DRAFT' && stat._id !== 'CANCELLED') {
+        overallStats.totalInvoices += stat.count;
+        overallStats.totalRevenue  += stat.totalAmount;
+        overallStats.totalPaid     += stat.totalPaid;
+        overallStats.totalDue      += stat.totalDue;
+      }
     });
     res.json({ success: true, data: overallStats });
   } catch (error) {
@@ -1719,23 +1745,26 @@ router.post('/', async (req, res) => {
     await invoice.save();
 
     // ✅ COA posting (original preserved + totalTax instead of cgst+sgst)
-    try {
-      const currentOrgId = req.user?.orgId || null;
-      const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
-        getSystemAccountId('Accounts Receivable', currentOrgId),
-        getSystemAccountId('Sales',               currentOrgId),
-        getSystemAccountId('Tax Payable',          currentOrgId),
-        getSystemAccountId('TDS Receivable',       currentOrgId),
-        getSystemAccountId('TDS Payable',          currentOrgId),
-      ]);
-      const txnDate = new Date(invoice.invoiceDate);
-      if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
-      if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
-      if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
-      if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
-      if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
-      console.log(`✅ COA posted for invoice: ${invoice.invoiceNumber}`);
-    } catch (coaErr) { console.error('⚠️ COA post error (invoice create):', coaErr.message); }
+    if (invoice.status !== 'DRAFT') {
+      try {
+        const currentOrgId = req.user?.orgId || null;
+        const branchId = invoice.branchId;
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+          getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
+          getSystemAccountId('Sales',               currentOrgId, branchId),
+          getSystemAccountId('Tax Payable',          currentOrgId, branchId),
+          getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
+          getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+        ]);
+        const txnDate = new Date(invoice.invoiceDate);
+        if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+        if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+        if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
+        if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+        if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        console.log(`✅ COA posted for invoice: ${invoice.invoiceNumber}`);
+      } catch (coaErr) { console.error('⚠️ COA post error (invoice create):', coaErr.message); }
+    }
 
     // ── Mark billable expenses as billed (original) ───────────────────────────
     try {
@@ -1776,6 +1805,46 @@ router.put('/:id', async (req, res) => {
     updates.updatedBy = req.user?.email || req.user?.uid || 'system';
     Object.assign(invoice, updates);
     await invoice.save();
+
+    // ✅ COA Reversal & Re-posting on Edit
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const branchId = invoice.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+      
+      // 1. Delete old COA entries for this invoice
+      await AccountTransaction.deleteMany({
+        referenceType: 'Invoice',
+        referenceId: invoice._id,
+        ...(currentOrgId ? { orgId: currentOrgId } : {})
+      });
+      
+      // 2. Repost the new amounts ONLY IF NOT DRAFT
+      if (invoice.status !== 'DRAFT') {
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+          getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
+          getSystemAccountId('Sales',               currentOrgId, branchId),
+          getSystemAccountId('Tax Payable',          currentOrgId, branchId),
+          getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
+          getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+        ]);
+        
+        const txnDate = new Date(invoice.invoiceDate);
+        const desc = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
+        
+        if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+        if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+        if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
+        if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+        if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        
+        console.log(`✅ COA updated for edited invoice: ${invoice.invoiceNumber}`);
+      } else {
+        console.log(`✅ Old COA removed, skipped reposting since invoice is DRAFT: ${invoice.invoiceNumber}`);
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA update error (invoice edit):', coaErr.message);
+    }
+
     console.log(`✅ Invoice updated: ${invoice.invoiceNumber}`);
     res.json({ success: true, message: 'Invoice updated successfully', data: invoice });
   } catch (error) {
@@ -1812,9 +1881,33 @@ router.post('/:id/send', async (req, res) => {
     } else {
       await sendInvoiceEmail(invoice, invoice.pdfPath, req.user?.orgId, invoice.branchId);
     }
-    if (invoice.status === 'DRAFT') invoice.status = 'SENT';
+    const oldStatus = invoice.status;
+    if (oldStatus === 'DRAFT') invoice.status = 'SENT';
     invoice.emailsSent.push({ sentTo: sendTo, sentAt: new Date(), emailType: 'invoice' });
     await invoice.save();
+
+    if (oldStatus === 'DRAFT') {
+      try {
+        const currentOrgId = req.user?.orgId || null;
+        const branchId = invoice.branchId;
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+          getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
+          getSystemAccountId('Sales',               currentOrgId, branchId),
+          getSystemAccountId('Tax Payable',          currentOrgId, branchId),
+          getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
+          getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+        ]);
+        const txnDate = new Date(invoice.invoiceDate);
+        const desc = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
+        if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+        if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+        if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
+        if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+        if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        console.log(`✅ COA posted for DRAFT -> SENT invoice: ${invoice.invoiceNumber}`);
+      } catch (coaErr) { console.error('⚠️ COA post error (mark-as-sent via email):', coaErr.message); }
+    }
+
     console.log(`✅ Invoice sent: ${invoice.invoiceNumber}`);
     res.json({ success: true, message: 'Invoice sent successfully', data: invoice });
   } catch (error) {
@@ -1828,12 +1921,38 @@ router.patch('/:id/mark-as-sent', async (req, res) => {
   try {
     const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
-    if (['PAID', 'CANCELLED'].includes(invoice.status)) {
-      return res.status(400).json({ success: false, error: `Cannot mark a ${invoice.status} invoice as sent` });
+    
+    const oldStatus = invoice.status;
+    if (['PAID', 'CANCELLED'].includes(oldStatus)) {
+      return res.status(400).json({ success: false, error: `Cannot mark a ${oldStatus} invoice as sent` });
     }
+    
     invoice.status    = 'SENT';
     invoice.updatedBy = req.user?.email || req.user?.uid || 'system';
     await invoice.save();
+
+    if (oldStatus === 'DRAFT') {
+      try {
+        const currentOrgId = req.user?.orgId || null;
+        const branchId = invoice.branchId;
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+          getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
+          getSystemAccountId('Sales',               currentOrgId, branchId),
+          getSystemAccountId('Tax Payable',          currentOrgId, branchId),
+          getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
+          getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+        ]);
+        const txnDate = new Date(invoice.invoiceDate);
+        const desc = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
+        if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
+        if (salesId) await postTransactionToCOA({ accountId: salesId, orgId: currentOrgId, branchId, date: txnDate, description: desc, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.subTotal });
+        if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
+        if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
+        if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        console.log(`✅ COA posted for DRAFT -> SENT invoice: ${invoice.invoiceNumber}`);
+      } catch (coaErr) { console.error('⚠️ COA post error (mark-as-sent):', coaErr.message); }
+    }
+
     console.log(`✅ Invoice marked as sent (no email): ${invoice.invoiceNumber}`);
     res.json({ success: true, message: 'Invoice marked as sent', data: invoice });
   } catch (error) {
@@ -1903,7 +2022,11 @@ router.get('/:id/pdf', async (req, res) => {
     }
   }
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
+    let invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
+    if (!invoice) {
+      const AutomationDraft = mongoose.models.AutomationDraft || mongoose.model('AutomationDraft', new mongoose.Schema({}, { strict: false }));
+      invoice = await AutomationDraft.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    }
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     // ✅ Always regenerate so the latest org logo is embedded
     const pdfInfo = await generateInvoicePDF(invoice, req.user?.orgId, invoice.branchId);
@@ -1940,7 +2063,11 @@ router.get('/:id/download-url', async (req, res) => {
 // ── GET /:id/email-preview (original structure + new Zoho fields) ─────────────
 router.get('/:id/email-preview', async (req, res) => {
   try {
-    const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
+    let invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
+    if (!invoice) {
+      const AutomationDraft = mongoose.models.AutomationDraft || mongoose.model('AutomationDraft', new mongoose.Schema({}, { strict: false }));
+      invoice = await AutomationDraft.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    }
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     const org         = await getOrgData(req.user?.orgId, invoice.branchId);
     const paymentInfo = getPaymentInfo(invoice, org);
@@ -2035,71 +2162,19 @@ router.delete('/:id', async (req, res) => {
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
     if (invoice.status !== 'DRAFT') return res.status(400).json({ success: false, error: 'Only draft invoices can be deleted' });
 
-    // ── COA REVERSAL ON DELETE ───────────────────────────────────────────────
+    // ── COA CLEANUP ON DELETE ───────────────────────────────────────────────
     try {
       const currentOrgId = req.user?.orgId || null;
-      const txnDate = new Date(invoice.invoiceDate);
-
-      const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
-        getSystemAccountId('Accounts Receivable', currentOrgId),
-        getSystemAccountId('Sales',               currentOrgId),
-        getSystemAccountId('Tax Payable',          currentOrgId),
-        getSystemAccountId('TDS Receivable',       currentOrgId),
-        getSystemAccountId('TDS Payable',          currentOrgId),
-      ]);
-
-      const desc = `REVERSAL - Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
-
-      // REVERSE: Cr Accounts Receivable (was Dr on create)
-      if (arId) await postTransactionToCOA({
-        accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
-        description: desc,
-        referenceType: 'Invoice', referenceId: invoice._id,
-        referenceNumber: invoice.invoiceNumber,
-        debit: 0, credit: invoice.totalAmount,
+      await AccountTransaction.deleteMany({
+        referenceType: 'Invoice',
+        referenceId: invoice._id,
+        ...(currentOrgId ? { orgId: currentOrgId } : {})
       });
-
-      // REVERSE: Dr Sales (was Cr on create)
-      if (salesId) await postTransactionToCOA({
-        accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
-        description: desc,
-        referenceType: 'Invoice', referenceId: invoice._id,
-        referenceNumber: invoice.invoiceNumber,
-        debit: invoice.subTotal, credit: 0,
-      });
-
-      // REVERSE: Dr Tax Payable (was Cr on create)
-      if (taxId && invoice.totalTax > 0) await postTransactionToCOA({
-        accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
-        description: desc,
-        referenceType: 'Invoice', referenceId: invoice._id,
-        referenceNumber: invoice.invoiceNumber,
-        debit: invoice.totalTax, credit: 0,
-      });
-
-      // REVERSE: Cr TDS Receivable (was Dr on create)
-      if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({
-        accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
-        description: desc,
-        referenceType: 'Invoice', referenceId: invoice._id,
-        referenceNumber: invoice.invoiceNumber,
-        debit: 0, credit: invoice.tdsAmount,
-      });
-
-      // REVERSE: Dr TCS Payable (was Cr on create)
-      if (tcsPayableId && invoice.tcsAmount > 0) await postTransactionToCOA({
-        accountId: tcsPayableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
-        description: desc,
-        referenceType: 'Invoice', referenceId: invoice._id,
-        referenceNumber: invoice.invoiceNumber,
-        debit: invoice.tcsAmount, credit: 0,
-      });
-
-      console.log(`✅ COA reversed for deleted invoice: ${invoice.invoiceNumber}`);
+      console.log(`✅ Cleaned up any residual COA entries for deleted draft invoice: ${invoice.invoiceNumber}`);
     } catch (coaErr) {
-      console.error('⚠️ COA reversal error (invoice delete):', coaErr.message);
+      console.error('⚠️ COA cleanup error (invoice delete):', coaErr.message);
     }
-    // ── END COA REVERSAL ─────────────────────────────────────────────────────
+    // ── END COA CLEANUP ─────────────────────────────────────────────────────
 
     await invoice.deleteOne();
     console.log(`✅ Invoice deleted: ${invoice.invoiceNumber}`);
@@ -2677,6 +2752,8 @@ router.post('/:id/preview-manual-reminder', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Old automation unbilled shipments route moved to invoices_automation.js
 
 module.exports = router;
 module.exports.generateInvoicePDF = generateInvoicePDF;

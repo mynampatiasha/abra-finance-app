@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // BILL SYSTEM - COMPLETE BACKEND
 // ============================================================================
 // File: backend/routes/bill.js
@@ -20,14 +20,21 @@ const path = require('path');
 const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 const { sendMail } = require('../utils/mailer');
 
-async function getSystemAccountId(name, orgId = null) {
+async function getSystemAccountId(name, orgId = null, branchId = null) {
   try {
-    const acc = await ChartOfAccount.findOne({
-      accountName: name,
-      isSystemAccount: true,
-      ...(orgId ? { orgId } : {}),
-    }).select('_id').lean();
-    return acc ? acc._id : null;
+    let query = { accountName: name, isSystemAccount: true };
+    if (orgId) query.orgId = orgId;
+    
+    if (branchId) {
+      let branchAcc = await ChartOfAccount.findOne({ ...query, branchId }).select('_id').lean();
+      if (branchAcc) return branchAcc._id;
+    }
+    
+    let globalAcc = await ChartOfAccount.findOne({ ...query, branchId: null }).select('_id').lean();
+    if (globalAcc) return globalAcc._id;
+    
+    let legacyAcc = await ChartOfAccount.findOne(query).select('_id').lean();
+    return legacyAcc ? legacyAcc._id : null;
   } catch (e) {
     console.error(`COA lookup error for "${name}":`, e.message);
     return null;
@@ -1468,7 +1475,7 @@ router.post('/', async (req, res) => {
     // ✅ COA: Debit each line item's expense account + Credit Accounts Payable
     try {
       const currentOrgId = req.user?.orgId || null;
-      const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+      const apId = await getSystemAccountId('Accounts Payable', currentOrgId, branchId);
       const txnDate = new Date(bill.billDate);
       const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
@@ -1629,7 +1636,7 @@ router.post('/:id/void', async (req, res) => {
     // Creation posted: Dr Expense accounts / Cr Accounts Payable
     // Void reversal:   Cr Expense accounts / Dr Accounts Payable
     try {
-      const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+      const apId = await getSystemAccountId('Accounts Payable', currentOrgId, branchId);
 
       // Cr each line item's expense account (reverses the original Dr)
       for (const item of bill.items || []) {
@@ -1675,7 +1682,7 @@ router.post('/:id/void', async (req, res) => {
     // ── STEP 2: If partially paid, reverse payment COA entries too ──────────
     if (bill.amountPaid > 0) {
       try {
-        const apId   = await getSystemAccountId('Accounts Payable', currentOrgId);
+        const apId   = await getSystemAccountId('Accounts Payable', currentOrgId, branchId);
         const cashId = await getSystemAccountId('Undeposited Funds', currentOrgId);
 
         // Reverse: Cr AP / Dr Undeposited Funds (undoes the payment posting)
@@ -1798,7 +1805,7 @@ router.post('/:id/payment', async (req, res) => {
 try {
   const currentOrgId = req.user?.orgId || null;
   const [apId, cashId] = await Promise.all([
-    getSystemAccountId('Accounts Payable', currentOrgId),
+    getSystemAccountId('Accounts Payable', currentOrgId, branchId),
     getSystemAccountId('Undeposited Funds', currentOrgId),
   ]);
   const txnDate = new Date(payment.paymentDate);
@@ -2086,7 +2093,7 @@ router.post('/:id/apply-credits', async (req, res) => {
       const desc         = `Vendor advance applied to ${bill.billNumber} (${advance.paymentNumber})`;
 
       const [apId, advId] = await Promise.all([
-        getSystemAccountId('Accounts Payable', currentOrgId),
+        getSystemAccountId('Accounts Payable', currentOrgId, branchId),
         getSystemAccountId('Advance to Vendor', currentOrgId),
       ]);
 
@@ -2174,7 +2181,7 @@ router.delete('/:id/apply-credits/:creditEntryId', async (req, res) => {
       const desc         = `Reversal: vendor advance removed from ${bill.billNumber}`;
 
       const [apId, advId] = await Promise.all([
-        getSystemAccountId('Accounts Payable', currentOrgId),
+        getSystemAccountId('Accounts Payable', currentOrgId, branchId),
         getSystemAccountId('Advance to Vendor', currentOrgId),
       ]);
 
@@ -2273,7 +2280,7 @@ router.post('/bulk-import', async (req, res) => {
         // ── COA posting: debit each line item's expense account, credit AP ──
         try {
           const currentOrgId = req.user?.orgId || null;
-          const apId = await getSystemAccountId('Accounts Payable', currentOrgId);
+          const apId = await getSystemAccountId('Accounts Payable', currentOrgId, branchId);
           const txnDate = new Date(bill.billDate);
           const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 

@@ -244,6 +244,18 @@ router.get('/balance-sheet', async (req, res) => {
       });
       totE = fmt(totE + netProfit);
     }
+
+    // ── FIX: Automatic Rounding Sweep ────────────────────────────────────
+    const difference = fmt(totA - (totL + totE));
+    if (Math.abs(difference) > 0 && Math.abs(difference) <= 2.00) {
+      equity.push({
+        accountName: 'Rounding Adjustments',
+        accountCode: '',
+        accountType: 'Equity',
+        amount: difference,
+      });
+      totE = fmt(totE + difference);
+    }
     // ─────────────────────────────────────────────────────────────────────
 
     res.json({ success: true, data: { asOf: end, assets: { items: assets, total: fmt(totA) }, liabilities: { items: liabs, total: fmt(totL) }, equity: { items: equity, total: fmt(totE) }, totalLiabilitiesAndEquity: fmt(totL + totE), balanced: Math.abs(totA - (totL + totE)) < 0.02 } });
@@ -255,83 +267,7 @@ router.get('/cash-flow', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
 
-    // ✅ FIX: Use ProviderTransaction which has cashFlowSection field
-    const ProviderTransaction = col('ProviderTransaction', 'providertransactions');
-
-    // Get all provider transactions in the period
-    const allTxns = await ProviderTransaction.find({
-      transactionDate: { $gte: start, $lte: end },
-      reconciliationStatus: 'CATEGORIZED',
-      ...scope,
-    }).lean();
-
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('🔍 [Cash Flow] DETAILED DEBUG START');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('🔍 [Cash Flow] Period:', { start, end });
-    console.log('🔍 [Cash Flow] Total transactions found:', allTxns.length);
-    console.log('🔍 [Cash Flow] Scope filter:', scope);
     
-    // Show ALL transactions with full details
-    console.log('\n📋 [Cash Flow] ALL TRANSACTIONS:');
-    allTxns.forEach((t, idx) => {
-      console.log(`\n  [${idx + 1}/${allTxns.length}] Transaction:`);
-      console.log(`    _id: ${t._id}`);
-      console.log(`    description: ${t.description}`);
-      console.log(`    amount: ₹${t.amount}`);
-      console.log(`    transactionType: ${t.transactionType}`);
-      console.log(`    cashFlowSection: ${t.cashFlowSection}`);
-      console.log(`    categoryLabel: ${t.categoryLabel}`);
-      console.log(`    source: ${t.source}`);
-      console.log(`    linkedRecordType: ${t.linkedRecordType}`);
-      console.log(`    linkedRecordId: ${t.linkedRecordId}`);
-      console.log(`    journalRef: ${t.journalRef}`);
-      console.log(`    reconciliationStatus: ${t.reconciliationStatus}`);
-      console.log(`    transactionDate: ${t.transactionDate}`);
-    });
-
-    // Categorize by cash flow section
-    let operatingInflows = 0, operatingOutflows = 0;
-    let investingInflows = 0, investingOutflows = 0;
-    let financingInflows = 0, financingOutflows = 0;
-
-    console.log('\n💰 [Cash Flow] PROCESSING TRANSACTIONS:');
-    for (const txn of allTxns) {
-      const amount = txn.amount || 0;
-      const section = txn.cashFlowSection || 'OPERATING'; // Default to operating
-      
-      console.log(`  → ${txn.description} | ₹${amount} | ${txn.transactionType} | ${section}`);
-      
-      if (txn.transactionType === 'CREDIT') {
-        // Money coming IN
-        if (section === 'INVESTING') investingInflows += amount;
-        else if (section === 'FINANCING') financingInflows += amount;
-        else operatingInflows += amount;
-      } else {
-        // Money going OUT (DEBIT)
-        if (section === 'INVESTING') investingOutflows += amount;
-        else if (section === 'FINANCING') financingOutflows += amount;
-        else operatingOutflows += amount;
-      }
-    }
-
-    console.log('\n📊 [Cash Flow] SUMMARY:');
-    console.log(`  Operating Activities:`);
-    console.log(`    Inflows:  ₹${operatingInflows}`);
-    console.log(`    Outflows: ₹${operatingOutflows}`);
-    console.log(`    Net:      ₹${operatingInflows - operatingOutflows}`);
-    console.log(`  Investing Activities:`);
-    console.log(`    Inflows:  ₹${investingInflows}`);
-    console.log(`    Outflows: ₹${investingOutflows}`);
-    console.log(`    Net:      ₹${investingInflows - investingOutflows}`);
-    console.log(`  Financing Activities:`);
-    console.log(`    Inflows:  ₹${financingInflows}`);
-    console.log(`    Outflows: ₹${financingOutflows}`);
-    console.log(`    Net:      ₹${financingInflows - financingOutflows}`);
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('🔍 [Cash Flow] DETAILED DEBUG END');
-    console.log('═══════════════════════════════════════════════════════════════');
-
     // Calculate opening and closing balance from cash accounts
     const CASH_BANK_TYPES = ['Cash', 'Other Current Asset', 'Fixed Asset', 'Other Asset'];
     const cashAccounts = await ChartOfAccount.find({
@@ -355,12 +291,75 @@ router.get('/cash-flow', async (req, res) => {
         },
         { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
       ]);
-      openingBalance = fmt((openingAgg[0]?.totalDebit || 0) - (openingAgg[0]?.totalCredit || 0));
+      openingBalance = (openingAgg[0]?.totalDebit || 0) - (openingAgg[0]?.totalCredit || 0);
     }
 
-    const totalIncoming = operatingInflows + investingInflows + financingInflows;
-    const totalOutgoing = operatingOutflows + investingOutflows + financingOutflows;
-    const closingBalance = fmt(openingBalance + totalIncoming - totalOutgoing);
+    // Get all AccountTransactions for the cash accounts within the current period
+    let operatingInflows = 0, operatingOutflows = 0;
+    const monthlyMap = {};
+
+
+
+    if (cashAccountIds.length > 0) {
+      const periodTxns = await AccountTransaction.find({
+        accountId: { $in: cashAccountIds },
+        date: { $gte: start, $lte: end },
+        ...scope,
+      }).lean();
+
+      for (const txn of periodTxns) {
+        // Debit to a cash account means money came IN
+        if (txn.debit > 0) {
+          operatingInflows += txn.debit;
+        }
+        // Credit to a cash account means money went OUT
+        if (txn.credit > 0) {
+          operatingOutflows += txn.credit;
+        }
+
+        const d = new Date(txn.date);
+        const y = d.getFullYear();
+        const m = d.getMonth();
+        const key = `${y}-${m}`;
+        
+
+        if (!monthlyMap[key]) monthlyMap[key] = { incoming: 0, outgoing: 0 };
+        monthlyMap[key].incoming += (txn.debit || 0);
+        monthlyMap[key].outgoing += (txn.credit || 0);
+      }
+    }
+
+    const totalIncoming = operatingInflows;
+    const totalOutgoing = operatingOutflows;
+    const closingBalance = openingBalance + totalIncoming - totalOutgoing;
+
+    // Build monthly breakdown
+    const monthlyBreakdown = [];
+    const abbr = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    
+    let runningBalance = openingBalance;
+    
+    // FY months from April to March
+    const fyMonths = [3,4,5,6,7,8,9,10,11,0,1,2];
+    const currentFYYear = start.getFullYear();
+    
+    for (const mIndex of fyMonths) {
+      const isNextYear = mIndex < 3;
+      const year = currentFYYear + (isNextYear ? 1 : 0);
+      const key = `${year}-${mIndex}`;
+      
+      const incoming = monthlyMap[key]?.incoming || 0;
+      const outgoing = monthlyMap[key]?.outgoing || 0;
+      runningBalance += (incoming - outgoing);
+      
+      monthlyBreakdown.push({
+        month: abbr[mIndex],
+        date: key,
+        incoming: fmt(incoming),
+        outgoing: fmt(outgoing),
+        endingBalance: fmt(runningBalance)
+      });
+    }
 
     res.json({
       success: true,
@@ -373,22 +372,22 @@ router.get('/cash-flow', async (req, res) => {
           items:    [],
         },
         investing: {
-          inflows:  fmt(investingInflows),
-          outflows: fmt(investingOutflows),
-          net:      fmt(investingInflows - investingOutflows),
+          inflows:  "0.00",
+          outflows: "0.00",
+          net:      "0.00",
         },
         financing: {
-          inflows:  fmt(financingInflows),
-          outflows: fmt(financingOutflows),
-          net:      fmt(financingInflows - financingOutflows),
+          inflows:  "0.00",
+          outflows: "0.00",
+          net:      "0.00",
         },
         netCashChange: fmt(totalIncoming - totalOutgoing),
-        monthlyBreakdown: [],
+        monthlyBreakdown,
         summary: {
-          openingBalance,
+          openingBalance: fmt(openingBalance),
           totalIncoming: fmt(totalIncoming),
           totalOutgoing: fmt(totalOutgoing),
-          closingBalance,
+          closingBalance: fmt(closingBalance),
         },
       },
     });

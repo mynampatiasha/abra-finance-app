@@ -661,7 +661,8 @@ router.post('/', upload.single('receipt'), async (req, res) => {
           referenceId: newExpense._id,
           referenceNumber: newExpense._id.toString(),
           debit: newExpense.total,
-          credit: 0
+          credit: 0,
+          createdByEmail: req.user?.email || 'system'
         });
         console.log(`✅ COA: Debited expense account "${expenseAccount}" ₹${newExpense.total}`);
       } else {
@@ -679,7 +680,8 @@ router.post('/', upload.single('receipt'), async (req, res) => {
           referenceId: newExpense._id,
           referenceNumber: newExpense._id.toString(),
           debit: 0,
-          credit: newExpense.total
+          credit: newExpense.total,
+          createdByEmail: req.user?.email || 'system'
         });
         console.log(`✅ COA: Credited paid-through account "${paidThrough}" ₹${newExpense.total}`);
       } else {

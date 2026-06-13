@@ -787,6 +787,18 @@ function extractTransactionData(row, mapping) {
   const actualDescriptionColumn = findColumnName(row, descriptionColumnNames);
   const description = actualDescriptionColumn ? row[actualDescriptionColumn] : null;
   
+  const payeeColumnNames = [
+    columnMappings.payeeColumn,
+    'Payee',
+    'Payee Name',
+    'Vendor',
+    'Customer',
+    'Beneficiary'
+  ].filter(Boolean);
+  
+  const actualPayeeColumn = findColumnName(row, payeeColumnNames);
+  const payee = actualPayeeColumn ? row[actualPayeeColumn] : null;
+  
   const referenceColumnNames = [
     columnMappings.referenceColumn,
     'Reference Number',
@@ -808,6 +820,7 @@ function extractTransactionData(row, mapping) {
     transactionDate,
     amount: Math.abs(amount),
     description,
+    payee,
     referenceNumber,
     location,
     cardNumber,
