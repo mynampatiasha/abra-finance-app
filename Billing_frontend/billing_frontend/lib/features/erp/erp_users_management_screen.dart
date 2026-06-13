@@ -1495,9 +1495,14 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
     final isEdit = widget.user != null;
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // ── Header ──────────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(20),
             decoration: const BoxDecoration(
@@ -1517,120 +1522,131 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
               IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white)),
             ]),
           ),
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(children: [
-                _field(_nameCtrl, 'Full Name', Icons.person_outline,
-                    validator: (v) => v!.trim().isEmpty ? 'Required' : null),
-                const SizedBox(height: 14),
-                _field(_emailCtrl, 'Email', Icons.email_outlined,
-                    readOnly: isEdit, keyType: TextInputType.emailAddress,
-                    validator: (v) { if (v!.trim().isEmpty) return 'Required'; if (!v.contains('@')) return 'Invalid email'; return null; }),
-                const SizedBox(height: 14),
-                _field(_phoneCtrl, 'Phone', Icons.phone_outlined,
-                    keyType: TextInputType.phone,
-                    validator: (v) => v!.trim().isEmpty ? 'Required' : null),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  value: _role,
-                  decoration: _dec('Role', Icons.badge_outlined),
-                  items: _roles.map((r) => DropdownMenuItem(
-                      value: r, child: Text(r[0].toUpperCase() + r.substring(1)))).toList(),
-                  onChanged: (v) => setState(() => _role = v!),
-                ),
-                const SizedBox(height: 14),
-                // ── Branch access control (only for non-admin roles) ──────────
-                if (_role != 'admin') ...[
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Row(children: [
-                      const Icon(Icons.account_tree_outlined, size: 16, color: Color(0xFF2463AE)),
-                      const SizedBox(width: 6),
-                      const Text('Branch Access', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF0D1B3E))),
-                      const SizedBox(width: 6),
-                      Text('(leave all unchecked = access to all branches)',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                    ]),
+          // ── Scrollable body ─────────────────────────────────────────────────
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                key: _formKey,
+                child: Column(children: [
+                  _field(_nameCtrl, 'Full Name', Icons.person_outline,
+                      validator: (v) => v!.trim().isEmpty ? 'Required' : null),
+                  const SizedBox(height: 14),
+                  _field(_emailCtrl, 'Email', Icons.email_outlined,
+                      readOnly: isEdit, keyType: TextInputType.emailAddress,
+                      validator: (v) { if (v!.trim().isEmpty) return 'Required'; if (!v.contains('@')) return 'Invalid email'; return null; }),
+                  const SizedBox(height: 14),
+                  _field(_phoneCtrl, 'Phone', Icons.phone_outlined,
+                      keyType: TextInputType.phone,
+                      validator: (v) => v!.trim().isEmpty ? 'Required' : null),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    value: _role,
+                    decoration: _dec('Role', Icons.badge_outlined),
+                    items: _roles.map((r) => DropdownMenuItem(
+                        value: r, child: Text(r[0].toUpperCase() + r.substring(1)))).toList(),
+                    onChanged: (v) => setState(() => _role = v!),
                   ),
-                  const SizedBox(height: 8),
-                  _loadingBranches
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8),
-                          child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-                        )
-                      : _branches.isEmpty
-                          ? Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: const Color(0xFFF7F9FC), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFDDE3EE))),
-                              child: Text('No branches set up yet', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                            )
-                          : Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF7F9FC),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFDDE3EE)),
-                              ),
-                              child: Column(
-                                children: _branches.map((branch) {
-                                  final branchId   = branch['branchId']   as String? ?? '';
-                                  final branchName = branch['branchName'] as String? ?? '';
-                                  final city       = branch['city']       as String? ?? '';
-                                  final isChecked  = _selectedBranchIds.contains(branchId);
-                                  return CheckboxListTile(
-                                    dense: true,
-                                    value: isChecked,
-                                    activeColor: const Color(0xFF2463AE),
-                                    title: Text(branchName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                                    subtitle: city.isNotEmpty ? Text(city, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)) : null,
-                                    onChanged: (v) {
-                                      setState(() {
-                                        if (v == true) _selectedBranchIds.add(branchId);
-                                        else _selectedBranchIds.remove(branchId);
-                                      });
-                                    },
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                  const SizedBox(height: 8),
-                ],
-                TextFormField(
-                  controller: _pwCtrl, obscureText: _obscure,
-                  decoration: _dec(isEdit ? 'New password (leave blank to keep)' : 'Password', Icons.lock_outline).copyWith(
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility, size: 18, color: Colors.grey.shade500),
-                      onPressed: () => setState(() => _obscure = !_obscure),
+                  const SizedBox(height: 14),
+                  // ── Branch access control ──────────────────────────────────
+                  if (_role != 'admin') ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Row(children: [
+                        const Icon(Icons.account_tree_outlined, size: 16, color: Color(0xFF2463AE)),
+                        const SizedBox(width: 6),
+                        const Text('Branch Access', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF0D1B3E))),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text('(leave all unchecked = access to all branches)',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500), overflow: TextOverflow.ellipsis)),
+                      ]),
                     ),
+                    const SizedBox(height: 8),
+                    _loadingBranches
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                          )
+                        : _branches.isEmpty
+                            ? Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(color: const Color(0xFFF7F9FC), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFDDE3EE))),
+                                child: Text('No branches set up yet', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                              )
+                            : Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF7F9FC),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFDDE3EE)),
+                                ),
+                                child: Column(
+                                  children: _branches.map((branch) {
+                                    final branchId   = branch['branchId']   as String? ?? '';
+                                    final branchName = branch['branchName'] as String? ?? '';
+                                    final city       = branch['city']       as String? ?? '';
+                                    final isChecked  = _selectedBranchIds.contains(branchId);
+                                    return CheckboxListTile(
+                                      dense: true,
+                                      value: isChecked,
+                                      activeColor: const Color(0xFF2463AE),
+                                      title: Text(branchName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                      subtitle: city.isNotEmpty ? Text(city, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)) : null,
+                                      onChanged: (v) {
+                                        setState(() {
+                                          if (v == true) _selectedBranchIds.add(branchId);
+                                          else _selectedBranchIds.remove(branchId);
+                                        });
+                                      },
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextFormField(
+                    controller: _pwCtrl, obscureText: _obscure,
+                    decoration: _dec(isEdit ? 'New password (leave blank to keep)' : 'Password', Icons.lock_outline).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility, size: 18, color: Colors.grey.shade500),
+                        onPressed: () => setState(() => _obscure = !_obscure),
+                      ),
+                    ),
+                    validator: (v) => !isEdit && (v == null || v.isEmpty) ? 'Password required' : null,
                   ),
-                  validator: (v) => !isEdit && (v == null || v.isEmpty) ? 'Password required' : null,
-                ),
-                const SizedBox(height: 24),
-                Row(children: [
-                  Expanded(child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.grey[700], side: BorderSide(color: Colors.grey[300]!),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
-                  )),
-                  const SizedBox(width: 12),
-                  Expanded(flex: 2, child: ElevatedButton(
-                    onPressed: _saving ? null : _save,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2463AE), foregroundColor: Colors.white,
-                        disabledBackgroundColor: const Color(0xFF2463AE).withOpacity(0.5),
-                        elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    child: _saving
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(isEdit ? 'Update' : 'Add User', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  )),
                 ]),
-              ]),
+              ),
             ),
+          ),
+          // ── Sticky action bar ────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF7F9FC),
+              border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
+              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+            ),
+            child: Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey[700], side: BorderSide(color: Colors.grey[300]!),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+              )),
+              const SizedBox(width: 12),
+              Expanded(flex: 2, child: ElevatedButton(
+                onPressed: _saving ? null : _save,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2463AE), foregroundColor: Colors.white,
+                    disabledBackgroundColor: const Color(0xFF2463AE).withOpacity(0.5),
+                    elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: _saving
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text(isEdit ? 'Update' : 'Add User', style: const TextStyle(fontWeight: FontWeight.bold)),
+              )),
+            ]),
           ),
         ]),
       ),
@@ -1657,18 +1673,21 @@ class _AddEditUserDialogState extends State<_AddEditUserDialog> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
-    final data = <String, dynamic>{
-      'name':  _nameCtrl.text.trim(),
-      'email': _emailCtrl.text.trim(),
-      'phone': _phoneCtrl.text.trim(),
-      'role':  _role,
-      // admins always get full access — send empty list to clear any restriction
-      'allowedBranches': _role == 'admin' ? [] : _selectedBranchIds.toList(),
-      if (_pwCtrl.text.isNotEmpty) 'password': _pwCtrl.text,
-    };
-    await widget.onSave(data);
-    if (mounted) Navigator.pop(context);
-    setState(() => _saving = false);
+    try {
+      final data = <String, dynamic>{
+        'name':  _nameCtrl.text.trim(),
+        'email': _emailCtrl.text.trim(),
+        'phone': _phoneCtrl.text.trim(),
+        'role':  _role,
+        // admins always get full access — send empty list to clear any restriction
+        'allowedBranches': _role == 'admin' ? [] : _selectedBranchIds.toList(),
+        if (_pwCtrl.text.isNotEmpty) 'password': _pwCtrl.text,
+      };
+      await widget.onSave(data);
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 }
 

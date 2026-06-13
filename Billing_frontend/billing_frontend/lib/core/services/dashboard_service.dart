@@ -289,7 +289,13 @@ class DashboardService {
           // Index the sparse backend data by month key "YYYY-MM"
           final Map<String, Map> monthlyByKey = {};
           for (final m in monthly) {
-            final key = m['month']?.toString() ?? '';
+            // Check 'date' first (YYYY-M or YYYY-MM), fallback to 'month'
+            String key = m['date']?.toString() ?? m['month']?.toString() ?? '';
+            // Pad the month part if it's missing a leading zero (e.g. 2026-5 -> 2026-05)
+            if (key.contains('-') && key.split('-')[1].length == 1) {
+              final parts = key.split('-');
+              key = '${parts[0]}-0${parts[1]}';
+            }
             if (key.isNotEmpty) monthlyByKey[key] = m;
           }
 
@@ -300,7 +306,7 @@ class DashboardService {
             final m   = monthlyByKey[key];
 
             if (m != null) {
-              lastBalance = _toDouble(m['balance']);
+              lastBalance = _toDouble(m['balance'] ?? m['endingBalance']);
               builtMonthly.add({
                 'month':         abbr[dt.month],
                 'date':          key,

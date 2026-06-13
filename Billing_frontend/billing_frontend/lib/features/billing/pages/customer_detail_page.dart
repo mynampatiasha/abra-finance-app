@@ -14,6 +14,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:pdf/pdf.dart' as pw_pdf;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../../../../core/services/billing_customers_service.dart';
 import '../../../../core/services/payment_service.dart';
 import 'new_customer.dart';
@@ -171,6 +176,121 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
       final data = await PaymentService.getCustomerAdvanceRegister(widget.customerId);
       setState(() { _advanceRegister = data; _loadingAdvances = false; });
     } catch (_) { setState(() { _advanceRegister = {}; _loadingAdvances = false; }); }
+  }
+
+  // ── Generate & download PDF statement ───────────────────────────────────────
+  Future<void> _exportStatementPdf() async {
+    if (_statement == null) return;
+    final s = _statement!;
+    final c = _customer!;
+    final fmt = NumberFormat('#,##0.00', 'en_IN');
+    final dateFmt = DateFormat('dd/MM/yyyy');
+
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: pw_pdf.PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        header: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text('CUSTOMER STATEMENT', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: pw_pdf.PdfColors.blueGrey800)),
+              pw.SizedBox(height: 4),
+              pw.Text(c.customerDisplayName, style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
+              if (c.primaryEmail.isNotEmpty) pw.Text(c.primaryEmail, style: const pw.TextStyle(fontSize: 10, color: pw_pdf.PdfColors.grey700)),
+              if (c.gstNumber.isNotEmpty) pw.Text('GSTIN: ${c.gstNumber}', style: const pw.TextStyle(fontSize: 10, color: pw_pdf.PdfColors.grey700)),
+            ]),
+            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+              pw.Text('Period:', style: const pw.TextStyle(fontSize: 10, color: pw_pdf.PdfColors.grey600)),
+              pw.Text('${dateFmt.format(s.fromDate)} to ${dateFmt.format(s.toDate)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 8),
+              pw.Text('Generated: ${dateFmt.format(DateTime.now())}', style: const pw.TextStyle(fontSize: 9, color: pw_pdf.PdfColors.grey500)),
+            ]),
+          ]),
+          pw.SizedBox(height: 8),
+          pw.Divider(thickness: 1.5, color: pw_pdf.PdfColors.blueGrey800),
+          pw.SizedBox(height: 4),
+          // Opening / Closing balance row
+          pw.Row(children: [
+            pw.Expanded(child: pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(color: pw_pdf.PdfColors.blue50, borderRadius: pw.BorderRadius.circular(4)),
+              child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                pw.Text('Opening Balance', style: const pw.TextStyle(fontSize: 9, color: pw_pdf.PdfColors.grey700)),
+                pw.Text('Rs. ${fmt.format(s.openingBalance)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: pw_pdf.PdfColors.blueGrey900)),
+              ]),
+            )),
+            pw.SizedBox(width: 12),
+            pw.Expanded(child: pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(color: s.closingBalance >= 0 ? pw_pdf.PdfColors.green50 : pw_pdf.PdfColors.red50, borderRadius: pw.BorderRadius.circular(4)),
+              child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                pw.Text('Closing Balance', style: const pw.TextStyle(fontSize: 9, color: pw_pdf.PdfColors.grey700)),
+                pw.Text('Rs. ${fmt.format(s.closingBalance)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: s.closingBalance >= 0 ? pw_pdf.PdfColors.green800 : pw_pdf.PdfColors.red800)),
+              ]),
+            )),
+          ]),
+          pw.SizedBox(height: 12),
+        ]),
+        build: (ctx) => [
+          // Table header
+          pw.Table(
+            border: pw.TableBorder.all(color: pw_pdf.PdfColors.grey300, width: 0.5),
+            columnWidths: {
+              0: const pw.FixedColumnWidth(65),
+              1: const pw.FixedColumnWidth(90),
+              2: const pw.FlexColumnWidth(3),
+              3: const pw.FixedColumnWidth(80),
+              4: const pw.FixedColumnWidth(80),
+              5: const pw.FixedColumnWidth(80),
+            },
+            children: [
+              // Header row
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: pw_pdf.PdfColors.blueGrey800),
+                children: ['DATE', 'NUMBER', 'DETAILS', 'INVOICES', 'PAYMENTS', 'BALANCE'].map((h) =>
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    child: pw.Text(h, style: pw.TextStyle(color: pw_pdf.PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 9)),
+                  )
+                ).toList(),
+              ),
+              // Data rows
+              ...s.entries.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final e = entry.value;
+                final isPayment = e.type == 'Payment';
+                final bg = idx.isOdd ? pw_pdf.PdfColors.grey50 : pw_pdf.PdfColors.white;
+                return pw.TableRow(
+                  decoration: pw.BoxDecoration(color: bg),
+                  children: [
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text(dateFmt.format(e.date), style: const pw.TextStyle(fontSize: 9))),
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text(e.number, style: pw.TextStyle(fontSize: 9, color: pw_pdf.PdfColors.blue700, fontWeight: pw.FontWeight.bold))),
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text((e.details.isNotEmpty && !isPayment) ? e.details : '', style: pw.TextStyle(fontSize: 9, color: pw_pdf.PdfColors.grey700))),
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text(e.invoices != null ? 'Rs. ${fmt.format(e.invoices!)}' : '-', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 9, color: e.invoices != null ? pw_pdf.PdfColors.blueGrey900 : pw_pdf.PdfColors.grey400))),
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text(e.payments != null ? 'Rs. ${fmt.format(e.payments!)}' : '-', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 9, color: e.payments != null ? pw_pdf.PdfColors.green700 : pw_pdf.PdfColors.grey400))),
+                    pw.Padding(padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5), child: pw.Text('Rs. ${fmt.format(e.balance)}', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: e.balance >= 0 ? pw_pdf.PdfColors.blueGrey900 : pw_pdf.PdfColors.red700))),
+                  ],
+                );
+              }).toList(),
+            ],
+          ),
+        ],
+        footer: (ctx) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+          pw.Text('Generated by Abra Finance', style: const pw.TextStyle(fontSize: 8, color: pw_pdf.PdfColors.grey500)),
+          pw.Text('Page ${ctx.pageNumber} of ${ctx.pagesCount}', style: const pw.TextStyle(fontSize: 8, color: pw_pdf.PdfColors.grey500)),
+        ]),
+      ),
+    );
+
+    final bytes = await pdf.save();
+    final fileName = 'statement_${c.customerDisplayName.replaceAll(' ', '_')}_${dateFmt.format(s.fromDate)}_${dateFmt.format(s.toDate)}.pdf';
+
+    if (kIsWeb) {
+      await Printing.sharePdf(bytes: Uint8List.fromList(bytes), filename: fileName);
+    } else {
+      await Printing.sharePdf(bytes: Uint8List.fromList(bytes), filename: fileName);
+    }
   }
 
   Future<void> _postComment() async {
@@ -1370,6 +1490,18 @@ Widget _buildStatementTab() {
             ),
             child: const Text('Run', style: TextStyle(fontSize: 13)),
           ),
+          const SizedBox(width: 10),
+          if (_statement != null)
+            OutlinedButton.icon(
+              onPressed: _exportStatementPdf,
+              icon: const Icon(Icons.picture_as_pdf_outlined, size: 16, color: _red),
+              label: const Text('Export PDF', style: TextStyle(fontSize: 12, color: _red)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: _red),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
         ]),
       ),
     ),
@@ -1458,7 +1590,7 @@ Widget _buildStatementTab() {
                                     children: [
                                       Text(e.number,
                                           style: const TextStyle(fontSize: 12, color: _navyAccent, fontWeight: FontWeight.w500)),
-                                      if (e.details.isNotEmpty)
+                                      if (e.details.isNotEmpty && e.type != 'Payment')
                                         Text(e.details,
                                             style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                     ],

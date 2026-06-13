@@ -101,6 +101,8 @@ class InvoiceService {
     return InvoiceListResponse.fromJson(data);
   }
 
+
+
   static Future<InvoiceStats> getStats() async {
     final data = await _api.get('$_baseEndpoint/stats');
     return InvoiceStats.fromJson(data['data']);
@@ -286,6 +288,7 @@ class InvoiceItem {
   double igstAmount;
   double amount;        // taxableAmount + tax
   String? expenseId;
+  String? unbilledShipmentTrackingNumber;
 
   InvoiceItem({
     this.itemDetails  = '',
@@ -306,6 +309,7 @@ class InvoiceItem {
     this.igstAmount   = 0,
     this.amount       = 0,
     this.expenseId,
+    this.unbilledShipmentTrackingNumber,
   });
 
   /// Calculate taxable amount from qty, rate, discount
@@ -359,6 +363,7 @@ class InvoiceItem {
     'igstAmount':    igstAmount,
     'amount':        amount,
     if (expenseId != null) 'expenseId': expenseId,
+    if (unbilledShipmentTrackingNumber != null) 'shipmentTrackingNumber': unbilledShipmentTrackingNumber,
   };
 
   factory InvoiceItem.fromJson(Map<String, dynamic> json) {
@@ -381,6 +386,7 @@ class InvoiceItem {
       igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
       amount:        (json['amount']       ?? 0).toDouble(),
       expenseId:     json['expenseId']?.toString(),
+      unbilledShipmentTrackingNumber: json['shipmentTrackingNumber']?.toString(),
     );
   }
 }

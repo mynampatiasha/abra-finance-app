@@ -16,38 +16,76 @@ const Color _navyMid    = Color(0xFF1A3A6B);
 const Color _navyLight  = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
-// ── Mutable account line for form ─────────────────────────────────────────────
 class _MutableLine {
   String? accountId;
   String accountName;
   String accountType;
-  List<TextEditingController> monthControllers;
+  List<TextEditingController> controllers = [];
+  List<double> _raw12 = List.filled(12, 0.0);
 
   _MutableLine({
     this.accountId,
     this.accountName = '',
     this.accountType = 'Expense',
     List<double>? amounts,
-  }) : monthControllers = List.generate(
-          12,
-          (i) => TextEditingController(
-              text: amounts != null && amounts[i] > 0 ? amounts[i].toStringAsFixed(2) : ''),
-        );
-
-  void dispose() {
-    for (final c in monthControllers) c.dispose();
+  }) {
+    if (amounts != null && amounts.length == 12) {
+      _raw12 = List.from(amounts);
+    }
   }
 
-  List<double> get amounts =>
-      monthControllers.map((c) => double.tryParse(c.text.replaceAll(',', '')) ?? 0).toList();
+  void dispose() {
+    for (final c in controllers) {
+      c.dispose();
+    }
+  }
 
-  double get total => amounts.reduce((a, b) => a + b);
+  void setPeriod(String period) {
+    for (final c in controllers) {
+      c.dispose();
+    }
+    if (period == 'Yearly') {
+      final total = _raw12.reduce((a, b) => a + b);
+      controllers = [TextEditingController(text: total > 0 ? total.toStringAsFixed(2) : '')];
+    } else if (period == 'Quarterly') {
+      controllers = List.generate(4, (i) {
+        final qTotal = _raw12[i * 3] + _raw12[i * 3 + 1] + _raw12[i * 3 + 2];
+        return TextEditingController(text: qTotal > 0 ? qTotal.toStringAsFixed(2) : '');
+      });
+    } else {
+      controllers = List.generate(12, (i) => 
+        TextEditingController(text: _raw12[i] > 0 ? _raw12[i].toStringAsFixed(2) : '')
+      );
+    }
+  }
 
-  Map<String, dynamic> toJson() => {
+  List<double> get12Months(String period) {
+    if (period == 'Yearly') {
+      final v = double.tryParse(controllers.isNotEmpty ? controllers[0].text.replaceAll(',', '') : '0') ?? 0;
+      return List.filled(12, v / 12);
+    } else if (period == 'Quarterly') {
+      final res = List.filled(12, 0.0);
+      for (int i = 0; i < 4; i++) {
+        final v = double.tryParse(controllers.length > i ? controllers[i].text.replaceAll(',', '') : '0') ?? 0;
+        res[i * 3] = v / 3;
+        res[i * 3 + 1] = v / 3;
+        res[i * 3 + 2] = v / 3;
+      }
+      return res;
+    } else {
+      return controllers.map((c) => double.tryParse(c.text.replaceAll(',', '')) ?? 0).toList();
+    }
+  }
+
+  double get total {
+    return controllers.fold(0.0, (s, c) => s + (double.tryParse(c.text.replaceAll(',', '')) ?? 0));
+  }
+
+  Map<String, dynamic> toJson(String period) => {
         'accountId': accountId,
         'accountName': accountName,
         'accountType': accountType,
-        'monthlyAmounts': amounts,
+        'monthlyAmounts': get12Months(period),
       };
 }
 
@@ -98,6 +136,12 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
     return '$startY-${endY.toString().substring(2)}';
   }
 
+  List<String> get _currentPeriodLabels {
+    if (_budgetPeriod == 'Yearly') return ['Annual Budget'];
+    if (_budgetPeriod == 'Quarterly') return ['Q1 (Apr-Jun)', 'Q2 (Jul-Sep)', 'Q3 (Oct-Dec)', 'Q4 (Jan-Mar)'];
+    return _monthLabels;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -136,12 +180,14 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
         for (final line in _lines) line.dispose();
         _lines.clear();
         for (final l in b.accountLines) {
-          _lines.add(_MutableLine(
+          final ml = _MutableLine(
             accountId:   l.accountId,
             accountName: l.accountName,
             accountType: l.accountType,
             amounts:     l.monthlyAmounts,
-          ));
+          );
+          ml.setPeriod(_budgetPeriod);
+          _lines.add(ml);
         }
       });
     } catch (e) {
@@ -152,7 +198,11 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
   }
 
   void _addLine() {
-    setState(() => _lines.add(_MutableLine()));
+    setState(() {
+      final ml = _MutableLine();
+      ml.setPeriod(_budgetPeriod);
+      _lines.add(ml);
+    });
   }
 
   void _removeLine(int i) {
@@ -162,9 +212,9 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
     });
   }
 
-  // Fill all months with same value
+  // Fill all inputs with same value
   void _fillAll(_MutableLine line, double value) {
-    for (final c in line.monthControllers) {
+    for (final c in line.controllers) {
       c.text = value > 0 ? value.toStringAsFixed(2) : '';
     }
     setState(() {});
@@ -172,10 +222,10 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
 
   // Distribute annual value equally
   void _distributeAnnual(_MutableLine line) {
-    final total = line.amounts.reduce((a, b) => a + b);
+    final total = line.get12Months(_budgetPeriod).reduce((a, b) => a + b);
     if (total <= 0) return;
-    final per = total / 12;
-    for (final c in line.monthControllers) c.text = per.toStringAsFixed(2);
+    final per = total / line.controllers.length;
+    for (final c in line.controllers) c.text = per.toStringAsFixed(2);
     setState(() {});
   }
 
@@ -208,7 +258,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
         'currency':      _currency,
         'isActive':      _isActive,
         'notes':         _notesCtrl.text.trim(),
-        'accountLines':  _lines.map((l) => l.toJson()).toList(),
+        'accountLines':  _lines.map((l) => l.toJson(_budgetPeriod)).toList(),
       };
 
       Budget budget;
@@ -365,7 +415,10 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
         label: 'Budget Period',
         value: _budgetPeriod,
         items: _periods,
-        onChanged: (v) => setState(() => _budgetPeriod = v!),
+        onChanged: (v) => setState(() {
+          _budgetPeriod = v!;
+          for (final l in _lines) l.setPeriod(_budgetPeriod);
+        }),
         icon: Icons.date_range,
       );
       final currF = _dropField<String>(
@@ -429,7 +482,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
         return Row(children: [
           const SizedBox(width: 220, child: Text('ACCOUNT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
           const SizedBox(width: 16),
-          ..._monthLabels.map((m) => SizedBox(width: 80, child: Text(m, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10), textAlign: TextAlign.center))),
+          ..._currentPeriodLabels.map((m) => SizedBox(width: 80, child: Text(m, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10), textAlign: TextAlign.center))),
           const SizedBox(width: 16),
           const SizedBox(width: 110, child: Text('ANNUAL TOTAL', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10), textAlign: TextAlign.right)),
           const SizedBox(width: 48),
@@ -529,13 +582,13 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                 ),
         ),
         const SizedBox(width: 16),
-        // 12 month inputs
-        ...List.generate(12, (m) => Padding(
+        // inputs
+        ...List.generate(line.controllers.length, (m) => Padding(
           padding: const EdgeInsets.only(right: 4),
           child: SizedBox(
             width: 76,
             child: TextField(
-              controller: line.monthControllers[m],
+              controller: line.controllers[m],
               decoration: InputDecoration(
                 hintText: '0',
                 isDense: true,
@@ -616,12 +669,12 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
         Wrap(
           spacing: 6,
           runSpacing: 6,
-          children: List.generate(12, (m) => SizedBox(
+          children: List.generate(line.controllers.length, (m) => SizedBox(
             width: 80,
             child: TextField(
-              controller: line.monthControllers[m],
+              controller: line.controllers[m],
               decoration: InputDecoration(
-                labelText: _monthLabels[m],
+                labelText: _currentPeriodLabels[m],
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),

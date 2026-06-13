@@ -49,7 +49,15 @@ const double _colDel     = 44.0;
 
 class NewInvoiceScreen extends StatefulWidget {
   final String? invoiceId;
-  const NewInvoiceScreen({Key? key, this.invoiceId}) : super(key: key);
+  final List<InvoiceItem>? initialItems;
+  final String? initialCustomerName;
+
+  const NewInvoiceScreen({
+    Key? key, 
+    this.invoiceId, 
+    this.initialItems, 
+    this.initialCustomerName,
+  }) : super(key: key);
 
   @override
   State<NewInvoiceScreen> createState() => _NewInvoiceScreenState();
@@ -150,10 +158,23 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   void initState() {
     super.initState();
     _dueDate = _invoiceDate.add(const Duration(days: 30));
-    _addNewItem();
+    
+    if (widget.invoiceId != null) {
+      _loadInvoiceData();
+    } else if (widget.initialItems != null && widget.initialItems!.isNotEmpty) {
+      _items = List.from(widget.initialItems!);
+      for (final item in _items) {
+        _descControllers.add(TextEditingController(text: item.itemDetails));
+      }
+      _selectedCustomerName = widget.initialCustomerName;
+      // Note: User still needs to select the customer from dropdown to get the customerId!
+      // We will calculate amounts after org state loads
+    } else {
+      _addNewItem();
+    }
+    
     _loadOrgState();
     _loadPaymentAccounts();
-    if (widget.invoiceId != null) _loadInvoiceData();
   }
 
   @override
@@ -486,11 +507,17 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       'salesperson': _salesperson, 'subject': _subjectController.text.trim(),
       'items': validItems.map((item) {
         final json = item.toJson();
-        final matched = _billableExpenses.firstWhere(
-          (e) => e.isSelected && item.itemDetails.startsWith('Expense: ${e.expenseAccount}'),
-          orElse: () => BillableExpense(id: '', date: '', expenseAccount: '', amount: 0, tax: 0, total: 0, billableAmount: 0, markupPercentage: 0, paidThrough: ''),
-        );
-        if (matched.id.isNotEmpty) json['expenseId'] = matched.id;
+        // Preserve shipmentTrackingNumber if present
+        if (item.expenseId != null && item.expenseId!.startsWith('SHIP_')) {
+            json['shipmentTrackingNumber'] = item.expenseId!.replaceAll('SHIP_', '');
+            json.remove('expenseId');
+        } else {
+            final matched = _billableExpenses.firstWhere(
+              (e) => e.isSelected && item.itemDetails.startsWith('Expense: ${e.expenseAccount}'),
+              orElse: () => BillableExpense(id: '', date: '', expenseAccount: '', amount: 0, tax: 0, total: 0, billableAmount: 0, markupPercentage: 0, paidThrough: ''),
+            );
+            if (matched.id.isNotEmpty) json['expenseId'] = matched.id;
+        }
         return json;
       }).toList(),
       'customerNotes': _customerNotesController.text.trim(),

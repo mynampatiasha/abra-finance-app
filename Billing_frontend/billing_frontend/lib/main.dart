@@ -35,8 +35,8 @@ void main() async {
   } catch (e) {
     debugPrint('⚠️ .env load failed: $e — using fallback');
     dotenv.testLoad(fileInput: '''
-FINANCE_API_BASE_URL=https://finance.abragroup.in
-API_BASE_URL=https://fleet.abra-travels.com
+FINANCE_API_BASE_URL=http://localhost:3002
+API_BASE_URL=http://localhost:3002
 ''');
   }
 

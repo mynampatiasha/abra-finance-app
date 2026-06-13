@@ -16,14 +16,36 @@ const Color _navyAccent= Color(0xFF2563EB);
 
 // ── Account Type / SubType Map ────────────────────────────────────────────────
 const Map<String, List<String>> _kSubTypes = {
+  // Broad types
   'Asset': ['Cash', 'Bank', 'Stock', 'Other Current Asset', 'Fixed Asset', 'Other Asset', 'Accounts Receivable'],
   'Liability': ['Accounts Payable', 'Other Current Liability', 'Non Current Liability', 'Other Liability', 'Credit Card'],
   'Equity': ['Equity', 'Retained Earnings'],
   'Income': ['Income', 'Other Income'],
   'Expense': ['Expense', 'Cost Of Goods Sold', 'Other Expense'],
+  
+  // Specific types mapped to themselves (so the second dropdown still works seamlessly)
+  'Fixed Asset': ['Fixed Asset'],
+  'Other Current Asset': ['Other Current Asset'],
+  'Cash': ['Cash'],
+  'Stock': ['Stock'],
+  'Other Asset': ['Other Asset'],
+  'Accounts Receivable': ['Accounts Receivable'],
+  'Accounts Payable': ['Accounts Payable'],
+  'Other Current Liability': ['Other Current Liability'],
+  'Non Current Liability': ['Non Current Liability'],
+  'Other Liability': ['Other Liability'],
+  'Other Income': ['Other Income'],
+  'Cost Of Goods Sold': ['Cost Of Goods Sold'],
+  'Other Expense': ['Other Expense'],
 };
 
-const List<String> _kAccountTypes = ['Asset', 'Liability', 'Equity', 'Income', 'Expense'];
+const List<String> _kAccountTypes = [
+  'Asset', 'Fixed Asset', 'Other Current Asset', 'Cash', 'Stock', 'Other Asset', 'Accounts Receivable',
+  'Liability', 'Accounts Payable', 'Other Current Liability', 'Non Current Liability', 'Other Liability',
+  'Equity',
+  'Income', 'Other Income',
+  'Expense', 'Cost Of Goods Sold', 'Other Expense'
+];
 const List<String> _kCurrencies   = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD'];
 
 // ============================================================================

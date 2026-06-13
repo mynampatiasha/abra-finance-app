@@ -12,6 +12,7 @@ import 'pages/new_recurring_invoice.dart';
 import 'pages/banking_page.dart';
 import 'pages/new_expenses.dart';
 import 'pages/expenses_list_page.dart';
+import 'pages/digital_expenses_list_page.dart';
 import 'pages/fixed_assets_list_page.dart';
 import 'pages/vendors_list_page.dart';
 import 'pages/quotes_list_page.dart';
@@ -67,6 +68,7 @@ const Map<String, List<String>> _kPermissionRouteMap = {
   'customers':          ['sales/customers'],
   'recurring_invoices': ['sales/recurring_invoices'],
   'expenses':           ['purchases/expenses'],
+  'digital_expenses':   ['digital_expenses'],
   'assets':             ['purchases/assets'],
   'bills':              ['purchases/bills'],
   'purchase_orders':    ['purchases/orders'],
@@ -336,6 +338,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
         SubNavigationItem(label: 'E-Way Bills',         route: 'purchases/eway_bills',        icon: Icons.receipt_outlined),
         SubNavigationItem(label: 'Payment Links',       route: 'purchases/payment_links',     icon: Icons.link_outlined),
       ]),
+    NavigationItem(icon: Icons.receipt_long_outlined,     selectedIcon: Icons.receipt_long,     label: 'Digital Expenses',  route: 'digital_expenses'),
     NavigationItem(icon: Icons.access_time_outlined,      selectedIcon: Icons.access_time,      label: 'Time Tracking',     route: 'time_tracking', isExpandable: true,
       subItems: [
         SubNavigationItem(label: 'Projects',  route: 'time_tracking/projects',  icon: Icons.folder_outlined),
@@ -662,6 +665,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
       case 'sales/delivery_challans':        return _EmbeddedPage(child: const DeliveryChallansListPage());
       case 'purchases/vendors':              return _EmbeddedPage(child: const VendorsListPage());
       case 'purchases/expenses':             return _EmbeddedPage(child: const ExpensesListPage());
+      case 'digital_expenses':               return const _DigitalExpensesLauncher();
       case 'purchases/assets':               return _EmbeddedPage(child: FixedAssetsListPage(baseUrl: ApiConfig.baseUrl, token: _token));
       case 'purchases/recurring_expenses':   return _EmbeddedPage(child: const RecurringExpensesListPage());
       case 'purchases/orders':               return _EmbeddedPage(child: const PurchaseOrdersListPage());
@@ -984,6 +988,39 @@ class _ClosedTicketsLauncherState extends State<_ClosedTicketsLauncher> {
           MaterialPageRoute(builder: (_) => const ClosedTicketsScreen()),
         ).then((_) {
           // When user presses back, go back to dashboard in the shell
+          final shell = context.findAncestorStateOfType<_BillingMainShellState>();
+          shell?._goToDashboard();
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: CircularProgressIndicator(color: Color(0xFF1E3A8A)));
+  }
+}
+
+// =============================================================================
+// DIGITAL EXPENSES LAUNCHER — navigates as a full page
+// =============================================================================
+class _DigitalExpensesLauncher extends StatefulWidget {
+  const _DigitalExpensesLauncher();
+
+  @override
+  State<_DigitalExpensesLauncher> createState() => _DigitalExpensesLauncherState();
+}
+
+class _DigitalExpensesLauncherState extends State<_DigitalExpensesLauncher> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const DigitalExpensesListPage()),
+        ).then((_) {
           final shell = context.findAncestorStateOfType<_BillingMainShellState>();
           shell?._goToDashboard();
         });

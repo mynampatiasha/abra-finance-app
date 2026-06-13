@@ -1,0 +1,321 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../../../../core/services/invoice_service.dart';
+import '../app_top_bar.dart';
+import 'new_invoice.dart';
+
+class InvoiceAutomationListPage extends StatefulWidget {
+  const InvoiceAutomationListPage({Key? key}) : super(key: key);
+
+  @override
+  State<InvoiceAutomationListPage> createState() => _InvoiceAutomationListPageState();
+}
+
+class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<dynamic> _allShipments = [];
+  List<dynamic> _filteredShipments = [];
+  Set<String> _selectedTrackingNumbers = {};
+  String _searchQuery = '';
+  
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _endDate = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchShipments();
+  }
+
+  Future<void> _fetchShipments() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final data = await InvoiceService.getUnbilledShipments(
+        startDate: DateFormat('yyyy-MM-dd').format(_startDate),
+        endDate: DateFormat('yyyy-MM-dd').format(_endDate),
+      );
+
+      if (data['success'] == true) {
+        setState(() {
+          _allShipments = data['shipments'] ?? [];
+          _filterShipments();
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = data['error'] ?? 'Failed to load shipments';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _filterShipments() {
+    setState(() {
+      if (_searchQuery.trim().isEmpty) {
+        _filteredShipments = List.from(_allShipments);
+      } else {
+        final q = _searchQuery.toLowerCase();
+        _filteredShipments = _allShipments.where((s) {
+          final cName = (s['customer_name'] ?? '').toString().toLowerCase();
+          final tracking = (s['tracking_no'] ?? '').toString().toLowerCase();
+          return cName.contains(q) || tracking.contains(q);
+        }).toList();
+      }
+    });
+  }
+
+  Future<void> _selectDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        _endDate = picked.end;
+      });
+      _fetchShipments();
+    }
+  }
+
+  void _reviewSelected() async {
+    if (_selectedTrackingNumbers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select at least one shipment')));
+      return;
+    }
+
+    final selectedShipments = _allShipments.where((s) => _selectedTrackingNumbers.contains(s['tracking_no'])).toList();
+    
+    // Pick the customer name from the first selected item to prefill
+    final firstCustomer = selectedShipments.isNotEmpty ? selectedShipments.first['customer_name'] : '';
+
+    // Map shipments to InvoiceItems
+    final initialItems = selectedShipments.map((s) {
+      final subtotal = double.tryParse(s['subtotal']?.toString() ?? '0') ?? 0.0;
+      final trackingNo = s['tracking_no'] ?? '';
+      final origin = s['origin'] ?? '';
+      final dest = s['destination'] ?? '';
+      final dateStr = s['delivery_date']?.toString() ?? '';
+      String date = dateStr;
+      if (dateStr.length > 10) {
+        try {
+          date = DateFormat('dd MMM yy').format(DateTime.parse(dateStr));
+        } catch (_) {}
+      }
+
+      return InvoiceItem(
+        itemDetails: 'Shipment: $trackingNo\\n$origin to $dest\\nDelivered: $date',
+        quantity: 1,
+        rate: subtotal,
+        amount: subtotal,
+        itemGstRate: 18, // Default 18%
+        // We use expenseId as a hack to pass tracking number to NewInvoiceScreen
+        expenseId: 'SHIP_$trackingNo',
+      );
+    }).toList();
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NewInvoiceScreen(
+          initialItems: initialItems,
+          initialCustomerName: firstCustomer,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      _selectedTrackingNumbers.clear();
+      _fetchShipments(); // Refresh list to remove billed shipments
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppTopBar(title: 'Invoice Automation'),
+      backgroundColor: const Color(0xFFF0F4F8),
+      body: Column(
+        children: [
+          _buildTopBar(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _errorMessage != null
+                    ? Center(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)))
+                    : _filteredShipments.isEmpty
+                        ? const Center(child: Text('No unbilled shipments found in this period.'))
+                        : Column(
+                            children: [
+                              // List Header with Select All
+                              Container(
+                                color: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                child: Row(
+                                  children: [
+                                    Checkbox(
+                                      value: _filteredShipments.isNotEmpty && _selectedTrackingNumbers.length == _filteredShipments.length,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          if (val == true) {
+                                            _selectedTrackingNumbers = _filteredShipments.map((e) => e['tracking_no'].toString()).toSet();
+                                          } else {
+                                            _selectedTrackingNumbers.clear();
+                                          }
+                                        });
+                                      },
+                                    ),
+                                    Text('Select All (${_filteredShipments.length} shipments)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    const Spacer(),
+                                    ElevatedButton.icon(
+                                      onPressed: _selectedTrackingNumbers.isEmpty ? null : _reviewSelected,
+                                      icon: const Icon(Icons.arrow_forward, size: 16),
+                                      label: Text('Draft Invoice (${_selectedTrackingNumbers.length})'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.indigo,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.all(16),
+                                  itemCount: _filteredShipments.length,
+                                  itemBuilder: (context, index) {
+                                    final s = _filteredShipments[index];
+                                    final tracking = s['tracking_no'] ?? '';
+                                    final subtotal = double.tryParse(s['subtotal']?.toString() ?? '0') ?? 0;
+                                    final isSelected = _selectedTrackingNumbers.contains(tracking);
+                                    
+                                    // Parse date cleanly
+                                    String dispDate = s['delivery_date'] ?? '';
+                                    if (dispDate.length > 10) {
+                                      dispDate = dispDate.substring(0, 10);
+                                    }
+
+                                    return Card(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      child: CheckboxListTile(
+                                        value: isSelected,
+                                        activeColor: Colors.indigo,
+                                        onChanged: (val) {
+                                          setState(() {
+                                            if (val == true) {
+                                              _selectedTrackingNumbers.add(tracking);
+                                            } else {
+                                              _selectedTrackingNumbers.remove(tracking);
+                                            }
+                                          });
+                                        },
+                                        title: Text(
+                                          '${s['customer_name'] ?? 'Unknown Customer'} - $tracking', 
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                                        ),
+                                        subtitle: Text(
+                                          '${s['origin']} ➡️ ${s['destination']} | Delivered: $dispDate',
+                                          style: TextStyle(color: Colors.grey[600], fontSize: 13)
+                                        ),
+                                        secondary: Text(
+                                          '₹${subtotal.toStringAsFixed(2)}', 
+                                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15)
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: const Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome, color: Colors.indigo),
+          const SizedBox(width: 8),
+          const Text(
+            'Shipment Consolidation',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+          ),
+          const SizedBox(width: 24),
+          // Add Search Field
+          Expanded(
+            flex: 2,
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: 'Search Customer or Tracking...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
+                filled: true,
+                fillColor: Colors.grey[50],
+              ),
+              onChanged: (val) {
+                _searchQuery = val;
+                _filterShipments();
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          InkWell(
+            onTap: _selectDateRange,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.date_range, size: 16, color: Colors.indigo),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${DateFormat('dd MMM').format(_startDate)} - ${DateFormat('dd MMM').format(_endDate)}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          IconButton(
+            onPressed: _isLoading ? null : _fetchShipments,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
+    );
+  }
+}

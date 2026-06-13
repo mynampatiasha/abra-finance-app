@@ -59,13 +59,13 @@ class _BulkImportBankStatementDialogState
   Future<void> _downloadTemplate() async {
     setState(() => _isDownloading = true);
     try {
-      const csvContent = '''Date,Description,Reference Number,Deposit,Withdrawal,Balance
-01/03/2026,Opening Balance,,,,10000.00
-05/03/2026,Salary Credit,SAL-001,50000.00,,60000.00
-10/03/2026,Electricity Bill,REF-101,,2500.00,57500.00
-15/03/2026,Customer Payment - Acme Corp,PAY-001,15000.00,,72500.00
-20/03/2026,Office Supplies,REF-202,,800.00,71700.00
-25/03/2026,Vendor Payment - ABC Traders,VND-001,,12000.00,59700.00
+      const csvContent = '''Date,Description,Payee,Reference Number,Deposit,Withdrawal,Balance
+01/03/2026,Opening Balance,,,,,10000.00
+05/03/2026,Salary Credit,,SAL-001,50000.00,,60000.00
+10/03/2026,Electricity Bill,Power Corp,REF-101,,2500.00,57500.00
+15/03/2026,Customer Payment - Acme Corp,Acme Corp,PAY-001,15000.00,,72500.00
+20/03/2026,Office Supplies,,REF-202,,800.00,71700.00
+25/03/2026,Vendor Payment - ABC Traders,ABC Traders,VND-001,,12000.00,59700.00
 ''';
 
       final bytes = utf8.encode(csvContent);
@@ -357,6 +357,7 @@ class _BulkImportBankStatementDialogState
         'Required columns:\n'
         '• Date (DD/MM/YYYY)\n'
         '• Description\n'
+        '• Payee (optional — vendor/customer name)\n'
         '• Reference Number\n'
         '• Deposit (credit/money in — leave blank if withdrawal)\n'
         '• Withdrawal (debit/money out — leave blank if deposit)\n'

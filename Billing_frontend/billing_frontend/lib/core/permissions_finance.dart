@@ -89,6 +89,15 @@ const List<Map<String, dynamic>> _kModules = [
     },
   },
 
+  // ── 4.5 Digital Expenses ─────────────────────────────────────────────────
+  {
+    'group': 'Digital Expenses',
+    'icon': Icons.receipt_long_outlined,
+    'permissions': {
+      'digital_expenses': 'Digital Expenses',
+    },
+  },
+
   // ── 5. Time Tracking ─────────────────────────────────────────────────────
   {
     'group': 'Time Tracking',

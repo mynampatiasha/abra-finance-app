@@ -28,6 +28,8 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   Budget? _budget;
   bool _isLoading = true;
   String? _error;
+  DateTime? _startDate;
+  DateTime? _endDate;
 
   final _hScroll = ScrollController();
   final _vScroll = ScrollController();
@@ -52,7 +54,11 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   Future<void> _load() async {
     setState(() { _isLoading = true; _error = null; });
     try {
-      final b = await BudgetService.getBudgetWithActuals(widget.budgetId);
+      final b = await BudgetService.getBudgetWithActuals(
+        widget.budgetId,
+        startDate: _startDate?.toIso8601String(),
+        endDate: _endDate?.toIso8601String(),
+      );
       setState(() { _budget = b; _isLoading = false; });
     } catch (e) {
       setState(() { _error = e.toString(); _isLoading = false; });
@@ -121,6 +127,20 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.date_range),
+            tooltip: 'Filter Date',
+            onPressed: _pickDateRange,
+          ),
+          if (_startDate != null || _endDate != null)
+            IconButton(
+              icon: const Icon(Icons.filter_alt_off),
+              tooltip: 'Clear Filter',
+              onPressed: () {
+                setState(() { _startDate = null; _endDate = null; });
+                _load();
+              },
+            ),
           if (_budget != null) ...[
             IconButton(
               icon: Icon(
@@ -146,6 +166,36 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
       ),
     ),
   );
+
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      initialDateRange: _startDate != null && _endDate != null 
+          ? DateTimeRange(start: _startDate!, end: _endDate!) 
+          : null,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _navyDark,
+              onPrimary: Colors.white,
+              onSurface: _navyDark,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        _endDate = picked.end;
+      });
+      _load();
+    }
+  }
 
   Widget _buildError() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
     Icon(Icons.error_outline, size: 60, color: Colors.red.shade300),
@@ -197,6 +247,11 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
             const SizedBox(height: 4),
             Text('${b.financialYear}  •  ${b.budgetPeriod}  •  ${b.currency}',
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+            if (_startDate != null && _endDate != null) ...[
+              const SizedBox(height: 4),
+              Text('Filtered: ${DateFormat('dd MMM yyyy').format(_startDate!)} - ${DateFormat('dd MMM yyyy').format(_endDate!)}',
+                  style: const TextStyle(fontSize: 13, color: _navyAccent, fontWeight: FontWeight.w600)),
+            ],
           ])),
           _badge(b.isActive ? 'Active' : 'Inactive',
               b.isActive ? Colors.green.shade100 : Colors.grey.shade200,
@@ -214,8 +269,11 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   // ── Summary Cards ─────────────────────────────────────────────────────────
 
   Widget _buildSummaryCards(Budget b) {
-    final variance   = b.totalBudgeted - b.totalActual;
-    final pctUsed    = b.totalBudgeted > 0 ? (b.totalActual / b.totalBudgeted * 100) : 0.0;
+    // Fix floating point precision errors
+    final varianceRaw = b.totalBudgeted - b.totalActual;
+    final variance = double.parse(varianceRaw.toStringAsFixed(2));
+    final pctUsedRaw = b.totalBudgeted > 0 ? (b.totalActual / b.totalBudgeted * 100) : 0.0;
+    final pctUsed = double.parse(pctUsedRaw.toStringAsFixed(2));
     final overBudget = variance < 0;
 
     final cards = [
@@ -305,29 +363,30 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
               columnSpacing: 20,
               horizontalMargin: 16,
               columns: const [
-                DataColumn(label: SizedBox(width: 200, child: Text('ACCOUNT'))),
-                DataColumn(label: SizedBox(width: 100, child: Text('TYPE'))),
-                DataColumn(label: SizedBox(width: 130, child: Text('BUDGETED')), numeric: true),
-                DataColumn(label: SizedBox(width: 130, child: Text('ACTUAL')),   numeric: true),
-                DataColumn(label: SizedBox(width: 130, child: Text('VARIANCE')), numeric: true),
-                DataColumn(label: SizedBox(width: 100, child: Text('% USED')),   numeric: true),
-                DataColumn(label: SizedBox(width: 180, child: Text('PROGRESS'))),
+                DataColumn(label: Text('ACCOUNT')),
+                DataColumn(label: Text('TYPE')),
+                DataColumn(label: Text('BUDGETED'), numeric: true),
+                DataColumn(label: Text('ACTUAL'),   numeric: true),
+                DataColumn(label: Text('VARIANCE'), numeric: true),
+                DataColumn(label: Text('% USED'),   numeric: true),
+                DataColumn(label: Text('PROGRESS')),
               ],
               rows: b.accountLines.map((line) {
-                final over = line.variance < 0;
-                final pct  = line.percentUsed;
+                final varianceRaw = line.totalBudgeted - line.totalActual;
+                final variance = double.parse(varianceRaw.toStringAsFixed(2));
+                final over = variance < 0;
+                final pct  = double.parse(line.percentUsed.toStringAsFixed(2));
                 return DataRow(cells: [
-                  DataCell(SizedBox(width: 200, child: Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis))),
-                  DataCell(SizedBox(width: 100, child: Text(line.accountType, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
-                  DataCell(SizedBox(width: 130, child: Text('₹${_fmt(line.totalBudgeted)}', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w600)))),
-                  DataCell(SizedBox(width: 130, child: Text('₹${_fmt(line.totalActual)}', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.w600, color: Colors.teal.shade700)))),
-                  DataCell(SizedBox(width: 130, child: Text(
-                    '${over ? '-' : ''}₹${_fmt(line.variance.abs())}',
-                    textAlign: TextAlign.right,
+                  DataCell(Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  DataCell(Text(line.accountType, style: const TextStyle(fontSize: 11))),
+                  DataCell(Text('₹${_fmt(line.totalBudgeted)}', style: const TextStyle(fontWeight: FontWeight.w600))),
+                  DataCell(Text('₹${_fmt(line.totalActual)}', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.teal.shade700))),
+                  DataCell(Text(
+                    '${over ? '-' : ''}₹${_fmt(variance.abs())}',
                     style: TextStyle(fontWeight: FontWeight.bold, color: over ? Colors.red : Colors.green.shade700),
-                  ))),
-                  DataCell(SizedBox(width: 100, child: _pctBadge(pct))),
-                  DataCell(SizedBox(width: 180, child: _progressBar(pct))),
+                  )),
+                  DataCell(_pctBadge(pct)),
+                  DataCell(SizedBox(width: 150, child: _progressBar(pct))),
                 ]);
               }).toList()
                 ..add(_totalRow(b)),
@@ -339,23 +398,24 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   );
 
   DataRow _totalRow(Budget b) {
-    final variance  = b.totalBudgeted - b.totalActual;
-    final pct       = b.totalBudgeted > 0 ? b.totalActual / b.totalBudgeted * 100 : 0.0;
-    final over      = variance < 0;
+    final varianceRaw  = b.totalBudgeted - b.totalActual;
+    final variance     = double.parse(varianceRaw.toStringAsFixed(2));
+    final pctRaw       = b.totalBudgeted > 0 ? b.totalActual / b.totalBudgeted * 100 : 0.0;
+    final pct          = double.parse(pctRaw.toStringAsFixed(2));
+    final over         = variance < 0;
     return DataRow(
       color: WidgetStateProperty.all(const Color(0xFFF0F4FF)),
       cells: [
-        const DataCell(SizedBox(width: 200, child: Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark)))),
-        const DataCell(SizedBox(width: 100, child: Text(''))),
-        DataCell(SizedBox(width: 130, child: Text('₹${_fmt(b.totalBudgeted)}', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: _navyDark)))),
-        DataCell(SizedBox(width: 130, child: Text('₹${_fmt(b.totalActual)}', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)))),
-        DataCell(SizedBox(width: 130, child: Text(
+        const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark))),
+        const DataCell(Text('')),
+        DataCell(Text('₹${_fmt(b.totalBudgeted)}', style: const TextStyle(fontWeight: FontWeight.bold, color: _navyDark))),
+        DataCell(Text('₹${_fmt(b.totalActual)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal))),
+        DataCell(Text(
           '${over ? '-' : ''}₹${_fmt(variance.abs())}',
-          textAlign: TextAlign.right,
           style: TextStyle(fontWeight: FontWeight.bold, color: over ? Colors.red : Colors.green),
-        ))),
-        DataCell(SizedBox(width: 100, child: _pctBadge(pct))),
-        DataCell(SizedBox(width: 180, child: _progressBar(pct))),
+        )),
+        DataCell(_pctBadge(pct)),
+        DataCell(SizedBox(width: 150, child: _progressBar(pct))),
       ],
     );
   }
@@ -402,25 +462,37 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                 const DataColumn(label: SizedBox(width: 160, child: Text('ACCOUNT'))),
                 ...List.generate(12, (i) => DataColumn(
                   label: SizedBox(width: 75,
-                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text(_monthLabels[i], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                    ]),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center, 
+                      crossAxisAlignment: CrossAxisAlignment.end, 
+                      children: [
+                        Text(_monthLabels[i], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      ]
+                    ),
                   ),
                   numeric: true,
                 )),
-                const DataColumn(label: SizedBox(width: 110, child: Text('ANNUAL')), numeric: true),
+                const DataColumn(
+                  label: SizedBox(
+                    width: 110, 
+                    child: Text('ANNUAL', textAlign: TextAlign.right)
+                  ), 
+                  numeric: true
+                ),
               ],
               rows: b.accountLines.map((line) => DataRow(cells: [
                 DataCell(SizedBox(width: 160, child: Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), overflow: TextOverflow.ellipsis))),
                 ...List.generate(12, (m) {
-                  final budg = m < line.monthlyAmounts.length ? line.monthlyAmounts[m] : 0.0;
-                  final act  = m < line.actualMonthly.length  ? line.actualMonthly[m]  : 0.0;
+                  final budgRaw = m < line.monthlyAmounts.length ? line.monthlyAmounts[m] : 0.0;
+                  final actRaw  = m < line.actualMonthly.length  ? line.actualMonthly[m]  : 0.0;
+                  final budg = double.parse(budgRaw.toStringAsFixed(2));
+                  final act  = double.parse(actRaw.toStringAsFixed(2));
                   final over = act > budg && budg > 0;
                   return DataCell(SizedBox(width: 75, child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
                       Text(_fmtShort(budg), style: const TextStyle(fontSize: 11, color: _navyDark)),
+                      const SizedBox(height: 4),
                       Text(_fmtShort(act), style: TextStyle(fontSize: 10, color: over ? Colors.red : Colors.teal.shade700)),
                     ],
                   )));
@@ -430,6 +502,7 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(_fmt(line.totalBudgeted), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navyDark)),
+                    const SizedBox(height: 4),
                     Text(_fmt(line.totalActual), style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
                   ],
                 ))),

@@ -32,6 +32,7 @@ import 'new_invoice.dart';
 import 'invoice_detail_page.dart';
 import 'new_recurring_invoice.dart';
 import 'reminder_settings_page.dart';
+import 'invoice_automation_list_page.dart';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
 const Color _navy   = Color(0xFF1e3a8a);
@@ -199,6 +200,12 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     final result = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => NewInvoiceScreen(invoiceId: invoiceId)));
     if (result == true) _refreshData();
+  }
+
+  void _openAutomationPage() async {
+    final result = await Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const InvoiceAutomationListPage()));
+    if (result == true) _refreshData(); // Refresh if drafts were created
   }
 
   // ==========================================================================
@@ -717,6 +724,8 @@ void _showImportDialog() {
     const SizedBox(width: 8),
     _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
     const SizedBox(width: 8),
+    _actionBtn('Automate', Icons.auto_awesome, Colors.indigo, _openAutomationPage),
+    const SizedBox(width: 8),
     _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
     const SizedBox(width: 8),
     _actionBtn('Reminders', Icons.notifications_active_outlined, _orange, _openReminderSettings),
@@ -747,6 +756,8 @@ void _showImportDialog() {
       _newInvoiceButton(),
       const SizedBox(width: 8),
       _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
+      const SizedBox(width: 8),
+      _actionBtn('Automate', Icons.auto_awesome, Colors.indigo, _openAutomationPage),
       const SizedBox(width: 8),
       _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
       const SizedBox(width: 8),
@@ -779,6 +790,8 @@ void _showImportDialog() {
         _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData, tooltip: 'Refresh'),
         const SizedBox(width: 6),
         _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog, tooltip: 'View Process', color: _blue, bg: _blue.withOpacity(0.10)),
+        const SizedBox(width: 6),
+        _compactBtn('Automate', Colors.indigo, _openAutomationPage),
         const SizedBox(width: 6),
         _compactBtn('Import', _purple, _showImportDialog),
         const SizedBox(width: 6),

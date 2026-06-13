@@ -248,9 +248,14 @@ class BudgetService {
 
   // ── Actuals (with COA comparison) ─────────────────────────────────────────
 
-  static Future<Budget> getBudgetWithActuals(String id) async {
+  static Future<Budget> getBudgetWithActuals(String id, {String? startDate, String? endDate}) async {
     final headers = await _getHeaders();
-    final res = await http.get(Uri.parse('$_base/$id/actuals'), headers: headers);
+    final params = <String, String>{};
+    if (startDate != null) params['startDate'] = startDate;
+    if (endDate != null) params['endDate'] = endDate;
+    
+    final uri = Uri.parse('$_base/$id/actuals').replace(queryParameters: params.isNotEmpty ? params : null);
+    final res = await http.get(uri, headers: headers);
     final body = jsonDecode(res.body);
     if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load actuals');
     return Budget.fromJson(body['data']);

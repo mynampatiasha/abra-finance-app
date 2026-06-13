@@ -1554,7 +1554,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       if (monthly.isNotEmpty) {
         rows.add({'Item': '── Monthly Breakdown ──', 'Amount': ''});
         for (final m in monthly) {
-          if (m is Map) rows.add({'Item': m['month']?.toString() ?? '', 'Amount': m['balance'] ?? 0, 'Incoming': m['incoming'] ?? 0, 'Outgoing': m['outgoing'] ?? 0});
+          if (m is Map) rows.add({'Item': m['month']?.toString() ?? '', 'Amount': m['endingBalance'] ?? m['balance'] ?? 0, 'Incoming': m['incoming'] ?? 0, 'Outgoing': m['outgoing'] ?? 0});
         }
       }
 

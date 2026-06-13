@@ -13,6 +13,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
 import '../../../core/services/dashboard_service.dart';
 import '../../../core/finance_secure_storage.dart';
 import '../../../core/services/reports_service.dart';
@@ -184,17 +185,12 @@ class _HomeBillingState extends State<HomeBilling> {
   // ── Formatters ─────────────────────────────────────────────────────────────
   String _fmt(dynamic v) {
     final val = (v is num) ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0.0;
-    if (val >= 10000000) return '₹${(val / 10000000).toStringAsFixed(2)}Cr';
-    if (val >= 100000)   return '₹${(val / 100000).toStringAsFixed(2)}L';
-    if (val >= 1000)     return '₹${(val / 1000).toStringAsFixed(1)}K';
-    return '₹${val.toStringAsFixed(2)}';
+    return '₹${NumberFormat('#,##,##0.00', 'en_IN').format(val)}';
   }
 
   String _fmtShort(double v) {
-    if (v == 0)            return '0';
-    if (v.abs() >= 100000) return '${(v / 100000).toStringAsFixed(0)}L';
-    if (v.abs() >= 1000)   return '${(v / 1000).toStringAsFixed(0)}K';
-    return v.toStringAsFixed(0);
+    if (v == 0) return '0';
+    return NumberFormat('#,##,##0.00', 'en_IN').format(v);
   }
 
   // ==========================================================================
@@ -694,7 +690,8 @@ Widget _buildCashFlowPanel() {
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            reservedSize: 52,
+            interval: interval,
+            reservedSize: 75,
             getTitlesWidget: (v, _) => Text(_fmtShort(v),
                 style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
           ),
@@ -913,6 +910,7 @@ Widget _buildCashFlowPanel() {
                               )),
                               leftTitles: AxisTitles(sideTitles: SideTitles(
                                 showTitles: true, reservedSize: 44,
+                                interval: maxVal == 0 ? 2000 : (maxVal / 4).clamp(1, double.infinity),
                                 getTitlesWidget: (v, _) => Text(_fmtShort(v),
                                     style: const TextStyle(fontSize: 10,
                                         color: Color(0xFF94A3B8))),

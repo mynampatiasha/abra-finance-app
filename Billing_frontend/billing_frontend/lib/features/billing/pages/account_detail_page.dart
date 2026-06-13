@@ -287,6 +287,20 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     _selectedCat         = null;
   });
 
+  void _markAsCategorizedLocally(String txnId, String label) {
+    setState(() {
+      _txns.removeWhere((t) => t['_id']?.toString() == txnId);
+      for (var t in _allTxns) {
+        if (t['_id']?.toString() == txnId) {
+          t['reconciliationStatus'] = 'CATEGORIZED';
+          t['categoryLabel'] = label;
+        }
+      }
+      _uncatCount = _uncatCount > 0 ? _uncatCount - 1 : 0;
+      _catCount++;
+    });
+  }
+
   void _backToCategoryPicker() => setState(() {
     _showingEmbeddedPage = false;
     _selectedCat         = null;
@@ -352,7 +366,7 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     }
     _showSuccess('Transaction categorized successfully');
     _closePanel();
-    _loadAll();
+    if (txn != null) _markAsCategorizedLocally(txn['_id']?.toString() ?? '', cat?.label ?? '');
   }
 
   Future<void> _loadMatches(Map<String,dynamic> txn) async {
@@ -400,7 +414,7 @@ class _AccountDetailPageState extends State<AccountDetailPage>
       if (result['success'] == true) {
         _showSuccess('Transaction categorized');
         _closePanel();
-        _loadAll();
+        _markAsCategorizedLocally(txnId, cat.label);
       } else if (result['code'] == 'COA_ACCOUNT_MISSING') {
         // The required COA account doesn't exist yet — take the user to create it
         final suggestedName    = result['suggestedName']    as String?;
@@ -958,6 +972,8 @@ void _openReconcile() {
             final status   = txn['reconciliationStatus']?.toString() ?? 'UNCATEGORIZED';
             final desc     = txn['description']?.toString() ?? '';
             final catLabel = txn['categoryLabel']?.toString() ?? '';
+            final refNum   = txn['referenceNumber']?.toString() ?? '';
+            final payee    = txn['payee']?.toString() ?? txn['vendorName']?.toString() ?? txn['customerName']?.toString() ?? '';
             final isCat    = status == 'CATEGORIZED';
             final isSelected =
                 _selectedCatTxn?['_id']?.toString() == id;
@@ -1007,10 +1023,7 @@ void _openReconcile() {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isCat && catLabel.isNotEmpty
-                                ? catLabel
-                                : (desc.isNotEmpty ? desc
-                                : (isDebit ? 'Debit' : 'Credit')),
+                            desc.isNotEmpty ? desc : (isCat && catLabel.isNotEmpty ? catLabel : (isDebit ? 'Debit' : 'Credit')),
                             style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -1018,8 +1031,22 @@ void _openReconcile() {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          if (desc.isNotEmpty && isCat)
-                            Text(desc,
+                          if (payee.isNotEmpty)
+                            Text('Payee: $payee',
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF7F8C8D)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                          if (isCat && catLabel.isNotEmpty)
+                            Text('Category: $catLabel',
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF7F8C8D)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                          if (refNum.isNotEmpty)
+                            Text('Ref: $refNum',
                                 style: const TextStyle(
                                     fontSize: 11,
                                     color: Color(0xFF7F8C8D)),
@@ -1867,7 +1894,7 @@ void _openReconcile() {
       } else {
         r = await _svc.matchToRecord(providerTransactionId: txnId, recordId: m['_id'].toString(), recordType: type);
       }
-      if (r['success'] == true) { _showSuccess('Transaction matched'); _closePanel(); _loadAll(); }
+      if (r['success'] == true) { _showSuccess('Transaction matched'); _closePanel(); _markAsCategorizedLocally(txnId, 'Matched to ${type}'); }
       else { _showError(r['message'] ?? 'Match failed'); }
     } catch (e) { _showError('Failed: $e'); }
   }
