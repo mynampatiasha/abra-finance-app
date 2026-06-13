@@ -1671,6 +1671,7 @@ void _openReconcile() {
           prefilledDate: dateStr,
           prefilledReference: ref,
           prefilledNotes: desc,
+          prefilledPaidThroughName: widget.accountName,
           providerTransactionId: _selectedTxn?['_id']?.toString(),
           onSavedCallback: _onEmbeddedPageSaved,
         );

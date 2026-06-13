@@ -78,6 +78,7 @@ class NewExpensePage extends StatefulWidget {
   final String? prefilledReference;
   final String? prefilledNotes;
   final String? providerTransactionId;
+  final String? prefilledPaidThroughName;
   final bool showAppBar;
   final Function(String recordId)? onSavedCallback;
 
@@ -89,6 +90,7 @@ class NewExpensePage extends StatefulWidget {
     this.prefilledReference,
     this.prefilledNotes,
     this.providerTransactionId,
+    this.prefilledPaidThroughName,
     this.showAppBar = true,
     this.onSavedCallback,
   }) : super(key: key);
@@ -177,6 +179,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
     }
     if (widget.prefilledNotes != null && widget.prefilledNotes!.isNotEmpty) {
       _notesCtrl.text = widget.prefilledNotes!;
+    }
+    if (widget.prefilledPaidThroughName != null && widget.prefilledPaidThroughName!.isNotEmpty) {
+      _selectedPaidThroughName = widget.prefilledPaidThroughName;
     }
     _loadAllAccounts();
     _loadCoaExpenseAccounts();
