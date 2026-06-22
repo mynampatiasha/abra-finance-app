@@ -36,10 +36,12 @@ class ReportCategory {
 class ReportMeta {
   final String key;
   final String name;
-  ReportMeta({required this.key, required this.name});
+  final String? accountId;
+  ReportMeta({required this.key, required this.name, this.accountId});
   factory ReportMeta.fromJson(Map<String, dynamic> j) => ReportMeta(
     key:  j['key']  as String,
     name: j['name'] as String,
+    accountId: j['accountId'] as String?,
   );
 }
 

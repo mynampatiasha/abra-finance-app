@@ -380,7 +380,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
             decoration: const BoxDecoration(color: _navy, borderRadius: BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14))),
             child: Row(children: [
               const Icon(Icons.receipt_long_outlined, color: Colors.white, size: 18), const SizedBox(width: 10),
-              const Expanded(child: Text('Transaction Details', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold))),
+              const Expanded(child: Text('Transaction Details', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold))),
               IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white, size: 18), padding: EdgeInsets.zero),
             ])),
           Flexible(child: SingleChildScrollView(
@@ -398,8 +398,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(4)),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    SizedBox(width: 160, child: Text(_colLabel(e.key), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy))),
-                    Expanded(child: Text(_displayVal(e.key, e.value), style: const TextStyle(fontSize: 12, color: Color(0xFF374151)))),
+                    SizedBox(width: 160, child: Text(_colLabel(e.key), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy))),
+                    Expanded(child: Text(_displayVal(e.key, e.value), style: const TextStyle(fontSize: 14, color: Color(0xFF374151)))),
                   ]))),
             ]))),
           Container(
@@ -508,15 +508,15 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     decoration: BoxDecoration(color: _navy.withOpacity(0.07), borderRadius: BorderRadius.circular(6)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.person_outline, size: 13, color: _navy), const SizedBox(width: 5),
-      Text(_entityName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)),
+      Text(_entityName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)),
     ]));
 
   Widget _searchBox() => SizedBox(
     height: 40,
     child: TextField(
-      controller: _searchCtrl, style: const TextStyle(fontSize: 13),
+      controller: _searchCtrl, style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
-        hintText: 'Search…', hintStyle: TextStyle(fontSize: 13, color: Colors.grey[400]),
+        hintText: 'Search…', hintStyle: TextStyle(fontSize: 15, color: Colors.grey[400]),
         prefixIcon: Icon(Icons.search, size: 16, color: Colors.grey[400]),
         suffixIcon: _search.isNotEmpty
             ? IconButton(icon: const Icon(Icons.clear, size: 14), onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); })
@@ -584,10 +584,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               border: Border.all(color: color.withOpacity(0.2)),
               boxShadow: [BoxShadow(color: color.withOpacity(0.06), blurRadius: 6, offset: const Offset(0,2))]),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.value['label'] ?? '', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
+              Text(e.value['label'] ?? '', style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
               Text(n != null ? '₹${n.toStringAsFixed(2)}' : (e.value['value'] ?? ''),
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
             ]));
         }).toList())),
     );
@@ -602,7 +602,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         Icon(Icons.inbox_outlined, size: 52, color: Colors.grey[300]), const SizedBox(height: 12),
         Text(
           _search.isNotEmpty ? 'No results match "$_search"' : 'No records found for $_entityName',
-          style: TextStyle(fontSize: 15, color: Colors.grey[500]), textAlign: TextAlign.center),
+          style: TextStyle(fontSize: 17, color: Colors.grey[500]), textAlign: TextAlign.center),
         if (_search.isNotEmpty) ...[
           const SizedBox(height: 8),
           TextButton(onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); }, child: const Text('Clear search')),
@@ -613,7 +613,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     if (_headers.isEmpty) {
       return SingleChildScrollView(padding: const EdgeInsets.all(16),
         child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-          child: Text(_data.toString(), style: const TextStyle(fontFamily: 'monospace', fontSize: 11))));
+          child: Text(_data.toString(), style: const TextStyle(fontFamily: 'monospace', fontSize: 13))));
     }
 
     final colW = _headers.length <= 4 ? 180.0 : _headers.length <= 7 ? 145.0 : 120.0;
@@ -628,7 +628,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           child: Row(children: [
             Text(
               '${rows.length} record${rows.length!=1?'s':''}${_search.isNotEmpty?" (filtered)":''}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+              style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
             const Spacer(),
             if (_exporting) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _navy)),
           ])),
@@ -656,10 +656,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                         scrollDirection: Axis.vertical,
                         child: DataTable(
                           headingRowColor: WidgetStateProperty.all(const Color(0xFF0D1B3E)),
-                          headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.3),
+                          headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.3),
                           headingRowHeight: 46,
                           dataRowMinHeight: 50, dataRowMaxHeight: 64,
-                          dataTextStyle: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+                          dataTextStyle: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
                           dividerThickness: 1, columnSpacing: 14, horizontalMargin: 14,
                           columns: _headers.map((h) {
                             final hl = h.toLowerCase();
@@ -715,17 +715,17 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-      child: Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg)));
+      child: Text(status, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)));
   }
 
   TextStyle? _cellStyle(String h, dynamic v) {
     final hl = h.toLowerCase();
     if (hl.contains('amount') || hl.contains('total') || hl.contains('due') || hl.contains('balance')) {
       final n = double.tryParse(v?.toString() ?? '');
-      if (n != null && n < 0) return const TextStyle(fontSize: 12, color: _red, fontWeight: FontWeight.w500);
-      if (n != null && n > 0) return const TextStyle(fontSize: 12, color: Color(0xFF374151), fontWeight: FontWeight.w500);
+      if (n != null && n < 0) return const TextStyle(fontSize: 14, color: _red, fontWeight: FontWeight.w500);
+      if (n != null && n > 0) return const TextStyle(fontSize: 14, color: Color(0xFF374151), fontWeight: FontWeight.w500);
     }
-    if (h.toLowerCase() == 'status') return const TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+    if (h.toLowerCase() == 'status') return const TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
     return null;
   }
 
@@ -745,7 +745,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           child: Row(children: [
             Container(width: 3, height: 18, decoration: BoxDecoration(color: _navy, borderRadius: BorderRadius.circular(2))),
             const SizedBox(width: 8),
-            const Text('Related Reports', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
+            const Text('Related Reports', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _navy)),
           ])),
         GridView.builder(
           shrinkWrap: true,
@@ -772,7 +772,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                     decoration: BoxDecoration(color: color.withOpacity(0.10), borderRadius: BorderRadius.circular(6)),
                     child: Icon(Icons.description_outlined, size: 15, color: color)),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(rel['name'] ?? '', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color), maxLines: 2, overflow: TextOverflow.ellipsis)),
+                  Expanded(child: Text(rel['name'] ?? '', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color), maxLines: 2, overflow: TextOverflow.ellipsis)),
                   Icon(Icons.arrow_forward_ios_rounded, size: 10, color: color.withOpacity(0.6)),
                 ]),
               ),
@@ -787,8 +787,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     padding: const EdgeInsets.all(32),
     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.error_outline_rounded, size: 52, color: Colors.red[400]), const SizedBox(height: 12),
-      Text('Failed to load details', style: TextStyle(fontSize: 15, color: Colors.grey[700])), const SizedBox(height: 8),
-      Text(_error ?? '', style: TextStyle(fontSize: 12, color: Colors.grey[500]), textAlign: TextAlign.center),
+      Text('Failed to load details', style: TextStyle(fontSize: 17, color: Colors.grey[700])), const SizedBox(height: 8),
+      Text(_error ?? '', style: TextStyle(fontSize: 14, color: Colors.grey[500]), textAlign: TextAlign.center),
       const SizedBox(height: 20),
       ElevatedButton.icon(onPressed: _load,
         icon: const Icon(Icons.refresh_rounded), label: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -804,7 +804,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _btn(String label, IconData icon, Color bg, VoidCallback? onTap) =>
     ElevatedButton.icon(onPressed: onTap, icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(backgroundColor: bg, foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.4), elevation: 0,
         minimumSize: const Size(0, 40), padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -816,5 +816,5 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         disabledBackgroundColor: bg.withOpacity(0.4), elevation: 0,
         minimumSize: const Size(0, 38), padding: const EdgeInsets.symmetric(horizontal: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-      child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)));
+      child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)));
 }

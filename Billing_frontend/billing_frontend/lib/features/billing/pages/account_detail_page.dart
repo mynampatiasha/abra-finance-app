@@ -110,12 +110,18 @@ class _AccountDetailPageState extends State<AccountDetailPage>
   int    _uncatCount   = 0;
   int    _catCount     = 0;
   int    _total        = 0;
-  double _balance      = 0;
+  double _statementBalance = 0;
+  double _ledgerBalance    = 0;
   bool   _statsLoading = true;
 
   List<Map<String,dynamic>> _txns    = [];
   List<Map<String,dynamic>> _allTxns = [];
   bool _txnsLoading = true;
+
+  // ── All Transactions pagination ───────────────────────────────────────────
+  int _allTxnsPage     = 1;
+  int _allTxnsTotal    = 0;
+  static const int _allTxnsPageSize = 50;
 
   String _filter = 'All';
   String _allTxnsFilter = 'All';
@@ -186,11 +192,12 @@ class _AccountDetailPageState extends State<AccountDetailPage>
       if (r['success'] == true) {
         final d = r['data'];
         setState(() {
-          _uncatCount   = d['uncategorized'] ?? 0;
-          _catCount     = d['categorized']   ?? 0;
-          _total        = d['total']          ?? 0;
-          _balance      = (d['currentBalance'] ?? 0).toDouble();
-          _statsLoading = false;
+          _uncatCount       = d['uncategorized'] ?? 0;
+          _catCount         = d['categorized']   ?? 0;
+          _total            = d['total']          ?? 0;
+          _statementBalance = (d['currentBalance'] ?? 0).toDouble();
+          _ledgerBalance    = (d['bankCOABalance'] ?? d['currentBalance'] ?? 0).toDouble();
+          _statsLoading     = false;
         });
       }
     } catch (_) { setState(() => _statsLoading = false); }
@@ -200,10 +207,27 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     setState(() => _txnsLoading = true);
     try {
       final r  = await _svc.getUncategorized(accountId: widget.accountId, page: 1, limit: 200);
-      final r2 = await _svc.getAllTransactions(accountId: widget.accountId);
+      final r2 = await _svc.getAllTransactions(accountId: widget.accountId, page: _allTxnsPage, limit: _allTxnsPageSize);
       setState(() {
         if (r['success']  == true) _txns    = List<Map<String,dynamic>>.from(r['data']  ?? []);
-        if (r2['success'] == true) _allTxns = List<Map<String,dynamic>>.from(r2['data'] ?? []);
+        if (r2['success'] == true) {
+          _allTxns      = List<Map<String,dynamic>>.from(r2['data'] ?? []);
+          _allTxnsTotal = (r2['total'] ?? 0) as int;
+        }
+        _txnsLoading = false;
+      });
+    } catch (_) { setState(() => _txnsLoading = false); }
+  }
+
+  Future<void> _loadAllTxnsPage(int page) async {
+    setState(() { _allTxnsPage = page; _txnsLoading = true; });
+    try {
+      final r2 = await _svc.getAllTransactions(accountId: widget.accountId, page: page, limit: _allTxnsPageSize);
+      setState(() {
+        if (r2['success'] == true) {
+          _allTxns      = List<Map<String,dynamic>>.from(r2['data'] ?? []);
+          _allTxnsTotal = (r2['total'] ?? 0) as int;
+        }
         _txnsLoading = false;
       });
     } catch (_) { setState(() => _txnsLoading = false); }
@@ -654,11 +678,9 @@ void _openReconcile() {
           style: const TextStyle(fontSize: 12, color: Color(0xFF7F8C8D)),
         ),
         Text(
-          _txnsLoading
+          _txnsLoading || _statsLoading
               ? 'Loading...'
-              : '₹${NumberFormat('#,##,##0.00').format(
-                  _tabCtrl.index == 2 ? _runningBalance : _balance
-                )}',
+              : '₹${NumberFormat('#,##,##0.00').format(_tabCtrl.index == 2 ? _ledgerBalance : _statementBalance)}',
           style: const TextStyle(
               fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
         ),
@@ -669,50 +691,62 @@ void _openReconcile() {
 
   Widget _buildTabsRow() => Container(
     color: Colors.white,
-    child: Column(children: [
-      Row(children: [
-        Expanded(child: TabBar(
-          controller: _tabCtrl,
-          isScrollable: true,
-          labelColor: _navyAccent,
-          unselectedLabelColor: const Color(0xFF64748B),
-          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 13),
-          indicatorColor: _navyAccent,
-          indicatorWeight: 2,
-          tabAlignment: TabAlignment.start,
-          tabs: [
-            const Tab(text: 'Dashboard'),
-            Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (_uncatCount > 0) Container(
-                margin: const EdgeInsets.only(right: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(color: _navyAccent, borderRadius: BorderRadius.circular(10)),
-                child: Text('$_uncatCount', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-              ),
-              const Text('Uncategorized Transactions'),
-              const SizedBox(width: 4),
-              const Text('From Bank Statements', style: TextStyle(fontSize: 10, color: Color(0xFF7F8C8D))),
-            ])),
-            const Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('All Transactions'),
-              SizedBox(width: 4),
+    child: LayoutBuilder(builder: (context, constraints) {
+      final isMobile = constraints.maxWidth < 650;
+      final tabs = TabBar(
+        controller: _tabCtrl,
+        isScrollable: true,
+        labelColor: _navyAccent,
+        unselectedLabelColor: const Color(0xFF64748B),
+        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 13),
+        indicatorColor: _navyAccent,
+        indicatorWeight: 2,
+        tabAlignment: TabAlignment.start,
+        tabs: [
+          const Tab(text: 'Dashboard'),
+          Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (_uncatCount > 0) Container(
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(color: _navyAccent, borderRadius: BorderRadius.circular(10)),
+              child: Text('$_uncatCount', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            ),
+            const Text('Uncategorized'),
+            if (!isMobile) const SizedBox(width: 4),
+            if (!isMobile) const Text('Transactions', style: TextStyle(fontSize: 10, color: Color(0xFF7F8C8D))),
+          ])),
+          const Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('All Transactions'),
+            SizedBox(width: 4),
+            Icon(Icons.keyboard_arrow_down, size: 14),
+          ])),
+        ],
+      );
+      
+      final switchWidget = Padding(
+        padding: EdgeInsets.only(right: 12, left: isMobile ? 16 : 0, bottom: isMobile ? 8 : 0, top: isMobile ? 8 : 0),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('Multi-Select & Match', style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+          const SizedBox(width: 6),
+          Switch(value: _multiSelect, activeColor: _navyAccent, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, onChanged: (v) => setState(() { _multiSelect = v; if (!v) _selectedIds.clear(); })),
+        ]),
+      );
 
-              Icon(Icons.keyboard_arrow_down, size: 14),
-            ])),
-          ],
-        )),
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: Row(children: [
-            Text('Multi-Select & Match', style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic)),
-            const SizedBox(width: 6),
-            Switch(value: _multiSelect, activeColor: _navyAccent, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, onChanged: (v) => setState(() { _multiSelect = v; if (!v) _selectedIds.clear(); })),
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (isMobile) ...[
+          tabs,
+          const Divider(height: 1, color: Color(0xFFE8ECF0)),
+          switchWidget,
+        ] else ...[
+          Row(children: [
+            Expanded(child: tabs),
+            switchWidget,
           ]),
-        ),
-      ]),
-      const Divider(height: 1, color: Color(0xFFE8ECF0)),
-    ]),
+        ],
+        const Divider(height: 1, color: Color(0xFFE8ECF0)),
+      ]);
+    }),
   );
 
   Widget _buildDashboard() => SingleChildScrollView(
@@ -812,11 +846,17 @@ void _openReconcile() {
     );
   }
 
-  Widget _buildTable() => Column(children: [
-    Container(
-      color: const Color(0xFFF8F9FB),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(children: [
+  Widget _buildTable() => LayoutBuilder(builder: (context, constraints) {
+    final tableWidth = constraints.maxWidth < 650 ? 650.0 : constraints.maxWidth;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: tableWidth,
+        child: Column(children: [
+          Container(
+            color: const Color(0xFFF8F9FB),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
         SizedBox(width: 36, child: Checkbox(value: _selectedIds.length == _filtered.length && _filtered.isNotEmpty, tristate: true, onChanged: (v) => setState(() { if (v == true) _selectedIds = _filtered.map((t) => t['_id'].toString()).toSet(); else _selectedIds.clear(); }), activeColor: _navyAccent, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap)),
         _col('DATE ↕', 100),
         const Expanded(child: Text('STATEMENT DETAILS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7F8C8D), letterSpacing: 0.4))),
@@ -827,7 +867,10 @@ void _openReconcile() {
     ),
     const Divider(height: 1, color: Color(0xFFEEF2F7)),
     Expanded(child: RefreshIndicator(color: _navyAccent, onRefresh: _loadAll, child: ListView.separated(physics: const AlwaysScrollableScrollPhysics(), itemCount: _filtered.length, separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEF2F7)), itemBuilder: (_, i) => _buildRow(_filtered[i])))),
-  ]);
+        ]),
+      ),
+    );
+  });
 
   Widget _col(String label, double width, {TextAlign align = TextAlign.left}) =>
       SizedBox(width: width, child: Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7F8C8D), letterSpacing: 0.4), textAlign: align));
@@ -886,9 +929,7 @@ void _openReconcile() {
   Widget _buildAllTxnsTab() {
     if (_txnsLoading) return const Center(
         child: CircularProgressIndicator(color: _navyAccent));
-    final categorizedTxns = _allTxns
-        .where((t) => t['reconciliationStatus'] == 'CATEGORIZED')
-        .toList();
+    final categorizedTxns = _allTxns;
     if (categorizedTxns.isEmpty) return Center(child: Column(
         mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.receipt_long_outlined, size: 52, color: Colors.grey[300]),
@@ -897,28 +938,20 @@ void _openReconcile() {
           style: TextStyle(fontSize: 14, color: Color(0xFF7F8C8D))),
     ]));
 
-    // ── Calculate running balance oldest → newest (categorized only, from opening balance) ──
-    final sorted = _allTxns
-        .where((t) => t['reconciliationStatus'] == 'CATEGORIZED')
-        .toList();
-    sorted.sort((a, b) {
-      final da = _parseDate(a['transactionDate'] ?? a['date']);
-      final db = _parseDate(b['transactionDate'] ?? b['date']);
-      return da.compareTo(db);
-    });
+    // Running balances are now computed accurately by the backend across all pages.
+    // ── Pagination info ──
+    final totalPages  = (_allTxnsTotal / _allTxnsPageSize).ceil().clamp(1, 9999);
+    final startRecord = ((_allTxnsPage - 1) * _allTxnsPageSize) + 1;
+    final endRecord   = (startRecord + categorizedTxns.length - 1).clamp(1, _allTxnsTotal);
 
-    double running = _openingBalance;
-    final runningBalances = <String, double>{};
-    for (final txn in sorted) {
-      final id      = txn['_id']?.toString() ?? '';
-      final isDebit = txn['transactionType'] == 'DEBIT';
-      final amount  = (txn['amount'] ?? 0).toDouble();
-      running += isDebit ? -amount : amount;
-      runningBalances[id] = running;
-    }
-
-    return Stack(children: [
-      Column(children: [
+    return LayoutBuilder(builder: (context, constraints) {
+      final tableWidth = constraints.maxWidth < 650 ? 650.0 : constraints.maxWidth;
+      return Stack(children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: Column(children: [
 
         // ── Column header row ──────────────────────────────────────────────
         Container(
@@ -977,7 +1010,7 @@ void _openReconcile() {
             final isCat    = status == 'CATEGORIZED';
             final isSelected =
                 _selectedCatTxn?['_id']?.toString() == id;
-            final runBal   = runningBalances[id] ?? 0.0;
+            final runBal   = txn['computedRunningBalance']?.toDouble() ?? 0.0;
 
             // Status color
             Color sc;
@@ -1130,12 +1163,83 @@ void _openReconcile() {
             );
           },
         )),
-      ]),
+
+        // ── Pagination footer ────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF8F9FB),
+            border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
+          ),
+          child: Row(children: [
+            // Record count label
+            Text(
+              'Showing $startRecord–$endRecord of $_allTxnsTotal transactions',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E)),
+            ),
+            const Spacer(),
+            // Prev button
+            InkWell(
+              onTap: _allTxnsPage > 1
+                  ? () => _loadAllTxnsPage(_allTxnsPage - 1)
+                  : null,
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  borderRadius: BorderRadius.circular(6),
+                  color: _allTxnsPage > 1 ? Colors.white : const Color(0xFFF1F5F9),
+                ),
+                child: Row(children: [
+                  Icon(Icons.chevron_left, size: 14,
+                      color: _allTxnsPage > 1 ? _navyAccent : Colors.grey),
+                  const SizedBox(width: 2),
+                  Text('Prev', style: TextStyle(
+                      fontSize: 12,
+                      color: _allTxnsPage > 1 ? _navyAccent : Colors.grey)),
+                ]),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Page indicator
+            Text('Page $_allTxnsPage of $totalPages',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E))),
+            const SizedBox(width: 8),
+            // Next button
+            InkWell(
+              onTap: _allTxnsPage < totalPages
+                  ? () => _loadAllTxnsPage(_allTxnsPage + 1)
+                  : null,
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  borderRadius: BorderRadius.circular(6),
+                  color: _allTxnsPage < totalPages ? Colors.white : const Color(0xFFF1F5F9),
+                ),
+                child: Row(children: [
+                  Text('Next', style: TextStyle(
+                      fontSize: 12,
+                      color: _allTxnsPage < totalPages ? _navyAccent : Colors.grey)),
+                  const SizedBox(width: 2),
+                  Icon(Icons.chevron_right, size: 14,
+                      color: _allTxnsPage < totalPages ? _navyAccent : Colors.grey),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+            ]),
+          ),
+        ),
 
       // Categorized panel overlay
       if (_catPanelOpen && _selectedCatTxn != null)
         _buildCatTxnPanel(),
-    ]);
+      ]);
+    });
   }
 
   // Header column style
@@ -1182,6 +1286,7 @@ void _openReconcile() {
     final amount   = (txn['amount'] ?? 0).toDouble();
     final date     = _parseDate(txn['transactionDate'] ?? txn['date']);
     final desc     = txn['description']?.toString() ?? '';
+    final payee    = txn['payee']?.toString() ?? txn['vendorName']?.toString() ?? txn['customerName']?.toString() ?? '';
     final ref      = txn['referenceNumber']?.toString() ?? '';
     final catLabel = txn['categoryLabel']?.toString() ?? '';
 
@@ -1230,6 +1335,7 @@ void _openReconcile() {
       <span class="value">${catLabel.isNotEmpty ? catLabel : 'Uncategorized'}</span>
     </div>
     
+    ${payee.isNotEmpty ? '<div class="row"><span class="label">Payee:</span><span class="value">$payee</span></div>' : ''}
     ${desc.isNotEmpty ? '<div class="row"><span class="label">Description:</span><span class="value">$desc</span></div>' : ''}
     
     ${ref.isNotEmpty ? '<div class="row"><span class="label">Reference:</span><span class="value">$ref</span></div>' : ''}
@@ -1300,6 +1406,7 @@ void _openReconcile() {
     final date     = _parseDate(txn['transactionDate'] ?? txn['date']);
     final desc     = txn['description']?.toString() ?? '';
     final catLabel = txn['categoryLabel']?.toString() ?? '';
+    final payee    = txn['payee']?.toString() ?? txn['vendorName']?.toString() ?? txn['customerName']?.toString() ?? '';
     final linkedId   = txn['linkedRecordId']?.toString() ?? '';
     final linkedType = txn['linkedRecordType']?.toString() ?? '';
 
@@ -1349,6 +1456,10 @@ void _openReconcile() {
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
                             color: Color(0xFF2C3E50)),
                         maxLines: 1, overflow: TextOverflow.ellipsis),
+                    if (payee.isNotEmpty)
+                      Text('Payee: $payee',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E)),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     Text(DateFormat('dd MMM yyyy').format(date),
                         style: const TextStyle(fontSize: 11, color: Color(0xFF7F8C8D))),
                     if (catLabel.isNotEmpty)
@@ -2083,12 +2194,25 @@ void _openReconcile() {
 
   void _showSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _green, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), duration: const Duration(seconds: 2)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _green,
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: _red, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: _red,
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
   void _editTransaction(Map<String, dynamic> txn) {

@@ -52,6 +52,10 @@ const ProviderTransactionSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  payee: {
+    type: String,
+    default: null,
+  },
   location: {
     type: String,
     default: null,
@@ -379,6 +383,10 @@ const ColumnMappingSchema = new mongoose.Schema({
       required: true,
     },
     descriptionColumn: {
+      type: String,
+      default: null,
+    },
+    payeeColumn: {
       type: String,
       default: null,
     },

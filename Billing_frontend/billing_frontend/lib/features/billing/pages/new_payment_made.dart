@@ -651,11 +651,11 @@ Future<void> _loadAllAccounts() async {
 
   void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating));
+          behavior: SnackBarBehavior.floating, margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20)));
 
   void _showSuccess(String msg) => ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: _green,
-          behavior: SnackBarBehavior.floating));
+          behavior: SnackBarBehavior.floating, margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20)));
 
   // ============================================================================
   // BUILD

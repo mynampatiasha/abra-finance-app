@@ -50,7 +50,7 @@ router.get('/unbilled-shipments', async (req, res) => {
     if (!orgId) orgId = req.user?.orgId || req.headers['x-org-id'] || '';
 
     // RULE: Only fetch shipments if we are in the specific logistics branch requested!
-    if (branchId !== '69eeecb21234dffba797bee4') {
+    if (branchId !== '6a05b32faef99160d927b0d1') {
       return res.json({ success: true, count: 0, shipments: [] });
     }
 
@@ -168,8 +168,8 @@ router.post('/draft', async (req, res) => {
     const orgId = req.user?.orgId || req.headers['x-org-id'];
     const branchId = req.headers['x-branch-ids'] || null;
 
-    if (branchId !== '69eeecb21234dffba797bee4') {
-      return res.status(403).json({ success: false, error: 'Automation feature is restricted to branch 69eeecb21234dffba797bee4 only.' });
+    if (branchId !== '6a05b32faef99160d927b0d1') {
+      return res.status(403).json({ success: false, error: 'Automation feature is restricted to branch 6a05b32faef99160d927b0d1 only.' });
     }
 
     const invoiceData = { ...req.body, orgId, branchId, status: 'AUTOMATION_DRAFT' };
@@ -201,7 +201,7 @@ router.get('/drafts', async (req, res) => {
     const orgId = req.user?.orgId || req.headers['x-org-id'];
     const branchId = req.headers['x-branch-ids'] || null;
 
-    if (branchId !== '69eeecb21234dffba797bee4') {
+    if (branchId !== '6a05b32faef99160d927b0d1') {
       return res.json({ success: true, invoices: [] });
     }
 
@@ -221,7 +221,7 @@ router.post('/approve/:id', async (req, res) => {
     const orgId = req.user?.orgId || req.headers['x-org-id'];
     const branchId = req.headers['x-branch-ids'] || null;
 
-    if (branchId !== '69eeecb21234dffba797bee4') {
+    if (branchId !== '6a05b32faef99160d927b0d1') {
       return res.status(403).json({ success: false, error: 'Restricted branch' });
     }
 
@@ -283,7 +283,7 @@ router.get('/billed-shipments', async (req, res) => {
     if (!branchId) branchId = req.headers['x-branch-ids'] || '';
     if (!orgId) orgId = req.user?.orgId || req.headers['x-org-id'] || '';
 
-    if (branchId !== '69eeecb21234dffba797bee4') {
+    if (branchId !== '6a05b32faef99160d927b0d1') {
       return res.json({ success: true, shipments: [], billedShipments: [] });
     }
 

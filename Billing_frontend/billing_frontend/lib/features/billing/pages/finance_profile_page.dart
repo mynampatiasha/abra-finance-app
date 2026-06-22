@@ -759,9 +759,8 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
                   const SizedBox(height: 4),
                   Text(_email, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 14)),
                   const SizedBox(height: 8),
-                  Row(children: [
+                  Wrap(spacing: 8, runSpacing: 6, children: [
                     _roleBadge(_role),
-                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
@@ -772,8 +771,12 @@ class _FinanceProfilePageState extends State<FinanceProfilePage> {
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         const Icon(Icons.business, color: _white, size: 12),
                         const SizedBox(width: 5),
-                        Text(_orgName,
-                            style: const TextStyle(color: _white, fontSize: 12, fontWeight: FontWeight.w500)),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 140),
+                          child: Text(_orgName,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: _white, fontSize: 12, fontWeight: FontWeight.w500)),
+                        ),
                       ]),
                     ),
                   ]),

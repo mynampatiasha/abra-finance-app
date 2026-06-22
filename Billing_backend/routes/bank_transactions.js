@@ -274,25 +274,165 @@ router.get('/stats/:accountId', async (req, res) => {
 // ============================================================================
 router.get('/all-transactions', async (req, res) => {
   try {
-    const { accountId, page = 1, limit = 100 } = req.query;
+    const { accountId, page = 1, limit = 50 } = req.query;
     if (!accountId) return res.status(400).json({ success: false, message: 'accountId is required' });
 
     const accountObjId = mongoose.Types.ObjectId.isValid(accountId)
       ? new mongoose.Types.ObjectId(accountId) : accountId;
 
-    const filter = { accountId: accountObjId, isExcluded: { $ne: true }, ...orgFilter(req) };
-    const total  = await ProviderTransaction.countDocuments(filter);
-    const txns   = await ProviderTransaction.find(filter)
-      .sort({ transactionDate: -1, categorizedAt: -1 })  // Sort by transaction date first to ensure chronological running balance
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
+    const PaymentAccount = mongoose.models.PaymentAccount || mongoose.model('PaymentAccount', new mongoose.Schema({}, { strict: false }), 'paymentaccounts');
+    const account = await PaymentAccount.findById(accountObjId).lean();
+    let openingBalance = account?.openingBalance || 0;
+
+    const filter = { 
+      accountId: accountObjId, 
+      isExcluded: { $ne: true }, 
+      reconciliationStatus: { $in: ['CATEGORIZED', 'RECONCILED', 'MATCHED'] },
+      ...orgFilter(req) 
+    };
+
+    // Fetch all matched transactions sorted from oldest to newest to compute running balance
+    const allTxns = await ProviderTransaction.find(filter)
+      .sort({ transactionDate: 1, categorizedAt: 1, _id: 1 })
       .lean();
 
-    res.json({ success: true, total, data: txns });
+    const total = allTxns.length;
+    
+    // Calculate accurate running balance across all pages
+    let currentRun = openingBalance;
+    allTxns.forEach(t => {
+      const amt = parseFloat(t.amount) || 0;
+      currentRun += (t.transactionType === 'DEBIT') ? -amt : amt;
+      t.computedRunningBalance = currentRun;
+    });
+
+    // Sort them descending (newest first) for UI
+    allTxns.reverse();
+
+    // Apply pagination slice
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedTxns = allTxns.slice(startIndex, endIndex);
+
+    res.json({ success: true, total, data: paginatedTxns });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// ============================================================================
+// ROUTE 1d — GET /by-category-label
+// Returns ProviderTransactions for a specific categoryLabel (P&L drill-down)
+// ============================================================================
+router.get('/by-category-label', async (req, res) => {
+  try {
+    const { categoryLabel, startDate, endDate } = req.query;
+    if (!categoryLabel) return res.status(400).json({ success: false, message: 'categoryLabel is required' });
+
+    const coa = await ChartOfAccount.findOne({ accountName: categoryLabel, ...orgFilter(req) }).lean();
+    if (!coa) {
+      return res.json({ success: true, total: 0, totalAmount: 0, data: [] });
+    }
+
+    const filter = {
+      accountId: coa._id,
+      ...orgFilter(req),
+    };
+
+    if (startDate || endDate) {
+      filter.date = {};
+      if (startDate) {
+        filter.date.$gte = new Date(startDate.split('T')[0] + 'T00:00:00.000Z');
+      }
+      if (endDate) {
+        filter.date.$lte = new Date(endDate.split('T')[0] + 'T23:59:59.999Z');
+      }
+    }
+
+    const txns = await AccountTransaction.find(filter).sort({ date: -1 }).lean();
+
+    // Deep lookups for Payee and Bank Account
+    const Expense = mongoose.models.Expense || mongoose.model('Expense', new mongoose.Schema({}, { strict: false }), 'expenses');
+    const Bill = mongoose.models.Bill || mongoose.model('Bill', new mongoose.Schema({}, { strict: false }), 'bills');
+
+    const expIds = txns.filter(t => t.referenceType === 'Expense').map(t => t.referenceId);
+    const billIds = txns.filter(t => t.referenceType === 'Bill').map(t => t.referenceId);
+    const provTxnIds = txns.filter(t => t.referenceType === 'ProviderTransaction').map(t => t.referenceId);
+
+    const [expenses, bills, provTxns] = await Promise.all([
+      expIds.length ? Expense.find({ _id: { $in: expIds } }).lean() : [],
+      billIds.length ? Bill.find({ _id: { $in: billIds } }).lean() : [],
+      provTxnIds.length ? ProviderTransaction.find({ _id: { $in: provTxnIds } }).lean() : [],
+    ]);
+
+    const expMap = {}; expenses.forEach(e => { expMap[e._id.toString()] = e; });
+    const billMap = {}; bills.forEach(b => { billMap[b._id.toString()] = b; });
+    const provTxnMap = {}; provTxns.forEach(p => { provTxnMap[p._id.toString()] = p; });
+
+    // Fetch bank account names if we only have IDs
+    const bankIdsToFetch = new Set();
+    provTxns.forEach(p => { if (p.accountId) bankIdsToFetch.add(p.accountId.toString()); });
+    
+    let accMap = {};
+    if (bankIdsToFetch.size > 0) {
+      const accounts = await PaymentAccount.find({ _id: { $in: Array.from(bankIdsToFetch) } }).lean();
+      accounts.forEach(a => { accMap[a._id.toString()] = a.accountName; });
+    }
+
+    const enriched = txns.map(t => {
+      let payee = '—';
+      let bankAccount = '—';
+      let desc = t.description || '';
+      
+      // Attempt to extract from description first
+      if (desc.includes('|')) {
+        const parts = desc.split('|');
+        payee = parts[1].trim();
+        desc = parts[0].trim();
+      }
+
+      if (t.referenceType === 'Expense') {
+        const exp = expMap[t.referenceId?.toString()];
+        if (exp) {
+          if (exp.vendor) payee = exp.vendor;
+          if (exp.paidThrough) bankAccount = exp.paidThrough;
+        }
+      } else if (t.referenceType === 'Bill') {
+        const bill = billMap[t.referenceId?.toString()];
+        if (bill) {
+          if (bill.vendorName) payee = bill.vendorName;
+          // Bills are usually Accrued, so bank account is Accounts Payable initially
+        }
+      } else if (t.referenceType === 'ProviderTransaction') {
+        const prov = provTxnMap[t.referenceId?.toString()];
+        if (prov) {
+          if (prov.payee || prov.vendorName || prov.customerName) payee = prov.payee || prov.vendorName || prov.customerName;
+          if (prov.accountId) bankAccount = accMap[prov.accountId.toString()] || prov.accountId.toString();
+        }
+      }
+
+      const amount = (t.debit || 0) + (t.credit || 0);
+
+      return {
+        date:             t.date,
+        bankAccount:      bankAccount,
+        description:      desc,
+        payee:            payee,
+        referenceNumber:  t.referenceNumber || '',
+        type:             t.debit > 0 ? 'Withdrawal' : 'Deposit',
+        amount:           amount,
+      };
+    });
+
+    const total = enriched.reduce((s, t) => s + (t.amount || 0), 0);
+
+    res.json({ success: true, total: txns.length, totalAmount: total, data: enriched });
+  } catch (err) {
+    console.error('by-category-label error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 // ============================================================================
 // ROUTE 2 — GET /ledger
@@ -1513,6 +1653,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
       try {
         const rawDate       = row['Date']             || row['date']             || '';
         const description   = row['Description']      || row['description']      || '';
+        const payee         = row['Payee']            || row['payee']            || row['Payee Name'] || row['Vendor'] || row['Customer'] || '';
         const referenceNum  = row['Reference Number'] || row['reference_number'] || row['Reference'] || '';
         const depositStr    = row['Deposit']          || row['deposit']          || row['Credit']    || '';
         const withdrawalStr = row['Withdrawal']       || row['withdrawal']       || row['Debit']     || '';
@@ -1579,6 +1720,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
           branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
           transactionDate:      parsedDate,
           description:          description || (isCredit ? 'Credit' : 'Debit'),
+          payee:                payee || null,
           referenceNumber:      referenceNum || null,
           amount,
           transactionType:      txnType,

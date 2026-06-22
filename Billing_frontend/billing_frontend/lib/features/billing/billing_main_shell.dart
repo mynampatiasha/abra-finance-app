@@ -305,13 +305,6 @@ class _BillingMainShellState extends State<BillingMainShell> {
   // ── FULL menu definition ─────────────────────────────────────────────────
   final List<NavigationItem> _allMenuItems = [
     NavigationItem(icon: Icons.dashboard_outlined,        selectedIcon: Icons.dashboard,        label: 'Dashboard',         route: 'home'),
-    NavigationItem(icon: Icons.confirmation_number_outlined, selectedIcon: Icons.confirmation_number, label: 'TMS', route: 'tms', isExpandable: true,
-      subItems: [
-        SubNavigationItem(label: 'Raise a Ticket',  route: 'tms/raise_ticket',  icon: Icons.add_circle_outline),
-        SubNavigationItem(label: 'My Tickets',       route: 'tms/my_tickets',    icon: Icons.assignment_outlined),
-        SubNavigationItem(label: 'All Tickets',      route: 'tms/all_tickets',   icon: Icons.list_alt_outlined),
-        SubNavigationItem(label: 'Closed Tickets',   route: 'tms/closed_tickets',icon: Icons.archive_outlined),
-      ]),
     NavigationItem(icon: Icons.inventory_2_outlined,      selectedIcon: Icons.inventory_2,      label: 'Items',             route: 'items'),
     NavigationItem(icon: Icons.shopping_cart_outlined,    selectedIcon: Icons.shopping_cart,    label: 'Sales',             route: 'sales', isExpandable: true,
       subItems: [
@@ -328,6 +321,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
       subItems: [
         SubNavigationItem(label: 'Vendors',             route: 'purchases/vendors',           icon: Icons.store_outlined),
         SubNavigationItem(label: 'Expenses',            route: 'purchases/expenses',          icon: Icons.money_off_outlined),
+        SubNavigationItem(label: 'Digital Expenses',    route: 'digital_expenses',            icon: Icons.receipt_long_outlined),
         SubNavigationItem(label: 'Fixed Assets',        route: 'purchases/assets',            icon: Icons.business_center_outlined),
         SubNavigationItem(label: 'Recurring Expenses',  route: 'purchases/recurring_expenses',icon: Icons.repeat_outlined),
         SubNavigationItem(label: 'Purchase Orders',     route: 'purchases/orders',            icon: Icons.shopping_cart_outlined),
@@ -338,7 +332,6 @@ class _BillingMainShellState extends State<BillingMainShell> {
         SubNavigationItem(label: 'E-Way Bills',         route: 'purchases/eway_bills',        icon: Icons.receipt_outlined),
         SubNavigationItem(label: 'Payment Links',       route: 'purchases/payment_links',     icon: Icons.link_outlined),
       ]),
-    NavigationItem(icon: Icons.receipt_long_outlined,     selectedIcon: Icons.receipt_long,     label: 'Digital Expenses',  route: 'digital_expenses'),
     NavigationItem(icon: Icons.access_time_outlined,      selectedIcon: Icons.access_time,      label: 'Time Tracking',     route: 'time_tracking', isExpandable: true,
       subItems: [
         SubNavigationItem(label: 'Projects',  route: 'time_tracking/projects',  icon: Icons.folder_outlined),
@@ -355,6 +348,13 @@ class _BillingMainShellState extends State<BillingMainShell> {
       ]),
     NavigationItem(icon: Icons.bar_chart_outlined,        selectedIcon: Icons.bar_chart,        label: 'Reports',           route: 'reports'),
     NavigationItem(icon: Icons.admin_panel_settings_outlined, selectedIcon: Icons.admin_panel_settings, label: 'Role Access Control', route: 'role_access_control'),
+    NavigationItem(icon: Icons.confirmation_number_outlined, selectedIcon: Icons.confirmation_number, label: 'TMS', route: 'tms', isExpandable: true,
+      subItems: [
+        SubNavigationItem(label: 'Raise a Ticket',  route: 'tms/raise_ticket',  icon: Icons.add_circle_outline),
+        SubNavigationItem(label: 'My Tickets',       route: 'tms/my_tickets',    icon: Icons.assignment_outlined),
+        SubNavigationItem(label: 'All Tickets',      route: 'tms/all_tickets',   icon: Icons.list_alt_outlined),
+        SubNavigationItem(label: 'Closed Tickets',   route: 'tms/closed_tickets',icon: Icons.archive_outlined),
+      ]),
     NavigationItem(icon: Icons.person_pin_outlined,       selectedIcon: Icons.person_pin,       label: 'My Profile',        route: 'my_profile'),
   ];
 
@@ -784,22 +784,25 @@ class _BillingMainShellState extends State<BillingMainShell> {
           IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: _kWhite, size: 18), onPressed: _goToDashboard, tooltip: 'Back to Dashboard'),
         ],
         const SizedBox(width: 4),
-        Expanded(child: Text(_currentPageTitle, style: const TextStyle(color: _kWhite, fontSize: 18, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+        Expanded(flex: 3, child: Text(_currentPageTitle, style: const TextStyle(color: _kWhite, fontSize: 18, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
 
         // ── Org name chip ─────────────────────────────────────────────────
         if (_orgLabel.isNotEmpty)
-          GestureDetector(
-            onTap: () => _showOrgSwitcher(context),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white.withOpacity(0.3))),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.business, color: _kWhite, size: 14),
-                const SizedBox(width: 5),
-                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 180),
-                  child: Text(_orgLabel, style: const TextStyle(color: _kWhite, fontSize: 12, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
-                if (_organizations.length > 1) ...[const SizedBox(width: 3), const Icon(Icons.swap_horiz, color: _kWhite, size: 14)],
-              ]),
+          Flexible(
+            flex: 2,
+            child: GestureDetector(
+              onTap: () => _showOrgSwitcher(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white.withOpacity(0.3))),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.business, color: _kWhite, size: 14),
+                  const SizedBox(width: 5),
+                  Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: isMobile ? 120 : 180),
+                    child: Text(_orgLabel, style: const TextStyle(color: _kWhite, fontSize: 12, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis))),
+                  if (_organizations.length > 1) ...[const SizedBox(width: 3), const Icon(Icons.swap_horiz, color: _kWhite, size: 14)],
+                ]),
+              ),
             ),
           ),
 
@@ -809,6 +812,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
         _QuickCreateButton(
           globalKey:  _quickCreateKey,
           isOpen:     _quickCreateOpen,
+          isMobile:   isMobile,
           onPressed:  _toggleQuickCreate,
         ),
 
@@ -826,7 +830,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
         ),
 
         const SizedBox(width: 4),
-        IconButton(icon: const Icon(Icons.logout, color: _kWhite), onPressed: _logout, tooltip: 'Sign Out'),
+        GestureDetector(onTap: _logout, child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8, vertical: 12), child: Icon(Icons.logout, color: _kWhite, size: 20))),
       ]),
     );
   }
@@ -964,7 +968,7 @@ class _BillingMainShellState extends State<BillingMainShell> {
     }
   }
 
-  Widget _buildDrawer() => Drawer(child: _buildSidebarContent(isDrawer: true));
+  Widget _buildDrawer() => Drawer(child: SafeArea(child: _buildSidebarContent(isDrawer: true)));
 }
 
 // =============================================================================
@@ -1040,9 +1044,10 @@ class _DigitalExpensesLauncherState extends State<_DigitalExpensesLauncher> {
 class _QuickCreateButton extends StatelessWidget {
   final GlobalKey  globalKey;
   final bool       isOpen;
+  final bool       isMobile;
   final VoidCallback onPressed;
 
-  const _QuickCreateButton({required this.globalKey, required this.isOpen, required this.onPressed});
+  const _QuickCreateButton({required this.globalKey, required this.isOpen, required this.isMobile, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -1063,8 +1068,10 @@ class _QuickCreateButton extends StatelessWidget {
             duration: const Duration(milliseconds: 200),
             child: const Icon(Icons.add, color: _kWhite, size: 18),
           ),
-          const SizedBox(width: 4),
-          const Text('New', style: TextStyle(color: _kWhite, fontSize: 13, fontWeight: FontWeight.w600)),
+          if (!isMobile) ...[
+            const SizedBox(width: 4),
+            const Text('New', style: TextStyle(color: _kWhite, fontSize: 13, fontWeight: FontWeight.w600)),
+          ]
         ]),
       ),
     );

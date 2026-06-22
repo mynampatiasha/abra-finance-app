@@ -5,17 +5,17 @@
 // Register in app.js: app.use('/api/budgets', require('./routes/budgets'));
 // ============================================================================
 
-const express  = require('express');
-const router   = express.Router();
+const express = require('express');
+const router = express.Router();
 const mongoose = require('mongoose');
-const multer   = require('multer');
+const multer = require('multer');
 
 // ── COA dependency ────────────────────────────────────────────────────────────
 const { ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
 
 // ── Auth middleware ────────────────────────────────────────────────────────────
 const { verifyFinanceJWT } = require('../middleware/finance_jwt');
-const authenticate  = verifyFinanceJWT;
+const authenticate = verifyFinanceJWT;
 
 // ============================================================================
 // MONGOOSE SCHEMA
@@ -28,7 +28,7 @@ const budgetAccountLineSchema = new mongoose.Schema({
     default: null,
   },
   accountName: { type: String, required: true, trim: true },
-  accountType:  { type: String, required: true, trim: true },
+  accountType: { type: String, required: true, trim: true },
   // 12 monthly amounts [Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar]
   monthlyAmounts: {
     type: [Number],
@@ -38,18 +38,18 @@ const budgetAccountLineSchema = new mongoose.Schema({
 }, { _id: false });
 
 const budgetSchema = new mongoose.Schema({
-  orgId:         { type: String, index: true, default: null },
-  branchId:      { type: String, index: true, default: null },
-  budgetName:    { type: String, required: true, trim: true },
+  orgId: { type: String, index: true, default: null },
+  branchId: { type: String, index: true, default: null },
+  budgetName: { type: String, required: true, trim: true },
   financialYear: { type: String, required: true, trim: true },  // e.g. "2025-26"
-  budgetPeriod:  { type: String, enum: ['Monthly', 'Quarterly', 'Yearly'], default: 'Monthly' },
-  currency:      { type: String, default: 'INR' },
-  isActive:      { type: Boolean, default: true, index: true },
-  notes:         { type: String, default: '' },
-  accountLines:  [budgetAccountLineSchema],
-  companyId:     { type: String, default: 'default' },
-  createdBy:     { type: String, default: 'system' },
-  updatedBy:     { type: String, default: 'system' },
+  budgetPeriod: { type: String, enum: ['Monthly', 'Quarterly', 'Yearly'], default: 'Monthly' },
+  currency: { type: String, default: 'INR' },
+  isActive: { type: Boolean, default: true, index: true },
+  notes: { type: String, default: '' },
+  accountLines: [budgetAccountLineSchema],
+  companyId: { type: String, default: 'default' },
+  createdBy: { type: String, default: 'system' },
+  updatedBy: { type: String, default: 'system' },
 }, { timestamps: true });
 
 budgetSchema.index({ financialYear: 1, isActive: 1 });
@@ -63,18 +63,18 @@ const Budget = mongoose.models.Budget || mongoose.model('Budget', budgetSchema);
 
 // Financial year months: Apr=0 … Mar=11
 const FY_MONTHS = [
-  { month: 3,  label: 'Apr' },
-  { month: 4,  label: 'May' },
-  { month: 5,  label: 'Jun' },
-  { month: 6,  label: 'Jul' },
-  { month: 7,  label: 'Aug' },
-  { month: 8,  label: 'Sep' },
-  { month: 9,  label: 'Oct' },
+  { month: 3, label: 'Apr' },
+  { month: 4, label: 'May' },
+  { month: 5, label: 'Jun' },
+  { month: 6, label: 'Jul' },
+  { month: 7, label: 'Aug' },
+  { month: 8, label: 'Sep' },
+  { month: 9, label: 'Oct' },
   { month: 10, label: 'Nov' },
   { month: 11, label: 'Dec' },
-  { month: 0,  label: 'Jan' },
-  { month: 1,  label: 'Feb' },
-  { month: 2,  label: 'Mar' },
+  { month: 0, label: 'Jan' },
+  { month: 1, label: 'Feb' },
+  { month: 2, label: 'Mar' },
 ];
 
 function parseFYRange(financialYear) {
@@ -91,7 +91,7 @@ function getFYDateRange(financialYear) {
   const { startYear, endYear } = parseFYRange(financialYear);
   return {
     start: new Date(startYear, 3, 1),   // Apr 1
-    end:   new Date(endYear,   2, 31),  // Mar 31
+    end: new Date(endYear, 2, 31),  // Mar 31
   };
 }
 
@@ -99,7 +99,7 @@ function getFYDateRange(financialYear) {
 async function enrichWithActuals(budget, orgId = null, filterStartDate = null, filterEndDate = null) {
   let { start, end } = getFYDateRange(budget.financialYear);
   const { startYear, endYear } = parseFYRange(budget.financialYear);
-  
+
   if (filterStartDate) {
     const fs = new Date(filterStartDate);
     fs.setHours(0, 0, 0, 0);
@@ -122,10 +122,10 @@ async function enrichWithActuals(budget, orgId = null, filterStartDate = null, f
         const monthYear = fm.month >= 3 ? startYear : endYear;
         const monthStart = new Date(monthYear, fm.month, 1);
         const monthEnd = new Date(monthYear, fm.month + 1, 0, 23, 59, 59, 999);
-        
+
         const overlapStart = new Date(Math.max(start.getTime(), monthStart.getTime()));
         const overlapEnd = new Date(Math.min(end.getTime(), monthEnd.getTime()));
-        
+
         if (overlapStart <= overlapEnd) {
           const overlapDays = (overlapEnd.getTime() - overlapStart.getTime() + 1) / (1000 * 60 * 60 * 24);
           const daysInMonth = monthEnd.getDate();
@@ -165,9 +165,9 @@ async function enrichWithActuals(budget, orgId = null, filterStartDate = null, f
         }
       });
 
-      const totalActual   = actualMonthly.reduce((s, v) => s + v, 0);
-      const variance      = calculatedBudgeted - totalActual;
-      const percentUsed   = calculatedBudgeted > 0 ? (totalActual / calculatedBudgeted) * 100 : 0;
+      const totalActual = actualMonthly.reduce((s, v) => s + v, 0);
+      const variance = calculatedBudgeted - totalActual;
+      const percentUsed = calculatedBudgeted > 0 ? (totalActual / calculatedBudgeted) * 100 : 0;
 
       return {
         ...line.toObject ? line.toObject() : line,
@@ -181,7 +181,7 @@ async function enrichWithActuals(budget, orgId = null, filterStartDate = null, f
   );
 
   const totalBudgeted = enrichedLines.reduce((s, l) => s + l.totalBudgeted, 0);
-  const totalActual   = enrichedLines.reduce((s, l) => s + l.totalActual,   0);
+  const totalActual = enrichedLines.reduce((s, l) => s + l.totalActual, 0);
   const totalVariance = totalBudgeted - totalActual;
 
   return {
@@ -205,7 +205,7 @@ router.get('/stats', authenticate, async (req, res) => {
     if (req.user?.orgId) {
       scopedFilter.$or = [{ orgId: req.user.orgId }, { orgId: null }];
     }
-    
+
     if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
       const branchIds = req.branchIds || [];
       if (scopedFilter.$or) {
@@ -215,7 +215,7 @@ router.get('/stats', authenticate, async (req, res) => {
         scopedFilter.$or = [{ branchId: { $in: branchIds } }, { branchId: null }];
       }
     }
-    
+
     const [total, active, inactive, budgets] = await Promise.all([
       Budget.countDocuments(scopedFilter),
       Budget.countDocuments({ ...scopedFilter, isActive: true }),
@@ -225,7 +225,7 @@ router.get('/stats', authenticate, async (req, res) => {
 
     let totalBudgeted = 0;
     let totalActual = 0;
-    
+
     // We can use enrichWithActuals to get the true total actuals
     const enrichedBudgets = await Promise.all(budgets.map(b => enrichWithActuals(b, req.user?.orgId)));
     enrichedBudgets.forEach((b) => {
@@ -248,8 +248,8 @@ router.get('/', authenticate, async (req, res) => {
     const { isActive, financialYear, budgetPeriod, search, page = 1, limit = 20 } = req.query;
 
     const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId; 
-    
+    if (req.user?.orgId) query.orgId = req.user.orgId;
+
     // Support treating branchId: null as global across branches
     if (req.branchFilter && Object.keys(req.branchFilter).length > 0) {
       const branchIds = req.branchIds || [];
@@ -260,12 +260,12 @@ router.get('/', authenticate, async (req, res) => {
     if (budgetPeriod && budgetPeriod !== 'All') query.budgetPeriod = budgetPeriod;
     if (search && search.trim()) {
       query.$or = [
-        { budgetName:    { $regex: search.trim(), $options: 'i' } },
+        { budgetName: { $regex: search.trim(), $options: 'i' } },
         { financialYear: { $regex: search.trim(), $options: 'i' } },
       ];
     }
 
-    const skip  = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     const total = await Budget.countDocuments(query);
 
     const budgets = await Budget.find(query)
@@ -348,7 +348,7 @@ router.post('/', authenticate, async (req, res) => {
             ...req.orgFilter,
           }).lean();
           if (acc) {
-            line.accountId   = acc._id;
+            line.accountId = acc._id;
             line.accountType = acc.accountType;
           }
         }
@@ -357,8 +357,8 @@ router.post('/', authenticate, async (req, res) => {
 
     const budget = await Budget.create({
       ...data,
-      orgId:     req.user?.orgId || null,
-      branchId:  req.branchIds?.length > 0 ? req.branchIds[0] : null,
+      orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
       createdBy: req.user?.email || 'system',
     });
 
@@ -413,7 +413,7 @@ router.patch('/:id/toggle-active', authenticate, async (req, res) => {
     });
     if (!budget) return res.status(404).json({ success: false, message: 'Budget not found' });
 
-    budget.isActive  = req.body.isActive ?? !budget.isActive;
+    budget.isActive = req.body.isActive ?? !budget.isActive;
     budget.updatedBy = req.user?.email || 'system';
     await budget.save();
 
@@ -435,16 +435,16 @@ router.post('/:id/clone', authenticate, async (req, res) => {
     const { budgetName, financialYear } = req.body;
 
     const cloned = await Budget.create({
-      budgetName:    budgetName    || `${original.budgetName} (Copy)`,
+      budgetName: budgetName || `${original.budgetName} (Copy)`,
       financialYear: financialYear || original.financialYear,
-      budgetPeriod:  original.budgetPeriod,
-      currency:      original.currency,
-      notes:         original.notes,
-      isActive:      true,
-      accountLines:  original.accountLines.map((l) => ({ ...l, _id: undefined })),
-      orgId:         req.user?.orgId || null,
-      branchId:      req.branchIds?.length > 0 ? req.branchIds[0] : null,
-      createdBy:     req.user?.email || 'system',
+      budgetPeriod: original.budgetPeriod,
+      currency: original.currency,
+      notes: original.notes,
+      isActive: true,
+      accountLines: original.accountLines.map((l) => ({ ...l, _id: undefined })),
+      orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+      createdBy: req.user?.email || 'system',
     });
 
     const enriched = await enrichWithActuals(cloned, req.user?.orgId);
@@ -476,8 +476,8 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
   try {
     const budgetsData = JSON.parse(req.body.budgets || '[]');
     let successCount = 0;
-    let failedCount  = 0;
-    const errors     = [];
+    let failedCount = 0;
+    const errors = [];
 
     for (let i = 0; i < budgetsData.length; i++) {
       const item = budgetsData[i];
@@ -499,16 +499,16 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
         });
         if (!budget) {
           budget = await Budget.create({
-            budgetName:    item.budgetName,
+            budgetName: item.budgetName,
             financialYear: item.financialYear,
-            budgetPeriod:  item.budgetPeriod || 'Monthly',
-            currency:      item.currency || 'INR',
-            notes:         item.notes || '',
-            isActive:      true,
-            accountLines:  [],
-            orgId:         req.user?.orgId || null,
-            branchId:      req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            createdBy:     req.user?.email || 'system',
+            budgetPeriod: item.budgetPeriod || 'Monthly',
+            currency: item.currency || 'INR',
+            notes: item.notes || '',
+            isActive: true,
+            accountLines: [],
+            orgId: req.user?.orgId || null,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            createdBy: req.user?.email || 'system',
           });
         }
 
@@ -518,9 +518,9 @@ router.post('/import', authenticate, upload.single('file'), async (req, res) => 
           : Array(12).fill(Number(item.annualAmount || 0) / 12);
 
         budget.accountLines.push({
-          accountId:     item.accountId   || null,
-          accountName:   item.accountName || '',
-          accountType:   item.accountType || 'Expense',
+          accountId: item.accountId || null,
+          accountName: item.accountName || '',
+          accountType: item.accountType || 'Expense',
           monthlyAmounts,
         });
         await budget.save();
@@ -591,9 +591,9 @@ async function checkBudgetExceedance(accountId, date, orgId = null, createdByEma
 
         // Fallback: If budget creator not found or is system, assign to the organization owner/admin
         if (!creator) {
-          creator = await db.collection('billing_users').findOne({ 
-            'organizations.orgId': orgId, 
-            role: { $in: ['owner', 'admin'] } 
+          creator = await db.collection('billing_users').findOne({
+            'organizations.orgId': orgId,
+            role: { $in: ['owner', 'admin'] }
           });
         }
 
@@ -601,9 +601,9 @@ async function checkBudgetExceedance(accountId, date, orgId = null, createdByEma
           console.error(`[BUDGET OBSERVER] No valid user found to assign ticket in org: ${orgId}`);
           return; // Can't assign ticket without a user
         }
-        
+
         const creatorId = creator._id;
-        
+
         const isBreach = actualMonthly >= budgetedAmount;
         const subjectPrefix = isBreach ? 'Budget Exceeded' : 'Budget Warning';
         const fullSubject = `${subjectPrefix}: ${line.accountName}`;

@@ -156,14 +156,19 @@ const PaymentAccount = mongoose.models.PaymentAccount || mongoose.model('Payment
   currentBalance: { type: Number, default: 0 }
 }, { strict: false }));
 
-async function getExpenseAccountId(accountName, orgId = null) {
+async function getExpenseAccountId(accountName, orgId = null, branchId = null) {
   try {
     // ✅ Accept ANY account type (Asset, Liability, Equity, Income, Expense, etc.)
     // Step 1: Try exact match — any account type allowed
+    const scope = { ...(orgId ? { orgId } : {}) };
+    if (branchId) {
+      scope.$or = [{ branchId }, { branchId: null }];
+    }
+    
     let acc = await ChartOfAccount.findOne({
       accountName: { $regex: `^${accountName}$`, $options: 'i' },
-      ...(orgId ? { orgId } : {}),
-    }).select('_id').lean();
+      ...scope,
+    }).sort({ branchId: -1 }).select('_id').lean(); // branchId string sorts before null
     if (acc) return acc._id;
 
     // Step 2: Not found at all — AUTO CREATE as Expense type (backward compatibility)
@@ -191,22 +196,27 @@ async function getExpenseAccountId(accountName, orgId = null) {
   }
 }
 
-async function getPaidThroughAccountId(paidThrough, orgId = null) {
+async function getPaidThroughAccountId(paidThrough, orgId = null, branchId = null) {
   try {
+    const scope = { ...(orgId ? { orgId } : {}) };
+    if (branchId) {
+      scope.$or = [{ branchId }, { branchId: null }];
+    }
+
     // Step 1: Check if it's a valid ObjectId
     if (mongoose.Types.ObjectId.isValid(paidThrough)) {
       const acc = await ChartOfAccount.findOne({
         _id: paidThrough,
-        ...(orgId ? { orgId } : {}),
-      }).select('_id').lean();
+        ...scope,
+      }).lean();
       if (acc) return acc._id;
     }
 
     // Step 2: Try exact name match
     let acc = await ChartOfAccount.findOne({
       accountName: { $regex: `^${paidThrough}$`, $options: 'i' },
-      ...(orgId ? { orgId } : {}),
-    }).select('_id').lean();
+      ...scope,
+    }).sort({ branchId: -1 }).select('_id').lean();
     if (acc) return acc._id;
 
     // Step 3: Not found — AUTO CREATE the paid-through account
@@ -642,9 +652,10 @@ router.post('/', upload.single('receipt'), async (req, res) => {
     // ── COA POSTING ─────────────────────────────────────────────────────────
     try {
       const currentOrgId = req.user?.orgId || null;
+      const currentBranchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
       const [expAccId, paidAccId] = await Promise.all([
-        getExpenseAccountId(expenseAccount, currentOrgId),
-        getPaidThroughAccountId(paidThrough, currentOrgId)
+        getExpenseAccountId(expenseAccount, currentOrgId, currentBranchId),
+        getPaidThroughAccountId(paidThrough, currentOrgId, currentBranchId)
       ]);
 
       const txnDate = new Date(date);
@@ -1888,9 +1899,10 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
 // ✅ COA for bulk imported expense
 try {
   const currentOrgId = req.user?.orgId || null;
+  const currentBranchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
   const [expAccId, paidAccId] = await Promise.all([
-    getExpenseAccountId(expenseAccountValue, currentOrgId),
-    getPaidThroughAccountId(String(paidThroughField).trim(), currentOrgId)
+    getExpenseAccountId(expenseAccountValue, currentOrgId, currentBranchId),
+    getPaidThroughAccountId(String(paidThroughField).trim(), currentOrgId, currentBranchId)
   ]);
 
   const txnDate = new Date(dateStr);

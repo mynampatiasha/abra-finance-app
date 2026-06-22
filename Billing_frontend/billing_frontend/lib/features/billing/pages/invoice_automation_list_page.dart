@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
-import 'dart:html' as html;
+import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as xlsLib;
 import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/invoice_automation_service.dart';
+import '../../../../core/finance_secure_storage.dart';
 import '../app_top_bar.dart';
 import 'new_invoice_automation.dart';
 
@@ -66,12 +67,14 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
   String _filterRemarks = '';
   String _filterTrackingNo = '';
   String _filterBilledText = '';
+  String _filterGlobal = '';
   
   final _senderController   = TextEditingController();
   final _customerController = TextEditingController();
   final _shippingController = TextEditingController();
   final _remarksController  = TextEditingController();
   final _trackingController = TextEditingController();
+  final _globalController   = TextEditingController();
   final _draftsSearchController = TextEditingController();
   final _billedSearchController = TextEditingController();
 
@@ -86,12 +89,15 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
   Timer? _debounceShipping;
   Timer? _debounceRemarks;
   Timer? _debounceTracking;
+  Timer? _debounceGlobal;
   Timer? _debounceDrafts;
   Timer? _debounceBilled;
+  String _currentRole = '';
 
   @override
   void initState() {
     super.initState();
+    _initRole();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && _tabController.index == 1) {
@@ -111,6 +117,11 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
     });
   }
 
+  Future<void> _initRole() async {
+    final role = await FinanceSecureStorage.getRole();
+    if (mounted) setState(() => _currentRole = role ?? '');
+  }
+
   @override
   void dispose() { 
     _tabController.dispose(); 
@@ -119,6 +130,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
     _debounceShipping?.cancel();
     _debounceRemarks?.cancel();
     _debounceTracking?.cancel();
+    _debounceGlobal?.cancel();
     _debounceDrafts?.cancel();
     _debounceBilled?.cancel();
     _senderController.dispose();
@@ -126,6 +138,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
     _shippingController.dispose();
     _remarksController.dispose();
     _trackingController.dispose();
+    _globalController.dispose();
     _draftsSearchController.dispose();
     _billedSearchController.dispose();
     _horizontalScrollController.dispose();
@@ -223,6 +236,17 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
   // ── Filtering Logic ──────────────────────────────────────────────────────
   List<dynamic> get _filteredData {
     return _rawData.where((s) {
+      if (_filterGlobal.isNotEmpty) {
+        final query = _filterGlobal.toLowerCase().trim();
+        bool anyMatch = false;
+        for (var val in s.values) {
+          if (val != null && val.toString().toLowerCase().contains(query)) {
+            anyMatch = true;
+            break;
+          }
+        }
+        if (!anyMatch) return false;
+      }
       if (_filterTrackingNo.isNotEmpty) {
         final query = _filterTrackingNo.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
         final tracking = _getShipmentKey(s).toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -297,7 +321,12 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
       // Detect Full Load by checking shipping_method or remarks (case-insensitive)
       final shippingMethod = (s['shipping_method'] ?? s['shipment_type'] ?? '').toString().toLowerCase();
       final remarks = (s['remarks'] ?? '').toString().toLowerCase();
-      final isFullLoad = shippingMethod.contains('full load') || remarks.contains('full load');
+      final isFullLoad = shippingMethod.contains('full load') || 
+                         shippingMethod.contains('full truck load') || 
+                         shippingMethod.contains('ftl') || 
+                         remarks.contains('full load') || 
+                         remarks.contains('full truck load') || 
+                         remarks.contains('ftl');
 
       double qty;
       double rate;
@@ -310,8 +339,13 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
         unit = unit[0].toUpperCase() + unit.substring(1).toLowerCase();
       }
 
-      qty = double.tryParse(s['quantity']?.toString() ?? '1') ?? 1.0;
-      if (qty <= 0) qty = 1.0;
+      if (isFullLoad) {
+        qty = 1.0; // Forcefully set to 1 for Full Load, regardless of DB value
+      } else {
+        qty = volumetricWeight > 0 ? volumetricWeight : (double.tryParse(s['quantity']?.toString() ?? '1') ?? 1.0);
+        if (qty <= 0) qty = 1.0;
+        if (unit.toLowerCase() == 'nos' || unit.toLowerCase() == 'box') unit = 'Kg';
+      }
 
       rate = 0;
       if (qty > 0) {
@@ -324,11 +358,18 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
       final destCity   = s['destination_city']?.toString() ?? '';
       final locationString = (originCity.isNotEmpty || destCity.isNotEmpty)
           ? '$originCity - $destCity'
-          : '${s['origin']} --TO-- ${s['destination']}'; // Fallback if cities are empty
+          : '${s['origin'] ?? ''} --TO-- ${s['destination'] ?? ''}'; // Fallback if cities are empty
       final date   = (s['delivery_date']?.toString() ?? '').split(' ').first;
       
+      final senderEmail = s['sender_email']?.toString() ?? '';
+      final customerEmail = s['customer_email']?.toString() ?? '';
+      
+      String details = '$tracking\n$locationString\nDate: $date\nType: ${shippingMethod.toUpperCase()}';
+      if (senderEmail.isNotEmpty && senderEmail.toLowerCase() != 'null') details += '\nSender Email: $senderEmail';
+      if (customerEmail.isNotEmpty && customerEmail.toLowerCase() != 'null') details += '\nCustomer Email: $customerEmail';
+
       return InvoiceItem(
-        itemDetails: '$tracking\n$locationString\nDate: $date\nType: ${shippingMethod.toUpperCase()}',
+        itemDetails: details,
         hsnCode: '009965',
         unit: unit,
         quantity: qty, 
@@ -549,6 +590,46 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
       content: Text('Excel downloaded!'), backgroundColor: Colors.green));
   }
 
+  void _exportDraftsToExcel() {
+    if (_filteredDrafts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No staging drafts to export.')));
+      return;
+    }
+    
+    final excel = xlsLib.Excel.createExcel();
+    final sheet = excel['Staging Drafts'];
+    
+    sheet.appendRow([
+      xlsLib.TextCellValue('INVOICE NO'),
+      xlsLib.TextCellValue('CUSTOMER NAME'),
+      xlsLib.TextCellValue('LINE ITEMS'),
+      xlsLib.TextCellValue('TOTAL AMOUNT (INR)'),
+      xlsLib.TextCellValue('INVOICE DATE'),
+      xlsLib.TextCellValue('STATUS'),
+    ]);
+    
+    for (var d in _filteredDrafts) {
+      sheet.appendRow([
+        xlsLib.TextCellValue(d.invoiceNumber ?? ''),
+        xlsLib.TextCellValue(d.customerName),
+        xlsLib.TextCellValue(d.items.length.toString()),
+        xlsLib.TextCellValue(d.totalAmount.toStringAsFixed(2)),
+        xlsLib.TextCellValue(DateFormat('yyyy-MM-dd').format(d.invoiceDate)),
+        xlsLib.TextCellValue('Staging Draft'),
+      ]);
+    }
+    
+    final bytes = excel.encode()!;
+    final blob = html.Blob([bytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'Staging_Drafts_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx')
+      ..click();
+    html.Url.revokeObjectUrl(url);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Staging Drafts Excel downloaded!'), backgroundColor: Colors.green));
+  }
+
   // =========================================================================
   // BUILD
   // =========================================================================
@@ -687,13 +768,41 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: Colors.indigo.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
-            child: Row(children: [
-              const Icon(Icons.filter_list, color: Colors.indigo),
-              const SizedBox(width: 12),
-              // Smart AL Number (Tracking No) Filter
-              Expanded(flex: 2, child: Focus(
-                onKeyEvent: (node, event) => KeyEventResult.skipRemainingHandlers,
-                child: TextField(
+            child: Column(
+              children: [
+                // Global / Universal Search Row
+                Row(children: [
+                  const Icon(Icons.search, color: Colors.indigo),
+                  const SizedBox(width: 12),
+                  Expanded(child: Focus(
+                    onKeyEvent: (node, event) => KeyEventResult.skipRemainingHandlers,
+                    child: TextField(
+                      controller: _globalController,
+                      decoration: InputDecoration(
+                        hintText: 'Company Name / Universal Search (searches all fields like Sender, Receiver, Email, etc.)...',
+                        prefixIcon: const Icon(Icons.travel_explore, size: 18),
+                        isDense: true, contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                        filled: true, fillColor: Colors.white,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.indigo[300]!, width: 2)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.indigo[300]!, width: 2)),
+                      ),
+                      onChanged: (v) {
+                        if (_debounceGlobal?.isActive ?? false) _debounceGlobal!.cancel();
+                        _debounceGlobal = Timer(const Duration(milliseconds: 500), () {
+                          setState(() => _filterGlobal = v);
+                        });
+                      },
+                    ))),
+                ]),
+                const SizedBox(height: 10),
+                // Original Column Filters Row
+                Row(children: [
+                  const Icon(Icons.filter_list, color: Colors.indigo),
+                  const SizedBox(width: 12),
+                  // Smart AL Number (Tracking No) Filter
+                  Expanded(flex: 2, child: Focus(
+                    onKeyEvent: (node, event) => KeyEventResult.skipRemainingHandlers,
+                    child: TextField(
                   controller: _trackingController,
                   decoration: InputDecoration(
                     hintText: 'AL Number...',
@@ -806,7 +915,9 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-            ]),
+                ]),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           
@@ -951,14 +1062,20 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
                       
                       // ── RIGHT PANEL (Scrolls horizontally) ──
                       Expanded(
-                        child: SingleChildScrollView(
+                        child: Scrollbar(
                           controller: _horizontalScrollController,
-                          scrollDirection: Axis.horizontal,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // RIGHT HEADER
-                              Container(
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          thickness: 8,
+                          radius: const Radius.circular(8),
+                          child: SingleChildScrollView(
+                            controller: _horizontalScrollController,
+                            scrollDirection: Axis.horizontal,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // RIGHT HEADER
+                                Container(
                                 color: Colors.grey[100],
                                 height: 44,
                                 child: Row(
@@ -1015,7 +1132,8 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
                                   );
                                 },
                               ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1088,6 +1206,13 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
               icon: const Icon(Icons.download, size: 16),
               label: const Text('Fetch Drafts'),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: _exportDraftsToExcel,
+              icon: const Icon(Icons.table_view, size: 16),
+              label: const Text('Export Filtered'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
             ),
           ]),
         ),
@@ -1207,7 +1332,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
 // TAB 3 — Billed Shipments
 // =========================================================================
   Future<void> _exportBilledShipments() async {
-    if (_billedShipments.isEmpty) {
+    if (_filteredBilledShipments.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No billed shipments to export.')));
       return;
     }
@@ -1226,7 +1351,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
       xlsLib.TextCellValue('BILLED DATE'),
     ]);
     
-    for (var row in _billedShipments) {
+    for (var row in _filteredBilledShipments) {
       sheet.appendRow([
         xlsLib.TextCellValue(row['id']?.toString() ?? ''),
         xlsLib.TextCellValue(row['tracking_no']?.toString() ?? ''),
@@ -1429,17 +1554,20 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
                                 ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(row['billed_at'].toString()) ?? DateTime.now())
                                 : '',
                               120),
-                            SizedBox(
-                              width: 100,
-                              child: IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                                tooltip: 'Remove from Billed',
-                                onPressed: () => _revertBilledShipment(
-                                  row['tracking_no']?.toString() ?? '',
-                                  row['invoice_number']?.toString() ?? ''
+                            if (_currentRole == 'owner' || _currentRole == 'admin')
+                              SizedBox(
+                                width: 100,
+                                child: IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                                  tooltip: 'Remove from Billed',
+                                  onPressed: () => _revertBilledShipment(
+                                    row['tracking_no']?.toString() ?? '',
+                                    row['invoice_number']?.toString() ?? ''
+                                  ),
                                 ),
-                              ),
-                            ),
+                              )
+                            else
+                              const SizedBox(width: 100),
                           ]),
                         );
                       },

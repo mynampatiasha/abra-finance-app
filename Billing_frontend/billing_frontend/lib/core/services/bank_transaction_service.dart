@@ -172,7 +172,7 @@ class BankTransactionService {
   Future<Map<String, dynamic>> getAllTransactions({
     required String accountId,
     int page  = 1,
-    int limit = 100,
+    int limit = 50,
   }) => _get('/api/finance/banking/transactions/all-transactions', params: {
     'accountId': accountId,
     'page':      '$page',

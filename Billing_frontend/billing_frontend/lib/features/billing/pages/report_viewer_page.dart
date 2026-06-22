@@ -16,6 +16,7 @@ import '../../../../core/services/tms_service.dart';
 import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'report_detail_page.dart';
+import 'pl_expense_drilldown_page.dart';
 
 // ─── Scroll behaviour ────────────────────────────────────────────────────────
 class _AllDeviceScroll extends MaterialScrollBehavior {
@@ -443,7 +444,8 @@ String _drillDownKey(String reportKey) {
 class ReportViewerPage extends StatefulWidget {
   final ReportMeta report;
   final String     orgName;
-  const ReportViewerPage({Key? key, required this.report, required this.orgName}) : super(key: key);
+  final Map<String, String>? initialParams;
+  const ReportViewerPage({Key? key, required this.report, required this.orgName, this.initialParams}) : super(key: key);
   @override State<ReportViewerPage> createState() => _ReportViewerPageState();
 }
 
@@ -470,6 +472,19 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialParams != null) {
+      if (widget.initialParams!.containsKey('period')) {
+        _periodKey = widget.initialParams!['period']!;
+      } else {
+        _periodKey = 'custom';
+        if (widget.initialParams!.containsKey('fromDate')) {
+          _fromDate = DateTime.tryParse(widget.initialParams!['fromDate']!);
+        }
+        if (widget.initialParams!.containsKey('toDate')) {
+          _toDate = DateTime.tryParse(widget.initialParams!['toDate']!);
+        }
+      }
+    }
     _searchCtrl.addListener(() => setState(() => _search = _searchCtrl.text.toLowerCase()));
     _load();
   }
@@ -486,8 +501,12 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   bool get _isTrialBal   => _trialBalanceKeys.contains(widget.report.key);
 
   Map<String, String> get _params {
-    if (_periodKey != 'custom') return {'period': _periodKey};
     final p = <String, String>{};
+    if (widget.report.accountId != null) p['accountId'] = widget.report.accountId!;
+    if (_periodKey != 'custom') {
+      p['period'] = _periodKey;
+      return p;
+    }
     if (_fromDate != null) p['fromDate'] = _fromDate!.toIso8601String();
     if (_toDate   != null) p['toDate']   = _toDate!.toIso8601String();
     return p;
@@ -500,6 +519,18 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       final d = await ReportsService.fetchReport(widget.report.key, _params);
       debugPrint('📊 [REPORT] Raw data keys: ${d.keys.toList()}');
       debugPrint('📊 [REPORT] Raw data: ${d.toString().substring(0, d.toString().length.clamp(0, 500))}');
+
+      if (d != null && d['success'] == true && _periodKey == 'custom' && d['data']?['period'] != null) {
+        try {
+          if (_fromDate == null && d['data']['period']['start'] != null) {
+            _fromDate = DateTime.parse(d['data']['period']['start'].toString());
+          }
+          if (_toDate == null && d['data']['period']['end'] != null) {
+            _toDate = DateTime.parse(d['data']['period']['end'].toString());
+          }
+        } catch (_) {}
+      }
+
       _parse(d);
       debugPrint('📊 [REPORT] After parse → _rows.length=${_rows.length} | _headers=$_headers');
       if (_rows.isEmpty) {
@@ -803,7 +834,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             child: Row(children: [
               const Icon(Icons.visibility_outlined, color: Colors.white, size: 18),
               const SizedBox(width: 10),
-              const Expanded(child: Text('Record Details', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+              const Expanded(child: Text('Record Details', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
               IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white, size: 18), padding: EdgeInsets.zero),
             ])),
           Flexible(child: ListView(
@@ -811,8 +842,8 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             children: row.entries.where((e) => !e.key.startsWith('_')).map((e) =>
               Padding(padding: const EdgeInsets.only(bottom: 10),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  SizedBox(width: 160, child: Text(_colLabel(e.key), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy))),
-                  Expanded(child: Text(_displayVal(e.key, e.value), style: const TextStyle(fontSize: 12, color: Color(0xFF374151)))),
+                  SizedBox(width: 160, child: Text(_colLabel(e.key), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy))),
+                  Expanded(child: Text(_displayVal(e.key, e.value), style: const TextStyle(fontSize: 14, color: Color(0xFF374151)))),
                 ]))).toList())),
           Container(
             padding: const EdgeInsets.all(14),
@@ -926,7 +957,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     _iconBtn(Icons.refresh_rounded, _loading ? null : _load),
     const Spacer(),
     if (widget.orgName.isNotEmpty) ...[
-      Text(widget.orgName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)),
+      Text(widget.orgName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)),
       const SizedBox(width: 14),
     ],
     if (!_isFinancial) ...[_toggleView(), const SizedBox(width: 10)],
@@ -966,44 +997,52 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16,0,16,10),
-      child: Row(children: [
-        PopupMenuButton<String>(
-          initialValue: _periodKey,
-          onSelected: (v) { setState(() => _periodKey = v); if (v != 'custom') _load(); },
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          itemBuilder: (_) => _periods.map((p) => PopupMenuItem(value: p.key,
-            child: Row(children: [
-              Icon(p.key == _periodKey ? Icons.radio_button_checked : Icons.radio_button_off,
-                  size: 16, color: p.key == _periodKey ? _navy : Colors.grey[400]),
-              const SizedBox(width: 8),
-              Text(p.label, style: TextStyle(fontSize: 13, fontWeight: p.key == _periodKey ? FontWeight.w600 : FontWeight.normal)),
-            ]))).toList(),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(color: _navy.withOpacity(0.06), borderRadius: BorderRadius.circular(8), border: Border.all(color: _navy.withOpacity(0.25))),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.date_range_rounded, size: 15, color: _navy), const SizedBox(width: 6),
-              Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
-              const SizedBox(width: 4), const Icon(Icons.arrow_drop_down, size: 16, color: _navy),
-            ])),
-        ),
-        if (_periodKey == 'custom') ...[
-          const SizedBox(width: 8),
-          _datePill(_fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', _fromDate != null, _pickFrom),
-          const SizedBox(width: 6),
-          _datePill(_toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', _toDate != null, _pickTo),
-          if (_fromDate != null || _toDate != null) ...[
+      child: LayoutBuilder(builder: (_, constraints) {
+        // On narrow screens wrap everything in horizontal scroll so nothing is cut off
+        final isNarrow = constraints.maxWidth < 600;
+        final content = Row(mainAxisSize: MainAxisSize.min, children: [
+          PopupMenuButton<String>(
+            initialValue: _periodKey,
+            onSelected: (v) { setState(() => _periodKey = v); if (v != 'custom') _load(); },
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            itemBuilder: (_) => _periods.map((p) => PopupMenuItem(value: p.key,
+              child: Row(children: [
+                Icon(p.key == _periodKey ? Icons.radio_button_checked : Icons.radio_button_off,
+                    size: 16, color: p.key == _periodKey ? _navy : Colors.grey[400]),
+                const SizedBox(width: 8),
+                Text(p.label, style: TextStyle(fontSize: 15, fontWeight: p.key == _periodKey ? FontWeight.w600 : FontWeight.normal)),
+              ]))).toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: _navy.withOpacity(0.06), borderRadius: BorderRadius.circular(8), border: Border.all(color: _navy.withOpacity(0.25))),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.date_range_rounded, size: 15, color: _navy), const SizedBox(width: 6),
+                Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy)),
+                const SizedBox(width: 4), const Icon(Icons.arrow_drop_down, size: 16, color: _navy),
+              ])),
+          ),
+          if (_periodKey == 'custom') ...[
+            const SizedBox(width: 8),
+            _datePill(_fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', _fromDate != null, _pickFrom),
             const SizedBox(width: 6),
-            InkWell(
-              onTap: () { setState(() { _fromDate = null; _toDate = null; _periodKey = 'this_fy'; }); _load(); },
-              child: Container(padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.red[200]!)),
-                child: const Icon(Icons.close, size: 13, color: _red))),
+            _datePill(_toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', _toDate != null, _pickTo),
+            if (_fromDate != null || _toDate != null) ...[
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: () { setState(() { _fromDate = null; _toDate = null; _periodKey = 'this_fy'; }); _load(); },
+                child: Container(padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.red[200]!)),
+                  child: const Icon(Icons.close, size: 13, color: _red))),
+            ],
           ],
-        ],
-        const Spacer(),
-        if (_chartMode && !_isFinancial) _chartTypePicker(),
-      ]),
+          if (_chartMode && !_isFinancial) ...[ const SizedBox(width: 8), _chartTypePicker() ],
+        ]);
+
+        if (isNarrow) {
+          return SingleChildScrollView(scrollDirection: Axis.horizontal, child: content);
+        }
+        return Row(children: [Expanded(child: content)]);
+      }),
     );
   }
 
@@ -1017,7 +1056,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         border: Border.all(color: active ? _navy : const Color(0xFFDDE3EE))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.calendar_today, size: 11, color: active ? _navy : Colors.grey[500]), const SizedBox(width: 5),
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: active ? FontWeight.w600 : FontWeight.normal, color: active ? _navy : Colors.grey[600])),
+        Text(label, style: TextStyle(fontSize: 13, fontWeight: active ? FontWeight.w600 : FontWeight.normal, color: active ? _navy : Colors.grey[600])),
       ])));
 
   Widget _chartTypePicker() => Container(
@@ -1039,7 +1078,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         decoration: BoxDecoration(color: active ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 14, color: active ? Colors.white : Colors.grey[500]), const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: active ? Colors.white : Colors.grey[500])),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: active ? Colors.white : Colors.grey[500])),
         ])));
   }
 
@@ -1122,13 +1161,13 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0,2))]),
       child: Column(children: [
         if (widget.orgName.isNotEmpty) ...[
-          Text(widget.orgName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _navy)),
+          Text(widget.orgName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _navy)),
           const SizedBox(height: 4),
         ],
-        Text(widget.report.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+        Text(widget.report.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
         if (pl.isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text(pl, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+          Text(pl, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
         ],
       ]),
     );
@@ -1160,10 +1199,10 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
               border: Border.all(color: color.withOpacity(0.22)),
               boxShadow: [BoxShadow(color: color.withOpacity(0.07), blurRadius: 6, offset: const Offset(0,2))]),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.value['label'] ?? '', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
+              Text(e.value['label'] ?? '', style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
               Text(n != null ? '₹${n.toStringAsFixed(2)}' : (e.value['value'] ?? ''),
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: color)),
             ]));
         }).toList())),
     );
@@ -1203,11 +1242,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   Widget _buildFinancialExportBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16,8,16,0),
-      child: Row(children: [
+      child: Wrap(spacing: 8, runSpacing: 8, children: [
         _btn('Export PDF',   Icons.picture_as_pdf_rounded, _red,   _exporting ? null : _exportPDF),
-        const SizedBox(width: 8),
         _btn('Export Excel', Icons.table_chart_rounded,    _green, _exporting ? null : _exportExcel),
-        const SizedBox(width: 8),
         _btn('Share',        Icons.share_rounded,          _blue,  _share),
       ]),
     );
@@ -1234,17 +1271,21 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       _fsSecHead('Operating Expenses', _red),
       ..._fsItems(opEx['items'], 'opex'),
       _fsSubtotal('Total for Operating Expenses', opEx['total']),
+      if (d.containsKey('operatingProfit')) ...[
+        const SizedBox(height: 8),
+        _fsGrossRow('Operating Profit', d['operatingProfit']),
+      ],
       if ((nonOpInc['items'] as List? ?? []).isNotEmpty) ...[
         const SizedBox(height: 16),
-        _fsSecHead('Other Income', _blue),
+        _fsSecHead('Non Operating Income', _blue),
         ..._fsItems(nonOpInc['items'], 'noninc'),
-        _fsSubtotal('Total for Other Income', nonOpInc['total']),
+        _fsSubtotal('Total for Non Operating Income', nonOpInc['total']),
       ],
       if ((nonOpEx['items'] as List? ?? []).isNotEmpty) ...[
         const SizedBox(height: 16),
-        _fsSecHead('Other Expenses', _purple),
+        _fsSecHead('Non Operating Expense', _purple),
         ..._fsItems(nonOpEx['items'], 'nonex'),
-        _fsSubtotal('Total for Other Expenses', nonOpEx['total']),
+        _fsSubtotal('Total for Non Operating Expense', nonOpEx['total']),
       ],
       const Divider(height: 28, thickness: 1, color: Color(0xFFE2E8F0)),
       _fsNetRow('Net Profit / Loss', d['netProfit']),
@@ -1253,23 +1294,131 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
   // Balance Sheet
   Widget _buildBS(Map<String,dynamic> d) {
-    final assets = d['assets']      as Map? ?? {};
-    final liabs  = d['liabilities'] as Map? ?? {};
-    final eq     = d['equity']      as Map? ?? {};
+    final tree = d['nestedTree'] as Map? ?? {};
+    if (tree.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('No balance sheet data available.'));
+
+    final assets = tree['assets'] as Map? ?? {};
+    final liabs = tree['liabilities'] as Map? ?? {};
+    final eqs = tree['equities'] as Map? ?? {};
+
+    Widget header(String title, int depth) => Padding(
+      padding: EdgeInsets.only(left: 12.0 + (depth * 16), top: 12, bottom: 6),
+      child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF111827)))
+    );
+    
+    Widget itemRow(Map item, int depth) => InkWell(
+      onTap: () => _openAccountTransactions(item),
+      child: Padding(
+        padding: EdgeInsets.only(left: 12.0 + (depth * 16), top: 6, bottom: 6, right: 12),
+        child: Row(children: [
+          Expanded(child: Text(item['accountName']?.toString() ?? '', style: const TextStyle(fontSize: 15, color: _blue))),
+          Text('₹${_fmtNum(item['amount'] ?? 0)}', style: const TextStyle(fontSize: 15, color: Color(0xFF374151))),
+        ])
+      )
+    );
+
+    Widget subtotal(String title, dynamic total, int depth) => Padding(
+      padding: EdgeInsets.only(left: 12.0 + (depth * 16), top: 6, bottom: 12, right: 12),
+      child: Row(children: [
+        Expanded(child: Text('Total for $title', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF374151)))),
+        Text('₹${_fmtNum(total)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
+      ])
+    );
+
+    Widget renderGroup(Map group, String title, int depth) {
+      final items = group['items'] as List? ?? [];
+      if (items.isEmpty && group['total'] == 0) return const SizedBox.shrink();
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        header(title, depth),
+        ...items.map((i) => itemRow(i, depth + 1)),
+        subtotal(title, group['total'], depth)
+      ]);
+    }
+
+    Widget renderCashBank(Map group, int depth) {
+      final cash = group['cash'] as List? ?? [];
+      final bank = group['bank'] as List? ?? [];
+      if (cash.isEmpty && bank.isEmpty) return const SizedBox.shrink();
+      final c = <Widget>[header('Cash and Cash Equivalents', depth)];
+      if (cash.isNotEmpty) {
+        c.add(header('Cash', depth + 1));
+        c.addAll(cash.map((i) => itemRow(i, depth + 2)));
+        c.add(subtotal('Cash', cash.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
+      }
+      if (bank.isNotEmpty) {
+        c.add(header('Bank', depth + 1));
+        c.addAll(bank.map((i) => itemRow(i, depth + 2)));
+        c.add(subtotal('Bank', bank.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
+      }
+      c.add(subtotal('Cash and Cash Equivalents', group['total'], depth));
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
+    }
+
+    Widget renderCurrentLiabilities(Map cl, int depth) {
+      final ap = cl['accountsPayable'] as Map? ?? {};
+      final ocl = cl['otherCurrentLiabilities'] as Map? ?? {};
+      if (cl['total'] == 0 && (ap['items'] as List? ?? []).isEmpty && (ocl['items'] as List? ?? []).isEmpty) return const SizedBox.shrink();
+      
+      final c = <Widget>[header('Current Liabilities', depth)];
+      if ((ap['items'] as List? ?? []).isNotEmpty || ap['total'] != 0) {
+        c.add(renderGroup(ap, 'Accounts Payable', depth + 1));
+      }
+      
+      final oclItems = ocl['items'] as List? ?? [];
+      final gst = ocl['gstPayable'] as Map? ?? {};
+      if (oclItems.isNotEmpty || (gst['items'] as List? ?? []).isNotEmpty || ocl['total'] != 0) {
+        c.add(header('Other Current Liabilities', depth + 1));
+        c.addAll(oclItems.map((i) => itemRow(i, depth + 2)));
+        if ((gst['items'] as List? ?? []).isNotEmpty) {
+          c.add(header('GST Payable', depth + 2));
+          c.addAll((gst['items'] as List).map((i) => itemRow(i, depth + 3)));
+          c.add(subtotal('GST Payable', gst['total'], depth + 2));
+        }
+        c.add(subtotal('Other Current Liabilities', ocl['total'], depth + 1));
+      }
+      c.add(subtotal('Current Liabilities', cl['total'], depth));
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // ── ASSETS ──
       _fsSecHead('Assets', _blue),
-      ..._fsGroupedItems(assets),
-      _fsSubtotal('Total Assets', assets['total']),
+      if (assets['currentAssets'] != null) ...[
+        header('Current Assets', 0),
+        renderCashBank(assets['currentAssets']['cashAndCashEquivalents'] ?? {}, 1),
+        renderGroup(assets['currentAssets']['accountsReceivable'] ?? {}, 'Accounts Receivable', 1),
+        renderGroup(assets['currentAssets']['otherCurrentAssets'] ?? {}, 'Other current assets', 1),
+        subtotal('Current Assets', assets['currentAssets']['total'], 0),
+      ],
+      renderGroup(assets['fixedAssets'] ?? {}, 'Fixed Assets', 0),
+      renderGroup(assets['nonCurrentAssets'] ?? {}, 'Non Current Assets', 0),
+      renderGroup(assets['otherAssets'] ?? {}, 'Other Assets', 0),
+      _fsSubtotal('Total for Assets', assets['total']),
       const SizedBox(height: 20),
+
+      // ── LIABILITIES ──
       _fsSecHead('Liabilities', _red),
-      ..._fsGroupedItems(liabs),
-      _fsSubtotal('Total Liabilities', liabs['total']),
+      if (liabs['currentLiabilities'] != null) renderCurrentLiabilities(liabs['currentLiabilities'], 0),
+      renderGroup(liabs['nonCurrentLiabilities'] ?? {}, 'Non Current Liabilities', 0),
+      renderGroup(liabs['otherLiabilities'] ?? {}, 'Other Liabilities', 0),
+      _fsSubtotal('Total for Liabilities', liabs['total']),
       const SizedBox(height: 20),
-      _fsSecHead('Equity', _purple),
-      ..._fsGroupedItems(eq),
-      _fsSubtotal('Total Equity', eq['total']),
+
+      // ── EQUITIES ──
+      _fsSecHead('Equities', _purple),
+      ...((eqs['items'] as List? ?? []).map((i) => itemRow(i, 0))),
+      if (eqs['currentYearEarnings'] != null && eqs['currentYearEarnings'] != 0)
+        Padding(
+          padding: const EdgeInsets.only(left: 12.0, top: 6, bottom: 6, right: 12),
+          child: Row(children: [
+            const Expanded(child: Text('Current Year Earnings', style: TextStyle(fontSize: 15, color: _blue))),
+            Text('₹${_fmtNum(eqs['currentYearEarnings'])}', style: const TextStyle(fontSize: 15, color: Color(0xFF374151))),
+          ])
+        ),
+      _fsSubtotal('Total for Equities', eqs['total']),
       const Divider(height: 28, thickness: 1, color: Color(0xFFE2E8F0)),
-      _fsNetRow('Total Liabilities + Equity', d['totalLiabilitiesAndEquity']),
+      _fsNetRow('Total for Liabilities & Equities', d['totalLiabilitiesAndEquity']),
+      
       if (d['balanced'] == true) ...[
         const SizedBox(height: 10),
         Container(
@@ -1277,7 +1426,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           decoration: BoxDecoration(color: _green.withOpacity(0.08), borderRadius: BorderRadius.circular(6), border: Border.all(color: _green.withOpacity(0.3))),
           child: const Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.check_circle, color: _green, size: 14), SizedBox(width: 6),
-            Text('Balance Sheet is Balanced', style: TextStyle(fontSize: 12, color: _green, fontWeight: FontWeight.w600)),
+            Text('Balance Sheet is Balanced', style: TextStyle(fontSize: 14, color: _green, fontWeight: FontWeight.w600)),
           ])),
       ],
     ]);
@@ -1316,12 +1465,19 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     final chg  = d['changes']  as Map? ?? {};
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _fsCompHeader(['Current Period', 'Previous Period', 'Change %']),
-      _fsCompRow('Revenue',    curr['income'],    prev['income'],    chg['income']?['percent'],    isAmount: true),
-      _fsCompRow('COGS',       curr['cogs'],      prev['cogs'],      chg['cogs']?['percent'],       isAmount: true),
-      _fsCompRow('Gross Profit',curr['grossProfit'],prev['grossProfit'],chg['grossProfit']?['percent'],isAmount: true, isBold: true),
-      _fsCompRow('Expenses',   curr['expenses'],  prev['expenses'],  chg['expenses']?['percent'],  isAmount: true),
+      _fsCompRow('Operating Income', curr['income'],    prev['income'],    chg['income']?['percent'],    isAmount: true),
+      _fsCompRow('COGS',             curr['cogs'],      prev['cogs'],      chg['cogs']?['percent'],       isAmount: true),
+      _fsCompRow('Gross Profit',     curr['grossProfit'],prev['grossProfit'],chg['grossProfit']?['percent'],isAmount: true, isBold: true),
+      _fsCompRow('Operating Expenses',curr['expenses'], prev['expenses'],  chg['expenses']?['percent'],  isAmount: true),
+      _fsCompRow('Operating Profit', curr['operatingProfit'],prev['operatingProfit'],chg['operatingProfit']?['percent'],isAmount: true, isBold: true),
+      if (curr.containsKey('nonOpInc')) ...[
+        _fsCompRow('Non Operating Income', curr['nonOpInc'], prev['nonOpInc'], chg['nonOpInc']?['percent'], isAmount: true),
+      ],
+      if (curr.containsKey('nonOpEx')) ...[
+        _fsCompRow('Non Operating Expense', curr['nonOpEx'], prev['nonOpEx'], chg['nonOpEx']?['percent'], isAmount: true),
+      ],
       const Divider(height: 24),
-      _fsCompRow('Net Profit', curr['netProfit'], prev['netProfit'], chg['netProfit']?['percent'],  isAmount: true, isBold: true, isNet: true),
+      _fsCompRow('Net Profit / Loss', curr['netProfit'], prev['netProfit'], chg['netProfit']?['percent'],  isAmount: true, isBold: true, isNet: true),
     ]);
   }
 
@@ -1347,9 +1503,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: const BoxDecoration(color: Color(0xFF0D1B3E), borderRadius: BorderRadius.only(topLeft: Radius.circular(6), topRight: Radius.circular(6))),
         child: Row(children: [
-          const Expanded(flex: 3, child: Text('ACCOUNT', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
+          const Expanded(flex: 3, child: Text('ACCOUNT', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
           for (final lbl in ['OPENING','CHANGE','CLOSING'])
-            Expanded(child: Text(lbl, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
+            Expanded(child: Text(lbl, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
         ])),
       // Rows
       ...accounts.asMap().entries.map<Widget>((e) {
@@ -1358,10 +1514,10 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           color: e.key % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
           child: Row(children: [
-            Expanded(flex: 3, child: Text(a['accountName']?.toString() ?? '', style: const TextStyle(fontSize: 12, color: Color(0xFF374151)))),
-            Expanded(child: Text('₹${_fmtNum(a['opening'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12))),
-            Expanded(child: Text('₹${_fmtNum(a['change'])}',  textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: _amtColor(a['change'])))),
-            Expanded(child: Text('₹${_fmtNum(a['closing'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy))),
+            Expanded(flex: 3, child: Text(a['accountName']?.toString() ?? '', style: const TextStyle(fontSize: 14, color: Color(0xFF374151)))),
+            Expanded(child: Text('₹${_fmtNum(a['opening'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 14))),
+            Expanded(child: Text('₹${_fmtNum(a['change'])}',  textAlign: TextAlign.right, style: TextStyle(fontSize: 14, color: _amtColor(a['change'])))),
+            Expanded(child: Text('₹${_fmtNum(a['closing'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy))),
           ]));
       }),
       // Totals row
@@ -1369,10 +1525,10 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF1E3A8A), width: 1.5))),
         child: Row(children: [
-          const Expanded(flex: 3, child: Text('Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-          Expanded(child: Text('₹${_fmtNum(totals['opening'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-          Expanded(child: Text('₹${_fmtNum(totals['change'])}',  textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-          Expanded(child: Text('₹${_fmtNum(totals['closing'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navy))),
+          const Expanded(flex: 3, child: Text('Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+          Expanded(child: Text('₹${_fmtNum(totals['opening'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+          Expanded(child: Text('₹${_fmtNum(totals['change'])}',  textAlign: TextAlign.right, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+          Expanded(child: Text('₹${_fmtNum(totals['closing'])}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy))),
         ])),
     ]);
   }
@@ -1382,12 +1538,12 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     margin: const EdgeInsets.only(bottom: 8),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
     decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(6), border: Border(left: BorderSide(color: color, width: 3))),
-    child: Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)));
+    child: Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: color)));
 
   List<Widget> _fsItems(dynamic items, String tag) {
     if (items == null || items is! List || items.isEmpty)
       return [Padding(padding: const EdgeInsets.only(left: 24, bottom: 4, top: 2),
-        child: Text('No transactions', style: TextStyle(fontSize: 11, color: Colors.grey[400], fontStyle: FontStyle.italic)))];
+        child: Text('No transactions', style: TextStyle(fontSize: 13, color: Colors.grey[400], fontStyle: FontStyle.italic)))];
     return items.asMap().entries.map<Widget>((e) {
       final item = e.value as Map;
       final accountName = item['accountName']?.toString() ?? '';
@@ -1399,11 +1555,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           color: e.key % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
           child: Row(children: [
             Expanded(child: Row(children: [
-              Text(accountName, style: const TextStyle(fontSize: 12, color: Color(0xFF374151))),
+              Text(accountName, style: const TextStyle(fontSize: 14, color: Color(0xFF374151))),
               const SizedBox(width: 4),
               Icon(Icons.open_in_new, size: 10, color: Colors.grey[400]),
             ])),
-            Text('₹${_fmtNum(amount)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _amtColor(amount))),
+            Text('₹${_fmtNum(amount)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _amtColor(amount))),
           ])),
       );
     },
@@ -1419,13 +1575,13 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(grp['name']?.toString() ?? '', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey[600], letterSpacing: 0.3))),
+            child: Text(grp['name']?.toString() ?? '', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey[600], letterSpacing: 0.3))),
           ..._fsItems(grp['items'], grp['name'] ?? ''),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: Row(children: [
-              Expanded(child: Text('Total ${grp['name'] ?? ''}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
-              Text('₹${_fmtNum(grp['total'])}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navy)),
+              Expanded(child: Text('Total ${grp['name'] ?? ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
+              Text('₹${_fmtNum(grp['total'])}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
             ])),
         ]);
       }).toList();
@@ -1438,31 +1594,31 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
     decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFE2E8F0)))),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
-      Text('₹${_fmtNum(val)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navy)),
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
+      Text('₹${_fmtNum(val)}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navy)),
     ]));
 
   Widget _fsGrossRow(String label, dynamic val) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
     decoration: BoxDecoration(color: _green.withOpacity(0.07), borderRadius: BorderRadius.circular(6), border: Border.all(color: _green.withOpacity(0.2))),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF374151)))),
-      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: (val is num && val < 0) ? _red : _green)),
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF374151)))),
+      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: (val is num && val < 0) ? _red : _green)),
     ]));
 
   Widget _fsNetRow(String label, dynamic val) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
     decoration: BoxDecoration(color: _navy.withOpacity(0.06), borderRadius: BorderRadius.circular(8)),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy))),
-      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: (val is num && val < 0) ? _red : _green)),
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _navy))),
+      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: (val is num && val < 0) ? _red : _green)),
     ]));
 
   Widget _fsKV(String label, dynamic val) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 5),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF374151)))),
-      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _amtColor(val))),
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 14, color: Color(0xFF374151)))),
+      Text('₹${_fmtNum(val)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _amtColor(val))),
     ]));
 
   Widget _fsCompHeader(List<String> cols) => Container(
@@ -1470,7 +1626,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     decoration: const BoxDecoration(color: Color(0xFF0D1B3E), borderRadius: BorderRadius.only(topLeft: Radius.circular(6), topRight: Radius.circular(6))),
     child: Row(children: [
       const Expanded(flex: 3, child: SizedBox()),
-      ...cols.map((c) => Expanded(flex: 2, child: Text(c, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3)))),
+      ...cols.map((c) => Expanded(flex: 2, child: Text(c, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3)))),
     ]));
 
   Widget _fsCompRow(String label, dynamic curr, dynamic prev, dynamic pct, {bool isAmount = false, bool isBold = false, bool isNet = false}) {
@@ -1487,7 +1643,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   }
 
   Widget _fsCompRow2(String label, dynamic curr, dynamic prev, {bool isBold = false}) {
-    final style = TextStyle(fontSize: 12, fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: const Color(0xFF374151));
+    final style = TextStyle(fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: const Color(0xFF374151));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(children: [
@@ -1498,11 +1654,37 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   }
 
   void _openAccountTransactions(Map item) {
-    final accountId   = item['accountId']?.toString()   ?? '';
     final accountName = item['accountName']?.toString() ?? '';
-    if (accountId.isEmpty && accountName.isEmpty) return;
-    final meta = ReportMeta(key: 'account-transactions', name: 'Account Transactions — $accountName');
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ReportViewerPage(report: meta, orgName: widget.orgName)));
+    if (accountName.isEmpty) return;
+
+    // For expense/COGS items from P&L — show bank transaction drill-down
+    if (widget.report.key == 'profit-loss' ||
+        widget.report.key == 'profit-loss-horizontal') {
+      // Pass the date range filters through to the drilldown
+      final startDate = _params['fromDate'];
+      final endDate   = _params['toDate'];
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => PlExpenseDrilldownPage(
+          accountName: accountName,
+          orgName:     widget.orgName,
+          startDate:   startDate,
+          endDate:     endDate,
+        ),
+      ));
+      return;
+    }
+
+    // For all other reports — original COA journal view
+    final meta = ReportMeta(
+      key: 'account-transactions', 
+      name: 'Account Transactions — $accountName',
+      accountId: item['accountId']?.toString()
+    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ReportViewerPage(
+      report: meta, 
+      orgName: widget.orgName,
+      initialParams: _params,
+    )));
   }
 
   // Flatten financial data for export
@@ -1598,7 +1780,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           return SizedBox(width: colW,
               child: Text(_colLabel(h).toUpperCase(),
                   textAlign: isAmt ? TextAlign.right : TextAlign.left,
-                  style: const TextStyle(color: Colors.white, fontSize: 11,
+                  style: const TextStyle(color: Colors.white, fontSize: 13,
                       fontWeight: FontWeight.bold, letterSpacing: 0.3)));
         }),
       ]),
@@ -1637,14 +1819,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                       return SizedBox(width: colW * 3,
                           child: Text(v?.toString() ?? '',
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)));
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)));
                     }
                     if (isAccountRow && h != 'accountName') return SizedBox(width: colW);
                     return SizedBox(width: colW,
                         child: Text(_displayVal(h, v),
                             textAlign: isAmt ? TextAlign.right : TextAlign.left,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12,
+                            style: TextStyle(fontSize: 14,
                                 color: c ?? const Color(0xFF374151),
                                 fontWeight: isAccountRow || hl.contains('total')
                                     ? FontWeight.w600
@@ -1673,7 +1855,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(children: [
             Text('${rows.length} record${rows.length != 1 ? 's' : ''}',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
           ]),
         ),
         const Divider(height: 1),
@@ -1709,11 +1891,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           final hl = h.toLowerCase();
           final isDebit  = hl.contains('debit');
           final isCredit = hl.contains('credit');
-          if (!isDebit && !isCredit) return SizedBox(width: colW, child: h == _headers.first ? Row(children: [const Text('TOTAL', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navy)), const SizedBox(width: 8), if (balanced) const Icon(Icons.check_circle, size: 14, color: _green)]) : const SizedBox.shrink());
+          if (!isDebit && !isCredit) return SizedBox(width: colW, child: h == _headers.first ? Row(children: [const Text('TOTAL', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)), const SizedBox(width: 8), if (balanced) const Icon(Icons.check_circle, size: 14, color: _green)]) : const SizedBox.shrink());
           return SizedBox(width: colW, child: Text(
             isDebit ? '₹${totalDebit.toStringAsFixed(2)}' : '₹${totalCredit.toStringAsFixed(2)}',
             textAlign: TextAlign.right,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDebit ? _orange : _green)));
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDebit ? _orange : _green)));
         }),
       ]));
   }
@@ -1727,7 +1909,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     if (rows.isEmpty) return _emptyState();
     if (_headers.isEmpty) return SingleChildScrollView(padding: const EdgeInsets.all(16),
         child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-            child: Text(_data.toString(), style: const TextStyle(fontFamily: 'monospace', fontSize: 11))));
+            child: Text(_data.toString(), style: const TextStyle(fontFamily: 'monospace', fontSize: 13))));
 
     final colW = _headers.length <= 4 ? 180.0 : _headers.length <= 7 ? 155.0 : 130.0;
     final tableW = _headers.length * colW + 28;
@@ -1740,7 +1922,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(children: [
             Text('${rows.length} record${rows.length!=1?'s':''}${_search.isNotEmpty?" (filtered)":''}',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
             const Spacer(),
             if (_exporting) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _navy)),
           ])),
@@ -1766,7 +1948,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                         _colLabel(h).toUpperCase(),
                         textAlign: isAmt ? TextAlign.right : TextAlign.left,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.3)));
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.3)));
                     }),
                     const SizedBox(width: 14),
                   ]),
@@ -1797,7 +1979,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                                         _displayVal(h, v),
                                         overflow: TextOverflow.ellipsis,
                                         textAlign: isAmt ? TextAlign.right : TextAlign.left,
-                                        style: _cellStyle(h, v) ?? const TextStyle(fontSize: 12, color: Color(0xFF374151))));
+                                        style: _cellStyle(h, v) ?? const TextStyle(fontSize: 14, color: Color(0xFF374151))));
                               }),
                               const SizedBox(width: 14),
                             ]),
@@ -1835,15 +2017,15 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-      child: Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg)));
+      child: Text(status, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)));
   }
 
   TextStyle? _cellStyle(String h, dynamic v) {
     final hl = h.toLowerCase();
     if (hl.contains('amount') || hl.contains('total') || hl.contains('due') || hl.contains('balance')) {
       final n = double.tryParse(v?.toString() ?? '');
-      if (n != null && n < 0) return const TextStyle(fontSize: 12, color: _red, fontWeight: FontWeight.w500);
-      if (n != null && n > 0) return const TextStyle(fontSize: 12, color: Color(0xFF374151), fontWeight: FontWeight.w500);
+      if (n != null && n < 0) return const TextStyle(fontSize: 14, color: _red, fontWeight: FontWeight.w500);
+      if (n != null && n > 0) return const TextStyle(fontSize: 14, color: Color(0xFF374151), fontWeight: FontWeight.w500);
     }
     return null;
   }
@@ -1857,16 +2039,16 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     if (rows.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.bar_chart_outlined, size: 52, color: Colors.grey[300]),
       const SizedBox(height: 12),
-      Text('No data to chart', style: TextStyle(fontSize: 15, color: Colors.grey[500])),
+      Text('No data to chart', style: TextStyle(fontSize: 17, color: Colors.grey[500])),
     ]));
     return Container(
       margin: const EdgeInsets.all(16), padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0,3))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(widget.report.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
+        Text(widget.report.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _navy)),
         const SizedBox(height: 4),
-        Text('${rows.length} records', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        Text('${rows.length} records', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
         const SizedBox(height: 20),
         Expanded(child: _chartType == _ChartType.pie ? _buildPie(rows) : _buildBarLine(rows)),
       ]),
@@ -1903,9 +2085,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       if (i < 0 || i >= lim.length || i % step != 0) return const SizedBox.shrink();
       final label = lim[i][lf]?.toString() ?? '';
       final short = label.length > 10 ? '${label.substring(0,9)}…' : label;
-      return Padding(padding: const EdgeInsets.only(top: 4), child: Text(short, style: TextStyle(fontSize: 9, color: Colors.grey[600])));
+      return Padding(padding: const EdgeInsets.only(top: 4), child: Text(short, style: TextStyle(fontSize: 11, color: Colors.grey[600])));
     }
-    Widget leftTitle(double v, TitleMeta _) => Text('₹${_shortNum(v)}', style: TextStyle(fontSize: 9, color: Colors.grey[600]));
+    Widget leftTitle(double v, TitleMeta _) => Text('₹${_shortNum(v)}', style: TextStyle(fontSize: 11, color: Colors.grey[600]));
 
     final titlesData = FlTitlesData(
       leftTitles:   AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 58, getTitlesWidget: leftTitle)),
@@ -1923,8 +2105,8 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           tooltipBgColor: Colors.white, tooltipBorder: const BorderSide(color: Color(0xFFE8EEF4)),
           getTooltipItem: (group, _, rod, __) {
             final label = lim[group.x][lf]?.toString() ?? '';
-            return BarTooltipItem('$label\n', const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 11),
-              children: [TextSpan(text: '₹${rod.toY.toStringAsFixed(2)}', style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, fontSize: 12))]);
+            return BarTooltipItem('$label\n', const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13),
+              children: [TextSpan(text: '₹${rod.toY.toStringAsFixed(2)}', style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, fontSize: 14))]);
           })),
         barGroups: lim.asMap().entries.map((e) => BarChartGroupData(x: e.key,
           barRods: [BarChartRodData(toY: vals[e.key], color: _cc[e.key % _cc.length], width: 20,
@@ -1956,7 +2138,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         sections: lim.asMap().entries.map((e) {
           final pct = vals[e.key] / total * 100;
           return PieChartSectionData(color: _cc[e.key % _cc.length], value: vals[e.key], radius: 85,
-              title: '${pct.toStringAsFixed(1)}%', titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white));
+              title: '${pct.toStringAsFixed(1)}%', titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white));
         }).toList()))),
       const SizedBox(width: 16),
       SizedBox(width: 150, child: Column(mainAxisAlignment: MainAxisAlignment.center,
@@ -1967,8 +2149,8 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             Container(width: 10, height: 10, decoration: BoxDecoration(color: _cc[e.key % _cc.length], borderRadius: BorderRadius.circular(2))),
             const SizedBox(width: 6),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label.length > 14 ? '${label.substring(0,13)}…' : label, style: const TextStyle(fontSize: 10), overflow: TextOverflow.ellipsis),
-              Text('${pct.toStringAsFixed(1)}%', style: TextStyle(fontSize: 9, color: Colors.grey[500])),
+              Text(label.length > 14 ? '${label.substring(0,13)}…' : label, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+              Text('${pct.toStringAsFixed(1)}%', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
             ])),
           ]));
         }).toList())),
@@ -2042,7 +2224,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           child: Row(children: [
             Container(width: 3, height: 18, decoration: BoxDecoration(color: _navy, borderRadius: BorderRadius.circular(2))),
             const SizedBox(width: 8),
-            const Text('Related Reports', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
+            const Text('Related Reports', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _navy)),
           ])),
         GridView.builder(
           shrinkWrap: true,
@@ -2071,7 +2253,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     decoration: BoxDecoration(color: color.withOpacity(0.10), borderRadius: BorderRadius.circular(6)),
                     child: Icon(Icons.description_outlined, size: 15, color: color)),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(rel['name'] ?? '', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color), maxLines: 2, overflow: TextOverflow.ellipsis)),
+                  Expanded(child: Text(rel['name'] ?? '', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color), maxLines: 2, overflow: TextOverflow.ellipsis)),
                   Icon(Icons.arrow_forward_ios_rounded, size: 10, color: color.withOpacity(0.6)),
                 ]),
               ),
@@ -2089,16 +2271,16 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     Icon(Icons.table_chart_outlined, size: 52, color: Colors.grey[300]),
     const SizedBox(height: 12),
     Text(_search.isNotEmpty ? 'No results match "$_search"' : 'No data for this period',
-        style: TextStyle(fontSize: 15, color: Colors.grey[500])),
+        style: TextStyle(fontSize: 17, color: Colors.grey[500])),
   ]));
 
   Widget _buildError() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
     Icon(Icons.error_outline, size: 52, color: Colors.red[400]),
     const SizedBox(height: 12),
-    Text('Failed to load report', style: TextStyle(fontSize: 15, color: Colors.grey[700])),
+    Text('Failed to load report', style: TextStyle(fontSize: 17, color: Colors.grey[700])),
     const SizedBox(height: 8),
     Padding(padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Text(_error ?? '', style: TextStyle(fontSize: 12, color: Colors.grey[500]), textAlign: TextAlign.center)),
+        child: Text(_error ?? '', style: TextStyle(fontSize: 14, color: Colors.grey[500]), textAlign: TextAlign.center)),
     const SizedBox(height: 20),
     ElevatedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('Retry'),
         style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0,
@@ -2142,14 +2324,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       decoration: BoxDecoration(color: active ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 15, color: active ? Colors.white : Colors.grey[500]), const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: active ? Colors.white : Colors.grey[500])),
+        Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: active ? Colors.white : Colors.grey[500])),
       ])));
 
   Widget _searchBox(double w) {
     final f = TextField(
-      controller: _searchCtrl, style: const TextStyle(fontSize: 13),
+      controller: _searchCtrl, style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
-        hintText: 'Search in report…', hintStyle: TextStyle(fontSize: 13, color: Colors.grey[400]),
+        hintText: 'Search in report…', hintStyle: TextStyle(fontSize: 15, color: Colors.grey[400]),
         prefixIcon: Icon(Icons.search, size: 16, color: Colors.grey[400]),
         suffixIcon: _search.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 14), onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); }) : null,
         filled: true, fillColor: const Color(0xFFF7F9FC), isDense: true, contentPadding: EdgeInsets.zero,
@@ -2169,7 +2351,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
   Widget _btn(String label, IconData icon, Color bg, VoidCallback? onTap) =>
     ElevatedButton.icon(onPressed: onTap, icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(backgroundColor: bg, foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.4), elevation: 0,
         minimumSize: const Size(0, 40), padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2181,7 +2363,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         disabledBackgroundColor: bg.withOpacity(0.4), elevation: 0,
         minimumSize: const Size(0, 40), padding: const EdgeInsets.symmetric(horizontal: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-      child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)));
+      child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)));
 }
 
 // =============================================================================
@@ -2246,13 +2428,13 @@ class _TicketDialogState extends State<_TicketDialog> {
           child: Row(children: [
             const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 20), const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Raise a Ticket', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-              Text(widget.reportName, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 11), overflow: TextOverflow.ellipsis),
+              const Text('Raise a Ticket', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(widget.reportName, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13), overflow: TextOverflow.ellipsis),
             ])),
             IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white, size: 18)),
           ])),
         Flexible(child: SingleChildScrollView(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Priority', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)),
+          const Text('Priority', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)),
           const SizedBox(height: 8),
           Row(children: ['Low','Medium','High'].map((p) {
             final sel = _priority == p;
@@ -2262,12 +2444,12 @@ class _TicketDialogState extends State<_TicketDialog> {
                 child: AnimatedContainer(duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(vertical: 9),
                   decoration: BoxDecoration(color: sel ? c : Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: sel ? c : Colors.grey[300]!)),
-                  child: Center(child: Text(p, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: sel ? Colors.white : Colors.grey[700])))))));
+                  child: Center(child: Text(p, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: sel ? Colors.white : Colors.grey[700])))))));
           }).toList()),
           const SizedBox(height: 16),
-          const Text('Assign To', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)),
+          const Text('Assign To', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)),
           const SizedBox(height: 8),
-          TextField(controller: _sc, style: const TextStyle(fontSize: 13),
+          TextField(controller: _sc, style: const TextStyle(fontSize: 15),
             decoration: InputDecoration(hintText: 'Search employees…',
               prefixIcon: Icon(Icons.search, size: 16, color: Colors.grey[400]),
               filled: true, fillColor: const Color(0xFFF7F9FC), isDense: true, contentPadding: EdgeInsets.zero,
@@ -2288,11 +2470,11 @@ class _TicketDialogState extends State<_TicketDialog> {
                         color: sel ? _navy.withOpacity(0.06) : Colors.transparent,
                         child: Row(children: [
                           CircleAvatar(radius: 16, backgroundColor: sel ? _navy : _navy.withOpacity(0.1),
-                            child: Text((e['name_parson'] ?? 'U')[0].toUpperCase(), style: TextStyle(color: sel ? Colors.white : _navy, fontWeight: FontWeight.bold, fontSize: 12))),
+                            child: Text((e['name_parson'] ?? 'U')[0].toUpperCase(), style: TextStyle(color: sel ? Colors.white : _navy, fontWeight: FontWeight.bold, fontSize: 14))),
                           const SizedBox(width: 10),
                           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(e['name_parson'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-                            if (e['email'] != null) Text(e['email'], style: TextStyle(fontSize: 10, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
+                            Text(e['name_parson'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            if (e['email'] != null) Text(e['email'], style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
                           ])),
                           if (sel) const Icon(Icons.check_circle, color: _navy, size: 18),
                         ])));
@@ -2316,7 +2498,7 @@ class _TicketDialogState extends State<_TicketDialog> {
               child: _assigning
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : Text(_sel != null ? 'Assign to ${_sel!['name_parson'] ?? ''}' : 'Select Employee',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), overflow: TextOverflow.ellipsis))),
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14), overflow: TextOverflow.ellipsis))),
           ])),
       ])),
   );
@@ -2361,10 +2543,10 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
       color: const Color(0xFF0D1B3E),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(children: [
-        const SizedBox(width: 180, child: Text('NAME', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
+        const SizedBox(width: 180, child: Text('NAME', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3))),
         ...agingCols.map((c) => SizedBox(width: 110,
             child: Text(c.toUpperCase(), textAlign: TextAlign.right,
-                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3)))),
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3)))),
       ]),
     );
 
@@ -2388,7 +2570,7 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
                   color: i % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
                   child: Row(children: [
                     SizedBox(width: 180, child: Text(name, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: _navy, fontWeight: FontWeight.w500, decoration: TextDecoration.underline))),
+                        style: const TextStyle(fontSize: 14, color: _navy, fontWeight: FontWeight.w500, decoration: TextDecoration.underline))),
                     ...agingKeys.map((ak) {
                       final val = double.tryParse(r[ak]?.toString() ?? '') ?? 0.0;
                       Color c = const Color(0xFF374151);
@@ -2399,7 +2581,7 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
                       return SizedBox(width: 110,
                           child: Text(val > 0 ? '₹${val.toStringAsFixed(2)}' : '-',
                               textAlign: TextAlign.right,
-                              style: TextStyle(fontSize: 12, color: c, fontWeight: ak == 'total' ? FontWeight.bold : FontWeight.normal)));
+                              style: TextStyle(fontSize: 14, color: c, fontWeight: ak == 'total' ? FontWeight.bold : FontWeight.normal)));
                     }),
                   ]),
                 ),
@@ -2414,10 +2596,10 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF1E3A8A), width: 1.5))),
       child: Row(children: [
-        const SizedBox(width: 180, child: Text('TOTAL', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navy))),
+        const SizedBox(width: 180, child: Text('TOTAL', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy))),
         ...agingKeys.map((ak) => SizedBox(width: 110,
             child: Text('₹${totals[ak]!.toStringAsFixed(2)}', textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navy)))),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)))),
       ]),
     );
 
@@ -2430,7 +2612,7 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(children: [
             Text('${rows.length} record${rows.length != 1 ? 's' : ''}',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
           ]),
         ),
         const Divider(height: 1),
@@ -2511,7 +2693,7 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
               h.toLowerCase().contains('balance') || h.toLowerCase().contains('amount');
           return SizedBox(width: colW,
               child: Text(_colLabel(h).toUpperCase(), textAlign: isAmt ? TextAlign.right : TextAlign.left,
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3)));
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.3)));
         }),
       ]),
     );
@@ -2548,14 +2730,14 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
                       if (isAccountRow && h == 'accountName') {
                         return SizedBox(width: colW * 3,
                             child: Text(v?.toString() ?? '', overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _navy)));
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _navy)));
                       }
                       if (isAccountRow && h != 'accountName') return SizedBox(width: colW);
                       return SizedBox(width: colW,
                           child: Text(_displayVal(h, v),
                               textAlign: isAmt ? TextAlign.right : TextAlign.left,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12,
+                              style: TextStyle(fontSize: 14,
                                   color: c ?? const Color(0xFF374151),
                                   fontWeight: isAccountRow || hl.contains('total') ? FontWeight.w600 : FontWeight.normal,
                                   decoration: isName ? TextDecoration.underline : TextDecoration.none)));
@@ -2585,7 +2767,7 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
           if (!isDebit && !isCredit) {
             return SizedBox(width: colW, child: h == visibleHeaders.first
                 ? Row(children: [
-                    const Text('TOTAL', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navy)),
+                    const Text('TOTAL', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
                     const SizedBox(width: 8),
                     if (balanced) const Icon(Icons.check_circle, size: 14, color: _green),
                   ])
@@ -2594,7 +2776,7 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
           return SizedBox(width: colW, child: Text(
               isDebit ? '₹${totalDebit.toStringAsFixed(2)}' : '₹${totalCredit.toStringAsFixed(2)}',
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDebit ? _orange : _green)));
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDebit ? _orange : _green)));
         }),
       ]),
     );
@@ -2608,7 +2790,7 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(children: [
             Text('${rows.length} record${rows.length != 1 ? 's' : ''}',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
           ]),
         ),
         const Divider(height: 1),
@@ -2678,7 +2860,7 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(children: [
             Text('${rows.length} record${rows.length != 1 ? 's' : ''}${widget.search.isNotEmpty ? " (filtered)" : ""}',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500)),
             const Spacer(),
             if (widget.exporting) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _navy)),
           ]),
@@ -2706,7 +2888,7 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                           widget.colLabel(h).toUpperCase(),
                           textAlign: isAmt ? TextAlign.right : TextAlign.left,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.3)));
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.3)));
                     }),
                     const SizedBox(width: 14),
                   ]),
@@ -2752,7 +2934,7 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                           padding: const EdgeInsets.symmetric(vertical: 12),
                                           child: Text(v?.toString() ?? '',
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navy))));
+                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy))));
                                     }
                                     if (h == 'accountType') {
                                       return SizedBox(width: colW,
@@ -2763,7 +2945,7 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                             decoration: BoxDecoration(color: _navy.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
                                             child: Text(v?.toString() ?? '',
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _navy)))));
+                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy)))));
                                     }
                                     return SizedBox(width: colW);
                                   }
@@ -2772,7 +2954,7 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                       : Text(widget.displayVal(h, v),
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: isAmt ? TextAlign.right : TextAlign.left,
-                                          style: widget.cellStyle(h, v) ?? const TextStyle(fontSize: 12, color: Color(0xFF374151))));
+                                          style: widget.cellStyle(h, v) ?? const TextStyle(fontSize: 14, color: Color(0xFF374151))));
                                 }),
                                 const SizedBox(width: 14),
                               ]),
@@ -2791,3 +2973,4 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
     );
   }
 }
+

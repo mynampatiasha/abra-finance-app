@@ -546,6 +546,10 @@ router.get('/summary', async (req, res) => {
     
     const { basis = 'accrual' } = req.query;
     const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
     
     // Calculate all dashboard components in parallel
     const [receivables, payables, cashFlow, incomeExpense, projects, bankAccounts, watchlist] = 
@@ -585,7 +589,12 @@ router.get('/summary', async (req, res) => {
  */
 router.get('/receivables', async (req, res) => {
   try {
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const receivables = await calculateReceivables(orgFilter);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const receivables = await calculateReceivables(orgFilter);
     res.json({ success: true, data: receivables });
   } catch (error) {
     console.error('❌ Error calculating receivables:', error);
@@ -602,7 +611,12 @@ router.get('/receivables', async (req, res) => {
  */
 router.get('/payables', async (req, res) => {
   try {
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const payables = await calculatePayables(orgFilter);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const payables = await calculatePayables(orgFilter);
     res.json({ success: true, data: payables });
   } catch (error) {
     console.error('❌ Error calculating payables:', error);
@@ -621,7 +635,12 @@ router.get('/payables', async (req, res) => {
 router.get('/cash-flow', async (req, res) => {
   try {
     const { period = 'fiscal_year' } = req.query;
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const cashFlow = await calculateCashFlow(orgFilter, period);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const cashFlow = await calculateCashFlow(orgFilter, period);
     res.json({ success: true, data: cashFlow });
   } catch (error) {
     console.error('❌ Error calculating cash flow:', error);
@@ -641,7 +660,12 @@ router.get('/cash-flow', async (req, res) => {
 router.get('/income-expense', async (req, res) => {
   try {
     const { period = 'fiscal_year', basis = 'accrual' } = req.query;
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const incomeExpense = await calculateIncomeAndExpense(orgFilter, period, basis);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const incomeExpense = await calculateIncomeAndExpense(orgFilter, period, basis);
     res.json({ success: true, data: incomeExpense });
   } catch (error) {
     console.error('❌ Error calculating income and expense:', error);
@@ -658,7 +682,12 @@ router.get('/income-expense', async (req, res) => {
  */
 router.get('/projects', async (req, res) => {
   try {
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const projects = await calculateProjectsSummary(orgFilter);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const projects = await calculateProjectsSummary(orgFilter);
     res.json({ success: true, data: projects });
   } catch (error) {
     console.error('❌ Error calculating projects:', error);
@@ -675,7 +704,12 @@ router.get('/projects', async (req, res) => {
  */
 router.get('/bank-accounts', async (req, res) => {
   try {
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const bankAccounts = await calculateBankAccountsSummary(orgFilter);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const bankAccounts = await calculateBankAccountsSummary(orgFilter);
     res.json({ success: true, data: bankAccounts });
   } catch (error) {
     console.error('❌ Error calculating bank accounts:', error);
@@ -693,7 +727,12 @@ router.get('/bank-accounts', async (req, res) => {
 router.get('/watchlist', async (req, res) => {
   try {
     const { basis = 'accrual' } = req.query;
-    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) }; const watchlist = await calculateAccountWatchlist(orgFilter, basis);
+    const orgFilter = { ...req.orgFilter, ...(req.branchFilter || {}) };
+    if (orgFilter.branchId) {
+      orgFilter.$or = [{ branchId: orgFilter.branchId }, { branchId: null }];
+      delete orgFilter.branchId;
+    }
+    const watchlist = await calculateAccountWatchlist(orgFilter, basis);
     res.json({ success: true, data: watchlist });
   } catch (error) {
     console.error('❌ Error calculating watchlist:', error);

@@ -157,7 +157,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   @override
   void initState() {
     super.initState();
-    _dueDate = _invoiceDate.add(const Duration(days: 30));
+    _dueDate = _invoiceDate;
     
     if (widget.invoiceId != null) {
       _loadInvoiceData();
@@ -777,10 +777,8 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
           onTap: () async {
             final date = await showDatePicker(context: context, initialDate: _invoiceDate, firstDate: DateTime(2020), lastDate: DateTime(2030));
             if (date != null) setState(() {
-              // Shift due date by the same offset to keep the gap
-              final gap = _dueDate != null ? _dueDate!.difference(_invoiceDate).inDays : 30;
               _invoiceDate = date;
-              _dueDate = date.add(Duration(days: gap > 0 ? gap : 30));
+              _dueDate = date;
             });
           },
           child: InputDecorator(decoration: InputDecoration(labelText: 'Invoice Date *', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.calendar_today)),
@@ -797,7 +795,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
           onTap: () async {
             final date = await showDatePicker(
               context: context,
-              initialDate: _dueDate ?? _invoiceDate.add(const Duration(days: 30)),
+              initialDate: _dueDate ?? _invoiceDate,
               firstDate: DateTime(2020),
               lastDate: DateTime(2035),
             );

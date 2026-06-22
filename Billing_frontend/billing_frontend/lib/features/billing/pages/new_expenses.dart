@@ -724,6 +724,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
       content: Text(msg),
       backgroundColor: Colors.red,
       behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
     ));
   }
 
@@ -733,6 +734,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
       content: Text(msg),
       backgroundColor: _green,
       behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
     ));
   }
 
