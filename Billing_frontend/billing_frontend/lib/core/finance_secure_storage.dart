@@ -9,25 +9,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FinanceSecureStorage {
   static const _storage = FlutterSecureStorage();
 
-  static const _keyToken         = 'finance_jwt_token';
-  static const _keyUserId        = 'finance_user_id';
-  static const _keyName          = 'finance_user_name';
-  static const _keyEmail         = 'finance_user_email';
-  static const _keyPhone         = 'finance_user_phone';
-  static const _keyRole          = 'finance_user_role';
-  static const _keyOrgId         = 'finance_org_id';
-  static const _keyOrgName       = 'finance_org_name';
-  static const _keyOrgLogoUrl    = 'finance_org_logo_url';   // ✅ NEW
-  static const _keyEntityName    = 'finance_entity_name';    // ✅ NEW: Entity/Group name
-  static const _keyTempToken     = 'finance_temp_token';
-  static const _keyPermissions   = 'finance_permissions';
+  static const _keyToken = 'finance_jwt_token';
+  static const _keyUserId = 'finance_user_id';
+  static const _keyName = 'finance_user_name';
+  static const _keyEmail = 'finance_user_email';
+  static const _keyPhone = 'finance_user_phone';
+  static const _keyRole = 'finance_user_role';
+  static const _keyOrgId = 'finance_org_id';
+  static const _keyOrgName = 'finance_org_name';
+  static const _keyOrgLogoUrl = 'finance_org_logo_url'; // ✅ NEW
+  static const _keyEntityName =
+      'finance_entity_name'; // ✅ NEW: Entity/Group name
+  static const _keyTempToken = 'finance_temp_token';
+  static const _keyPermissions = 'finance_permissions';
   static const _keyOrganizations = 'finance_organizations';
   // ── Branch keys ─────────────────────────────────────────────────────────────
-  static const _keyBranches           = 'finance_branches';           // available branches for current org
-  static const _keySelectedBranchIds  = 'finance_selected_branch_ids'; // JSON list of selected branchIds
-  static const _keyAllowedBranchIds   = 'finance_allowed_branch_ids';  // JSON list of branches this user is permitted to access
+  static const _keyBranches =
+      'finance_branches'; // available branches for current org
+  static const _keySelectedBranchIds =
+      'finance_selected_branch_ids'; // JSON list of selected branchIds
+  static const _keyAllowedBranchIds =
+      'finance_allowed_branch_ids'; // JSON list of branches this user is permitted to access
   // ── Organization keys (NEW - Multi-org support) ─────────────────────────────
-  static const _keySelectedOrgIds     = 'finance_selected_org_ids';    // JSON list of selected orgIds (empty = current org only)
+  static const _keySelectedOrgIds =
+      'finance_selected_org_ids'; // JSON list of selected orgIds (empty = current org only)
 
   // ── Save full session after org selected ────────────────────────────────────
   static Future<void> saveSession({
@@ -39,17 +44,17 @@ class FinanceSecureStorage {
     required String role,
     required String orgId,
     required String orgName,
-    String? orgLogoUrl,          // ✅ NEW — optional so existing callers don't break
-    String? entityName,          // ✅ NEW — optional entity/group name
+    String? orgLogoUrl, // ✅ NEW — optional so existing callers don't break
+    String? entityName, // ✅ NEW — optional entity/group name
   }) async {
     await Future.wait([
-      _storage.write(key: _keyToken,   value: token),
-      _storage.write(key: _keyUserId,  value: userId),
-      _storage.write(key: _keyName,    value: name),
-      _storage.write(key: _keyEmail,   value: email),
-      _storage.write(key: _keyPhone,   value: phone),
-      _storage.write(key: _keyRole,    value: role),
-      _storage.write(key: _keyOrgId,   value: orgId),
+      _storage.write(key: _keyToken, value: token),
+      _storage.write(key: _keyUserId, value: userId),
+      _storage.write(key: _keyName, value: name),
+      _storage.write(key: _keyEmail, value: email),
+      _storage.write(key: _keyPhone, value: phone),
+      _storage.write(key: _keyRole, value: role),
+      _storage.write(key: _keyOrgId, value: orgId),
       _storage.write(key: _keyOrgName, value: orgName),
       // ✅ Save orgLogoUrl — write empty string if null so we can still read it
       _storage.write(key: _keyOrgLogoUrl, value: orgLogoUrl ?? ''),
@@ -57,15 +62,15 @@ class FinanceSecureStorage {
       _storage.write(key: _keyEntityName, value: entityName ?? ''),
     ]);
 // Mirror JWT to SharedPreferences with org-specific key
-final prefs = await SharedPreferences.getInstance();
-await prefs.setString('jwt_token', token);    
-await prefs.setString('finance_jwt_token', token);  // ← change key name
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('jwt_token', token);
+    await prefs.setString('finance_jwt_token', token); // ← change key name
   }
 
   // ── Save permissions (JSON map) ─────────────────────────────────────────────
   static Future<void> savePermissions(Map<String, dynamic> permissions) async {
     await _storage.write(
-      key:   _keyPermissions,
+      key: _keyPermissions,
       value: jsonEncode(permissions),
     );
   }
@@ -84,7 +89,7 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
   // ── Save organizations array ────────────────────────────────────────────────
   static Future<void> saveOrganizations(List<dynamic> organizations) async {
     await _storage.write(
-      key:   _keyOrganizations,
+      key: _keyOrganizations,
       value: jsonEncode(organizations),
     );
   }
@@ -105,21 +110,19 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
   static Future<void> saveTempToken(String token) =>
       _storage.write(key: _keyTempToken, value: token);
 
-  static Future<String?> getTempToken() =>
-      _storage.read(key: _keyTempToken);
+  static Future<String?> getTempToken() => _storage.read(key: _keyTempToken);
 
-  static Future<void> clearTempToken() =>
-      _storage.delete(key: _keyTempToken);
+  static Future<void> clearTempToken() => _storage.delete(key: _keyTempToken);
 
   // ── Read ────────────────────────────────────────────────────────────────────
-  static Future<String?> getToken()      => _storage.read(key: _keyToken);
-  static Future<String?> getUserId()     => _storage.read(key: _keyUserId);
-  static Future<String?> getName()       => _storage.read(key: _keyName);
-  static Future<String?> getEmail()      => _storage.read(key: _keyEmail);
-  static Future<String?> getPhone()      => _storage.read(key: _keyPhone);
-  static Future<String?> getRole()       => _storage.read(key: _keyRole);
-  static Future<String?> getOrgId()      => _storage.read(key: _keyOrgId);
-  static Future<String?> getOrgName()    => _storage.read(key: _keyOrgName);
+  static Future<String?> getToken() => _storage.read(key: _keyToken);
+  static Future<String?> getUserId() => _storage.read(key: _keyUserId);
+  static Future<String?> getName() => _storage.read(key: _keyName);
+  static Future<String?> getEmail() => _storage.read(key: _keyEmail);
+  static Future<String?> getPhone() => _storage.read(key: _keyPhone);
+  static Future<String?> getRole() => _storage.read(key: _keyRole);
+  static Future<String?> getOrgId() => _storage.read(key: _keyOrgId);
+  static Future<String?> getOrgName() => _storage.read(key: _keyOrgName);
 
   /// Returns the org logo URL (relative path like /uploads/org-logos/xxx.jpg)
   /// or null if not set.
@@ -160,18 +163,26 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
       String payload = parts[1];
       payload = payload.replaceAll('-', '+').replaceAll('_', '/');
       switch (payload.length % 4) {
-        case 2: payload += '=='; break;
-        case 3: payload += '=';  break;
-        default: break;
+        case 2:
+          payload += '==';
+          break;
+        case 3:
+          payload += '=';
+          break;
+        default:
+          break;
       }
 
-      final decoded = jsonDecode(utf8.decode(base64Decode(payload))) as Map<String, dynamic>;
+      final decoded = jsonDecode(utf8.decode(base64Decode(payload)))
+          as Map<String, dynamic>;
       final exp = decoded['exp'];
       if (exp == null) return true; // no expiry claim — treat as valid
 
-      final expiryDate = DateTime.fromMillisecondsSinceEpoch((exp as int) * 1000);
+      final expiryDate =
+          DateTime.fromMillisecondsSinceEpoch((exp as int) * 1000);
       if (DateTime.now().isAfter(expiryDate)) {
-        debugPrint('⚠️ Finance token expired at $expiryDate — clearing session');
+        debugPrint(
+            '⚠️ Finance token expired at $expiryDate — clearing session');
         await clearSession();
         return false;
       }
@@ -197,7 +208,9 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>;
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) { return []; }
+    } catch (_) {
+      return [];
+    }
   }
 
   /// Save selected branch IDs (empty list = ALL branches)
@@ -212,7 +225,9 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>;
       return list.map((e) => e.toString()).toList();
-    } catch (_) { return []; }
+    } catch (_) {
+      return [];
+    }
   }
 
   /// Build the x-branch-ids header value
@@ -222,7 +237,8 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
       final ids = await getSelectedBranchIds();
       debugPrint('🔧 getBranchHeader: selectedBranchIds = $ids');
       if (ids.isEmpty) {
-        debugPrint('🔧 getBranchHeader: returning ALL (no specific branches selected)');
+        debugPrint(
+            '🔧 getBranchHeader: returning ALL (no specific branches selected)');
         return 'ALL';
       }
       final header = ids.join(',');
@@ -277,7 +293,9 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>;
       return list.map((e) => e.toString()).toList();
-    } catch (_) { return []; }
+    } catch (_) {
+      return [];
+    }
   }
 
   /// Build the x-org-ids header value
@@ -287,17 +305,17 @@ await prefs.setString('finance_jwt_token', token);  // ← change key name
   /// - current orgId when no selection (backward compatible)
   static Future<String> getOrgHeader() async {
     final ids = await getSelectedOrgIds();
-    
+
     // Special case: ["ALL"] means all organizations
     if (ids.length == 1 && ids[0] == 'ALL') {
       return 'ALL';
     }
-    
+
     // Specific orgs selected
     if (ids.isNotEmpty) {
       return ids.join(',');
     }
-    
+
     // Default: use current org from token (backward compatible)
     final currentOrgId = await getOrgId();
     return currentOrgId ?? '';

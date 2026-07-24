@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // // lib/screens/tms/ticket_detail_screen.dart
 // // ============================================================================
 // // 🎫 TICKET DETAIL SCREEN - View Single Ticket Details
@@ -376,8 +377,6 @@
 //   }
 // }
 
-
-
 // lib/screens/tms/ticket_detail_screen.dart
 // ============================================================================
 // 🎫 TICKET DETAIL SCREEN - Complete Ticket Information
@@ -492,7 +491,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF64748B))),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -515,9 +515,11 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFEF4444),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
-            child: const Text('Close Ticket', style: TextStyle(color: Colors.white)),
+            child: const Text('Close Ticket',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -525,39 +527,11 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message),
-          ],
-        ),
-        backgroundColor: mediumBlue,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error_outline, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message),
-          ],
-        ),
-        backgroundColor: const Color(0xFFEF4444),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   @override
@@ -585,9 +559,11 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
               color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+            child: const Icon(Icons.arrow_back_ios_new,
+                color: Colors.white, size: 18),
           ),
-          onPressed: () => Navigator.pop(context, _ticket['status'] != widget.ticket['status']),
+          onPressed: () => Navigator.pop(
+              context, _ticket['status'] != widget.ticket['status']),
         ),
         title: const Text(
           'Ticket Details',
@@ -610,7 +586,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
               const SizedBox(height: 20),
               _buildInfoSection('Subject', subject, Icons.text_fields),
               const SizedBox(height: 16),
-              _buildInfoSection('Message', message, Icons.message, isMultiline: true),
+              _buildInfoSection('Message', message, Icons.message,
+                  isMultiline: true),
               const SizedBox(height: 16),
               _buildPrioritySection(priority),
               const SizedBox(height: 16),
@@ -660,7 +637,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.confirmation_number_rounded, size: 40, color: Colors.white),
+            child: const Icon(Icons.confirmation_number_rounded,
+                size: 40, color: Colors.white),
           ),
           const SizedBox(height: 16),
           Text(
@@ -675,7 +653,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildHeaderBadge(priority, _getPriorityIcon(priority), _getPriorityColor(priority)),
+              _buildHeaderBadge(priority, _getPriorityIcon(priority),
+                  _getPriorityColor(priority)),
               const SizedBox(width: 12),
               _buildHeaderBadge(status, Icons.info, _getStatusColor(status)),
             ],
@@ -711,7 +690,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
     );
   }
 
-  Widget _buildInfoSection(String label, String value, IconData icon, {bool isMultiline = false}) {
+  Widget _buildInfoSection(String label, String value, IconData icon,
+      {bool isMultiline = false}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -975,17 +955,20 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
             ],
           ),
           const SizedBox(height: 16),
-          _buildDateRow('Created', createdAt, Icons.add_circle_outline, const Color(0xFF10B981)),
+          _buildDateRow('Created', createdAt, Icons.add_circle_outline,
+              const Color(0xFF10B981)),
           if (deadline != null && deadline.isNotEmpty) ...[
             const SizedBox(height: 12),
-            _buildDateRow('Deadline', deadline, Icons.access_time_filled, _getDeadlineColor(deadline)),
+            _buildDateRow('Deadline', deadline, Icons.access_time_filled,
+                _getDeadlineColor(deadline)),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildDateRow(String label, String? dateStr, IconData icon, Color color) {
+  Widget _buildDateRow(
+      String label, String? dateStr, IconData icon, Color color) {
     final formattedDate = _formatDate(dateStr);
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1241,17 +1224,20 @@ class _TicketDetailScreenState extends State<TicketDetailScreen>
             ],
           ),
           const SizedBox(height: 16),
-          _buildStatusButton('Open', currentStatus, Icons.radio_button_unchecked),
+          _buildStatusButton(
+              'Open', currentStatus, Icons.radio_button_unchecked),
           const SizedBox(height: 8),
           _buildStatusButton('In Progress', currentStatus, Icons.autorenew),
           const SizedBox(height: 8),
-          _buildStatusButton('closed', currentStatus, Icons.check_circle, label: 'Close'),
+          _buildStatusButton('closed', currentStatus, Icons.check_circle,
+              label: 'Close'),
         ],
       ),
     );
   }
 
-  Widget _buildStatusButton(String status, String currentStatus, IconData icon, {String? label}) {
+  Widget _buildStatusButton(String status, String currentStatus, IconData icon,
+      {String? label}) {
     final isSelected = status == currentStatus;
     final displayLabel = label ?? status;
     final color = _getStatusColor(status);

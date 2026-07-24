@@ -21,8 +21,7 @@ import 'package:csv/csv.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show File, Directory, Platform;
-import 'package:universal_html/html.dart' as html
-    show Blob, Url, AnchorElement;
+import 'package:universal_html/html.dart' as html show Blob, Url, AnchorElement;
 
 import 'api_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -50,16 +49,17 @@ class ItemBillingService {
   }) async {
     try {
       final q = <String, String>{};
-      if (type != null)        q['type']         = type;
-      if (isSellable != null)  q['isSellable']   = isSellable.toString();
+      if (type != null) q['type'] = type;
+      if (isSellable != null) q['isSellable'] = isSellable.toString();
       if (isPurchasable != null) q['isPurchasable'] = isPurchasable.toString();
       if (search != null && search.isNotEmpty) q['search'] = search;
-      if (startDate != null)   q['startDate']    = startDate.toIso8601String();
-      if (endDate != null)     q['endDate']       = endDate.toIso8601String();
-      if (page != null)        q['page']          = page.toString();
-      if (limit != null)       q['limit']         = limit.toString();
+      if (startDate != null) q['startDate'] = startDate.toIso8601String();
+      if (endDate != null) q['endDate'] = endDate.toIso8601String();
+      if (page != null) q['page'] = page.toString();
+      if (limit != null) q['limit'] = limit.toString();
 
-      final response = await _apiService.get('/api/finance/items', queryParams: q);
+      final response =
+          await _apiService.get('/api/finance/items', queryParams: q);
 
       if (response['items'] != null) {
         return List<Map<String, dynamic>>.from(response['items']);
@@ -76,8 +76,10 @@ class ItemBillingService {
   Future<Map<String, dynamic>> fetchItemById(String itemId) async {
     try {
       final response = await _apiService.get('/api/finance/items/$itemId');
-      if (response['item'] != null)  return Map<String, dynamic>.from(response['item']);
-      if (response['data'] != null)  return Map<String, dynamic>.from(response['data']);
+      if (response['item'] != null)
+        return Map<String, dynamic>.from(response['item']);
+      if (response['data'] != null)
+        return Map<String, dynamic>.from(response['data']);
       return Map<String, dynamic>.from(response);
     } catch (e) {
       throw Exception('Error fetching item: $e');
@@ -88,7 +90,8 @@ class ItemBillingService {
   Future<String> createItem(Map<String, dynamic> itemData) async {
     try {
       _validateItemData(itemData);
-      final response = await _apiService.post('/api/finance/items', body: itemData);
+      final response =
+          await _apiService.post('/api/finance/items', body: itemData);
       return response['message'] ?? 'Item created successfully';
     } catch (e) {
       throw Exception('Error creating item: $e');
@@ -96,10 +99,12 @@ class ItemBillingService {
   }
 
   /// Update an existing item
-  Future<String> updateItem(String itemId, Map<String, dynamic> itemData) async {
+  Future<String> updateItem(
+      String itemId, Map<String, dynamic> itemData) async {
     try {
       _validateItemData(itemData);
-      final response = await _apiService.put('/api/finance/items/$itemId', body: itemData);
+      final response =
+          await _apiService.put('/api/finance/items/$itemId', body: itemData);
       return response['message'] ?? 'Item updated successfully';
     } catch (e) {
       throw Exception('Error updating item: $e');
@@ -125,8 +130,10 @@ class ItemBillingService {
         '/api/finance/items/search',
         queryParams: {'q': query},
       );
-      if (response['items'] != null) return List<Map<String, dynamic>>.from(response['items']);
-      if (response['data'] != null)  return List<Map<String, dynamic>>.from(response['data']);
+      if (response['items'] != null)
+        return List<Map<String, dynamic>>.from(response['items']);
+      if (response['data'] != null)
+        return List<Map<String, dynamic>>.from(response['data']);
       return [];
     } catch (e) {
       throw Exception('Error searching items: $e');
@@ -174,7 +181,8 @@ class ItemBillingService {
       if (data['sellingPrice'] is! num || (data['sellingPrice'] as num) < 0) {
         throw Exception('Selling price must be a positive number');
       }
-      if (data['salesAccount'] == null || (data['salesAccount'] as String).trim().isEmpty) {
+      if (data['salesAccount'] == null ||
+          (data['salesAccount'] as String).trim().isEmpty) {
         throw Exception('Sales account is required for sellable items');
       }
     }
@@ -217,11 +225,15 @@ class ItemBillingService {
   }
 
   /// Create a new vendor
-  Future<Map<String, dynamic>> createVendor(Map<String, dynamic> vendorData) async {
+  Future<Map<String, dynamic>> createVendor(
+      Map<String, dynamic> vendorData) async {
     try {
-      final response = await _apiService.post('/api/finance/vendors', body: vendorData);
-      if (response['vendor'] != null) return Map<String, dynamic>.from(response['vendor']);
-      if (response['data'] != null)   return Map<String, dynamic>.from(response['data']);
+      final response =
+          await _apiService.post('/api/finance/vendors', body: vendorData);
+      if (response['vendor'] != null)
+        return Map<String, dynamic>.from(response['vendor']);
+      if (response['data'] != null)
+        return Map<String, dynamic>.from(response['data']);
       return Map<String, dynamic>.from(response);
     } catch (e) {
       throw Exception('Error creating vendor: $e');
@@ -238,25 +250,42 @@ class ItemBillingService {
     try {
       // FIX 4: correct endpoint
       final response = await _apiService.get('/api/finance/items/units');
-      if (response['units'] != null) return List<String>.from(response['units'] as List);
-      if (response['data'] != null)  return List<String>.from(response['data'] as List);
-      if (response is List)          return List<String>.from(response as List);
+      if (response['units'] != null)
+        return List<String>.from(response['units'] as List);
+      if (response['data'] != null)
+        return List<String>.from(response['data'] as List);
+      if (response is List) return List<String>.from(response as List);
       return _defaultUnits();
     } catch (_) {
       return _defaultUnits();
     }
   }
 
-  List<String> _defaultUnits() =>
-      ['pcs', 'dz', 'kg', 'g', 'ltr', 'ml', 'box', 'carton', 'unit', 'dozen', 'ton', 'hour'];
+  List<String> _defaultUnits() => [
+        'pcs',
+        'dz',
+        'kg',
+        'g',
+        'ltr',
+        'ml',
+        'box',
+        'carton',
+        'unit',
+        'dozen',
+        'ton',
+        'hour'
+      ];
 
   /// Fetch sales accounts — FIX 2: reads from COA (Income accounts)
   Future<List<String>> fetchSalesAccounts() async {
     try {
-      final response = await _apiService.get('/api/finance/items/accounts/sales');
-      if (response['accounts'] != null) return List<String>.from(response['accounts'] as List);
-      if (response['data'] != null)     return List<String>.from(response['data'] as List);
-      if (response is List)             return List<String>.from(response as List);
+      final response =
+          await _apiService.get('/api/finance/items/accounts/sales');
+      if (response['accounts'] != null)
+        return List<String>.from(response['accounts'] as List);
+      if (response['data'] != null)
+        return List<String>.from(response['data'] as List);
+      if (response is List) return List<String>.from(response as List);
       return _defaultSalesAccounts();
     } catch (_) {
       return _defaultSalesAccounts();
@@ -269,10 +298,13 @@ class ItemBillingService {
   /// Fetch purchase accounts — FIX 3: reads from COA (Expense / COGS accounts)
   Future<List<String>> fetchPurchaseAccounts() async {
     try {
-      final response = await _apiService.get('/api/finance/items/accounts/purchase');
-      if (response['accounts'] != null) return List<String>.from(response['accounts'] as List);
-      if (response['data'] != null)     return List<String>.from(response['data'] as List);
-      if (response is List)             return List<String>.from(response as List);
+      final response =
+          await _apiService.get('/api/finance/items/accounts/purchase');
+      if (response['accounts'] != null)
+        return List<String>.from(response['accounts'] as List);
+      if (response['data'] != null)
+        return List<String>.from(response['data'] as List);
+      if (response is List) return List<String>.from(response as List);
       return _defaultPurchaseAccounts();
     } catch (_) {
       return _defaultPurchaseAccounts();
@@ -287,7 +319,8 @@ class ItemBillingService {
   // ==========================================================================
 
   Future<dynamic> _getDownloadsDirectory() async {
-    if (kIsWeb) throw UnsupportedError('Downloads directory not supported on web');
+    if (kIsWeb)
+      throw UnsupportedError('Downloads directory not supported on web');
     try {
       if (Platform.isAndroid) {
         var status = await Permission.storage.status;
@@ -295,7 +328,8 @@ class ItemBillingService {
           status = await Permission.storage.request();
           if (!status.isGranted) {
             var ms = await Permission.manageExternalStorage.status;
-            if (!ms.isGranted) ms = await Permission.manageExternalStorage.request();
+            if (!ms.isGranted)
+              ms = await Permission.manageExternalStorage.request();
             if (!ms.isGranted) throw Exception('Storage permission denied');
           }
         }
@@ -348,10 +382,12 @@ class ItemBillingService {
 
       if (kIsWeb) {
         if (file.bytes == null) throw Exception('File bytes not available');
-        request.files.add(http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name));
+        request.files.add(http.MultipartFile.fromBytes('file', file.bytes!,
+            filename: file.name));
       } else {
         if (file.path == null) throw Exception('File path not available');
-        request.files.add(await http.MultipartFile.fromPath('file', file.path!, filename: file.name));
+        request.files.add(await http.MultipartFile.fromPath('file', file.path!,
+            filename: file.name));
       }
 
       final streamed = await request.send();
@@ -360,11 +396,11 @@ class ItemBillingService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = json.decode(response.body);
         return {
-          'success':      true,
+          'success': true,
           'successCount': data['successCount'] ?? 0,
-          'errorCount':   data['errorCount']   ?? 0,
-          'errors':       data['errors']        ?? [],
-          'message':      data['message']       ?? 'Import completed',
+          'errorCount': data['errorCount'] ?? 0,
+          'errors': data['errors'] ?? [],
+          'message': data['message'] ?? 'Import completed',
         };
       } else {
         final error = json.decode(response.body);
@@ -379,30 +415,73 @@ class ItemBillingService {
   Future<String> downloadCSVTemplate() async {
     try {
       final csvData = [
-        ['Name', 'Type', 'Unit', 'Selling Price', 'Cost Price', 'Sales Account',
-         'Purchase Account', 'Sales Description', 'Purchase Description',
-         'Is Sellable', 'Is Purchasable'],
-        ['Laptop Dell Inspiron', 'Goods', 'pcs', '45000', '40000', 'Sales',
-         'Cost of Goods Sold', 'Dell Inspiron 15', 'Bulk purchase', 'true', 'true'],
-        ['IT Consulting Service', 'Service', 'hour', '2000', '1500', 'Service Revenue',
-         'Direct Expenses', 'Professional IT consulting', 'Outsourced consulting', 'true', 'true'],
-        ['Office Chair Premium', 'Goods', 'pcs', '8500', '7000', 'Sales',
-         'Purchases', 'Ergonomic office chair', 'Imported from manufacturer', 'true', 'true'],
+        [
+          'Name',
+          'Type',
+          'Unit',
+          'Selling Price',
+          'Cost Price',
+          'Sales Account',
+          'Purchase Account',
+          'Sales Description',
+          'Purchase Description',
+          'Is Sellable',
+          'Is Purchasable'
+        ],
+        [
+          'Laptop Dell Inspiron',
+          'Goods',
+          'pcs',
+          '45000',
+          '40000',
+          'Sales',
+          'Cost of Goods Sold',
+          'Dell Inspiron 15',
+          'Bulk purchase',
+          'true',
+          'true'
+        ],
+        [
+          'IT Consulting Service',
+          'Service',
+          'hour',
+          '2000',
+          '1500',
+          'Service Revenue',
+          'Direct Expenses',
+          'Professional IT consulting',
+          'Outsourced consulting',
+          'true',
+          'true'
+        ],
+        [
+          'Office Chair Premium',
+          'Goods',
+          'pcs',
+          '8500',
+          '7000',
+          'Sales',
+          'Purchases',
+          'Ergonomic office chair',
+          'Imported from manufacturer',
+          'true',
+          'true'
+        ],
       ];
       final csvString = const ListToCsvConverter().convert(csvData);
 
       if (kIsWeb) {
         final bytes = utf8.encode(csvString);
-        final blob  = html.Blob([bytes]);
-        final url   = html.Url.createObjectUrlFromBlob(blob);
+        final blob = html.Blob([bytes]);
+        final url = html.Url.createObjectUrlFromBlob(blob);
         html.AnchorElement(href: url)
           ..setAttribute('download', 'items_import_template.csv')
           ..click();
         html.Url.revokeObjectUrl(url);
         return 'items_import_template.csv';
       } else {
-        final dir  = await _getDownloadsDirectory();
-        final ts   = DateTime.now().millisecondsSinceEpoch;
+        final dir = await _getDownloadsDirectory();
+        final ts = DateTime.now().millisecondsSinceEpoch;
         final path = '${dir.path}/items_import_template_$ts.csv';
         await File(path).writeAsString(csvString);
         return path;
@@ -420,32 +499,48 @@ class ItemBillingService {
     try {
       if (items.isEmpty) throw Exception('No items to export');
       final csvData = [
-        ['Name', 'Type', 'Unit', 'Selling Price', 'Cost Price', 'Sales Account',
-         'Purchase Account', 'Sales Description', 'Purchase Description',
-         'Is Sellable', 'Is Purchasable', 'Created At'],
+        [
+          'Name',
+          'Type',
+          'Unit',
+          'Selling Price',
+          'Cost Price',
+          'Sales Account',
+          'Purchase Account',
+          'Sales Description',
+          'Purchase Description',
+          'Is Sellable',
+          'Is Purchasable',
+          'Created At'
+        ],
         ...items.map((i) => [
-          i['name'] ?? '', i['type'] ?? '', i['unit'] ?? '',
-          i['sellingPrice']?.toString() ?? '', i['costPrice']?.toString() ?? '',
-          i['salesAccount'] ?? '', i['purchaseAccount'] ?? '',
-          i['salesDescription'] ?? '', i['purchaseDescription'] ?? '',
-          i['isSellable']?.toString() ?? 'true',
-          i['isPurchasable']?.toString() ?? 'true',
-          i['createdAt'] ?? '',
-        ]),
+              i['name'] ?? '',
+              i['type'] ?? '',
+              i['unit'] ?? '',
+              i['sellingPrice']?.toString() ?? '',
+              i['costPrice']?.toString() ?? '',
+              i['salesAccount'] ?? '',
+              i['purchaseAccount'] ?? '',
+              i['salesDescription'] ?? '',
+              i['purchaseDescription'] ?? '',
+              i['isSellable']?.toString() ?? 'true',
+              i['isPurchasable']?.toString() ?? 'true',
+              i['createdAt'] ?? '',
+            ]),
       ];
       final csvString = const ListToCsvConverter().convert(csvData);
       final ts = DateTime.now().millisecondsSinceEpoch;
 
       if (kIsWeb) {
         final blob = html.Blob([utf8.encode(csvString)]);
-        final url  = html.Url.createObjectUrlFromBlob(blob);
+        final url = html.Url.createObjectUrlFromBlob(blob);
         html.AnchorElement(href: url)
           ..setAttribute('download', 'items_export_$ts.csv')
           ..click();
         html.Url.revokeObjectUrl(url);
         return 'items_export_$ts.csv';
       } else {
-        final dir  = await _getDownloadsDirectory();
+        final dir = await _getDownloadsDirectory();
         final path = '${dir.path}/items_export_$ts.csv';
         await File(path).writeAsString(csvString);
         return path;
@@ -473,7 +568,8 @@ class ItemBillingService {
             pw.Header(
               level: 0,
               child: pw.Text('Items Export Report',
-                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                  style: pw.TextStyle(
+                      fontSize: 24, fontWeight: pw.FontWeight.bold)),
             ),
             pw.SizedBox(height: 10),
             pw.Text(
@@ -482,41 +578,55 @@ class ItemBillingService {
             ),
             pw.SizedBox(height: 20),
             pw.Table.fromTextArray(
-              headers: ['Name', 'Type', 'Unit', 'Selling Price', 'Cost Price', 'Sales Account'],
-              data: items.map((i) => [
-                i['name'] ?? '',
-                i['type'] ?? '',
-                i['unit'] ?? '',
-                i['sellingPrice'] != null ? '₹${i['sellingPrice']}' : '-',
-                i['costPrice']    != null ? '₹${i['costPrice']}'    : '-',
-                i['salesAccount'] ?? '',
-              ]).toList(),
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+              headers: [
+                'Name',
+                'Type',
+                'Unit',
+                'Selling Price',
+                'Cost Price',
+                'Sales Account'
+              ],
+              data: items
+                  .map((i) => [
+                        i['name'] ?? '',
+                        i['type'] ?? '',
+                        i['unit'] ?? '',
+                        i['sellingPrice'] != null
+                            ? '₹${i['sellingPrice']}'
+                            : '-',
+                        i['costPrice'] != null ? '₹${i['costPrice']}' : '-',
+                        i['salesAccount'] ?? '',
+                      ])
+                  .toList(),
+              headerStyle:
+                  pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
               cellStyle: const pw.TextStyle(fontSize: 9),
               cellAlignment: pw.Alignment.centerLeft,
-              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+              headerDecoration:
+                  const pw.BoxDecoration(color: PdfColors.grey300),
               cellHeight: 25,
             ),
             pw.SizedBox(height: 20),
             pw.Text('Total Items: ${items.length}',
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                style:
+                    pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
           ],
         ),
       );
 
-      final ts       = DateTime.now().millisecondsSinceEpoch;
+      final ts = DateTime.now().millisecondsSinceEpoch;
       final pdfBytes = await pdf.save();
 
       if (kIsWeb) {
         final blob = html.Blob([pdfBytes], 'application/pdf');
-        final url  = html.Url.createObjectUrlFromBlob(blob);
+        final url = html.Url.createObjectUrlFromBlob(blob);
         html.AnchorElement(href: url)
           ..setAttribute('download', 'items_export_$ts.pdf')
           ..click();
         html.Url.revokeObjectUrl(url);
         return 'items_export_$ts.pdf';
       } else {
-        final dir  = await _getDownloadsDirectory();
+        final dir = await _getDownloadsDirectory();
         final path = '${dir.path}/items_export_$ts.pdf';
         await File(path).writeAsBytes(pdfBytes);
         return path;

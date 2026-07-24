@@ -11,9 +11,9 @@ import 'package:flutter/material.dart';
 import 'api_service.dart';
 
 enum ErrorSeverity {
-  low,      // Log only
-  medium,   // Log only
-  high,     // Log only
+  low, // Log only
+  medium, // Log only
+  high, // Log only
   critical, // Log only
 }
 
@@ -42,15 +42,15 @@ class ErrorHandlerService {
   int _consecutiveFailures = 0;
   DateTime? _lastFailureTime;
   bool _circuitBreakerOpen = false;
-  
+
   // ✅ CONFIGURATION
   static const int _maxConsecutiveFailures = 5;
   static const Duration _circuitBreakerTimeout = Duration(minutes: 2);
-  
+
   // ✅ CHECK IF CIRCUIT BREAKER ALLOWS REQUESTS
   bool get canMakeRequest {
     if (!_circuitBreakerOpen) return true;
-    
+
     // Check if timeout has passed
     if (_lastFailureTime != null) {
       final timeSinceLastFailure = DateTime.now().difference(_lastFailureTime!);
@@ -60,7 +60,7 @@ class ErrorHandlerService {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -86,13 +86,17 @@ class ErrorHandlerService {
   void recordFailure() {
     _consecutiveFailures++;
     _lastFailureTime = DateTime.now();
-    
-    if (_consecutiveFailures >= _maxConsecutiveFailures && !_circuitBreakerOpen) {
+
+    if (_consecutiveFailures >= _maxConsecutiveFailures &&
+        !_circuitBreakerOpen) {
       _circuitBreakerOpen = true;
-      debugPrint('⛔ CIRCUIT BREAKER OPENED after $_consecutiveFailures failures');
-      debugPrint('⏰ Will retry after ${_circuitBreakerTimeout.inMinutes} minutes');
+      debugPrint(
+          '⛔ CIRCUIT BREAKER OPENED after $_consecutiveFailures failures');
+      debugPrint(
+          '⏰ Will retry after ${_circuitBreakerTimeout.inMinutes} minutes');
     } else {
-      debugPrint('⚠️ Failure count: $_consecutiveFailures/$_maxConsecutiveFailures');
+      debugPrint(
+          '⚠️ Failure count: $_consecutiveFailures/$_maxConsecutiveFailures');
     }
   }
 
@@ -121,7 +125,7 @@ class ErrorHandlerService {
 
     // Handle other exception types
     final errorString = error.toString();
-    
+
     // Network connectivity issues
     if (_isNetworkError(errorString)) {
       return ErrorInfo(
@@ -176,7 +180,7 @@ class ErrorHandlerService {
           severity: ErrorSeverity.low,
           actionHint: 'Please check your input and try again',
         );
-      
+
       case 401:
         return ErrorInfo(
           userMessage: 'Authentication required',
@@ -184,7 +188,7 @@ class ErrorHandlerService {
           severity: ErrorSeverity.low,
           actionHint: 'Please log in again',
         );
-      
+
       case 403:
         return ErrorInfo(
           userMessage: 'Access denied',
@@ -192,7 +196,7 @@ class ErrorHandlerService {
           severity: ErrorSeverity.low,
           actionHint: 'You don\'t have permission for this action',
         );
-      
+
       case 404:
         return ErrorInfo(
           userMessage: 'Resource not found',
@@ -200,7 +204,7 @@ class ErrorHandlerService {
           severity: ErrorSeverity.low,
           actionHint: 'The requested item may have been removed',
         );
-      
+
       case 500:
       case 502:
       case 503:
@@ -211,7 +215,7 @@ class ErrorHandlerService {
           severity: ErrorSeverity.low,
           actionHint: 'The service will retry automatically',
         );
-      
+
       default:
         return ErrorInfo(
           userMessage: 'Service temporarily unavailable',
@@ -236,7 +240,7 @@ class ErrorHandlerService {
       'failed host lookup',
       'os error',
     ];
-    
+
     final lowerMessage = errorMessage.toLowerCase();
     return networkKeywords.any((keyword) => lowerMessage.contains(keyword));
   }
@@ -250,7 +254,7 @@ class ErrorHandlerService {
       'access denied',
       'forbidden',
     ];
-    
+
     final lowerMessage = errorMessage.toLowerCase();
     return authKeywords.any((keyword) => lowerMessage.contains(keyword));
   }
@@ -263,7 +267,8 @@ class ErrorHandlerService {
 
   void _logErrorToConsole(ErrorInfo errorInfo) {
     final icon = _getSeverityIcon(errorInfo.severity);
-    debugPrint('$icon [${errorInfo.severity.name.toUpperCase()}] ${errorInfo.userMessage}');
+    debugPrint(
+        '$icon [${errorInfo.severity.name.toUpperCase()}] ${errorInfo.userMessage}');
     if (kDebugMode) {
       debugPrint('   Technical: ${errorInfo.technicalMessage}');
       if (errorInfo.actionHint != null) {
@@ -292,7 +297,8 @@ class ErrorHandlerService {
   }
 
   /// ✅ HANDLES ALL ERRORS SILENTLY - NO UI DISPLAY
-  void handleError(BuildContext context, dynamic error, {String? errorContext}) {
+  void handleError(BuildContext context, dynamic error,
+      {String? errorContext}) {
     final errorInfo = processError(error, context: errorContext);
     _logErrorToConsole(errorInfo);
   }

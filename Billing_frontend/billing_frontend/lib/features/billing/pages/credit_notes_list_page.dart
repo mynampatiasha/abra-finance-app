@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // CREDIT NOTES LIST PAGE - Fully Responsive UI
 // ============================================================================
@@ -62,11 +63,11 @@ class CreditNotesListPage extends StatefulWidget {
 
 class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // ── Brand palette ──────────────────────────────────────────────────────────
-  static const Color _navy    = Color(0xFF1e3a8a);
-  static const Color _purple  = Color(0xFF9B59B6);
-  static const Color _green   = Color(0xFF27AE60);
-  static const Color _blue    = Color(0xFF2980B9);
-  static const Color _orange  = Color(0xFFE67E22);
+  static const Color _navy = Color(0xFF1e3a8a);
+  static const Color _purple = Color(0xFF9B59B6);
+  static const Color _green = Color(0xFF27AE60);
+  static const Color _blue = Color(0xFF2980B9);
+  static const Color _orange = Color(0xFFE67E22);
 
   // ── Data ───────────────────────────────────────────────────────────────────
   List<CreditNote> _creditNotes = [];
@@ -77,14 +78,19 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // ── Filters ────────────────────────────────────────────────────────────────
   String _selectedStatus = 'All';
   final List<String> _statusFilters = [
-    'All', 'DRAFT', 'OPEN', 'CLOSED', 'REFUNDED', 'VOID',
+    'All',
+    'DRAFT',
+    'OPEN',
+    'CLOSED',
+    'REFUNDED',
+    'VOID',
   ];
   DateTime? _fromDate;
   DateTime? _toDate;
 
   // ── Pagination ─────────────────────────────────────────────────────────────
-  int _currentPage  = 1;
-  int _totalPages   = 1;
+  int _currentPage = 1;
+  int _totalPages = 1;
   int _totalCreditNotes = 0;
   final int _itemsPerPage = 20;
 
@@ -124,24 +130,30 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // ==========================================================================
 
   Future<void> _loadCreditNotes() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final response = await CreditNoteService.getCreditNotes(
-        status:   _selectedStatus == 'All' ? null : _selectedStatus,
-        page:     _currentPage,
-        limit:    _itemsPerPage,
-        search:   _searchQuery.isNotEmpty ? _searchQuery : null,
+        status: _selectedStatus == 'All' ? null : _selectedStatus,
+        page: _currentPage,
+        limit: _itemsPerPage,
+        search: _searchQuery.isNotEmpty ? _searchQuery : null,
         fromDate: _fromDate,
-        toDate:   _toDate,
+        toDate: _toDate,
       );
       setState(() {
-        _creditNotes      = response.creditNotes;
-        _totalPages       = response.pagination.pages;
+        _creditNotes = response.creditNotes;
+        _totalPages = response.pagination.pages;
         _totalCreditNotes = response.pagination.total;
-        _isLoading        = false;
+        _isLoading = false;
       });
     } catch (e) {
-      setState(() { _errorMessage = e.toString(); _isLoading = false; });
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
@@ -155,13 +167,15 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   }
 
   Future<void> _refreshData() async {
-    _currentPage = 1;
     await Future.wait([_loadCreditNotes(), _loadStats()]);
     _snackSuccess('Data refreshed successfully');
   }
 
   void _filterByStatus(String status) {
-    setState(() { _selectedStatus = status; _currentPage = 1; });
+    setState(() {
+      _selectedStatus = status;
+      _currentPage = 1;
+    });
     _loadCreditNotes();
   }
 
@@ -198,7 +212,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   }
 
   void _openEditCreditNote(String creditNoteId) async {
-    final result = await Navigator.push(context,
+    final result = await Navigator.push(
+        context,
         MaterialPageRoute(
             builder: (_) => NewCreditNoteScreen(creditNoteId: creditNoteId)));
     if (result == true) _refreshData();
@@ -262,15 +277,13 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(children: [
           const Icon(Icons.check_circle_outline,
               color: Color(0xFF27AE60), size: 22),
           const SizedBox(width: 8),
           const Text('Apply Credit to Invoice',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 16)),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -290,8 +303,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                           fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 4),
                   Text('Invoice      : ${cn.invoiceNumber ?? '-'}',
-                      style: TextStyle(
-                          fontSize: 13, color: Colors.grey[600])),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600])),
                   const SizedBox(height: 4),
                   Text(
                     'Available    : ₹${cn.creditBalance.toStringAsFixed(2)}',
@@ -305,13 +317,12 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             ),
             const SizedBox(height: 16),
             const Text('Amount to Apply',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 13)),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             const SizedBox(height: 8),
             TextField(
               controller: amountController,
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 prefixText: '₹ ',
                 hintText: '0.00',
@@ -319,16 +330,14 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 fillColor: const Color(0xFFF7F9FC),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFDDE3EE))),
+                    borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFDDE3EE))),
+                    borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF1e3a8a), width: 1.5)),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1e3a8a), width: 1.5)),
               ),
             ),
           ],
@@ -398,15 +407,20 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Mark as Sent?',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text(
           'The email will NOT be sent to the customer.\n\nDo you want to mark this credit note as Sent anyway?',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1e3a8a), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1e3a8a),
+                foregroundColor: Colors.white),
             child: const Text('Mark as Sent'),
           ),
         ],
@@ -479,16 +493,15 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('Import Complete',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                    '✅ Successfully imported: ${importResult.successCount}'),
+                Text('✅ Successfully imported: ${importResult.successCount}'),
                 if (importResult.errorCount > 0)
                   Text('❌ Failed: ${importResult.errorCount}',
                       style: const TextStyle(color: Colors.red)),
@@ -526,9 +539,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     try {
       _snackSuccess('Preparing export...');
       final url = await CreditNoteService.exportCreditNotes(
-        status:   _selectedStatus == 'All' ? null : _selectedStatus,
+        status: _selectedStatus == 'All' ? null : _selectedStatus,
         fromDate: _fromDate,
-        toDate:   _toDate,
+        toDate: _toDate,
       );
       if (kIsWeb) {
         html.AnchorElement(href: url)
@@ -550,8 +563,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // Works on both web (clipboard fallback) and mobile (native share sheet)
 
   Future<void> _shareCreditNote(CreditNote cn) async {
-    final text =
-        'Credit Note\n'
+    final text = 'Credit Note\n'
         '─────────────────────────\n'
         'Credit Note # : ${cn.creditNoteNumber}\n'
         'Customer      : ${cn.customerName}\n'
@@ -566,7 +578,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       if (kIsWeb) {
         // Web: try navigator.share via share_plus, fallback to clipboard
         try {
-          await Share.share(text, subject: 'Credit Note: ${cn.creditNoteNumber}');
+          await Share.share(text,
+              subject: 'Credit Note: ${cn.creditNoteNumber}');
         } catch (_) {
           await Clipboard.setData(ClipboardData(text: text));
           _snackSuccess('✅ Copied to clipboard');
@@ -627,7 +640,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         }
       } else {
         // Mobile: try native whatsapp:// scheme first, fallback to wa.me
-        final nativeUri = Uri.parse('whatsapp://send?phone=$phone&text=$message');
+        final nativeUri =
+            Uri.parse('whatsapp://send?phone=$phone&text=$message');
         if (await canLaunchUrl(nativeUri)) {
           await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
         } else {
@@ -665,8 +679,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     showDialog(
       context: context,
       builder: (_) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Container(
           width: MediaQuery.of(context).size.width > 600
               ? 520
@@ -687,8 +700,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 ),
                 const SizedBox(width: 14),
                 const Text('Import Credit Notes',
-                    style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -746,26 +759,22 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                   fontWeight: FontWeight.bold,
                   fontSize: 16))),
     );
-    final textBlock = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    final textBlock =
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(title,
-          style: const TextStyle(
-              fontWeight: FontWeight.bold, fontSize: 14)),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
       const SizedBox(height: 4),
-      Text(subtitle,
-          style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+      Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
     ]);
     final button = ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 16),
-      label:
-          Text(buttonLabel, style: const TextStyle(fontSize: 12)),
+      label: Text(buttonLabel, style: const TextStyle(fontSize: 12)),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
     return Container(
@@ -777,13 +786,25 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         if (constraints.maxWidth < 340) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [circle, const SizedBox(width: 10), Expanded(child: textBlock)]),
-            const SizedBox(height: 10),
-            SizedBox(width: double.infinity, child: button),
-          ]);
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  circle,
+                  const SizedBox(width: 10),
+                  Expanded(child: textBlock)
+                ]),
+                const SizedBox(height: 10),
+                SizedBox(width: double.infinity, child: button),
+              ]);
         }
-        return Row(children: [circle, const SizedBox(width: 14), Expanded(child: textBlock), const SizedBox(width: 12), button]);
+        return Row(children: [
+          circle,
+          const SizedBox(width: 14),
+          Expanded(child: textBlock),
+          const SizedBox(width: 12),
+          button
+        ]);
       }),
     );
   }
@@ -798,7 +819,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() { _fromDate = picked; });
+      setState(() {
+        _fromDate = picked;
+      });
       _loadCreditNotes();
     }
   }
@@ -811,13 +834,18 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() { _toDate = picked; });
+      setState(() {
+        _toDate = picked;
+      });
       _loadCreditNotes();
     }
   }
 
   void _clearDateFilters() {
-    setState(() { _fromDate = null; _toDate = null; });
+    setState(() {
+      _fromDate = null;
+      _toDate = null;
+    });
     _loadCreditNotes();
   }
 
@@ -827,30 +855,12 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
 
   void _snackSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.check_circle, color: Colors.white, size: 18),
-        const SizedBox(width: 8),
-        Text(msg),
-      ]),
-      backgroundColor: _green,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   void _snackError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.error_outline, color: Colors.white, size: 18),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: Colors.red[700],
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg, isError: true);
   }
 
   // ==========================================================================
@@ -870,13 +880,15 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             _isLoading
                 ? const SizedBox(
                     height: 400,
-                    child: Center(
-                        child: CircularProgressIndicator(color: _navy)))
+                    child:
+                        Center(child: CircularProgressIndicator(color: _navy)))
                 : _errorMessage != null
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _creditNotes.isEmpty
                         ? SizedBox(height: 400, child: _buildEmptyState())
-                        : _isTableView ? _buildCreditNoteTable() : _buildCreditNoteListView(),
+                        : _isTableView
+                            ? _buildCreditNoteTable()
+                            : _buildCreditNoteListView(),
             if (!_isLoading && _creditNotes.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -909,7 +921,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       child: LayoutBuilder(builder: (_, constraints) {
         final w = constraints.maxWidth;
         if (w >= 1100) return _topBarDesktop();
-        if (w >= 700)  return _topBarTablet();
+        if (w >= 700) return _topBarTablet();
         return _topBarMobile();
       }),
     );
@@ -917,55 +929,10 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
 
   // ── Desktop ────────────────────────────────────────────────────────────────
   Widget _topBarDesktop() => Row(children: [
-    _statusDropdown(),
-    const SizedBox(width: 12),
-    _searchField(width: 240),
-    const SizedBox(width: 10),
-    _dateChip(
-      label: _fromDate != null
-          ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
-          : 'From Date',
-      isActive: _fromDate != null,
-      onTap: _selectFromDate,
-    ),
-    const SizedBox(width: 8),
-    _dateChip(
-      label: _toDate != null
-          ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
-          : 'To Date',
-      isActive: _toDate != null,
-      onTap: _selectToDate,
-    ),
-    if (_hasDateFilters) ...[
-      const SizedBox(width: 6),
-      _iconBtn(Icons.close, _clearDateFilters,
-          tooltip: 'Clear Dates', color: Colors.red[600]!, bg: Colors.red[50]!),
-    ],
-    const SizedBox(width: 6),
-    _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
-        tooltip: 'Refresh'),
-    const Spacer(),
-    _buildViewToggle(), const SizedBox(width: 12),
-    _actionBtn('New Credit Note', Icons.add_rounded, _navy, _openNewCreditNote),
-    const SizedBox(width: 8),
-    _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
-    const SizedBox(width: 8),
-    _actionBtn('Export', Icons.download_rounded, _blue,
-        _isLoading ? null : _exportToCsv),
-    const SizedBox(width: 8),
-    _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
-        () => _raiseTicket()),
-  ]);
-
-  // ── Tablet ─────────────────────────────────────────────────────────────────
-  Widget _topBarTablet() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(children: [
         _statusDropdown(),
+        const SizedBox(width: 12),
+        _searchField(width: 240),
         const SizedBox(width: 10),
-        _searchField(width: 220),
-        const SizedBox(width: 8),
         _dateChip(
           label: _fromDate != null
               ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
@@ -973,7 +940,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
           isActive: _fromDate != null,
           onTap: _selectFromDate,
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         _dateChip(
           label: _toDate != null
               ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
@@ -991,10 +958,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         const SizedBox(width: 6),
         _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
             tooltip: 'Refresh'),
-      ]),
-      const SizedBox(height: 10),
-      Row(children: [
-        _buildViewToggle(), const SizedBox(width: 10),
+        const Spacer(),
+        _buildViewToggle(),
+        const SizedBox(width: 12),
         _actionBtn(
             'New Credit Note', Icons.add_rounded, _navy, _openNewCreditNote),
         const SizedBox(width: 8),
@@ -1006,90 +972,143 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         const SizedBox(width: 8),
         _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
             () => _raiseTicket()),
-      ]),
-    ],
-  );
+      ]);
+
+  // ── Tablet ─────────────────────────────────────────────────────────────────
+  Widget _topBarTablet() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _statusDropdown(),
+            const SizedBox(width: 10),
+            _searchField(width: 220),
+            const SizedBox(width: 8),
+            _dateChip(
+              label: _fromDate != null
+                  ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                  : 'From Date',
+              isActive: _fromDate != null,
+              onTap: _selectFromDate,
+            ),
+            const SizedBox(width: 6),
+            _dateChip(
+              label: _toDate != null
+                  ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                  : 'To Date',
+              isActive: _toDate != null,
+              onTap: _selectToDate,
+            ),
+            if (_hasDateFilters) ...[
+              const SizedBox(width: 6),
+              _iconBtn(Icons.close, _clearDateFilters,
+                  tooltip: 'Clear Dates',
+                  color: Colors.red[600]!,
+                  bg: Colors.red[50]!),
+            ],
+            const SizedBox(width: 6),
+            _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
+                tooltip: 'Refresh'),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            _buildViewToggle(),
+            const SizedBox(width: 10),
+            _actionBtn('New Credit Note', Icons.add_rounded, _navy,
+                _openNewCreditNote),
+            const SizedBox(width: 8),
+            _actionBtn('Import', Icons.upload_file_rounded, _purple,
+                _showImportDialog),
+            const SizedBox(width: 8),
+            _actionBtn('Export', Icons.download_rounded, _blue,
+                _isLoading ? null : _exportToCsv),
+            const SizedBox(width: 8),
+            _actionBtn('Raise Ticket', Icons.confirmation_number_rounded,
+                _orange, () => _raiseTicket()),
+          ]),
+        ],
+      );
 
   // ── Mobile ─────────────────────────────────────────────────────────────────
   Widget _topBarMobile() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      // Single row: dropdown + search + New button
-      Row(children: [
-        _statusDropdown(),
-        const SizedBox(width: 8),
-        Expanded(child: _searchField(width: double.infinity)),
-        const SizedBox(width: 8),
-        _actionBtn('New', Icons.add_rounded, _navy, _openNewCreditNote),
-      ]),
-      const SizedBox(height: 10),
-      // Row 2: Scrollable strip of utility buttons
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          _buildViewToggle(), const SizedBox(width: 8),
-          _dateChip(
-            label: _fromDate != null
-                ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
-                : 'From Date',
-            isActive: _fromDate != null,
-            onTap: _selectFromDate,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Single row: dropdown + search + New button
+          Row(children: [
+            _statusDropdown(),
+            const SizedBox(width: 8),
+            Expanded(child: _searchField(width: double.infinity)),
+            const SizedBox(width: 8),
+            _actionBtn('New', Icons.add_rounded, _navy, _openNewCreditNote),
+          ]),
+          const SizedBox(height: 10),
+          // Row 2: Scrollable strip of utility buttons
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _buildViewToggle(),
+              const SizedBox(width: 8),
+              _dateChip(
+                label: _fromDate != null
+                    ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                    : 'From Date',
+                isActive: _fromDate != null,
+                onTap: _selectFromDate,
+              ),
+              const SizedBox(width: 6),
+              _dateChip(
+                label: _toDate != null
+                    ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                    : 'To Date',
+                isActive: _toDate != null,
+                onTap: _selectToDate,
+              ),
+              if (_hasDateFilters) ...[
+                const SizedBox(width: 6),
+                _iconBtn(Icons.close, _clearDateFilters,
+                    tooltip: 'Clear',
+                    color: Colors.red[600]!,
+                    bg: Colors.red[50]!),
+              ],
+              const SizedBox(width: 6),
+              _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
+                  tooltip: 'Refresh'),
+              const SizedBox(width: 6),
+              _compactBtn('Import', _purple, _showImportDialog),
+              const SizedBox(width: 6),
+              _compactBtn('Export', _blue, _isLoading ? null : _exportToCsv),
+              const SizedBox(width: 6),
+              _compactBtn('Ticket', _orange, () => _raiseTicket()),
+            ]),
           ),
-          const SizedBox(width: 6),
-          _dateChip(
-            label: _toDate != null
-                ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
-                : 'To Date',
-            isActive: _toDate != null,
-            onTap: _selectToDate,
-          ),
-          if (_hasDateFilters) ...[
-            const SizedBox(width: 6),
-            _iconBtn(Icons.close, _clearDateFilters,
-                tooltip: 'Clear',
-                color: Colors.red[600]!,
-                bg: Colors.red[50]!),
-          ],
-          const SizedBox(width: 6),
-          _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
-              tooltip: 'Refresh'),
-          const SizedBox(width: 6),
-          _compactBtn('Import', _purple, _showImportDialog),
-          const SizedBox(width: 6),
-          _compactBtn('Export', _blue, _isLoading ? null : _exportToCsv),
-          const SizedBox(width: 6),
-          _compactBtn('Ticket', _orange, () => _raiseTicket()),
-        ]),
-      ),
-    ],
-  );
+        ],
+      );
 
   // ── Shared top-bar widgets ─────────────────────────────────────────────────
 
   Widget _statusDropdown() => Container(
-    height: 44,
-    padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF7F9FC),
-      border: Border.all(color: const Color(0xFFDDE3EE)),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: _selectedStatus,
-        icon: const Icon(Icons.expand_more, size: 18, color: _navy),
-        style: const TextStyle(
-            fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
-        items: _statusFilters
-            .map((s) => DropdownMenuItem(
-                value: s,
-                child:
-                    Text(s == 'All' ? 'All Credit Notes' : s)))
-            .toList(),
-        onChanged: (v) { if (v != null) _filterByStatus(v); },
-      ),
-    ),
-  );
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F9FC),
+          border: Border.all(color: const Color(0xFFDDE3EE)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedStatus,
+            icon: const Icon(Icons.expand_more, size: 18, color: _navy),
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
+            items: _statusFilters
+                .map((s) => DropdownMenuItem(
+                    value: s, child: Text(s == 'All' ? 'All Credit Notes' : s)))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) _filterByStatus(v);
+            },
+          ),
+        ),
+      );
 
   Widget _searchField({required double width}) {
     final field = TextField(
@@ -1104,7 +1123,10 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 icon: const Icon(Icons.clear, size: 16),
                 onPressed: () {
                   _searchController.clear();
-                  setState(() { _searchQuery = ''; _currentPage = 1; });
+                  setState(() {
+                    _searchQuery = '';
+                    _currentPage = 1;
+                  });
                   _loadCreditNotes();
                 })
             : null,
@@ -1123,7 +1145,10 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             borderSide: const BorderSide(color: _navy, width: 1.5)),
       ),
       onChanged: (v) {
-        setState(() { _searchQuery = v.toLowerCase(); _currentPage = 1; });
+        setState(() {
+          _searchQuery = v.toLowerCase();
+          _currentPage = 1;
+        });
         Future.delayed(const Duration(milliseconds: 400), () {
           if (_searchQuery == v.toLowerCase()) _loadCreditNotes();
         });
@@ -1146,20 +1171,17 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive ? _navy.withOpacity(0.08) : const Color(0xFFF7F9FC),
-          border: Border.all(
-              color: isActive ? _navy : const Color(0xFFDDE3EE)),
+          border: Border.all(color: isActive ? _navy : const Color(0xFFDDE3EE)),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.calendar_today,
-              size: 15,
-              color: isActive ? _navy : Colors.grey[500]),
+              size: 15, color: isActive ? _navy : Colors.grey[500]),
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight:
-                    isActive ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                 color: isActive ? _navy : Colors.grey[600],
               )),
         ]),
@@ -1188,8 +1210,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             border: Border.all(color: color.withOpacity(0.25)),
           ),
           child: Icon(icon,
-              size: 20,
-              color: onTap == null ? Colors.grey[300] : color),
+              size: 20, color: onTap == null ? Colors.grey[300] : color),
         ),
       ),
     );
@@ -1209,8 +1230,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         elevation: 0,
         minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -1225,8 +1245,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         elevation: 0,
         minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       child: Text(label,
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -1439,21 +1458,33 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // ── View toggle ───────────────────────────────────────────────────────────
 
   Widget _buildViewToggle() => Container(
-    decoration: BoxDecoration(
-      border: Border.all(color: Colors.grey.shade300),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
-        Container(width: 1, height: 24, color: Colors.grey.shade300),
-        _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
-      ],
-    ),
-  );
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _toggleButton(
+                icon: Icons.view_list_rounded,
+                label: 'List',
+                isSelected: !_isTableView,
+                onTap: () => setState(() => _isTableView = false)),
+            Container(width: 1, height: 24, color: Colors.grey.shade300),
+            _toggleButton(
+                icon: Icons.table_chart_rounded,
+                label: 'Table',
+                isSelected: _isTableView,
+                onTap: () => setState(() => _isTableView = true)),
+          ],
+        ),
+      );
 
-  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+  Widget _toggleButton(
+          {required IconData icon,
+          required String label,
+          required bool isSelected,
+          required VoidCallback onTap}) =>
       InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(7),
@@ -1464,9 +1495,16 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             borderRadius: BorderRadius.circular(7),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            Icon(icon,
+                size: 16,
+                color: isSelected ? Colors.white : Colors.grey.shade600),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected ? Colors.white : Colors.grey.shade600)),
           ]),
         ),
       );
@@ -1476,12 +1514,16 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   Widget _buildCreditNoteListView() {
     final filtered = _searchQuery.isEmpty
         ? _creditNotes
-        : _creditNotes.where((cn) =>
-            cn.creditNoteNumber.toLowerCase().contains(_searchQuery) ||
-            cn.customerName.toLowerCase().contains(_searchQuery) ||
-            (cn.referenceNumber?.toLowerCase().contains(_searchQuery) ?? false)).toList();
+        : _creditNotes
+            .where((cn) =>
+                cn.creditNoteNumber.toLowerCase().contains(_searchQuery) ||
+                cn.customerName.toLowerCase().contains(_searchQuery) ||
+                (cn.referenceNumber?.toLowerCase().contains(_searchQuery) ??
+                    false))
+            .toList();
 
-    if (filtered.isEmpty) return SizedBox(height: 400, child: _buildEmptyState());
+    if (filtered.isEmpty)
+      return SizedBox(height: 400, child: _buildEmptyState());
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -1501,15 +1543,29 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        border: Border.all(
+            color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200,
+            width: isSelected ? 1.5 : 1),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: InkWell(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreditNoteDetailPage(creditNoteId: cn.id))).then((r) { if (r == true) _refreshData(); }),
+        onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => CreditNoteDetailPage(creditNoteId: cn.id)))
+            .then((r) {
+          if (r == true) _refreshData();
+        }),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Row 1: Checkbox + Credit Note # + Status
             Row(children: [
               Checkbox(
@@ -1519,9 +1575,16 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 visualDensity: VisualDensity.compact,
               ),
               const SizedBox(width: 4),
-              Expanded(child: InkWell(
+              Expanded(
+                  child: InkWell(
                 onTap: () => _openEditCreditNote(cn.id),
-                child: Text(cn.creditNoteNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                child: Text(cn.creditNoteNumber,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navy,
+                        decoration: TextDecoration.underline),
+                    overflow: TextOverflow.ellipsis),
               )),
               const SizedBox(width: 8),
               _buildStatusBadge(cn.status),
@@ -1529,73 +1592,208 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
             const SizedBox(height: 10),
             // Row 2: Customer avatar + name
             Row(children: [
-              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
-                  child: Center(child: Text(cn.customerName.isNotEmpty ? cn.customerName[0].toUpperCase() : '?',
-                      style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                      color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(
+                      child: Text(
+                          cn.customerName.isNotEmpty
+                              ? cn.customerName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                              color: _navy,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)))),
               const SizedBox(width: 10),
-              Expanded(child: Text(cn.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
+              Expanded(
+                  child: Text(cn.customerName,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E293B)),
+                      overflow: TextOverflow.ellipsis)),
               if (cn.referenceNumber != null && cn.referenceNumber!.isNotEmpty)
-                Text('Ref: ${cn.referenceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                Text('Ref: ${cn.referenceNumber}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
             ]),
             const SizedBox(height: 8),
             // Row 3: Date + Reason
             Row(children: [
-              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              Icon(Icons.calendar_today_outlined,
+                  size: 13, color: Colors.grey[500]),
               const SizedBox(width: 4),
-              Text(DateFormat('dd MMM yyyy').format(cn.creditNoteDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Text(DateFormat('dd MMM yyyy').format(cn.creditNoteDate),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               const SizedBox(width: 12),
-              Expanded(child: Text(cn.reason, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+              Expanded(
+                  child: Text(cn.reason,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis)),
             ]),
             const SizedBox(height: 10),
             const Divider(height: 1, color: Color(0xFFF1F5F9)),
             const SizedBox(height: 10),
             // Row 4: Amount + Balance + Actions
             Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Total Amount', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-                const SizedBox(height: 3),
-                Text('₹${cn.totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-              ])),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Balance', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-                const SizedBox(height: 3),
-                Text('₹${cn.creditBalance.toStringAsFixed(2)}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: cn.creditBalance > 0 ? _green : Colors.grey[400])),
-              ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('Total Amount',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 3),
+                    Text('₹${cn.totalAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B))),
+                  ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('Balance',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 3),
+                    Text('₹${cn.creditBalance.toStringAsFixed(2)}',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: cn.creditBalance > 0
+                                ? _green
+                                : Colors.grey[400])),
+                  ])),
               // Actions
               Row(mainAxisSize: MainAxisSize.min, children: [
-                Tooltip(message: 'Share', child: InkWell(
-                  onTap: () => _shareCreditNote(cn),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-                      child: const Icon(Icons.share, size: 16, color: _blue)),
-                )),
+                Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _shareCreditNote(cn),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: _blue.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(8)),
+                          child:
+                              const Icon(Icons.share, size: 16, color: _blue)),
+                    )),
                 const SizedBox(width: 6),
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                   onSelected: (value) async {
                     switch (value) {
-                      case 'view': Navigator.push(context, MaterialPageRoute(builder: (_) => CreditNoteDetailPage(creditNoteId: cn.id))).then((r) { if (r == true) _refreshData(); }); break;
-                      case 'edit': _openEditCreditNote(cn.id); break;
-                      case 'mark_as_sent': await _markCreditNoteAsSent(cn); break;
-                      case 'send': await _sendCreditNote(cn); break;
-                      case 'download': await _downloadCreditNotePDF(cn); break;
-                      case 'apply': await _showApplyCreditDialog(cn); break;
-                      case 'whatsapp': await _whatsAppCreditNote(cn); break;
-                      case 'ticket': _raiseTicket(cn); break;
-                      case 'delete': await _deleteCreditNote(cn); break;
+                      case 'view':
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => CreditNoteDetailPage(
+                                    creditNoteId: cn.id))).then((r) {
+                          if (r == true) _refreshData();
+                        });
+                        break;
+                      case 'edit':
+                        _openEditCreditNote(cn.id);
+                        break;
+                      case 'mark_as_sent':
+                        await _markCreditNoteAsSent(cn);
+                        break;
+                      case 'send':
+                        await _sendCreditNote(cn);
+                        break;
+                      case 'download':
+                        await _downloadCreditNotePDF(cn);
+                        break;
+                      case 'apply':
+                        await _showApplyCreditDialog(cn);
+                        break;
+                      case 'whatsapp':
+                        await _whatsAppCreditNote(cn);
+                        break;
+                      case 'ticket':
+                        _raiseTicket(cn);
+                        break;
+                      case 'delete':
+                        await _deleteCreditNote(cn);
+                        break;
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'mark_as_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'send', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'download', child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'apply', child: ListTile(leading: Icon(Icons.check_circle_outline, size: 17, color: _green), title: Text('Apply Credit'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'view',
+                        child: ListTile(
+                            leading: Icon(Icons.visibility_outlined,
+                                size: 17, color: _blue),
+                            title: Text('View Details'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'edit',
+                        child: ListTile(
+                            leading: Icon(Icons.edit_outlined,
+                                size: 17, color: _navy),
+                            title: Text('Edit'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'mark_as_sent',
+                        child: ListTile(
+                            leading: Icon(Icons.mark_email_read_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Mark as Sent'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'send',
+                        child: ListTile(
+                            leading: Icon(Icons.send_outlined,
+                                size: 17, color: _green),
+                            title: Text('Send Email'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'download',
+                        child: ListTile(
+                            leading: Icon(Icons.download_outlined,
+                                size: 17, color: _purple),
+                            title: Text('Download PDF'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'apply',
+                        child: ListTile(
+                            leading: Icon(Icons.check_circle_outline,
+                                size: 17, color: _green),
+                            title: Text('Apply Credit'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'whatsapp',
+                        child: ListTile(
+                            leading: Icon(Icons.chat,
+                                size: 17, color: Color(0xFF25D366)),
+                            title: Text('WhatsApp'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'ticket',
+                        child: ListTile(
+                            leading: Icon(Icons.confirmation_number_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Raise Ticket'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                            leading: Icon(Icons.delete_outline,
+                                size: 17, color: Colors.red),
+                            title: Text('Delete',
+                                style: TextStyle(color: Colors.red)),
+                            contentPadding: EdgeInsets.zero)),
                   ],
                 ),
               ]),
@@ -1642,11 +1840,10 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
               controller: _tableHScrollCtrl,
               scrollDirection: Axis.horizontal,
               child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(minWidth: constraints.maxWidth),
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(
-                      const Color(0xFF0D1B3E)),
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFF0D1B3E)),
                   headingTextStyle: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -1656,8 +1853,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                   dataRowMinHeight: 58,
                   dataRowMaxHeight: 72,
                   dataTextStyle: const TextStyle(fontSize: 14),
-                  dataRowColor:
-                      WidgetStateProperty.resolveWith((states) {
+                  dataRowColor: WidgetStateProperty.resolveWith((states) {
                     if (states.contains(WidgetState.hovered))
                       return _navy.withOpacity(0.04);
                     return null;
@@ -1671,8 +1867,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                         width: 36,
                         child: Checkbox(
                           value: _selectAll,
-                          fillColor:
-                              WidgetStateProperty.all(Colors.white),
+                          fillColor: WidgetStateProperty.all(Colors.white),
                           checkColor: const Color(0xFF0D1B3E),
                           onChanged: _toggleSelectAll,
                         ),
@@ -1700,8 +1895,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   }
 
   DataRow _buildCreditNoteRow(CreditNote creditNote) {
-    final bool isSelected =
-        _selectedCreditNotes.contains(creditNote.id);
+    final bool isSelected = _selectedCreditNotes.contains(creditNote.id);
     return DataRow(
       selected: isSelected,
       color: WidgetStateProperty.resolveWith((states) {
@@ -1717,8 +1911,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         )),
         DataCell(SizedBox(
           width: 110,
-          child: Text(DateFormat('dd MMM yyyy')
-              .format(creditNote.creditNoteDate)),
+          child:
+              Text(DateFormat('dd MMM yyyy').format(creditNote.creditNoteDate)),
         )),
         DataCell(SizedBox(
           width: 150,
@@ -1751,17 +1945,14 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                       ? creditNote.customerName[0].toUpperCase()
                       : '?',
                   style: const TextStyle(
-                      color: _navy,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13),
+                      color: _navy, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ),
             Expanded(
               child: Text(creditNote.customerName,
                   overflow: TextOverflow.ellipsis,
-                  style:
-                      const TextStyle(fontWeight: FontWeight.w500)),
+                  style: const TextStyle(fontWeight: FontWeight.w500)),
             ),
           ]),
         )),
@@ -1771,9 +1962,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: Colors.grey[600])),
         )),
-        DataCell(SizedBox(
-            width: 110,
-            child: _buildStatusBadge(creditNote.status))),
+        DataCell(
+            SizedBox(width: 110, child: _buildStatusBadge(creditNote.status))),
         DataCell(SizedBox(
           width: 120,
           child: Text(
@@ -1787,9 +1977,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
           child: Text(
             '₹${creditNote.creditBalance.toStringAsFixed(2)}',
             style: TextStyle(
-                color: creditNote.creditBalance > 0
-                    ? _green
-                    : Colors.grey,
+                color: creditNote.creditBalance > 0 ? _green : Colors.grey,
                 fontWeight: FontWeight.w600),
             textAlign: TextAlign.right,
           ),
@@ -1842,8 +2030,11 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
               onSelected: (value) async {
                 switch (value) {
                   case 'view':
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => CreditNoteDetailPage(creditNoteId: creditNote.id)));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => CreditNoteDetailPage(
+                                creditNoteId: creditNote.id)));
                     break;
                   case 'edit':
                     _openEditCreditNote(creditNote.id);
@@ -1872,23 +2063,24 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 const PopupMenuItem(
                   value: 'view',
                   child: ListTile(
-                      leading: Icon(Icons.visibility, size: 17, color: Color(0xFF3D8EFF)),
+                      leading: Icon(Icons.visibility,
+                          size: 17, color: Color(0xFF3D8EFF)),
                       title: Text('View Details'),
                       contentPadding: EdgeInsets.zero),
                 ),
                 const PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
-                      leading: Icon(Icons.edit_outlined,
-                          size: 17, color: _navy),
+                      leading:
+                          Icon(Icons.edit_outlined, size: 17, color: _navy),
                       title: Text('Edit'),
                       contentPadding: EdgeInsets.zero),
                 ),
                 const PopupMenuItem(
                   value: 'send',
                   child: ListTile(
-                      leading: Icon(Icons.send_outlined,
-                          size: 17, color: _green),
+                      leading:
+                          Icon(Icons.send_outlined, size: 17, color: _green),
                       title: Text('Send Email'),
                       contentPadding: EdgeInsets.zero),
                 ),
@@ -1932,8 +2124,8 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                   child: ListTile(
                       leading: Icon(Icons.delete_outline,
                           size: 17, color: Colors.red),
-                      title: Text('Delete',
-                          style: TextStyle(color: Colors.red)),
+                      title:
+                          Text('Delete', style: TextStyle(color: Colors.red)),
                       contentPadding: EdgeInsets.zero),
                 ),
               ],
@@ -1948,17 +2140,16 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
 
   Widget _buildStatusBadge(String status) {
     final Map<String, List<Color>> statusColors = {
-      'OPEN':     [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
-      'CLOSED':   [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+      'OPEN': [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+      'CLOSED': [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
       'REFUNDED': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
-      'VOID':     [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
-      'DRAFT':    [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+      'VOID': [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+      'DRAFT': [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
     };
     final c = statusColors[status] ??
         [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: c[0],
         borderRadius: BorderRadius.circular(20),
@@ -1968,8 +2159,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(
-                color: c[1], shape: BoxShape.circle)),
+            decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
         const SizedBox(width: 5),
         Text(status,
             style: TextStyle(
@@ -1990,15 +2180,13 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
     if (_totalPages <= 5) {
       pages = List.generate(_totalPages, (i) => i + 1);
     } else {
-      final int start =
-          (_currentPage - 2).clamp(1, _totalPages - 4);
+      final int start = (_currentPage - 2).clamp(1, _totalPages - 4);
       pages = List.generate(5, (i) => start + i);
     }
 
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
@@ -2034,8 +2222,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 if (pages.first > 2)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Text('…',
-                        style: TextStyle(color: Colors.grey[400])),
+                    child: Text('…', style: TextStyle(color: Colors.grey[400])),
                   ),
               ],
               ...pages.map((p) => _pageNumBtn(p)),
@@ -2043,8 +2230,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                 if (pages.last < _totalPages - 1)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Text('…',
-                        style: TextStyle(color: Colors.grey[400])),
+                    child: Text('…', style: TextStyle(color: Colors.grey[400])),
                   ),
                 _pageNumBtn(_totalPages),
               ],
@@ -2081,18 +2267,14 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         decoration: BoxDecoration(
           color: isActive ? _navy : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color: isActive ? _navy : Colors.grey[300]!),
+          border: Border.all(color: isActive ? _navy : Colors.grey[300]!),
         ),
         child: Center(
           child: Text('$page',
               style: TextStyle(
                   fontSize: 13,
-                  fontWeight: isActive
-                      ? FontWeight.bold
-                      : FontWeight.normal,
-                  color:
-                      isActive ? Colors.white : Colors.grey[700])),
+                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                  color: isActive ? Colors.white : Colors.grey[700])),
         ),
       ),
     );
@@ -2113,9 +2295,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.grey[300]!),
         ),
-        child: Icon(icon,
-            size: 18,
-            color: enabled ? _navy : Colors.grey[300]),
+        child: Icon(icon, size: 18, color: enabled ? _navy : Colors.grey[300]),
       ),
     );
   }
@@ -2161,8 +2341,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
               backgroundColor: _navy,
               foregroundColor: Colors.white,
               elevation: 0,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 28, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
             ),
@@ -2183,10 +2362,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-                color: Colors.red[50], shape: BoxShape.circle),
-            child: Icon(Icons.error_outline,
-                size: 56, color: Colors.red[400]),
+            decoration:
+                BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
+            child: Icon(Icons.error_outline, size: 56, color: Colors.red[400]),
           ),
           const SizedBox(height: 20),
           const Text('Failed to Load Credit Notes',
@@ -2213,8 +2391,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
               backgroundColor: _navy,
               foregroundColor: Colors.white,
               elevation: 0,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 28, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
             ),
@@ -2253,16 +2430,16 @@ class _CreditNoteRaiseTicketOverlayState
   final _searchCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _employees = [];
-  List<Map<String, dynamic>> _filtered  = [];
-  Map<String, dynamic>?      _selectedEmp;
-  bool _loading   = true;
+  List<Map<String, dynamic>> _filtered = [];
+  Map<String, dynamic>? _selectedEmp;
+  bool _loading = true;
   bool _assigning = false;
   String _priority = 'Medium';
 
-  static const Color _navy   = Color(0xFF1e3a8a);
+  static const Color _navy = Color(0xFF1e3a8a);
   static const Color _orange = Color(0xFFE67E22);
-  static const Color _green  = Color(0xFF27AE60);
-  static const Color _red    = Color(0xFFE74C3C);
+  static const Color _green = Color(0xFF27AE60);
+  static const Color _red = Color(0xFFE74C3C);
 
   @override
   void initState() {
@@ -2282,8 +2459,8 @@ class _CreditNoteRaiseTicketOverlayState
     if (resp['success'] == true && resp['data'] != null) {
       setState(() {
         _employees = List<Map<String, dynamic>>.from(resp['data']);
-        _filtered  = _employees;
-        _loading   = false;
+        _filtered = _employees;
+        _loading = false;
       });
     } else {
       setState(() => _loading = false);
@@ -2298,8 +2475,8 @@ class _CreditNoteRaiseTicketOverlayState
           ? _employees
           : _employees.where((e) {
               return (e['name_parson'] ?? '').toLowerCase().contains(q) ||
-                     (e['email'] ?? '').toLowerCase().contains(q) ||
-                     (e['role'] ?? '').toLowerCase().contains(q);
+                  (e['email'] ?? '').toLowerCase().contains(q) ||
+                  (e['role'] ?? '').toLowerCase().contains(q);
             }).toList();
     });
   }
@@ -2328,9 +2505,9 @@ class _CreditNoteRaiseTicketOverlayState
         subject: widget.creditNote != null
             ? 'Credit Note: ${widget.creditNote!.creditNoteNumber}'
             : 'Credit Notes — Action Required',
-        message:    _buildTicketMessage(),
-        priority:   _priority,
-        timeline:   1440, // 24 hours
+        message: _buildTicketMessage(),
+        priority: _priority,
+        timeline: 1440, // 24 hours
         assignedTo: _selectedEmp!['_id'].toString(),
       );
       setState(() => _assigning = false);
@@ -2350,10 +2527,8 @@ class _CreditNoteRaiseTicketOverlayState
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding:
-          const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Container(
         width: 520,
         constraints: BoxConstraints(
@@ -2369,7 +2544,7 @@ class _CreditNoteRaiseTicketOverlayState
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.only(
-                topLeft:  Radius.circular(20),
+                topLeft: Radius.circular(20),
                 topRight: Radius.circular(20),
               ),
             ),
@@ -2380,8 +2555,7 @@ class _CreditNoteRaiseTicketOverlayState
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
-                    Icons.confirmation_number_rounded,
+                child: const Icon(Icons.confirmation_number_rounded,
                     color: Colors.white, size: 22),
               ),
               const SizedBox(width: 14),
@@ -2389,20 +2563,20 @@ class _CreditNoteRaiseTicketOverlayState
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                  const Text('Raise a Ticket',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
-                  if (widget.creditNote != null)
-                    Text(
-                      'Credit Note: ${widget.creditNote!.creditNoteNumber}',
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ]),
+                      const Text('Raise a Ticket',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold)),
+                      if (widget.creditNote != null)
+                        Text(
+                          'Credit Note: ${widget.creditNote!.creditNoteNumber}',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ]),
               ),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
@@ -2418,247 +2592,236 @@ class _CreditNoteRaiseTicketOverlayState
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                // Auto message preview
-                if (widget.creditNote != null) ...[
-                  const Text('Auto-generated message',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: _navy)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF0F4F8),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: const Color(0xFFDDE3EE)),
-                    ),
-                    child: Text(_buildTicketMessage(),
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[700],
-                            height: 1.5)),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-
-                // Priority selector
-                const Text('Priority',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: _navy)),
-                const SizedBox(height: 8),
-                Row(
-                  children: ['Low', 'Medium', 'High'].map((pr) {
-                    final isSel = _priority == pr;
-                    final color = pr == 'High'
-                        ? _red
-                        : pr == 'Medium'
-                            ? _orange
-                            : _green;
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: InkWell(
-                          onTap: () => setState(() => _priority = pr),
+                    // Auto message preview
+                    if (widget.creditNote != null) ...[
+                      const Text('Auto-generated message',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: _navy)),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F4F8),
                           borderRadius: BorderRadius.circular(10),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isSel ? color : Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                  color: isSel
-                                      ? color
-                                      : Colors.grey[300]!),
-                              boxShadow: isSel
-                                  ? [
-                                      BoxShadow(
-                                        color:
-                                            color.withOpacity(0.3),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 3),
-                                      )
-                                    ]
-                                  : [],
-                            ),
-                            child: Center(
-                              child: Text(pr,
-                                  style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: isSel
-                                          ? Colors.white
-                                          : Colors.grey[700])),
-                            ),
-                          ),
+                          border: Border.all(color: const Color(0xFFDDE3EE)),
                         ),
+                        child: Text(_buildTicketMessage(),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                                height: 1.5)),
                       ),
-                    );
-                  }).toList(),
-                ),
+                      const SizedBox(height: 20),
+                    ],
 
-                const SizedBox(height: 20),
-
-                // Employee search
-                const Text('Assign To',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: _navy)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _searchCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'Search employees…',
-                    prefixIcon: Icon(Icons.search,
-                        size: 18, color: Colors.grey[400]),
-                    filled: true,
-                    fillColor: const Color(0xFFF7F9FC),
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 0),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(
-                            color: Color(0xFFDDE3EE))),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(
-                            color: Color(0xFFDDE3EE))),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(
-                            color: _navy, width: 1.5)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Employee list
-                _loading
-                    ? const SizedBox(
-                        height: 120,
-                        child: Center(
-                            child: CircularProgressIndicator(
-                                color: _navy)))
-                    : _filtered.isEmpty
-                        ? Container(
-                            height: 80,
-                            alignment: Alignment.center,
-                            child: Text('No employees found',
-                                style: TextStyle(
-                                    color: Colors.grey[500])))
-                        : Container(
-                            constraints:
-                                const BoxConstraints(maxHeight: 240),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: const Color(0xFFDDE3EE)),
+                    // Priority selector
+                    const Text('Priority',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: _navy)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: ['Low', 'Medium', 'High'].map((pr) {
+                        final isSel = _priority == pr;
+                        final color = pr == 'High'
+                            ? _red
+                            : pr == 'Medium'
+                                ? _orange
+                                : _green;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: InkWell(
+                              onTap: () => setState(() => _priority = pr),
                               borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: _filtered.length,
-                              separatorBuilder: (_, __) => const Divider(
-                                  height: 1,
-                                  color: Color(0xFFEEF2F7)),
-                              itemBuilder: (_, i) {
-                                final emp  = _filtered[i];
-                                final isSel =
-                                    _selectedEmp?['_id'] == emp['_id'];
-                                return InkWell(
-                                  onTap: () => setState(() =>
-                                      _selectedEmp =
-                                          isSel ? null : emp),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 14, vertical: 10),
-                                    color: isSel
-                                        ? _navy.withOpacity(0.06)
-                                        : Colors.transparent,
-                                    child: Row(children: [
-                                      CircleAvatar(
-                                        radius: 18,
-                                        backgroundColor: isSel
-                                            ? _navy
-                                            : _navy.withOpacity(0.10),
-                                        child: Text(
-                                          (emp['name_parson'] ??
-                                                  'U')[0]
-                                              .toUpperCase(),
-                                          style: TextStyle(
-                                              color: isSel
-                                                  ? Colors.white
-                                                  : _navy,
-                                              fontWeight:
-                                                  FontWeight.bold,
-                                              fontSize: 13),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                                emp['name_parson'] ??
-                                                    'Unknown',
-                                                style: const TextStyle(
-                                                    fontWeight:
-                                                        FontWeight.w600,
-                                                    fontSize: 13)),
-                                            if (emp['email'] != null)
-                                              Text(emp['email'],
-                                                  style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: Colors
-                                                          .grey[600]),
-                                                  overflow: TextOverflow
-                                                      .ellipsis),
-                                            if (emp['role'] != null)
-                                              Container(
-                                                margin:
-                                                    const EdgeInsets.only(
-                                                        top: 3),
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: _navy
-                                                      .withOpacity(0.08),
-                                                  borderRadius:
-                                                      BorderRadius
-                                                          .circular(4),
-                                                ),
-                                                child: Text(
-                                                  emp['role']
-                                                      .toString()
-                                                      .toUpperCase(),
-                                                  style: const TextStyle(
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: _navy),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (isSel)
-                                        const Icon(Icons.check_circle,
-                                            color: _navy, size: 20),
-                                    ]),
-                                  ),
-                                );
-                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: isSel ? color : Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                      color: isSel ? color : Colors.grey[300]!),
+                                  boxShadow: isSel
+                                      ? [
+                                          BoxShadow(
+                                            color: color.withOpacity(0.3),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 3),
+                                          )
+                                        ]
+                                      : [],
+                                ),
+                                child: Center(
+                                  child: Text(pr,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSel
+                                              ? Colors.white
+                                              : Colors.grey[700])),
+                                ),
+                              ),
                             ),
                           ),
-              ]),
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Employee search
+                    const Text('Assign To',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: _navy)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Search employees…',
+                        prefixIcon: Icon(Icons.search,
+                            size: 18, color: Colors.grey[400]),
+                        filled: true,
+                        fillColor: const Color(0xFFF7F9FC),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFDDE3EE))),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFDDE3EE))),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: _navy, width: 1.5)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Employee list
+                    _loading
+                        ? const SizedBox(
+                            height: 120,
+                            child: Center(
+                                child: CircularProgressIndicator(color: _navy)))
+                        : _filtered.isEmpty
+                            ? Container(
+                                height: 80,
+                                alignment: Alignment.center,
+                                child: Text('No employees found',
+                                    style: TextStyle(color: Colors.grey[500])))
+                            : Container(
+                                constraints:
+                                    const BoxConstraints(maxHeight: 240),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                      color: const Color(0xFFDDE3EE)),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: _filtered.length,
+                                  separatorBuilder: (_, __) => const Divider(
+                                      height: 1, color: Color(0xFFEEF2F7)),
+                                  itemBuilder: (_, i) {
+                                    final emp = _filtered[i];
+                                    final isSel =
+                                        _selectedEmp?['_id'] == emp['_id'];
+                                    return InkWell(
+                                      onTap: () => setState(() =>
+                                          _selectedEmp = isSel ? null : emp),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 10),
+                                        color: isSel
+                                            ? _navy.withOpacity(0.06)
+                                            : Colors.transparent,
+                                        child: Row(children: [
+                                          CircleAvatar(
+                                            radius: 18,
+                                            backgroundColor: isSel
+                                                ? _navy
+                                                : _navy.withOpacity(0.10),
+                                            child: Text(
+                                              (emp['name_parson'] ?? 'U')[0]
+                                                  .toUpperCase(),
+                                              style: TextStyle(
+                                                  color: isSel
+                                                      ? Colors.white
+                                                      : _navy,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                    emp['name_parson'] ??
+                                                        'Unknown',
+                                                    style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        fontSize: 13)),
+                                                if (emp['email'] != null)
+                                                  Text(emp['email'],
+                                                      style: TextStyle(
+                                                          fontSize: 11,
+                                                          color:
+                                                              Colors.grey[600]),
+                                                      overflow: TextOverflow
+                                                          .ellipsis),
+                                                if (emp['role'] != null)
+                                                  Container(
+                                                    margin:
+                                                        const EdgeInsets.only(
+                                                            top: 3),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: _navy
+                                                          .withOpacity(0.08),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Text(
+                                                      emp['role']
+                                                          .toString()
+                                                          .toUpperCase(),
+                                                      style: const TextStyle(
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: _navy),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                          if (isSel)
+                                            const Icon(Icons.check_circle,
+                                                color: _navy, size: 20),
+                                        ]),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                  ]),
             ),
           ),
 
@@ -2667,10 +2830,9 @@ class _CreditNoteRaiseTicketOverlayState
             padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
               color: Color(0xFFF7F9FC),
-              border:
-                  Border(top: BorderSide(color: Color(0xFFEEF2F7))),
+              border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
               borderRadius: BorderRadius.only(
-                bottomLeft:  Radius.circular(20),
+                bottomLeft: Radius.circular(20),
                 bottomRight: Radius.circular(20),
               ),
             ),
@@ -2692,9 +2854,8 @@ class _CreditNoteRaiseTicketOverlayState
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: (_selectedEmp == null || _assigning)
-                      ? null
-                      : _assign,
+                  onPressed:
+                      (_selectedEmp == null || _assigning) ? null : _assign,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _navy,
                     foregroundColor: Colors.white,
@@ -2714,8 +2875,7 @@ class _CreditNoteRaiseTicketOverlayState
                           _selectedEmp != null
                               ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}'
                               : 'Select Employee',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis,
                         ),
                 ),
@@ -2727,3 +2887,4 @@ class _CreditNoteRaiseTicketOverlayState
     );
   }
 }
+

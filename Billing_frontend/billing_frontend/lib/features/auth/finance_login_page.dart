@@ -21,9 +21,9 @@ import 'finance_branch_selector_page.dart';
 import '../billing/billing_main_shell.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 const Color _goldAccent = Color(0xFFFBBF24);
 
@@ -36,32 +36,35 @@ class FinanceLoginPage extends StatefulWidget {
 
 class _FinanceLoginPageState extends State<FinanceLoginPage>
     with TickerProviderStateMixin {
-  final _formKey   = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
-  final _pwCtrl    = TextEditingController();
-  bool _loading    = false;
-  bool _obscure    = true;
+  final _pwCtrl = TextEditingController();
+  bool _loading = false;
+  bool _obscure = true;
   String? _error;
 
   late final AnimationController _orbitCtrl;
   late final AnimationController _entranceCtrl;
-  late final Animation<double>   _entranceFade;
-  late final Animation<Offset>   _entranceSlide;
+  late final Animation<double> _entranceFade;
+  late final Animation<Offset> _entranceSlide;
   late final AnimationController _btnCtrl;
-  late final Animation<double>   _btnScale;
+  late final Animation<double> _btnScale;
 
   @override
   void initState() {
     super.initState();
-    _orbitCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 18))
-      ..repeat();
+    _orbitCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 18))
+          ..repeat();
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900));
-    _entranceFade  = CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut);
-    _entranceSlide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic));
-    _btnCtrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 120));
+    _entranceFade =
+        CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut);
+    _entranceSlide =
+        Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero).animate(
+            CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic));
+    _btnCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 120));
     _btnScale = Tween<double>(begin: 1.0, end: 0.97)
         .animate(CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut));
     _entranceCtrl.forward();
@@ -80,10 +83,13 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
   // ── Login logic ────────────────────────────────────────────────────────────
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     final res = await FinanceAuthService.login(
-      email:    _emailCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
       password: _pwCtrl.text,
     );
 
@@ -95,7 +101,8 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
       if (res['requireOrgSelect'] == true) {
         final tempToken = data['tempToken'] as String? ?? '';
         await FinanceSecureStorage.saveTempToken(tempToken);
-        final orgs = List<Map<String, dynamic>>.from(data['organizations'] ?? []);
+        final orgs =
+            List<Map<String, dynamic>>.from(data['organizations'] ?? []);
         final user = data['user'] as Map<String, dynamic>;
         if (!mounted) return;
         TextInput.finishAutofillContext();
@@ -105,20 +112,20 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
             builder: (_) => FinanceOrgSelectorPage(
               organizations: orgs,
               user: user,
-              tempToken: tempToken,   // ✅ pass directly — avoids web storage race
+              tempToken: tempToken, // ✅ pass directly — avoids web storage race
             ),
           ),
         );
       } else {
         final user = data['user'] as Map<String, dynamic>;
         await FinanceSecureStorage.saveSession(
-          token:   data['token'],
-          userId:  user['id'].toString(),
-          name:    user['name'] ?? '',
-          email:   user['email'] ?? '',
-          phone:   user['phone'] ?? '',
-          role:    user['role'] ?? '',
-          orgId:   user['orgId'] ?? '',
+          token: data['token'],
+          userId: user['id'].toString(),
+          name: user['name'] ?? '',
+          email: user['email'] ?? '',
+          phone: user['phone'] ?? '',
+          role: user['role'] ?? '',
+          orgId: user['orgId'] ?? '',
           orgName: user['orgName'] ?? '',
         );
         if (!mounted) return;
@@ -127,9 +134,9 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
           context,
           PageRouteBuilder(
             pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
-              orgId:          user['orgId'] ?? '',
-              orgName:        user['orgName'] ?? 'Your Organisation',
-              userName:       user['name'] ?? 'User',
+              orgId: user['orgId'] ?? '',
+              orgName: user['orgName'] ?? 'Your Organisation',
+              userName: user['name'] ?? 'User',
               isInitialLogin: true,
             ),
             transitionsBuilder: (_, anim, __, child) =>
@@ -164,7 +171,8 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
                 position: _entranceSlide,
                 child: Center(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 40),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 480),
                       child: Column(
@@ -213,16 +221,24 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 48, height: 48,
+          width: 48,
+          height: 48,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [_navyAccent, _navyLight],
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: _navyAccent.withOpacity(0.4), blurRadius: 18, spreadRadius: 2)],
+            boxShadow: [
+              BoxShadow(
+                  color: _navyAccent.withOpacity(0.4),
+                  blurRadius: 18,
+                  spreadRadius: 2)
+            ],
           ),
-          child: const Icon(Icons.account_balance_rounded, color: Colors.white, size: 26),
+          child: const Icon(Icons.account_balance_rounded,
+              color: Colors.white, size: 26),
         ),
         const SizedBox(width: 14),
         const Column(
@@ -230,10 +246,14 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('ABRA Finance Suite',
-                style: TextStyle(color: Colors.white, fontSize: 16,
-                    fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3)),
             Text('Enterprise Finance Platform',
-                style: TextStyle(color: Colors.white, fontSize: 10, letterSpacing: 0.8)),
+                style: TextStyle(
+                    color: Colors.white, fontSize: 10, letterSpacing: 0.8)),
           ],
         ),
       ],
@@ -243,10 +263,10 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
   // ── Horizontal 4-step row ──────────────────────────────────────────────────
   Widget _buildHorizontalSteps() {
     final steps = [
-      (Icons.lock_outline_rounded,   '01', 'Secure Login'),
+      (Icons.lock_outline_rounded, '01', 'Secure Login'),
       (Icons.corporate_fare_rounded, '02', 'Org Selected'),
-      (Icons.verified_user_rounded,  '03', 'Access Granted'),
-      (Icons.dashboard_rounded,      '04', 'Dashboard Ready'),
+      (Icons.verified_user_rounded, '03', 'Access Granted'),
+      (Icons.dashboard_rounded, '04', 'Dashboard Ready'),
     ];
 
     return Row(
@@ -274,7 +294,8 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 38, height: 38,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const LinearGradient(
@@ -283,7 +304,10 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
-                  BoxShadow(color: _navyAccent.withOpacity(0.4), blurRadius: 12, spreadRadius: 1),
+                  BoxShadow(
+                      color: _navyAccent.withOpacity(0.4),
+                      blurRadius: 12,
+                      spreadRadius: 1),
                 ],
               ),
               child: Icon(s.$1, color: Colors.white, size: 17),
@@ -291,13 +315,17 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
             const SizedBox(height: 6),
             Text(s.$2,
                 style: const TextStyle(
-                    color: _navyAccent, fontSize: 10,
-                    fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                    color: _navyAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8)),
             const SizedBox(height: 3),
             Text(s.$3,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
           ],
         );
       }),
@@ -313,160 +341,187 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white.withOpacity(0.12)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 40, offset: const Offset(0, 16)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 40,
+              offset: const Offset(0, 16)),
         ],
       ),
       child: AutofillGroup(
         child: Form(
           key: _formKey,
           child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Sign In',
-                style: TextStyle(color: Colors.white, fontSize: 26,
-                    fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-            const SizedBox(height: 4),
-            const Text('Enter your credentials to continue',
-                style: TextStyle(color: Colors.white, fontSize: 13)),
-            const SizedBox(height: 24),
-
-            if (_error != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Sign In',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5)),
+              const SizedBox(height: 4),
+              const Text('Enter your credentials to continue',
+                  style: TextStyle(color: Colors.white, fontSize: 13)),
+              const SizedBox(height: 24),
+              if (_error != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.error_outline,
+                        color: Color(0xFFFF6B6B), size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(_error!,
+                            style: const TextStyle(
+                                color: Color(0xFFFF6B6B), fontSize: 13))),
+                  ]),
                 ),
-                child: Row(children: [
-                  const Icon(Icons.error_outline, color: Color(0xFFFF6B6B), size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(_error!,
-                      style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13))),
-                ]),
+                const SizedBox(height: 16),
+              ],
+              _buildField(
+                ctrl: _emailCtrl,
+                label: 'Email Address',
+                hint: 'you@company.com',
+                icon: Icons.email_outlined,
+                keyboard: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Email is required';
+                  if (!v.contains('@')) return 'Enter a valid email';
+                  return null;
+                },
               ),
               const SizedBox(height: 16),
-            ],
-
-            _buildField(
-              ctrl: _emailCtrl, label: 'Email Address',
-              hint: 'you@company.com', icon: Icons.email_outlined,
-              keyboard: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.email],
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Email is required';
-                if (!v.contains('@')) return 'Enter a valid email';
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-
-            _buildField(
-              ctrl: _pwCtrl, label: 'Password',
-              hint: '••••••••', icon: Icons.lock_outline_rounded,
-              obscure: _obscure,
-              autofillHints: const [AutofillHints.password],
-              suffix: IconButton(
-                icon: Icon(
-                  _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                  color: Colors.white, size: 18,
-                ),
-                onPressed: () => setState(() => _obscure = !_obscure),
-              ),
-              validator: (v) => (v == null || v.isEmpty) ? 'Password is required' : null,
-            ),
-            const SizedBox(height: 28),
-
-            ScaleTransition(
-              scale: _btnScale,
-              child: GestureDetector(
-                onTapDown: (_) => _btnCtrl.forward(),
-                onTapUp: (_) => _btnCtrl.reverse(),
-                onTapCancel: () => _btnCtrl.reverse(),
-                child: ElevatedButton(
-                  onPressed: _loading ? null : _login,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _navyAccent,
-                    disabledBackgroundColor: _navyAccent.withOpacity(0.5),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              _buildField(
+                ctrl: _pwCtrl,
+                label: 'Password',
+                hint: '••••••••',
+                icon: Icons.lock_outline_rounded,
+                obscure: _obscure,
+                autofillHints: const [AutofillHints.password],
+                suffix: IconButton(
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: Colors.white,
+                    size: 18,
                   ),
-                  child: _loading
-                      ? const SizedBox(width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text('Sign In',
-                                style: TextStyle(fontSize: 16,
-                                    fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                            SizedBox(width: 8),
-                            Icon(Icons.arrow_forward_rounded, size: 18),
-                          ],
-                        ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
                 ),
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? 'Password is required' : null,
               ),
-            ),
-            const SizedBox(height: 20),
-
-            Row(children: [
-              Expanded(child: Divider(color: Colors.white.withOpacity(0.12))),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: const Text('or', style: TextStyle(color: Colors.white, fontSize: 12)),
-              ),
-              Expanded(child: Divider(color: Colors.white.withOpacity(0.12))),
-            ]),
-            const SizedBox(height: 20),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text("Don't have an account?",
-                    style: TextStyle(color: Colors.white, fontSize: 13)),
-                TextButton(
-                  onPressed: _loading
-                      ? null
-                      : () => Navigator.pushReplacement(
-                          context, MaterialPageRoute(builder: (_) => const FinanceRegisterPage())),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.only(left: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              const SizedBox(height: 28),
+              ScaleTransition(
+                scale: _btnScale,
+                child: GestureDetector(
+                  onTapDown: (_) => _btnCtrl.forward(),
+                  onTapUp: (_) => _btnCtrl.reverse(),
+                  onTapCancel: () => _btnCtrl.reverse(),
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _navyAccent,
+                      disabledBackgroundColor: _navyAccent.withOpacity(0.5),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Sign In',
+                                  style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5)),
+                              SizedBox(width: 8),
+                              Icon(Icons.arrow_forward_rounded, size: 18),
+                            ],
+                          ),
                   ),
-                  child: const Text('Register',
-                      style: TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w700, color: _goldAccent)),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
               ),
-              child: Row(
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: Divider(color: Colors.white.withOpacity(0.12))),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: const Text('or',
+                      style: TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+                Expanded(child: Divider(color: Colors.white.withOpacity(0.12))),
+              ]),
+              const SizedBox(height: 20),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.shield_outlined, color: _navyAccent, size: 13),
-                  const SizedBox(width: 8),
-                  const Text('Secured with JWT authentication',
-                      style: TextStyle(color: Colors.white, fontSize: 11, letterSpacing: 0.3)),
+                  const Text("Don't have an account?",
+                      style: TextStyle(color: Colors.white, fontSize: 13)),
+                  TextButton(
+                    onPressed: _loading
+                        ? null
+                        : () => Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FinanceRegisterPage())),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.only(left: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Register',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: _goldAccent)),
+                  ),
                 ],
               ),
-            ),
-          ],
-        ),  // Column
-        ),  // Form
-      ),    // AutofillGroup
+              const SizedBox(height: 16),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.shield_outlined,
+                        color: _navyAccent, size: 13),
+                    const SizedBox(width: 8),
+                    const Text('Secured with JWT authentication',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            letterSpacing: 0.3)),
+                  ],
+                ),
+              ),
+            ],
+          ), // Column
+        ), // Form
+      ), // AutofillGroup
     );
   }
+
   Widget _buildField({
     required TextEditingController ctrl,
     required String label,
@@ -494,7 +549,8 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
         suffixIcon: suffix,
         filled: true,
         fillColor: Colors.white.withOpacity(0.07),
-        contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
@@ -527,11 +583,14 @@ class _FinanceLoginBgPainter extends CustomPainter {
     final bg = Paint()
       ..shader = const LinearGradient(
         colors: [Color(0xFF0D1B3E), Color(0xFF0F2350), Color(0xFF1A3A6B)],
-        begin: Alignment.topLeft, end: Alignment.bottomRight,
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Offset.zero & size, bg);
 
-    final grid = Paint()..color = Colors.white.withOpacity(0.025)..strokeWidth = 1;
+    final grid = Paint()
+      ..color = Colors.white.withOpacity(0.025)
+      ..strokeWidth = 1;
     for (double x = 0; x < size.width; x += 55) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
@@ -557,7 +616,11 @@ class _FinanceLoginBgPainter extends CustomPainter {
 
     final line = Paint()
       ..shader = LinearGradient(
-        colors: [Colors.transparent, const Color(0xFF3D8EFF).withOpacity(0.6), Colors.transparent],
+        colors: [
+          Colors.transparent,
+          const Color(0xFF3D8EFF).withOpacity(0.6),
+          Colors.transparent
+        ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, 2))
       ..strokeWidth = 2;
     canvas.drawLine(const Offset(0, 0), Offset(size.width, 0), line);

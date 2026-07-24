@@ -18,7 +18,7 @@ class SafeApiService {
   /// Cache for storing last successful responses
   final Map<String, dynamic> _responseCache = {};
   final Map<String, DateTime> _cacheTimestamps = {};
-  
+
   /// Maximum cache age in minutes
   static const int _maxCacheAgeMinutes = 5;
 
@@ -36,13 +36,16 @@ class SafeApiService {
     // ✅ CHECK CIRCUIT BREAKER FIRST
     if (!_errorHandler.canMakeRequest) {
       debugPrint('⛔ Circuit breaker open, skipping API call: $context');
-      
+
       // Try to return cached data
-      if (cacheKey != null && useCache && _responseCache.containsKey(cacheKey)) {
-        debugPrint('🔄 Returning cached data (circuit breaker open): $cacheKey');
+      if (cacheKey != null &&
+          useCache &&
+          _responseCache.containsKey(cacheKey)) {
+        debugPrint(
+            '🔄 Returning cached data (circuit breaker open): $cacheKey');
         return _responseCache[cacheKey] as T;
       }
-      
+
       // Return fallback
       return fallbackValue;
     }
@@ -50,23 +53,25 @@ class SafeApiService {
     try {
       // Try the API call
       final result = await apiCall();
-      
+
       // ✅ RECORD SUCCESS
       _errorHandler.recordSuccess();
-      
+
       // Cache successful result if cache key provided
       if (cacheKey != null && useCache) {
         _responseCache[cacheKey] = result;
         _cacheTimestamps[cacheKey] = DateTime.now();
       }
-      
+
       return result;
     } catch (error) {
       // ✅ Handle the error silently
       _errorHandler.handleSilentError(error, context: context);
-      
+
       // Try to return cached data if available and not too old
-      if (cacheKey != null && useCache && _responseCache.containsKey(cacheKey)) {
+      if (cacheKey != null &&
+          useCache &&
+          _responseCache.containsKey(cacheKey)) {
         final cacheTime = _cacheTimestamps[cacheKey];
         if (cacheTime != null) {
           final age = DateTime.now().difference(cacheTime).inMinutes;
@@ -78,7 +83,7 @@ class SafeApiService {
           }
         }
       }
-      
+
       // Return fallback value
       debugPrint('🔄 Returning fallback value for $context');
       return fallbackValue;
@@ -215,7 +220,7 @@ class SafeApiService {
   Map<String, dynamic> getCacheStatus() {
     final now = DateTime.now();
     final status = <String, dynamic>{};
-    
+
     for (final key in _responseCache.keys) {
       final timestamp = _cacheTimestamps[key];
       if (timestamp != null) {
@@ -227,21 +232,21 @@ class SafeApiService {
         };
       }
     }
-    
+
     return status;
   }
 
   /// Preload critical data
   Future<void> preloadCriticalData() async {
     debugPrint('🔄 Preloading critical data...');
-    
+
     // Run all critical API calls in parallel
     await Future.wait([
       getVehiclesSafe(),
       getDriversSafe(),
       getTripsSafe(),
     ]);
-    
+
     debugPrint('✅ Critical data preload completed');
   }
 }

@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // BUDGET DETAIL PAGE
 // ============================================================================
@@ -11,9 +12,9 @@ import 'package:intl/intl.dart';
 import '../../../../core/services/budget_service.dart';
 import 'new_budget.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class BudgetDetailPage extends StatefulWidget {
@@ -35,7 +36,18 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   final _vScroll = ScrollController();
 
   static const _monthLabels = [
-    'Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+    'Jan',
+    'Feb',
+    'Mar'
   ];
 
   @override
@@ -52,23 +64,33 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final b = await BudgetService.getBudgetWithActuals(
         widget.budgetId,
         startDate: _startDate?.toIso8601String(),
         endDate: _endDate?.toIso8601String(),
       );
-      setState(() { _budget = b; _isLoading = false; });
+      setState(() {
+        _budget = b;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _goEdit() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => NewBudgetScreen(budgetId: widget.budgetId)),
+      MaterialPageRoute(
+          builder: (_) => NewBudgetScreen(budgetId: widget.budgetId)),
     );
     if (result == true) _load();
   }
@@ -87,8 +109,7 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ============================================================================
@@ -109,62 +130,66 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   }
 
   PreferredSizeWidget _buildAppBar() => PreferredSize(
-    preferredSize: const Size.fromHeight(64),
-    child: Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_navyDark, _navyMid, _navyLight],
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
+        preferredSize: const Size.fromHeight(64),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [_navyDark, _navyMid, _navyLight],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+          child: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            foregroundColor: Colors.white,
+            title: Text(
+              _budget?.budgetName ?? 'Budget Detail',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            actions: [
+              if (_budget != null) ...[
+                IconButton(
+                  icon: Icon(
+                    _budget!.isActive ? Icons.toggle_on : Icons.toggle_off,
+                    size: 28,
+                  ),
+                  tooltip: _budget!.isActive ? 'Deactivate' : 'Activate',
+                  onPressed: _toggleActive,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: 'Edit',
+                  onPressed: _goEdit,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Refresh',
+                  onPressed: _load,
+                ),
+              ],
+              const SizedBox(width: 8),
+            ],
+          ),
         ),
-      ),
-      child: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.white,
-        title: Text(
-          _budget?.budgetName ?? 'Budget Detail',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        actions: [
-          if (_budget != null) ...[
-            IconButton(
-              icon: Icon(
-                _budget!.isActive ? Icons.toggle_on : Icons.toggle_off,
-                size: 28,
-              ),
-              tooltip: _budget!.isActive ? 'Deactivate' : 'Activate',
-              onPressed: _toggleActive,
-            ),
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit',
-              onPressed: _goEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Refresh',
-              onPressed: _load,
-            ),
-          ],
-          const SizedBox(width: 8),
-        ],
-      ),
-    ),
-  );
+      );
 
-
-
-  Widget _buildError() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-    Icon(Icons.error_outline, size: 60, color: Colors.red.shade300),
-    const SizedBox(height: 16),
-    Text('Failed to load', style: TextStyle(fontSize: 16, color: Colors.grey.shade700)),
-    const SizedBox(height: 8),
-    Text(_error ?? '', style: TextStyle(color: Colors.grey.shade500)),
-    const SizedBox(height: 20),
-    ElevatedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('Retry'),
-        style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white)),
-  ]));
+  Widget _buildError() => Center(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.error_outline, size: 60, color: Colors.red.shade300),
+        const SizedBox(height: 16),
+        Text('Failed to load',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade700)),
+        const SizedBox(height: 8),
+        Text(_error ?? '', style: TextStyle(color: Colors.grey.shade500)),
+        const SizedBox(height: 20),
+        ElevatedButton.icon(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent, foregroundColor: Colors.white)),
+      ]));
 
   Widget _buildBody() {
     final b = _budget!;
@@ -186,40 +211,54 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   // ── Header ────────────────────────────────────────────────────────────────
 
   Widget _buildHeader(Budget b) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(20),
-    color: Colors.white,
-    child: LayoutBuilder(builder: (_, cs) {
-      final wide = cs.maxWidth > 600;
-      final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.account_balance, color: Colors.white, size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(b.budgetName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _navyDark)),
-            const SizedBox(height: 4),
-            Text('${b.financialYear}  •  ${b.budgetPeriod}  •  ${b.currency}',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-          ])),
-          _badge(b.isActive ? 'Active' : 'Inactive',
-              b.isActive ? Colors.green.shade100 : Colors.grey.shade200,
-              b.isActive ? Colors.green.shade700 : Colors.grey.shade600),
-        ]),
-        if (b.notes != null && b.notes!.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(b.notes!, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-        ],
-      ]);
-      return info;
-    }),
-  );
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        color: Colors.white,
+        child: LayoutBuilder(builder: (_, cs) {
+          final wide = cs.maxWidth > 600;
+          final info =
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.account_balance,
+                    color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(b.budgetName,
+                        style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: _navyDark)),
+                    const SizedBox(height: 4),
+                    Text(
+                        '${b.financialYear}  •  ${b.budgetPeriod}  •  ${b.currency}',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.grey.shade600)),
+                  ])),
+              _badge(
+                  b.isActive ? 'Active' : 'Inactive',
+                  b.isActive ? Colors.green.shade100 : Colors.grey.shade200,
+                  b.isActive ? Colors.green.shade700 : Colors.grey.shade600),
+            ]),
+            if (b.notes != null && b.notes!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(b.notes!,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+            ],
+          ]);
+          return info;
+        }),
+      );
 
   Widget _buildFilterBar() {
     return Container(
@@ -241,10 +280,17 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(6)),
               child: Row(children: [
-                const Icon(Icons.calendar_today, size: 14, color: _navyDark), const SizedBox(width: 8),
-                Text(_startDate != null ? DateFormat('dd MMM yyyy').format(_startDate!) : 'Start Date', style: const TextStyle(fontSize: 13)),
+                const Icon(Icons.calendar_today, size: 14, color: _navyDark),
+                const SizedBox(width: 8),
+                Text(
+                    _startDate != null
+                        ? DateFormat('dd MMM yyyy').format(_startDate!)
+                        : 'Start Date',
+                    style: const TextStyle(fontSize: 13)),
               ]),
             ),
           ),
@@ -263,10 +309,17 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(6)),
               child: Row(children: [
-                const Icon(Icons.calendar_today, size: 14, color: _navyDark), const SizedBox(width: 8),
-                Text(_endDate != null ? DateFormat('dd MMM yyyy').format(_endDate!) : 'End Date', style: const TextStyle(fontSize: 13)),
+                const Icon(Icons.calendar_today, size: 14, color: _navyDark),
+                const SizedBox(width: 8),
+                Text(
+                    _endDate != null
+                        ? DateFormat('dd MMM yyyy').format(_endDate!)
+                        : 'End Date',
+                    style: const TextStyle(fontSize: 13)),
               ]),
             ),
           ),
@@ -283,13 +336,20 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
             },
             icon: const Icon(Icons.check, size: 14),
             label: const Text('Apply', style: TextStyle(fontSize: 12)),
-            style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 0)),
           ),
           if (_startDate != null || _endDate != null) ...[
             const SizedBox(width: 8),
             TextButton.icon(
               onPressed: () {
-                setState(() { _startDate = null; _endDate = null; });
+                setState(() {
+                  _startDate = null;
+                  _endDate = null;
+                });
                 _load();
               },
               icon: const Icon(Icons.clear, size: 14),
@@ -308,15 +368,30 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
     // Fix floating point precision errors
     final varianceRaw = b.totalBudgeted - b.totalActual;
     final variance = double.parse(varianceRaw.toStringAsFixed(2));
-    final pctUsedRaw = b.totalBudgeted > 0 ? (b.totalActual / b.totalBudgeted * 100) : 0.0;
+    final pctUsedRaw =
+        b.totalBudgeted > 0 ? (b.totalActual / b.totalBudgeted * 100) : 0.0;
     final pctUsed = double.parse(pctUsedRaw.toStringAsFixed(2));
     final overBudget = variance < 0;
 
     final cards = [
-      _CardData('Total Budgeted', '₹${_fmt(b.totalBudgeted)}', Icons.account_balance_wallet_outlined, Colors.blue),
-      _CardData('Total Actual', '₹${_fmt(b.totalActual)}', Icons.receipt_long_outlined, Colors.teal),
-      _CardData('Variance', '${overBudget ? '-' : ''}₹${_fmt(variance.abs())}', Icons.swap_vert_circle_outlined, overBudget ? Colors.red : Colors.green),
-      _CardData('% Utilised', '${pctUsed.toStringAsFixed(1)}%', Icons.pie_chart_outline, pctUsed > 100 ? Colors.red : pctUsed > 80 ? Colors.orange : Colors.green),
+      _CardData('Total Budgeted', '₹${_fmt(b.totalBudgeted)}',
+          Icons.account_balance_wallet_outlined, Colors.blue),
+      _CardData('Total Actual', '₹${_fmt(b.totalActual)}',
+          Icons.receipt_long_outlined, Colors.teal),
+      _CardData(
+          'Variance',
+          '${overBudget ? '-' : ''}₹${_fmt(variance.abs())}',
+          Icons.swap_vert_circle_outlined,
+          overBudget ? Colors.red : Colors.green),
+      _CardData(
+          '% Utilised',
+          '${pctUsed.toStringAsFixed(1)}%',
+          Icons.pie_chart_outline,
+          pctUsed > 100
+              ? Colors.red
+              : pctUsed > 80
+                  ? Colors.orange
+                  : Colors.green),
     ];
 
     return Container(
@@ -325,137 +400,224 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
       margin: const EdgeInsets.only(top: 1),
       child: LayoutBuilder(builder: (_, cs) {
         if (cs.maxWidth < 600) {
-          return Wrap(spacing: 12, runSpacing: 12,
-              children: cards.map((c) => SizedBox(width: (cs.maxWidth - 12) / 2, child: _summCard(c))).toList());
+          return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: cards
+                  .map((c) => SizedBox(
+                      width: (cs.maxWidth - 12) / 2, child: _summCard(c)))
+                  .toList());
         }
-        return Row(children: cards.map((c) =>
-            Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _summCard(c)))).toList());
+        return Row(
+            children: cards
+                .map((c) => Expanded(
+                    child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: _summCard(c))))
+                .toList());
       }),
     );
   }
 
   Widget _summCard(_CardData c) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: c.color.withOpacity(0.07),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: c.color.withOpacity(0.25)),
-    ),
-    child: Row(children: [
-      Icon(c.icon, size: 30, color: c.color),
-      const SizedBox(width: 10),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(c.label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 3),
-        Text(c.value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: c.color), overflow: TextOverflow.ellipsis),
-      ])),
-    ]),
-  );
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: c.color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c.color.withOpacity(0.25)),
+        ),
+        child: Row(children: [
+          Icon(c.icon, size: 30, color: c.color),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(c.label,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 3),
+                Text(c.value,
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: c.color),
+                    overflow: TextOverflow.ellipsis),
+              ])),
+        ]),
+      );
 
   // ── Comparison Table ──────────────────────────────────────────────────────
 
   Widget _buildComparisonTable(Budget b) => Container(
-    margin: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2))],
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(colors: [_navyDark, _navyMid]),
-          borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
+          ],
         ),
-        child: Row(children: [
-          const Icon(Icons.compare_arrows, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          const Expanded(child: Text('Budget vs Actual Comparison',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
-          Text('${b.accountLines.length} accounts',
-              style: const TextStyle(color: Colors.white70, fontSize: 12)),
-        ]),
-      ),
-      LayoutBuilder(
-        builder: (context, constraints) {
-          return Scrollbar(
-            controller: _hScroll,
-            thumbVisibility: true,
-            trackVisibility: true,
-            thickness: 6,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(
-                dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad},
-              ),
-              child: SingleChildScrollView(
-                controller: _hScroll,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF0F4FF)),
-                    headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark, letterSpacing: 0.4),
-                    headingRowHeight: 44,
-                    dataRowMinHeight: 56,
-                    dataTextStyle: const TextStyle(fontSize: 14, color: _navyDark),
-                    dividerThickness: 0.8,
-                    columnSpacing: 24,
-                    horizontalMargin: 16,
-                    columns: const [
-                      DataColumn(label: SizedBox(width: 200, child: Text('ACCOUNT'))),
-                      DataColumn(label: SizedBox(width: 100, child: Text('TYPE'))),
-                      DataColumn(label: SizedBox(width: 120, child: Text('BUDGETED', textAlign: TextAlign.right)), numeric: true),
-                      DataColumn(label: SizedBox(width: 120, child: Text('ACTUAL', textAlign: TextAlign.right)), numeric: true),
-                      DataColumn(label: SizedBox(width: 120, child: Text('VARIANCE', textAlign: TextAlign.right)), numeric: true),
-                      DataColumn(label: SizedBox(width: 100, child: Text('% USED', textAlign: TextAlign.right)), numeric: true),
-                      DataColumn(label: SizedBox(width: 150, child: Text('PROGRESS'))),
-                    ],
-                    rows: b.accountLines.map((line) {
-                      final varianceRaw = line.totalBudgeted - line.totalActual;
-                final variance = double.parse(varianceRaw.toStringAsFixed(2));
-                final over = variance < 0;
-                final pct  = double.parse(line.percentUsed.toStringAsFixed(2));
-                return DataRow(cells: [
-                  DataCell(Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataCell(Text(line.accountType, style: const TextStyle(fontSize: 11))),
-                  DataCell(Text('₹${_fmt(line.totalBudgeted)}', style: const TextStyle(fontWeight: FontWeight.w600))),
-                  DataCell(Text('₹${_fmt(line.totalActual)}', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.teal.shade700))),
-                  DataCell(Text(
-                    '${over ? '-' : ''}₹${_fmt(variance.abs())}',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: over ? Colors.red : Colors.green.shade700),
-                  )),
-                  DataCell(_pctBadge(pct)),
-                  DataCell(SizedBox(width: 150, child: _progressBar(pct))),
-                ]);
-              }).toList()
-                ..add(_totalRow(b)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [_navyDark, _navyMid]),
+              borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.compare_arrows, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                  child: Text('Budget vs Actual Comparison',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15))),
+              Text('${b.accountLines.length} accounts',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            ]),
+          ),
+          LayoutBuilder(builder: (context, constraints) {
+            return Scrollbar(
+              controller: _hScroll,
+              thumbVisibility: true,
+              trackVisibility: true,
+              thickness: 6,
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad
+                  },
+                ),
+                child: SingleChildScrollView(
+                  controller: _hScroll,
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                    child: DataTable(
+                      headingRowColor:
+                          WidgetStateProperty.all(const Color(0xFFF0F4FF)),
+                      headingTextStyle: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: _navyDark,
+                          letterSpacing: 0.4),
+                      headingRowHeight: 44,
+                      dataRowMinHeight: 56,
+                      dataTextStyle:
+                          const TextStyle(fontSize: 14, color: _navyDark),
+                      dividerThickness: 0.8,
+                      columnSpacing: 24,
+                      horizontalMargin: 16,
+                      columns: const [
+                        DataColumn(
+                            label:
+                                SizedBox(width: 200, child: Text('ACCOUNT'))),
+                        DataColumn(
+                            label: SizedBox(width: 100, child: Text('TYPE'))),
+                        DataColumn(
+                            label: SizedBox(
+                                width: 120,
+                                child: Text('BUDGETED',
+                                    textAlign: TextAlign.right)),
+                            numeric: true),
+                        DataColumn(
+                            label: SizedBox(
+                                width: 120,
+                                child:
+                                    Text('ACTUAL', textAlign: TextAlign.right)),
+                            numeric: true),
+                        DataColumn(
+                            label: SizedBox(
+                                width: 120,
+                                child: Text('VARIANCE',
+                                    textAlign: TextAlign.right)),
+                            numeric: true),
+                        DataColumn(
+                            label: SizedBox(
+                                width: 100,
+                                child:
+                                    Text('% USED', textAlign: TextAlign.right)),
+                            numeric: true),
+                        DataColumn(
+                            label:
+                                SizedBox(width: 150, child: Text('PROGRESS'))),
+                      ],
+                      rows: b.accountLines.map((line) {
+                        final varianceRaw =
+                            line.totalBudgeted - line.totalActual;
+                        final variance =
+                            double.parse(varianceRaw.toStringAsFixed(2));
+                        final over = variance < 0;
+                        final pct =
+                            double.parse(line.percentUsed.toStringAsFixed(2));
+                        return DataRow(cells: [
+                          DataCell(Text(line.accountName,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataCell(Text(line.accountType,
+                              style: const TextStyle(fontSize: 11))),
+                          DataCell(Text('₹${_fmt(line.totalBudgeted)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600))),
+                          DataCell(Text('₹${_fmt(line.totalActual)}',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.teal.shade700))),
+                          DataCell(Text(
+                            '${over ? '-' : ''}₹${_fmt(variance.abs())}',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    over ? Colors.red : Colors.green.shade700),
+                          )),
+                          DataCell(_pctBadge(pct)),
+                          DataCell(
+                              SizedBox(width: 150, child: _progressBar(pct))),
+                        ]);
+                      }).toList()
+                        ..add(_totalRow(b)),
                     ),
                   ),
                 ),
               ),
-          );
-        }
-      ),
-    ]),
-  );
+            );
+          }),
+        ]),
+      );
 
   DataRow _totalRow(Budget b) {
-    final varianceRaw  = b.totalBudgeted - b.totalActual;
-    final variance     = double.parse(varianceRaw.toStringAsFixed(2));
-    final pctRaw       = b.totalBudgeted > 0 ? b.totalActual / b.totalBudgeted * 100 : 0.0;
-    final pct          = double.parse(pctRaw.toStringAsFixed(2));
-    final over         = variance < 0;
+    final varianceRaw = b.totalBudgeted - b.totalActual;
+    final variance = double.parse(varianceRaw.toStringAsFixed(2));
+    final pctRaw =
+        b.totalBudgeted > 0 ? b.totalActual / b.totalBudgeted * 100 : 0.0;
+    final pct = double.parse(pctRaw.toStringAsFixed(2));
+    final over = variance < 0;
     return DataRow(
       color: WidgetStateProperty.all(const Color(0xFFF0F4FF)),
       cells: [
-        const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark))),
+        const DataCell(Text('TOTAL',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark))),
         const DataCell(Text('')),
-        DataCell(Text('₹${_fmt(b.totalBudgeted)}', style: const TextStyle(fontWeight: FontWeight.bold, color: _navyDark))),
-        DataCell(Text('₹${_fmt(b.totalActual)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal))),
+        DataCell(Text('₹${_fmt(b.totalBudgeted)}',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: _navyDark))),
+        DataCell(Text('₹${_fmt(b.totalActual)}',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.teal))),
         DataCell(Text(
           '${over ? '-' : ''}₹${_fmt(variance.abs())}',
-          style: TextStyle(fontWeight: FontWeight.bold, color: over ? Colors.red : Colors.green),
+          style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: over ? Colors.red : Colors.green),
         )),
         DataCell(_pctBadge(pct)),
         DataCell(SizedBox(width: 150, child: _progressBar(pct))),
@@ -472,103 +634,156 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.all(16),
           decoration: const BoxDecoration(
             gradient: LinearGradient(colors: [_navyMid, _navyLight]),
-            borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+            borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(8), topRight: Radius.circular(8)),
           ),
           child: Row(children: [
             const Icon(Icons.calendar_month, color: Colors.white, size: 20),
             const SizedBox(width: 8),
             const Text('Monthly Breakdown (Budgeted vs Actual)',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15)),
           ]),
         ),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            return Scrollbar(
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF8F9FA)),
-                    headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark),
-                    headingRowHeight: 48,
-                    dataRowMinHeight: 60,
-                    dataTextStyle: const TextStyle(fontSize: 13),
-                    dividerThickness: 0.8,
-                    columnSpacing: 16,
-                    horizontalMargin: 16,
-                    columns: [
-                      const DataColumn(label: SizedBox(width: 200, child: Text('ACCOUNT'))),
-                      ...List.generate(12, (i) => DataColumn(
-                        label: SizedBox(width: 85,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center, 
-                            crossAxisAlignment: CrossAxisAlignment.end, 
-                            children: [
-                              Text(_monthLabels[i], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                            ]
-                          ),
-                        ),
-                        numeric: true,
-                      )),
-                      const DataColumn(
+        LayoutBuilder(builder: (context, constraints) {
+          return Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: DataTable(
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFFF8F9FA)),
+                  headingTextStyle: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: _navyDark),
+                  headingRowHeight: 48,
+                  dataRowMinHeight: 60,
+                  dataTextStyle: const TextStyle(fontSize: 13),
+                  dividerThickness: 0.8,
+                  columnSpacing: 16,
+                  horizontalMargin: 16,
+                  columns: [
+                    const DataColumn(
+                        label: SizedBox(width: 200, child: Text('ACCOUNT'))),
+                    ...List.generate(
+                        12,
+                        (i) => DataColumn(
+                              label: SizedBox(
+                                width: 85,
+                                child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(_monthLabels[i],
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold)),
+                                    ]),
+                              ),
+                              numeric: true,
+                            )),
+                    const DataColumn(
                         label: SizedBox(
-                          width: 120, 
-                          child: Text('ANNUAL', textAlign: TextAlign.right)
-                        ), 
-                        numeric: true
-                      ),
-                    ],
-                    rows: b.accountLines.map((line) => DataRow(cells: [
-                      DataCell(SizedBox(width: 200, child: Text(line.accountName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14), overflow: TextOverflow.ellipsis))),
-                ...List.generate(12, (m) {
-                  final budgRaw = m < line.monthlyAmounts.length ? line.monthlyAmounts[m] : 0.0;
-                  final actRaw  = m < line.actualMonthly.length  ? line.actualMonthly[m]  : 0.0;
-                  final budg = double.parse(budgRaw.toStringAsFixed(2));
-                  final act  = double.parse(actRaw.toStringAsFixed(2));
-                  final over = act > budg && budg > 0;
-                  return DataCell(SizedBox(width: 75, child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(_fmtShort(budg), style: const TextStyle(fontSize: 11, color: _navyDark)),
-                      const SizedBox(height: 4),
-                      Text(_fmtShort(act), style: TextStyle(fontSize: 10, color: over ? Colors.red : Colors.teal.shade700)),
-                    ],
-                  )));
-                }),
-                DataCell(SizedBox(width: 110, child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(_fmt(line.totalBudgeted), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _navyDark)),
-                    const SizedBox(height: 4),
-                    Text(_fmt(line.totalActual), style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
+                            width: 120,
+                            child: Text('ANNUAL', textAlign: TextAlign.right)),
+                        numeric: true),
                   ],
-                ))),
-              ])).toList(),
+                  rows: b.accountLines
+                      .map((line) => DataRow(cells: [
+                            DataCell(SizedBox(
+                                width: 200,
+                                child: Text(line.accountName,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14),
+                                    overflow: TextOverflow.ellipsis))),
+                            ...List.generate(12, (m) {
+                              final budgRaw = m < line.monthlyAmounts.length
+                                  ? line.monthlyAmounts[m]
+                                  : 0.0;
+                              final actRaw = m < line.actualMonthly.length
+                                  ? line.actualMonthly[m]
+                                  : 0.0;
+                              final budg =
+                                  double.parse(budgRaw.toStringAsFixed(2));
+                              final act =
+                                  double.parse(actRaw.toStringAsFixed(2));
+                              final over = act > budg && budg > 0;
+                              return DataCell(SizedBox(
+                                  width: 75,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(_fmtShort(budg),
+                                          style: const TextStyle(
+                                              fontSize: 11, color: _navyDark)),
+                                      const SizedBox(height: 4),
+                                      Text(_fmtShort(act),
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: over
+                                                  ? Colors.red
+                                                  : Colors.teal.shade700)),
+                                    ],
+                                  )));
+                            }),
+                            DataCell(SizedBox(
+                                width: 110,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(_fmt(line.totalBudgeted),
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _navyDark)),
+                                    const SizedBox(height: 4),
+                                    Text(_fmt(line.totalActual),
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.teal.shade700)),
+                                  ],
+                                ))),
+                          ]))
+                      .toList(),
+                ),
+              ),
             ),
-          ),
-        ),
-      );
-    }
-        ),
+          );
+        }),
         Padding(
           padding: const EdgeInsets.all(12),
           child: Row(children: [
-            _legendDot(Colors.teal.shade700), const SizedBox(width: 4), const Text('Actual', style: TextStyle(fontSize: 11)),
+            _legendDot(Colors.teal.shade700),
+            const SizedBox(width: 4),
+            const Text('Actual', style: TextStyle(fontSize: 11)),
             const SizedBox(width: 12),
-            _legendDot(_navyDark), const SizedBox(width: 4), const Text('Budgeted', style: TextStyle(fontSize: 11)),
+            _legendDot(_navyDark),
+            const SizedBox(width: 4),
+            const Text('Budgeted', style: TextStyle(fontSize: 11)),
             const SizedBox(width: 12),
-            _legendDot(Colors.red), const SizedBox(width: 4), const Text('Over budget', style: TextStyle(fontSize: 11)),
+            _legendDot(Colors.red),
+            const SizedBox(width: 4),
+            const Text('Over budget', style: TextStyle(fontSize: 11)),
           ]),
         ),
       ]),
@@ -580,20 +795,37 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   Widget _pctBadge(double pct) {
     Color bg, fg;
     String icon;
-    if (pct > 100) { bg = Colors.red.shade50;    fg = Colors.red;              icon = '🔴'; }
-    else if (pct > 80) { bg = Colors.orange.shade50; fg = Colors.orange.shade700; icon = '🟡'; }
-    else { bg = Colors.green.shade50;  fg = Colors.green.shade700;  icon = '🟢'; }
+    if (pct > 100) {
+      bg = Colors.red.shade50;
+      fg = Colors.red;
+      icon = '🔴';
+    } else if (pct > 80) {
+      bg = Colors.orange.shade50;
+      fg = Colors.orange.shade700;
+      icon = '🟡';
+    } else {
+      bg = Colors.green.shade50;
+      fg = Colors.green.shade700;
+      icon = '🟢';
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text('$icon ${pct.toStringAsFixed(1)}%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text('$icon ${pct.toStringAsFixed(1)}%',
+          style:
+              TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
     );
   }
 
   Widget _progressBar(double pct) {
     final clamped = pct.clamp(0.0, 150.0);
     final fraction = (clamped / 150).clamp(0.0, 1.0);
-    final color = pct > 100 ? Colors.red : pct > 80 ? Colors.orange : Colors.green;
+    final color = pct > 100
+        ? Colors.red
+        : pct > 80
+            ? Colors.orange
+            : Colors.green;
     return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       ClipRRect(
         borderRadius: BorderRadius.circular(4),
@@ -608,20 +840,24 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
   }
 
   Widget _badge(String label, Color bg, Color fg) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-    child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
+      );
 
   Widget _legendDot(Color color) => Container(
-    width: 10, height: 10,
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-  );
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      );
 
   String _fmt(double v) => NumberFormat('#,##0.00').format(v);
   String _fmtShort(double v) {
     if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
-    if (v >= 1000)   return '${(v / 1000).toStringAsFixed(1)}K';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
     return v.toStringAsFixed(0);
   }
 }

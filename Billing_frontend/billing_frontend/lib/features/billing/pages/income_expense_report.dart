@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // INCOME & EXPENSE REPORT SCREEN - MONTHLY DETAIL VIEW
 // ============================================================================
@@ -24,7 +25,8 @@ class IncomeExpenseReportScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<IncomeExpenseReportScreen> createState() => _IncomeExpenseReportScreenState();
+  State<IncomeExpenseReportScreen> createState() =>
+      _IncomeExpenseReportScreenState();
 }
 
 class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
@@ -46,24 +48,23 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
 
     try {
       print('📊 Loading ${widget.type} report for ${widget.month}...');
-      
+
       // Call API to get detailed breakdown
       final reportData = await BillingApiService.getIncomeExpenseDetail(
         month: widget.month,
         type: widget.type,
         basis: widget.basis,
       );
-      
+
       setState(() {
         _reportData = reportData;
         _isLoading = false;
       });
-      
+
       print('✅ Report data loaded successfully');
-      
     } catch (e) {
       print('❌ Error loading report data: $e');
-      
+
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
@@ -75,7 +76,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
   Widget build(BuildContext context) {
     final isIncome = widget.type == 'income';
     final color = isIncome ? Colors.green[700]! : Colors.red[700]!;
-    
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
@@ -111,12 +112,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
           IconButton(
             icon: Icon(Icons.file_download_outlined, color: Colors.grey[700]),
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Export feature coming soon!'),
-                  backgroundColor: Color(0xFFF39C12),
-                ),
-              );
+              AppSnackbar.show(context, message: 'Export feature coming soon!');
             },
             tooltip: 'Export Report',
           ),
@@ -193,7 +189,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
           // Summary Card
           _buildSummaryCard(color),
           const SizedBox(height: 24),
-          
+
           // Detailed Breakdown
           _buildDetailedBreakdown(color),
         ],
@@ -203,7 +199,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
 
   Widget _buildSummaryCard(Color color) {
     final isIncome = widget.type == 'income';
-    
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -293,7 +289,8 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
                   ),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.blue[50],
                       borderRadius: BorderRadius.circular(4),
@@ -352,7 +349,8 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
         child: Center(
           child: Column(
             children: [
-              Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]),
+              Icon(Icons.receipt_long_outlined,
+                  size: 64, color: Colors.grey[300]),
               const SizedBox(height: 16),
               Text(
                 'No transactions found for this period',
@@ -394,7 +392,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
             ),
           ),
           Divider(height: 1, color: Colors.grey[200]),
-          
+
           // Table Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -449,7 +447,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
               ],
             ),
           ),
-          
+
           // Transaction Rows
           ListView.builder(
             shrinkWrap: true,
@@ -460,7 +458,7 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
               return _buildTransactionRow(transaction, color, index);
             },
           ),
-          
+
           // Total Row
           Container(
             padding: const EdgeInsets.all(20),
@@ -498,7 +496,8 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
     );
   }
 
-  Widget _buildTransactionRow(TransactionDetail transaction, Color color, int index) {
+  Widget _buildTransactionRow(
+      TransactionDetail transaction, Color color, int index) {
     return InkWell(
       onTap: () {
         // Navigate to transaction detail or invoice detail
@@ -598,7 +597,8 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
             _buildDetailRow('Description', transaction.description),
             if (transaction.customer != null)
               _buildDetailRow('Customer', transaction.customer!),
-            _buildDetailRow('Amount', '₹${transaction.amount.toStringAsFixed(2)}'),
+            _buildDetailRow(
+                'Amount', '₹${transaction.amount.toStringAsFixed(2)}'),
           ],
         ),
         actions: [
@@ -610,12 +610,8 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
             onPressed: () {
               Navigator.pop(context);
               // Navigate to invoice/bill detail
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('View invoice feature coming soon!'),
-                  backgroundColor: Color(0xFFF39C12),
-                ),
-              );
+              AppSnackbar.show(context,
+                  message: 'View invoice feature coming soon!');
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue[700],
@@ -661,8 +657,18 @@ class _IncomeExpenseReportScreenState extends State<IncomeExpenseReportScreen> {
 
   String _formatDate(DateTime date) {
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }

@@ -7,14 +7,15 @@ import '../../../../core/services/sales_order_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_sales_order.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class SalesOrderDetailPage extends StatefulWidget {
   final String salesOrderId;
-  const SalesOrderDetailPage({Key? key, required this.salesOrderId}) : super(key: key);
+  const SalesOrderDetailPage({Key? key, required this.salesOrderId})
+      : super(key: key);
 
   @override
   State<SalesOrderDetailPage> createState() => _SalesOrderDetailPageState();
@@ -33,25 +34,39 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final so = await SalesOrderService.getSalesOrder(widget.salesOrderId);
-      setState(() { _order = so; _isLoading = false; });
+      setState(() {
+        _order = so;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -63,7 +78,8 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [_navyDark, _navyMid, _navyLight],
-            begin: Alignment.centerLeft, end: Alignment.centerRight,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
         child: AppBar(
@@ -78,8 +94,12 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
                 icon: const Icon(Icons.download, color: Colors.white),
                 tooltip: 'Download PDF',
                 onPressed: () async {
-                  final url = await SalesOrderService.downloadPDF(widget.salesOrderId);
-                  if (mounted) await fetchAndHandleFile(context, url, '${_order!.salesOrderNumber}.pdf', download: true);
+                  final url =
+                      await SalesOrderService.downloadPDF(widget.salesOrderId);
+                  if (mounted)
+                    await fetchAndHandleFile(
+                        context, url, '${_order!.salesOrderNumber}.pdf',
+                        download: true);
                 },
               ),
               IconButton(
@@ -92,23 +112,33 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
                       'Amount: ₹${so.totalAmount.toStringAsFixed(2)}\n'
                       'Status: ${so.status}\n'
                       'Date: ${DateFormat('dd MMM yyyy').format(so.salesOrderDate)}';
-                  shareText(context, text, 'Sales Order: ${so.salesOrderNumber}');
+                  shareText(
+                      context, text, 'Sales Order: ${so.salesOrderNumber}');
                 },
               ),
             ],
-            if (_order != null && (_order!.status == 'DRAFT' || _order!.status == 'OPEN'))
+            if (_order != null &&
+                (_order!.status == 'DRAFT' || _order!.status == 'OPEN'))
               TextButton.icon(
                 onPressed: () async {
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewSalesOrderScreen(salesOrderId: widget.salesOrderId)));
-                  if (r == true) { setState(() => _changed = true); _load(); }
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => NewSalesOrderScreen(
+                              salesOrderId: widget.salesOrderId)));
+                  if (r == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white70)),
               ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white),
-              onPressed: _load, tooltip: 'Refresh',
+              onPressed: _load,
+              tooltip: 'Refresh',
             ),
             const SizedBox(width: 8),
           ],
@@ -136,9 +166,12 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
           ),
         ]);
       } else {
-        return SingleChildScrollView(child: Column(children: [
+        return SingleChildScrollView(
+            child: Column(children: [
           _buildMainScroll(so, isScrollable: false),
-          Container(color: Colors.white, padding: const EdgeInsets.all(20),
+          Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(20),
               child: _buildAmountSidebar(so)),
         ]));
       }
@@ -154,31 +187,51 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [_navyDark, _navyMid],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+                color: _navyDark.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4))
+          ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(so.salesOrderNumber,
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(so.customerName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
-              if (so.customerEmail != null)
-                Text(so.customerEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(so.salesOrderNumber,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(so.customerName,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 15)),
+                  if (so.customerEmail != null)
+                    Text(so.customerEmail!,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13)),
+                ])),
             _glowBadge(so.status),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 24, runSpacing: 8, children: [
-            _headerInfo('Order Date', DateFormat('dd MMM yyyy').format(so.salesOrderDate)),
+            _headerInfo('Order Date',
+                DateFormat('dd MMM yyyy').format(so.salesOrderDate)),
             if (so.expectedShipmentDate != null)
-              _headerInfo('Ship By', DateFormat('dd MMM yyyy').format(so.expectedShipmentDate!)),
+              _headerInfo('Ship By',
+                  DateFormat('dd MMM yyyy').format(so.expectedShipmentDate!)),
             _headerInfo('Payment Terms', so.paymentTerms),
-            if (so.deliveryMethod != null) _headerInfo('Delivery', so.deliveryMethod!),
-            if (so.salesperson != null) _headerInfo('Salesperson', so.salesperson!),
+            if (so.deliveryMethod != null)
+              _headerInfo('Delivery', so.deliveryMethod!),
+            if (so.salesperson != null)
+              _headerInfo('Salesperson', so.salesperson!),
             if (so.convertedFromQuoteNumber != null)
               _headerInfo('From Quote', so.convertedFromQuoteNumber!),
           ]),
@@ -200,7 +253,8 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
             const SizedBox(width: 8),
             Text(
               'Converted to Invoice${so.convertedToInvoiceNumber != null ? ': ${so.convertedToInvoiceNumber}' : ''}',
-              style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  color: Colors.green[800], fontWeight: FontWeight.w600),
             ),
           ]),
         ),
@@ -209,12 +263,15 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
 
       // Line Items
       _detailCard(
-        title: 'Line Items', icon: Icons.list_alt,
+        title: 'Line Items',
+        icon: Icons.list_alt,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-            headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            headingRowColor:
+                WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+            headingTextStyle: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
             columns: const [
               DataColumn(label: Text('ITEM')),
               DataColumn(label: Text('QTY')),
@@ -224,17 +281,23 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
               DataColumn(label: Text('SHIPPED')),
               DataColumn(label: Text('AMOUNT')),
             ],
-            rows: so.items.map((item) => DataRow(cells: [
-              DataCell(SizedBox(width: 180, child: Text(item.itemDetails, overflow: TextOverflow.ellipsis))),
-              DataCell(Text(item.quantity.toStringAsFixed(0))),
-              DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
-              DataCell(Text(item.discount > 0
-                  ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}' : '—')),
-              DataCell(Text(item.quantityPacked.toStringAsFixed(0))),
-              DataCell(Text(item.quantityShipped.toStringAsFixed(0))),
-              DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600))),
-            ])).toList(),
+            rows: so.items
+                .map((item) => DataRow(cells: [
+                      DataCell(SizedBox(
+                          width: 180,
+                          child: Text(item.itemDetails,
+                              overflow: TextOverflow.ellipsis))),
+                      DataCell(Text(item.quantity.toStringAsFixed(0))),
+                      DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
+                      DataCell(Text(item.discount > 0
+                          ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
+                          : '—')),
+                      DataCell(Text(item.quantityPacked.toStringAsFixed(0))),
+                      DataCell(Text(item.quantityShipped.toStringAsFixed(0))),
+                      DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.w600))),
+                    ]))
+                .toList(),
           ),
         ),
       ),
@@ -242,21 +305,26 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
       if (so.customerNotes != null && so.customerNotes!.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Customer Notes', icon: Icons.note,
+          title: 'Customer Notes',
+          icon: Icons.note,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(so.customerNotes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(so.customerNotes!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
 
-      if (so.termsAndConditions != null && so.termsAndConditions!.isNotEmpty) ...[
+      if (so.termsAndConditions != null &&
+          so.termsAndConditions!.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Terms & Conditions', icon: Icons.description,
+          title: 'Terms & Conditions',
+          icon: Icons.description,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(so.termsAndConditions!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(so.termsAndConditions!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
@@ -281,11 +349,13 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
         ),
         const SizedBox(width: 8),
         const Text('Order Summary',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
       ]),
       const SizedBox(height: 16),
       _amtRow('Sub Total', so.subTotal),
-      if (so.tdsAmount > 0) _amtRow('TDS', -so.tdsAmount, color: Colors.red[700]),
+      if (so.tdsAmount > 0)
+        _amtRow('TDS', -so.tdsAmount, color: Colors.red[700]),
       if (so.tcsAmount > 0) _amtRow('TCS', so.tcsAmount),
       if (so.cgst > 0) _amtRow('CGST', so.cgst),
       if (so.sgst > 0) _amtRow('SGST', so.sgst),
@@ -303,16 +373,21 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: _navyAccent.withOpacity(0.25)),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.local_shipping, color: _navyAccent, size: 16),
               const SizedBox(width: 6),
               const Text('Expected Shipment',
-                  style: TextStyle(fontWeight: FontWeight.w600, color: _navyMid)),
+                  style:
+                      TextStyle(fontWeight: FontWeight.w600, color: _navyMid)),
             ]),
             const SizedBox(height: 6),
             Text(DateFormat('dd MMM yyyy').format(so.expectedShipmentDate!),
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
             if (so.deliveryMethod != null) ...[
               const SizedBox(height: 4),
               Text(so.deliveryMethod!,
@@ -333,20 +408,27 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
             foregroundColor: _navyMid,
             side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
     ]);
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
@@ -361,7 +443,11 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
               child: Icon(icon, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
           ]),
         ),
         const Divider(height: 1),
@@ -374,20 +460,35 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
       const SizedBox(height: 2),
-      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+      Text(value,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
     ]);
   }
 
   Widget _glowBadge(String status) {
     Color bg;
     switch (status) {
-      case 'DRAFT':     bg = Colors.grey;   break;
-      case 'OPEN':      bg = Colors.blue;   break;
-      case 'CONFIRMED': bg = Colors.orange; break;
-      case 'SHIPPED':   bg = Colors.purple; break;
-      case 'INVOICED':  bg = Colors.green;  break;
-      case 'CANCELLED': bg = Colors.red;    break;
-      default:          bg = _navyAccent;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'OPEN':
+        bg = Colors.blue;
+        break;
+      case 'CONFIRMED':
+        bg = Colors.orange;
+        break;
+      case 'SHIPPED':
+        bg = Colors.purple;
+        break;
+      case 'INVOICED':
+        bg = Colors.green;
+        break;
+      case 'CANCELLED':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -396,19 +497,23 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: TextStyle(
-          fontSize: isTotal ? 14 : 13,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-        )),
+        Text(label,
+            style: TextStyle(
+              fontSize: isTotal ? 14 : 13,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+            )),
         Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
             style: TextStyle(
               fontSize: isTotal ? 16 : 13,
@@ -420,11 +525,15 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
   }
 
   Widget _buildError() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
       const SizedBox(height: 16),
       Text('Error Loading Sales Order',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700])),
       const SizedBox(height: 8),
       Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
       const SizedBox(height: 24),
@@ -432,7 +541,8 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
         onPressed: _load,
         icon: const Icon(Icons.refresh),
         label: const Text('Retry'),
-        style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
+        style: ElevatedButton.styleFrom(
+            backgroundColor: _navyAccent, foregroundColor: Colors.white),
       ),
     ]));
   }

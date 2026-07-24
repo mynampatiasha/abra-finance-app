@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // DELIVERY CHALLANS LIST PAGE
 // - Recurring Invoices UI pattern (3-breakpoint top bar, gradient stat cards,
@@ -32,12 +33,12 @@ import 'new_delivery_challan.dart';
 import 'delivery_challan_detail_page.dart';
 
 // ─── colour palette (same as recurring_invoices_list_page) ───────────────────
-const Color _navy   = Color(0xFF1e3a8a);
+const Color _navy = Color(0xFF1e3a8a);
 const Color _purple = Color(0xFF9B59B6);
-const Color _green  = Color(0xFF27AE60);
-const Color _blue   = Color(0xFF2980B9);
+const Color _green = Color(0xFF27AE60);
+const Color _blue = Color(0xFF2980B9);
 const Color _orange = Color(0xFFE67E22);
-const Color _red    = Color(0xFFE74C3C);
+const Color _red = Color(0xFFE74C3C);
 
 // ─── stat card data helper ────────────────────────────────────────────────────
 class _StatCardData {
@@ -46,8 +47,10 @@ class _StatCardData {
   final Color color;
   final List<Color> gradientColors;
   const _StatCardData({
-    required this.label, required this.value,
-    required this.icon,  required this.color,
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
     required this.gradientColors,
   });
 }
@@ -59,34 +62,41 @@ class _StatCardData {
 class DeliveryChallansListPage extends StatefulWidget {
   const DeliveryChallansListPage({Key? key}) : super(key: key);
   @override
-  State<DeliveryChallansListPage> createState() => _DeliveryChallansListPageState();
+  State<DeliveryChallansListPage> createState() =>
+      _DeliveryChallansListPageState();
 }
 
 class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
-
   // ── data ──────────────────────────────────────────────────────────────────
   List<DeliveryChallan> _challans = [];
   ChallanStats? _stats;
-  bool    _isLoading    = true;
+  bool _isLoading = true;
   String? _errorMessage;
 
   // ── filters ───────────────────────────────────────────────────────────────
-  String   _selectedStatus = 'All';
+  String _selectedStatus = 'All';
   DateTime? _fromDate;
   DateTime? _toDate;
   bool _showAdvancedFilters = false;
 
   final List<String> _statusFilters = [
-    'All', 'DRAFT', 'OPEN', 'DELIVERED', 'INVOICED',
-    'PARTIALLY_INVOICED', 'RETURNED', 'PARTIALLY_RETURNED', 'CANCELLED',
+    'All',
+    'DRAFT',
+    'OPEN',
+    'DELIVERED',
+    'INVOICED',
+    'PARTIALLY_INVOICED',
+    'RETURNED',
+    'PARTIALLY_RETURNED',
+    'CANCELLED',
   ];
 
   // ── search ────────────────────────────────────────────────────────────────
   final TextEditingController _searchController = TextEditingController();
 
   // ── pagination ────────────────────────────────────────────────────────────
-  int _currentPage  = 1;
-  int _totalPages   = 1;
+  int _currentPage = 1;
+  int _totalPages = 1;
   final int _itemsPerPage = 20;
   List<DeliveryChallan> _filtered = [];
 
@@ -124,16 +134,23 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   }
 
   Future<void> _loadChallans() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
-      final resp = await DeliveryChallanService.getDeliveryChallans(limit: 1000);
+      final resp =
+          await DeliveryChallanService.getDeliveryChallans(limit: 1000);
       setState(() {
-        _challans  = resp.challans;
+        _challans = resp.challans;
         _isLoading = false;
       });
       _applyFilters();
     } catch (e) {
-      setState(() { _isLoading = false; _errorMessage = e.toString(); });
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.toString();
+      });
     }
   }
 
@@ -158,13 +175,18 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
         if (q.isNotEmpty &&
             !c.challanNumber.toLowerCase().contains(q) &&
             !c.customerName.toLowerCase().contains(q) &&
-            !(c.referenceNumber?.toLowerCase().contains(q) ?? false)) return false;
-        if (_selectedStatus != 'All' && c.status != _selectedStatus) return false;
-        if (_fromDate != null && c.challanDate.isBefore(_fromDate!)) return false;
-        if (_toDate   != null && c.challanDate.isAfter(_toDate!.add(const Duration(days: 1)))) return false;
+            !(c.referenceNumber?.toLowerCase().contains(q) ?? false))
+          return false;
+        if (_selectedStatus != 'All' && c.status != _selectedStatus)
+          return false;
+        if (_fromDate != null && c.challanDate.isBefore(_fromDate!))
+          return false;
+        if (_toDate != null &&
+            c.challanDate.isAfter(_toDate!.add(const Duration(days: 1))))
+          return false;
         return true;
       }).toList();
-      _totalPages  = (_filtered.length / _itemsPerPage).ceil().clamp(1, 9999);
+      _totalPages = (_filtered.length / _itemsPerPage).ceil().clamp(1, 9999);
       if (_currentPage > _totalPages) _currentPage = _totalPages;
       _selectedRows.clear();
       _selectAll = false;
@@ -174,22 +196,24 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   void _clearFilters() {
     _searchController.clear();
     setState(() {
-      _selectedStatus      = 'All';
-      _fromDate            = null;
-      _toDate              = null;
-      _currentPage         = 1;
+      _selectedStatus = 'All';
+      _fromDate = null;
+      _toDate = null;
+      _currentPage = 1;
       _showAdvancedFilters = false;
     });
     _applyFilters();
   }
 
   bool get _hasAnyFilter =>
-      _selectedStatus != 'All' || _fromDate != null || _toDate != null ||
+      _selectedStatus != 'All' ||
+      _fromDate != null ||
+      _toDate != null ||
       _searchController.text.isNotEmpty;
 
   List<DeliveryChallan> get _currentPageItems {
     final start = (_currentPage - 1) * _itemsPerPage;
-    final end   = (start + _itemsPerPage).clamp(0, _filtered.length);
+    final end = (start + _itemsPerPage).clamp(0, _filtered.length);
     return _filtered.sublist(start, end);
   }
 
@@ -206,7 +230,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
 
   void _toggleRow(int i) {
     setState(() {
-      _selectedRows.contains(i) ? _selectedRows.remove(i) : _selectedRows.add(i);
+      _selectedRows.contains(i)
+          ? _selectedRows.remove(i)
+          : _selectedRows.add(i);
       _selectAll = _selectedRows.length == _currentPageItems.length;
     });
   }
@@ -220,8 +246,10 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   }
 
   void _openEdit(String challanId) async {
-    final ok = await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => NewDeliveryChallanScreen(challanId: challanId)));
+    final ok = await Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => NewDeliveryChallanScreen(challanId: challanId)));
     if (ok == true) _loadAll();
   }
 
@@ -230,37 +258,54 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   void _viewChallanDetails(DeliveryChallan challan) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => DeliveryChallanDetailPage(challanId: challan.id)),
-    ).then((result) { if (result == true) _loadAll(); });
+      MaterialPageRoute(
+          builder: (_) => DeliveryChallanDetailPage(challanId: challan.id)),
+    ).then((result) {
+      if (result == true) _loadAll();
+    });
   }
 
   Future<void> _dispatchChallan(DeliveryChallan challan) async {
-    if (challan.status != 'DRAFT') { _showError('Only draft challans can be dispatched'); return; }
+    if (challan.status != 'DRAFT') {
+      _showError('Only draft challans can be dispatched');
+      return;
+    }
     try {
       await DeliveryChallanService.dispatchChallan(challan.id);
       _showSuccess('Challan dispatched');
       _loadAll();
-    } catch (e) { _showError('Failed to dispatch: $e'); }
+    } catch (e) {
+      _showError('Failed to dispatch: $e');
+    }
   }
 
   Future<void> _markAsDelivered(DeliveryChallan challan) async {
-    if (challan.status != 'OPEN') { _showError('Only dispatched challans can be marked as delivered'); return; }
+    if (challan.status != 'OPEN') {
+      _showError('Only dispatched challans can be marked as delivered');
+      return;
+    }
     try {
       await DeliveryChallanService.markAsDelivered(challan.id);
       _showSuccess('Challan marked as delivered');
       _loadAll();
-    } catch (e) { _showError('Failed to mark as delivered: $e'); }
+    } catch (e) {
+      _showError('Failed to mark as delivered: $e');
+    }
   }
 
   Future<void> _convertToInvoice(DeliveryChallan challan) async {
-    if (challan.status != 'DELIVERED' && challan.status != 'PARTIALLY_INVOICED') {
-      _showError('Only delivered challans can be converted to invoice'); return;
+    if (challan.status != 'DELIVERED' &&
+        challan.status != 'PARTIALLY_INVOICED') {
+      _showError('Only delivered challans can be converted to invoice');
+      return;
     }
     try {
       await DeliveryChallanService.convertToInvoice(challan.id);
       _showSuccess('Challan converted to invoice');
       _loadAll();
-    } catch (e) { _showError('Failed to convert to invoice: $e'); }
+    } catch (e) {
+      _showError('Failed to convert to invoice: $e');
+    }
   }
 
   Future<void> _markAsReturned(DeliveryChallan challan) async {
@@ -275,7 +320,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       await DeliveryChallanService.markAsReturned(challan.id);
       _showSuccess('Challan marked as returned');
       _loadAll();
-    } catch (e) { _showError('Failed to mark as returned: $e'); }
+    } catch (e) {
+      _showError('Failed to mark as returned: $e');
+    }
   }
 
   Future<void> _markChallanAsSent(DeliveryChallan challan) async {
@@ -283,15 +330,19 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Mark as Sent?',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text(
           'The email will NOT be sent to the customer.\n\nDo you want to mark this challan as Sent anyway?',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navy, foregroundColor: Colors.white),
             child: const Text('Mark as Sent'),
           ),
         ],
@@ -302,18 +353,23 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       await DeliveryChallanService.markChallanAsSent(challan.id);
       _showSuccess('Challan marked as sent');
       _loadAll();
-    } catch (e) { _showError('Failed to mark as sent: $e'); }
+    } catch (e) {
+      _showError('Failed to mark as sent: $e');
+    }
   }
 
   Future<void> _sendChallan(DeliveryChallan challan) async {
     if (challan.customerEmail == null || challan.customerEmail!.isEmpty) {
-      _showError('Customer email required to send challan'); return;
+      _showError('Customer email required to send challan');
+      return;
     }
     try {
       await DeliveryChallanService.sendChallan(challan.id);
       _showSuccess('Challan sent to ${challan.customerEmail}');
       _loadAll();
-    } catch (e) { _showError('Failed to send challan: $e'); }
+    } catch (e) {
+      _showError('Failed to send challan: $e');
+    }
   }
 
   Future<void> _downloadPDF(DeliveryChallan challan) async {
@@ -334,14 +390,20 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
           throw 'Could not launch PDF viewer';
         }
       }
-    } catch (e) { _showError('Failed to download PDF: $e'); }
+    } catch (e) {
+      _showError('Failed to download PDF: $e');
+    }
   }
 
   Future<void> _deleteChallan(DeliveryChallan challan) async {
-    if (challan.status != 'DRAFT') { _showError('Only draft challans can be deleted'); return; }
+    if (challan.status != 'DRAFT') {
+      _showError('Only draft challans can be deleted');
+      return;
+    }
     final ok = await _confirmDialog(
       title: 'Delete Challan',
-      message: 'Delete challan ${challan.challanNumber}? This cannot be undone.',
+      message:
+          'Delete challan ${challan.challanNumber}? This cannot be undone.',
       confirmLabel: 'Delete',
       confirmColor: _red,
     );
@@ -350,7 +412,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       await DeliveryChallanService.deleteDeliveryChallan(challan.id);
       _showSuccess('Challan deleted');
       _loadAll();
-    } catch (e) { _showError('Failed to delete: $e'); }
+    } catch (e) {
+      _showError('Failed to delete: $e');
+    }
   }
 
   // ── share ─────────────────────────────────────────────────────────────────
@@ -358,12 +422,16 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   Future<void> _shareChallan(DeliveryChallan challan) async {
     final text = _buildShareText(challan);
     try {
-      await Share.share(text, subject: 'Delivery Challan: ${challan.challanNumber}');
-    } catch (e) { _showError('Share failed: $e'); }
+      await Share.share(text,
+          subject: 'Delivery Challan: ${challan.challanNumber}');
+    } catch (e) {
+      _showError('Share failed: $e');
+    }
   }
 
   String _buildShareText(DeliveryChallan challan) {
-    final totalQty = challan.items.fold(0.0, (sum, item) => sum + item.quantity);
+    final totalQty =
+        challan.items.fold(0.0, (sum, item) => sum + item.quantity);
     return 'Delivery Challan\n'
         '─────────────────────────\n'
         'Challan# : ${challan.challanNumber}\n'
@@ -425,25 +493,47 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Export Delivery Challans', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Export Delivery Challans',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             leading: const Icon(Icons.table_chart, color: _green),
             title: const Text('Excel (XLSX)'),
-            onTap: () { Navigator.pop(context); _exportExcel(); },
+            onTap: () {
+              Navigator.pop(context);
+              _exportExcel();
+            },
           ),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'))
+        ],
       ),
     );
   }
 
   Future<void> _exportExcel() async {
     try {
-      if (_filtered.isEmpty) { _showError('Nothing to export'); return; }
+      if (_filtered.isEmpty) {
+        _showError('Nothing to export');
+        return;
+      }
       _showSuccess('Preparing export…');
       final rows = <List<dynamic>>[
-        ['Date','Challan#','Reference','Customer','Email','Status','Transport','Vehicle','Items','Total Qty'],
+        [
+          'Date',
+          'Challan#',
+          'Reference',
+          'Customer',
+          'Email',
+          'Status',
+          'Transport',
+          'Vehicle',
+          'Items',
+          'Total Qty'
+        ],
         ..._filtered.map((c) {
           final totalQty = c.items.fold(0.0, (s, i) => s + i.quantity);
           return [
@@ -460,9 +550,12 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
           ];
         }),
       ];
-      await ExportHelper.exportToExcel(data: rows, filename: 'delivery_challans');
+      await ExportHelper.exportToExcel(
+          data: rows, filename: 'delivery_challans');
       _showSuccess('✅ Excel downloaded (${_filtered.length} challans)');
-    } catch (e) { _showError('Export failed: $e'); }
+    } catch (e) {
+      _showError('Export failed: $e');
+    }
   }
 
   // ── import ────────────────────────────────────────────────────────────────
@@ -480,69 +573,77 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     final d = await showDatePicker(
       context: context,
       initialDate: _fromDate ?? DateTime.now(),
-      firstDate: DateTime(2020), lastDate: DateTime(2100),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
       builder: (c, child) => Theme(
-        data: Theme.of(c).copyWith(colorScheme: const ColorScheme.light(primary: _navy)),
+        data: Theme.of(c)
+            .copyWith(colorScheme: const ColorScheme.light(primary: _navy)),
         child: child!,
       ),
     );
-    if (d != null) { setState(() => _fromDate = d); _applyFilters(); }
+    if (d != null) {
+      setState(() => _fromDate = d);
+      _applyFilters();
+    }
   }
 
   Future<void> _pickToDate() async {
     final d = await showDatePicker(
       context: context,
       initialDate: _toDate ?? DateTime.now(),
-      firstDate: DateTime(2020), lastDate: DateTime(2100),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
       builder: (c, child) => Theme(
-        data: Theme.of(c).copyWith(colorScheme: const ColorScheme.light(primary: _navy)),
+        data: Theme.of(c)
+            .copyWith(colorScheme: const ColorScheme.light(primary: _navy)),
         child: child!,
       ),
     );
-    if (d != null) { setState(() => _toDate = d); _applyFilters(); }
+    if (d != null) {
+      setState(() => _toDate = d);
+      _applyFilters();
+    }
   }
 
   // ── snackbars ─────────────────────────────────────────────────────────────
 
   void _showSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [const Icon(Icons.check_circle, color: Colors.white, size: 18), const SizedBox(width: 8), Expanded(child: Text(msg))]),
-      backgroundColor: _green, behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration: const Duration(seconds: 2),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [const Icon(Icons.error_outline, color: Colors.white, size: 18), const SizedBox(width: 8), Expanded(child: Text(msg))]),
-      backgroundColor: _red, behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration: const Duration(seconds: 4),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   Future<bool?> _confirmDialog({
-    required String title, required String message,
-    required String confirmLabel, Color confirmColor = _navy,
-  }) => showDialog<bool>(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-      content: Text(message),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: ElevatedButton.styleFrom(backgroundColor: confirmColor, foregroundColor: Colors.white),
-          child: Text(confirmLabel),
+    required String title,
+    required String message,
+    required String confirmLabel,
+    Color confirmColor = _navy,
+  }) =>
+      showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title:
+              Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(message),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: confirmColor, foregroundColor: Colors.white),
+              child: Text(confirmLabel),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   // =========================================================================
   //  BUILD
@@ -559,12 +660,16 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
           if (_showAdvancedFilters) _buildAdvancedFiltersBar(),
           _buildStatsCards(),
           _isLoading
-              ? const SizedBox(height: 400, child: Center(child: CircularProgressIndicator(color: _navy)))
+              ? const SizedBox(
+                  height: 400,
+                  child: Center(child: CircularProgressIndicator(color: _navy)))
               : _errorMessage != null
                   ? SizedBox(height: 400, child: _buildErrorState())
                   : _filtered.isEmpty
                       ? SizedBox(height: 400, child: _buildEmptyState())
-                      : _isTableView ? _buildTable() : _buildChallanListView(),
+                      : _isTableView
+                          ? _buildTable()
+                          : _buildChallanListView(),
           if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
         ]),
       ),
@@ -580,106 +685,187 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         border: const Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: LayoutBuilder(builder: (_, c) {
         if (c.maxWidth >= 1100) return _topBarDesktop();
-        if (c.maxWidth >= 700)  return _topBarTablet();
+        if (c.maxWidth >= 700) return _topBarTablet();
         return _topBarMobile();
       }),
     );
   }
 
   Widget _topBarDesktop() => Row(children: [
-    _statusDropdown(),
-    const SizedBox(width: 12),
-    _searchField(width: 220),
-    const SizedBox(width: 10),
-    _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
-    const SizedBox(width: 8),
-    _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
-    if (_fromDate != null || _toDate != null) ...[
-      const SizedBox(width: 6),
-      _iconBtn(Icons.close, () { setState(() { _fromDate = null; _toDate = null; }); _applyFilters(); }, tooltip: 'Clear Dates', color: _red, bg: Colors.red[50]!),
-    ],
-    const SizedBox(width: 6),
-    _iconBtn(Icons.filter_list, () => setState(() => _showAdvancedFilters = !_showAdvancedFilters),
-        tooltip: 'Filters', color: _showAdvancedFilters ? _navy : const Color(0xFF7F8C8D),
-        bg: _showAdvancedFilters ? _navy.withOpacity(0.08) : const Color(0xFFF1F1F1)),
-    const SizedBox(width: 6),
-    _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-    const Spacer(),
-    _buildViewToggle(), const SizedBox(width: 12),
-    _actionBtn('New', Icons.add_rounded, _navy, _openNew),
-    const SizedBox(width: 8),
-    _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
-    const SizedBox(width: 8),
-    _actionBtn('Export', Icons.download_rounded, _blue, _filtered.isEmpty ? null : _handleExport),
-    const SizedBox(width: 8),
-    _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange, () => _raiseTicket()),
-  ]);
-
-  Widget _topBarTablet() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [
-      _statusDropdown(),
-      const SizedBox(width: 10),
-      _searchField(width: 190),
-      const SizedBox(width: 8),
-      _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
-      const SizedBox(width: 6),
-      _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
-      if (_fromDate != null || _toDate != null) ...[
+        _statusDropdown(),
+        const SizedBox(width: 12),
+        _searchField(width: 220),
+        const SizedBox(width: 10),
+        _dateChip(
+            label: _fromDate != null
+                ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                : 'From Date',
+            isActive: _fromDate != null,
+            onTap: _pickFromDate),
+        const SizedBox(width: 8),
+        _dateChip(
+            label: _toDate != null
+                ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                : 'To Date',
+            isActive: _toDate != null,
+            onTap: _pickToDate),
+        if (_fromDate != null || _toDate != null) ...[
+          const SizedBox(width: 6),
+          _iconBtn(Icons.close, () {
+            setState(() {
+              _fromDate = null;
+              _toDate = null;
+            });
+            _applyFilters();
+          }, tooltip: 'Clear Dates', color: _red, bg: Colors.red[50]!),
+        ],
         const SizedBox(width: 6),
-        _iconBtn(Icons.close, () { setState(() { _fromDate = null; _toDate = null; }); _applyFilters(); }, tooltip: 'Clear', color: _red, bg: Colors.red[50]!),
-      ],
-      const SizedBox(width: 6),
-      _iconBtn(Icons.filter_list, () => setState(() => _showAdvancedFilters = !_showAdvancedFilters), tooltip: 'Filters'),
-      const SizedBox(width: 6),
-      _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-    ]),
-    const SizedBox(height: 10),
-    Row(children: [
-      _buildViewToggle(), const SizedBox(width: 10),
-      _actionBtn('New', Icons.add_rounded, _navy, _openNew),
-      const SizedBox(width: 8),
-      _actionBtn('Import', Icons.upload_file_rounded, _purple, _isLoading ? null : _handleImport),
-      const SizedBox(width: 8),
-      _actionBtn('Export', Icons.download_rounded, _blue, _filtered.isEmpty ? null : _handleExport),
-      const SizedBox(width: 8),
-      _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange, () => _raiseTicket()),
-    ]),
-  ]);
-
-  Widget _topBarMobile() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [
-      _statusDropdown(),
-      const SizedBox(width: 8),
-      Expanded(child: _searchField(width: double.infinity)),
-      const SizedBox(width: 8),
-      _actionBtn('New', Icons.add_rounded, _navy, _openNew),
-    ]),
-    const SizedBox(height: 10),
-    SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-      _buildViewToggle(), const SizedBox(width: 8),
-      _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _pickFromDate),
-      const SizedBox(width: 6),
-      _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _pickToDate),
-      if (_fromDate != null || _toDate != null) ...[
+        _iconBtn(Icons.filter_list,
+            () => setState(() => _showAdvancedFilters = !_showAdvancedFilters),
+            tooltip: 'Filters',
+            color: _showAdvancedFilters ? _navy : const Color(0xFF7F8C8D),
+            bg: _showAdvancedFilters
+                ? _navy.withOpacity(0.08)
+                : const Color(0xFFF1F1F1)),
         const SizedBox(width: 6),
-        _iconBtn(Icons.close, () { setState(() { _fromDate = null; _toDate = null; }); _applyFilters(); }, color: _red, bg: Colors.red[50]!),
-      ],
-      const SizedBox(width: 6),
-      _iconBtn(Icons.filter_list, () => setState(() => _showAdvancedFilters = !_showAdvancedFilters)),
-      const SizedBox(width: 6),
-      _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-      const SizedBox(width: 6),
-      _compactBtn('Import', _purple, _isLoading ? null : _handleImport),
-      const SizedBox(width: 6),
-      _compactBtn('Export', _blue, _filtered.isEmpty ? null : _handleExport),
-      const SizedBox(width: 6),
-      _compactBtn('Ticket', _orange, () => _raiseTicket()),
-    ])),
-  ]);
+        _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+            tooltip: 'Refresh'),
+        const Spacer(),
+        _buildViewToggle(),
+        const SizedBox(width: 12),
+        _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+        const SizedBox(width: 8),
+        _actionBtn('Import', Icons.upload_file_rounded, _purple,
+            _isLoading ? null : _handleImport),
+        const SizedBox(width: 8),
+        _actionBtn('Export', Icons.download_rounded, _blue,
+            _filtered.isEmpty ? null : _handleExport),
+        const SizedBox(width: 8),
+        _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
+            () => _raiseTicket()),
+      ]);
+
+  Widget _topBarTablet() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _statusDropdown(),
+          const SizedBox(width: 10),
+          _searchField(width: 190),
+          const SizedBox(width: 8),
+          _dateChip(
+              label: _fromDate != null
+                  ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                  : 'From Date',
+              isActive: _fromDate != null,
+              onTap: _pickFromDate),
+          const SizedBox(width: 6),
+          _dateChip(
+              label: _toDate != null
+                  ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                  : 'To Date',
+              isActive: _toDate != null,
+              onTap: _pickToDate),
+          if (_fromDate != null || _toDate != null) ...[
+            const SizedBox(width: 6),
+            _iconBtn(Icons.close, () {
+              setState(() {
+                _fromDate = null;
+                _toDate = null;
+              });
+              _applyFilters();
+            }, tooltip: 'Clear', color: _red, bg: Colors.red[50]!),
+          ],
+          const SizedBox(width: 6),
+          _iconBtn(
+              Icons.filter_list,
+              () =>
+                  setState(() => _showAdvancedFilters = !_showAdvancedFilters),
+              tooltip: 'Filters'),
+          const SizedBox(width: 6),
+          _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+              tooltip: 'Refresh'),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          _buildViewToggle(),
+          const SizedBox(width: 10),
+          _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+          const SizedBox(width: 8),
+          _actionBtn('Import', Icons.upload_file_rounded, _purple,
+              _isLoading ? null : _handleImport),
+          const SizedBox(width: 8),
+          _actionBtn('Export', Icons.download_rounded, _blue,
+              _filtered.isEmpty ? null : _handleExport),
+          const SizedBox(width: 8),
+          _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
+              () => _raiseTicket()),
+        ]),
+      ]);
+
+  Widget _topBarMobile() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _statusDropdown(),
+          const SizedBox(width: 8),
+          Expanded(child: _searchField(width: double.infinity)),
+          const SizedBox(width: 8),
+          _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+        ]),
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _buildViewToggle(),
+              const SizedBox(width: 8),
+              _dateChip(
+                  label: _fromDate != null
+                      ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                      : 'From Date',
+                  isActive: _fromDate != null,
+                  onTap: _pickFromDate),
+              const SizedBox(width: 6),
+              _dateChip(
+                  label: _toDate != null
+                      ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                      : 'To Date',
+                  isActive: _toDate != null,
+                  onTap: _pickToDate),
+              if (_fromDate != null || _toDate != null) ...[
+                const SizedBox(width: 6),
+                _iconBtn(Icons.close, () {
+                  setState(() {
+                    _fromDate = null;
+                    _toDate = null;
+                  });
+                  _applyFilters();
+                }, color: _red, bg: Colors.red[50]!),
+              ],
+              const SizedBox(width: 6),
+              _iconBtn(
+                  Icons.filter_list,
+                  () => setState(
+                      () => _showAdvancedFilters = !_showAdvancedFilters)),
+              const SizedBox(width: 6),
+              _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+                  tooltip: 'Refresh'),
+              const SizedBox(width: 6),
+              _compactBtn('Import', _purple, _isLoading ? null : _handleImport),
+              const SizedBox(width: 6),
+              _compactBtn(
+                  'Export', _blue, _filtered.isEmpty ? null : _handleExport),
+              const SizedBox(width: 6),
+              _compactBtn('Ticket', _orange, () => _raiseTicket()),
+            ])),
+      ]);
 
   // ── advanced filters ──────────────────────────────────────────────────────
 
@@ -689,8 +875,13 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: const Color(0xFFF7F9FC),
       child: LayoutBuilder(builder: (_, c) {
-        final statusDD = _advDropdown(_selectedStatus, _statusFilters,
-            (v) { setState(() { _selectedStatus = v!; _currentPage = 1; }); _applyFilters(); });
+        final statusDD = _advDropdown(_selectedStatus, _statusFilters, (v) {
+          setState(() {
+            _selectedStatus = v!;
+            _currentPage = 1;
+          });
+          _applyFilters();
+        });
         final clearBtn = TextButton.icon(
           onPressed: _clearFilters,
           icon: const Icon(Icons.clear, size: 16),
@@ -698,16 +889,24 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
           style: TextButton.styleFrom(foregroundColor: _red),
         );
         if (c.maxWidth < 700) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Filters', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navy)),
-            const SizedBox(height: 8),
-            statusDD,
-            const SizedBox(height: 8),
-            Align(alignment: Alignment.centerRight, child: clearBtn),
-          ]);
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Filters',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: _navy)),
+                const SizedBox(height: 8),
+                statusDD,
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerRight, child: clearBtn),
+              ]);
         }
         return Row(children: [
-          const Text('Filters:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
+          const Text('Filters:',
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
           const SizedBox(width: 12),
           SizedBox(width: 200, child: statusDD),
           const Spacer(),
@@ -717,16 +916,27 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     );
   }
 
-  Widget _advDropdown(String value, List<String> items, ValueChanged<String?> onChanged) {
+  Widget _advDropdown(
+      String value, List<String> items, ValueChanged<String?> onChanged) {
     return Container(
-      height: 40, padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: const Color(0xFFDDE3EE)), borderRadius: BorderRadius.circular(10)),
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFDDE3EE)),
+          borderRadius: BorderRadius.circular(10)),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: value, isExpanded: true,
+          value: value,
+          isExpanded: true,
           icon: const Icon(Icons.expand_more, size: 18),
           style: const TextStyle(fontSize: 13, color: Color(0xFF2C3E50)),
-          items: items.map((s) => DropdownMenuItem(value: s, child: Text(s == 'All' ? 'All Challans' : s.replaceAll('_', ' ')))).toList(),
+          items: items
+              .map((s) => DropdownMenuItem(
+                  value: s,
+                  child: Text(
+                      s == 'All' ? 'All Challans' : s.replaceAll('_', ' '))))
+              .toList(),
           onChanged: onChanged,
         ),
       ),
@@ -736,18 +946,36 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   // ── reusable widgets ──────────────────────────────────────────────────────
 
   Widget _statusDropdown() => Container(
-    height: 44, padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: BoxDecoration(color: const Color(0xFFF7F9FC), border: Border.all(color: const Color(0xFFDDE3EE)), borderRadius: BorderRadius.circular(10)),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: _selectedStatus,
-        icon: const Icon(Icons.expand_more, size: 18, color: _navy),
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
-        items: _statusFilters.map((s) => DropdownMenuItem(value: s, child: Text(s == 'All' ? 'All Challans' : s.replaceAll('_', ' ')))).toList(),
-        onChanged: (v) { if (v != null) { setState(() { _selectedStatus = v; _currentPage = 1; }); _applyFilters(); } },
-      ),
-    ),
-  );
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+            color: const Color(0xFFF7F9FC),
+            border: Border.all(color: const Color(0xFFDDE3EE)),
+            borderRadius: BorderRadius.circular(10)),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedStatus,
+            icon: const Icon(Icons.expand_more, size: 18, color: _navy),
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
+            items: _statusFilters
+                .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(
+                        s == 'All' ? 'All Challans' : s.replaceAll('_', ' '))))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                setState(() {
+                  _selectedStatus = v;
+                  _currentPage = 1;
+                });
+                _applyFilters();
+              }
+            },
+          ),
+        ),
+      );
 
   Widget _searchField({required double width}) {
     final field = TextField(
@@ -758,62 +986,98 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
         hintStyle: TextStyle(fontSize: 14, color: Colors.grey[400]),
         prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey[400]),
         suffixIcon: _searchController.text.isNotEmpty
-            ? IconButton(icon: const Icon(Icons.clear, size: 16),
-                onPressed: () { _searchController.clear(); setState(() => _currentPage = 1); _applyFilters(); })
+            ? IconButton(
+                icon: const Icon(Icons.clear, size: 16),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _currentPage = 1);
+                  _applyFilters();
+                })
             : null,
-        filled: true, fillColor: const Color(0xFFF7F9FC),
-        contentPadding: const EdgeInsets.symmetric(vertical: 0), isDense: true,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _navy, width: 1.5)),
+        filled: true,
+        fillColor: const Color(0xFFF7F9FC),
+        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+        isDense: true,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: _navy, width: 1.5)),
       ),
     );
     if (width == double.infinity) return field;
     return SizedBox(width: width, height: 44, child: field);
   }
 
-  Widget _dateChip({required String label, required bool isActive, required VoidCallback onTap}) {
+  Widget _dateChip(
+      {required String label,
+      required bool isActive,
+      required VoidCallback onTap}) {
     return InkWell(
-      onTap: onTap, borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 42, padding: const EdgeInsets.symmetric(horizontal: 12),
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive ? _navy.withOpacity(0.08) : const Color(0xFFF7F9FC),
           border: Border.all(color: isActive ? _navy : const Color(0xFFDDE3EE)),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.calendar_today, size: 15, color: isActive ? _navy : Colors.grey[500]),
+          Icon(Icons.calendar_today,
+              size: 15, color: isActive ? _navy : Colors.grey[500]),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.normal, color: isActive ? _navy : Colors.grey[600])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                  color: isActive ? _navy : Colors.grey[600])),
         ]),
       ),
     );
   }
 
-  Widget _iconBtn(IconData icon, VoidCallback? onTap, {String tooltip = '', Color color = const Color(0xFF7F8C8D), Color bg = const Color(0xFFF1F1F1)}) {
+  Widget _iconBtn(IconData icon, VoidCallback? onTap,
+      {String tooltip = '',
+      Color color = const Color(0xFF7F8C8D),
+      Color bg = const Color(0xFFF1F1F1)}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: onTap, borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
         child: Container(
-          width: 42, height: 42,
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withOpacity(0.25))),
-          child: Icon(icon, size: 20, color: onTap == null ? Colors.grey[300] : color),
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withOpacity(0.25))),
+          child: Icon(icon,
+              size: 20, color: onTap == null ? Colors.grey[300] : color),
         ),
       ),
     );
   }
 
-  Widget _actionBtn(String label, IconData icon, Color bg, VoidCallback? onTap) {
+  Widget _actionBtn(
+      String label, IconData icon, Color bg, VoidCallback? onTap) {
     return ElevatedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      label: Text(label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -824,31 +1088,62 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     return ElevatedButton(
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      child: Text(label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
     );
   }
 
   // ── stats cards ───────────────────────────────────────────────────────────
 
   Widget _buildStatsCards() {
-    final total     = _challans.length;
-    final draft     = _challans.where((c) => c.status == 'DRAFT').length;
-    final open      = _challans.where((c) => c.status == 'OPEN').length;
+    final total = _challans.length;
+    final draft = _challans.where((c) => c.status == 'DRAFT').length;
+    final open = _challans.where((c) => c.status == 'OPEN').length;
     final delivered = _challans.where((c) => c.status == 'DELIVERED').length;
-    final invoiced  = _challans.where((c) => c.status == 'INVOICED' || c.status == 'PARTIALLY_INVOICED').length;
+    final invoiced = _challans
+        .where(
+            (c) => c.status == 'INVOICED' || c.status == 'PARTIALLY_INVOICED')
+        .length;
 
     final cards = [
-      _StatCardData(label: 'Total Challans', value: total.toString(), icon: Icons.local_shipping_rounded, color: _navy, gradientColors: const [Color(0xFF2463AE), Color(0xFF1e3a8a)]),
-      _StatCardData(label: 'Draft', value: draft.toString(), icon: Icons.drafts_outlined, color: const Color(0xFF7F8C8D), gradientColors: const [Color(0xFF95A5A6), Color(0xFF7F8C8D)]),
-      _StatCardData(label: 'Open / Dispatched', value: open.toString(), icon: Icons.local_shipping_outlined, color: _orange, gradientColors: const [Color(0xFFF39C12), Color(0xFFE67E22)]),
-      _StatCardData(label: 'Delivered', value: delivered.toString(), icon: Icons.check_circle_outline, color: _green, gradientColors: const [Color(0xFF2ECC71), Color(0xFF27AE60)]),
-      _StatCardData(label: 'Invoiced', value: invoiced.toString(), icon: Icons.receipt_long_outlined, color: _blue, gradientColors: const [Color(0xFF3498DB), Color(0xFF2980B9)]),
+      _StatCardData(
+          label: 'Total Challans',
+          value: total.toString(),
+          icon: Icons.local_shipping_rounded,
+          color: _navy,
+          gradientColors: const [Color(0xFF2463AE), Color(0xFF1e3a8a)]),
+      _StatCardData(
+          label: 'Draft',
+          value: draft.toString(),
+          icon: Icons.drafts_outlined,
+          color: const Color(0xFF7F8C8D),
+          gradientColors: const [Color(0xFF95A5A6), Color(0xFF7F8C8D)]),
+      _StatCardData(
+          label: 'Open / Dispatched',
+          value: open.toString(),
+          icon: Icons.local_shipping_outlined,
+          color: _orange,
+          gradientColors: const [Color(0xFFF39C12), Color(0xFFE67E22)]),
+      _StatCardData(
+          label: 'Delivered',
+          value: delivered.toString(),
+          icon: Icons.check_circle_outline,
+          color: _green,
+          gradientColors: const [Color(0xFF2ECC71), Color(0xFF27AE60)]),
+      _StatCardData(
+          label: 'Invoiced',
+          value: invoiced.toString(),
+          icon: Icons.receipt_long_outlined,
+          color: _blue,
+          gradientColors: const [Color(0xFF3498DB), Color(0xFF2980B9)]),
     ];
 
     return Container(
@@ -859,60 +1154,123 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
         final isMobile = c.maxWidth < 700;
         if (isMobile) {
           return SingleChildScrollView(
-            controller: _statsHScrollCtrl, scrollDirection: Axis.horizontal,
-            child: Row(children: cards.asMap().entries.map((e) => Container(
-              width: 160, margin: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
-              child: _buildStatCard(e.value, compact: true),
-            )).toList()),
+            controller: _statsHScrollCtrl,
+            scrollDirection: Axis.horizontal,
+            child: Row(
+                children: cards
+                    .asMap()
+                    .entries
+                    .map((e) => Container(
+                          width: 160,
+                          margin: EdgeInsets.only(
+                              right: e.key < cards.length - 1 ? 10 : 0),
+                          child: _buildStatCard(e.value, compact: true),
+                        ))
+                    .toList()),
           );
         }
-        return Row(children: cards.asMap().entries.map((e) => Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
-            child: _buildStatCard(e.value, compact: false),
-          ),
-        )).toList());
+        return Row(
+            children: cards
+                .asMap()
+                .entries
+                .map((e) => Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                            right: e.key < cards.length - 1 ? 10 : 0),
+                        child: _buildStatCard(e.value, compact: false),
+                      ),
+                    ))
+                .toList());
       }),
     );
   }
 
   Widget _buildStatCard(_StatCardData d, {required bool compact}) {
     return Container(
-      padding: compact ? const EdgeInsets.all(12) : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: compact
+          ? const EdgeInsets.all(12)
+          : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [d.gradientColors[0].withOpacity(0.15), d.gradientColors[1].withOpacity(0.08)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(colors: [
+          d.gradientColors[0].withOpacity(0.15),
+          d.gradientColors[1].withOpacity(0.08)
+        ], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: d.color.withOpacity(0.22)),
-        boxShadow: [BoxShadow(color: d.color.withOpacity(0.10), blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: d.color.withOpacity(0.10),
+              blurRadius: 12,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: compact
-          ? Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(gradient: LinearGradient(colors: d.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(10)),
-                child: Icon(d.icon, color: Colors.white, size: 20),
-              ),
-              const SizedBox(height: 10),
-              Text(d.label, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 4),
-              Text(d.value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: d.color)),
-            ])
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                            colors: d.gradientColors,
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: Icon(d.icon, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(d.label,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text(d.value,
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: d.color)),
+                ])
           : Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: d.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  gradient: LinearGradient(
+                      colors: d.gradientColors,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight),
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: d.color.withOpacity(0.30), blurRadius: 8, offset: const Offset(0, 3))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: d.color.withOpacity(0.30),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3))
+                  ],
                 ),
                 child: Icon(d.icon, color: Colors.white, size: 24),
               ),
               const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(d.label, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 5),
-                Text(d.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: d.color)),
-              ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(d.label,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 5),
+                    Text(d.value,
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: d.color)),
+                  ])),
             ]),
     );
   }
@@ -920,24 +1278,48 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   // ── view toggle ───────────────────────────────────────────────────────────
 
   Widget _buildViewToggle() => Container(
-    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
-      Container(width: 1, height: 24, color: Colors.grey.shade300),
-      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
-    ]),
-  );
+        decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _toggleButton(
+              icon: Icons.view_list_rounded,
+              label: 'List',
+              isSelected: !_isTableView,
+              onTap: () => setState(() => _isTableView = false)),
+          Container(width: 1, height: 24, color: Colors.grey.shade300),
+          _toggleButton(
+              icon: Icons.table_chart_rounded,
+              label: 'Table',
+              isSelected: _isTableView,
+              onTap: () => setState(() => _isTableView = true)),
+        ]),
+      );
 
-  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
+  Widget _toggleButton(
+          {required IconData icon,
+          required String label,
+          required bool isSelected,
+          required VoidCallback onTap}) =>
       InkWell(
-        onTap: onTap, borderRadius: BorderRadius.circular(7),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          decoration: BoxDecoration(
+              color: isSelected ? _navy : Colors.transparent,
+              borderRadius: BorderRadius.circular(7)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            Icon(icon,
+                size: 16,
+                color: isSelected ? Colors.white : Colors.grey.shade600),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected ? Colors.white : Colors.grey.shade600)),
           ]),
         ),
       );
@@ -950,7 +1332,8 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     return Container(
       margin: const EdgeInsets.all(16),
       child: ListView.separated(
-        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, i) => _buildChallanListCard(i, items[i]),
@@ -960,25 +1343,47 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
 
   Widget _buildChallanListCard(int index, DeliveryChallan challan) {
     final isSel = _selectedRows.contains(index);
-    final totalQty = challan.items.fold(0.0, (sum, item) => sum + item.quantity);
+    final totalQty =
+        challan.items.fold(0.0, (sum, item) => sum + item.quantity);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSel ? 1.5 : 1),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: isSel ? _navy.withOpacity(0.4) : Colors.grey.shade200,
+            width: isSel ? 1.5 : 1),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: InkWell(
-        onTap: () => _viewChallanDetails(challan), borderRadius: BorderRadius.circular(12),
+        onTap: () => _viewChallanDetails(challan),
+        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Row 1: Checkbox + Challan # + Status
             Row(children: [
-              Checkbox(value: isSel, onChanged: (_) => _toggleRow(index), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              Checkbox(
+                  value: isSel,
+                  onChanged: (_) => _toggleRow(index),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact),
               const SizedBox(width: 4),
-              Expanded(child: InkWell(
+              Expanded(
+                  child: InkWell(
                 onTap: () => _openEdit(challan.id),
-                child: Text(challan.challanNumber, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                child: Text(challan.challanNumber,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navy,
+                        decoration: TextDecoration.underline),
+                    overflow: TextOverflow.ellipsis),
               )),
               const SizedBox(width: 8),
               _statusBadge(challan.status),
@@ -986,68 +1391,204 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
             const SizedBox(height: 10),
             // Row 2: Customer + Reference
             Row(children: [
-              Container(width: 32, height: 32, decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
-                  child: Center(child: Text(challan.customerName.isNotEmpty ? challan.customerName[0].toUpperCase() : '?', style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13)))),
+              Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                      color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                  child: Center(
+                      child: Text(
+                          challan.customerName.isNotEmpty
+                              ? challan.customerName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                              color: _navy,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)))),
               const SizedBox(width: 10),
-              Expanded(child: Text(challan.customerName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), overflow: TextOverflow.ellipsis)),
-              if (challan.referenceNumber != null && challan.referenceNumber!.isNotEmpty)
-                Text('Ref: ${challan.referenceNumber}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              Expanded(
+                  child: Text(challan.customerName,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E293B)),
+                      overflow: TextOverflow.ellipsis)),
+              if (challan.referenceNumber != null &&
+                  challan.referenceNumber!.isNotEmpty)
+                Text('Ref: ${challan.referenceNumber}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
             ]),
             const SizedBox(height: 8),
             // Row 3: Date + Purpose + Items
             Row(children: [
-              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey[500]),
+              Icon(Icons.calendar_today_outlined,
+                  size: 13, color: Colors.grey[500]),
               const SizedBox(width: 4),
-              Text(DateFormat('dd MMM yyyy').format(challan.challanDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Text(DateFormat('dd MMM yyyy').format(challan.challanDate),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               const SizedBox(width: 12),
-              Icon(Icons.inventory_2_outlined, size: 13, color: Colors.grey[500]),
+              Icon(Icons.inventory_2_outlined,
+                  size: 13, color: Colors.grey[500]),
               const SizedBox(width: 4),
-              Text('${challan.items.length} items · Qty: ${totalQty.toStringAsFixed(0)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Text(
+                  '${challan.items.length} items · Qty: ${totalQty.toStringAsFixed(0)}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             ]),
             const SizedBox(height: 10),
             const Divider(height: 1, color: Color(0xFFF1F5F9)),
             const SizedBox(height: 10),
             // Row 4: Purpose + Actions
             Row(children: [
-              Expanded(child: Text(challan.purpose, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+              Expanded(
+                  child: Text(challan.purpose,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis)),
               Row(mainAxisSize: MainAxisSize.min, children: [
-                Tooltip(message: 'Share', child: InkWell(
-                  onTap: () => _shareChallan(challan), borderRadius: BorderRadius.circular(8),
-                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
-                )),
+                Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _shareChallan(challan),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: _blue.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(8)),
+                          child:
+                              const Icon(Icons.share, size: 16, color: _blue)),
+                    )),
                 const SizedBox(width: 6),
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                   onSelected: (v) async {
                     switch (v) {
-                      case 'view':         _viewChallanDetails(challan);    break;
-                      case 'edit':         _openEdit(challan.id);           break;
-                      case 'dispatch':     await _dispatchChallan(challan); break;
-                      case 'delivered':    await _markAsDelivered(challan); break;
-                      case 'convert':      await _convertToInvoice(challan);break;
-                      case 'send':         await _sendChallan(challan);     break;
-                      case 'mark_sent':    await _markChallanAsSent(challan);break;
-                      case 'download':     await _downloadPDF(challan);     break;
-                      case 'return':       await _markAsReturned(challan);  break;
-                      case 'whatsapp':     await _whatsApp(challan);        break;
-                      case 'ticket':       _raiseTicket(challan);           break;
-                      case 'delete':       await _deleteChallan(challan);   break;
+                      case 'view':
+                        _viewChallanDetails(challan);
+                        break;
+                      case 'edit':
+                        _openEdit(challan.id);
+                        break;
+                      case 'dispatch':
+                        await _dispatchChallan(challan);
+                        break;
+                      case 'delivered':
+                        await _markAsDelivered(challan);
+                        break;
+                      case 'convert':
+                        await _convertToInvoice(challan);
+                        break;
+                      case 'send':
+                        await _sendChallan(challan);
+                        break;
+                      case 'mark_sent':
+                        await _markChallanAsSent(challan);
+                        break;
+                      case 'download':
+                        await _downloadPDF(challan);
+                        break;
+                      case 'return':
+                        await _markAsReturned(challan);
+                        break;
+                      case 'whatsapp':
+                        await _whatsApp(challan);
+                        break;
+                      case 'ticket':
+                        _raiseTicket(challan);
+                        break;
+                      case 'delete':
+                        await _deleteChallan(challan);
+                        break;
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'dispatch', child: ListTile(leading: Icon(Icons.local_shipping_outlined, size: 17, color: _orange), title: Text('Dispatch'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'delivered', child: ListTile(leading: Icon(Icons.check_circle_outline, size: 17, color: _green), title: Text('Mark as Delivered'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'convert', child: ListTile(leading: Icon(Icons.receipt_long_outlined, size: 17, color: _green), title: Text('Convert to Invoice'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'send', child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'mark_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'download', child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'return', child: ListTile(leading: Icon(Icons.undo_outlined, size: 17, color: _orange), title: Text('Mark as Returned'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'whatsapp', child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('WhatsApp'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'view',
+                        child: ListTile(
+                            leading: Icon(Icons.visibility_outlined,
+                                size: 17, color: _blue),
+                            title: Text('View Details'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'edit',
+                        child: ListTile(
+                            leading: Icon(Icons.edit_outlined,
+                                size: 17, color: _navy),
+                            title: Text('Edit'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'dispatch',
+                        child: ListTile(
+                            leading: Icon(Icons.local_shipping_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Dispatch'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'delivered',
+                        child: ListTile(
+                            leading: Icon(Icons.check_circle_outline,
+                                size: 17, color: _green),
+                            title: Text('Mark as Delivered'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'convert',
+                        child: ListTile(
+                            leading: Icon(Icons.receipt_long_outlined,
+                                size: 17, color: _green),
+                            title: Text('Convert to Invoice'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'send',
+                        child: ListTile(
+                            leading: Icon(Icons.send_outlined,
+                                size: 17, color: _green),
+                            title: Text('Send Email'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'mark_sent',
+                        child: ListTile(
+                            leading: Icon(Icons.mark_email_read_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Mark as Sent'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'download',
+                        child: ListTile(
+                            leading: Icon(Icons.download_outlined,
+                                size: 17, color: _purple),
+                            title: Text('Download PDF'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'return',
+                        child: ListTile(
+                            leading: Icon(Icons.undo_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Mark as Returned'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'whatsapp',
+                        child: ListTile(
+                            leading: Icon(Icons.chat,
+                                size: 17, color: Color(0xFF25D366)),
+                            title: Text('WhatsApp'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'ticket',
+                        child: ListTile(
+                            leading: Icon(Icons.confirmation_number_outlined,
+                                size: 17, color: _orange),
+                            title: Text('Raise Ticket'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                            leading: Icon(Icons.delete_outline,
+                                size: 17, color: Colors.red),
+                            title: Text('Delete',
+                                style: TextStyle(color: Colors.red)),
+                            contentPadding: EdgeInsets.zero)),
                   ],
                 ),
               ]),
@@ -1064,29 +1605,63 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     final items = _currentPageItems;
     return Container(
       margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 3))]),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3))
+          ]),
       child: LayoutBuilder(builder: (context, constraints) {
         return Scrollbar(
-          controller: _tableHScrollCtrl, thumbVisibility: true, trackVisibility: true, thickness: 8, radius: const Radius.circular(4),
+          controller: _tableHScrollCtrl,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8,
+          radius: const Radius.circular(4),
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad}),
+            behavior: ScrollConfiguration.of(context).copyWith(dragDevices: {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.trackpad
+            }),
             child: SingleChildScrollView(
-              controller: _tableHScrollCtrl, scrollDirection: Axis.horizontal,
+              controller: _tableHScrollCtrl,
+              scrollDirection: Axis.horizontal,
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFF0D1B3E)),
-                  headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.4),
-                  headingRowHeight: 52, dataRowMinHeight: 60, dataRowMaxHeight: 76,
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFF0D1B3E)),
+                  headingTextStyle: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 0.4),
+                  headingRowHeight: 52,
+                  dataRowMinHeight: 60,
+                  dataRowMaxHeight: 76,
                   dataTextStyle: const TextStyle(fontSize: 13),
                   dataRowColor: WidgetStateProperty.resolveWith((s) {
-                    if (s.contains(WidgetState.hovered)) return _navy.withOpacity(0.04);
+                    if (s.contains(WidgetState.hovered))
+                      return _navy.withOpacity(0.04);
                     return null;
                   }),
-                  dividerThickness: 1, columnSpacing: 16, horizontalMargin: 16,
+                  dividerThickness: 1,
+                  columnSpacing: 16,
+                  horizontalMargin: 16,
                   columns: [
-                    DataColumn(label: SizedBox(width: 36, child: Checkbox(value: _selectAll, fillColor: WidgetStateProperty.all(Colors.white), checkColor: const Color(0xFF0D1B3E), onChanged: _toggleSelectAll))),
+                    DataColumn(
+                        label: SizedBox(
+                            width: 36,
+                            child: Checkbox(
+                                value: _selectAll,
+                                fillColor:
+                                    WidgetStateProperty.all(Colors.white),
+                                checkColor: const Color(0xFF0D1B3E),
+                                onChanged: _toggleSelectAll))),
                     const DataColumn(label: Text('DATE')),
                     const DataColumn(label: Text('CHALLAN #')),
                     const DataColumn(label: Text('REFERENCE')),
@@ -1096,7 +1671,11 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
                     const DataColumn(label: Text('QTY')),
                     const DataColumn(label: Text('ACTIONS')),
                   ],
-                  rows: items.asMap().entries.map((e) => _buildRow(e.key, e.value)).toList(),
+                  rows: items
+                      .asMap()
+                      .entries
+                      .map((e) => _buildRow(e.key, e.value))
+                      .toList(),
                 ),
               ),
             ),
@@ -1108,7 +1687,8 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
 
   DataRow _buildRow(int index, DeliveryChallan challan) {
     final isSel = _selectedRows.contains(index);
-    final totalQty = challan.items.fold(0.0, (sum, item) => sum + item.quantity);
+    final totalQty =
+        challan.items.fold(0.0, (sum, item) => sum + item.quantity);
 
     return DataRow(
       selected: isSel,
@@ -1121,130 +1701,223 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
         DataCell(Checkbox(value: isSel, onChanged: (_) => _toggleRow(index))),
 
         // Date
-        DataCell(SizedBox(width: 110, child: Text(DateFormat('dd/MM/yyyy').format(challan.challanDate), style: const TextStyle(fontSize: 13)))),
+        DataCell(SizedBox(
+            width: 110,
+            child: Text(DateFormat('dd/MM/yyyy').format(challan.challanDate),
+                style: const TextStyle(fontSize: 13)))),
 
         // Challan number (clickable)
-        DataCell(SizedBox(width: 160, child: InkWell(
-          onTap: () => _openEdit(challan.id),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(challan.challanNumber,
-                style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, fontSize: 13, decoration: TextDecoration.underline)),
-            const SizedBox(height: 3),
-            Text(challan.purpose, style: TextStyle(fontSize: 11, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
-          ]),
-        ))),
+        DataCell(SizedBox(
+            width: 160,
+            child: InkWell(
+              onTap: () => _openEdit(challan.id),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(challan.challanNumber,
+                        style: const TextStyle(
+                            color: _navy,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            decoration: TextDecoration.underline)),
+                    const SizedBox(height: 3),
+                    Text(challan.purpose,
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        overflow: TextOverflow.ellipsis),
+                  ]),
+            ))),
 
         // Reference
-        DataCell(SizedBox(width: 130, child: Text(challan.referenceNumber ?? '-',
-            style: TextStyle(fontSize: 13, color: Colors.grey[600])))),
+        DataCell(SizedBox(
+            width: 130,
+            child: Text(challan.referenceNumber ?? '-',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600])))),
 
         // Customer
-        DataCell(SizedBox(width: 180, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text(challan.customerName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-          if (challan.customerEmail != null)
-            Text(challan.customerEmail!, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-        ]))),
+        DataCell(SizedBox(
+            width: 180,
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(challan.customerName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w500, fontSize: 13)),
+                  if (challan.customerEmail != null)
+                    Text(challan.customerEmail!,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[600])),
+                ]))),
 
         // Status badge
         DataCell(SizedBox(width: 120, child: _statusBadge(challan.status))),
 
         // Items count
-        DataCell(SizedBox(width: 70, child: Text(challan.items.length.toString(),
-            textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)))),
+        DataCell(SizedBox(
+            width: 70,
+            child: Text(challan.items.length.toString(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w500)))),
 
         // Total qty
-        DataCell(SizedBox(width: 80, child: Text(totalQty.toStringAsFixed(0),
-            textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)))),
+        DataCell(SizedBox(
+            width: 80,
+            child: Text(totalQty.toStringAsFixed(0),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)))),
 
         // Actions
-        DataCell(SizedBox(width: 150, child: Row(children: [
-          // Share
-          Tooltip(message: 'Share', child: InkWell(
-            onTap: () => _shareChallan(challan),
-            child: Container(width: 30, height: 30,
-                decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.share, size: 15, color: _blue)),
-          )),
-          const SizedBox(width: 4),
-          // WhatsApp
-          // Tooltip(message: 'WhatsApp', child: InkWell(
-          //   onTap: () => _whatsApp(challan),
-          //   child: Container(width: 30, height: 30,
-          //       decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-          //       child: const Icon(Icons.chat, size: 15, color: Color(0xFF25D366))),
-          // )),
-          // const SizedBox(width: 4),
-          // More popup
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            itemBuilder: (_) => [
-              _menuItem('view',     Icons.visibility_outlined,     _blue,   'View Details'),
-              _menuItem('edit',     Icons.edit_outlined,           _navy,   'Edit'),
-              if (challan.status == 'DRAFT')
-                _menuItem('dispatch', Icons.local_shipping_outlined, _orange, 'Dispatch'),
-              if (challan.status == 'OPEN')
-                _menuItem('delivered', Icons.check_circle_outline,  _green,  'Mark as Delivered'),
-              if (challan.status == 'DELIVERED' || challan.status == 'PARTIALLY_INVOICED')
-                _menuItem('convert', Icons.receipt_long_outlined,   _blue,   'Convert to Invoice'),
-              _menuItem('send',     Icons.send_outlined,            _purple, 'Send via Email'),
-              if (challan.status == 'DRAFT')
-                _menuItem('mark_as_sent', Icons.mark_email_read_outlined, _orange, 'Mark as Sent'),
-              _menuItem('download', Icons.download_outlined,        _navy,   'Download PDF'),
-              if (challan.status != 'DRAFT' && challan.status != 'CANCELLED')
-                _menuItem('return', Icons.keyboard_return_outlined, _orange, 'Mark as Returned'),
-              _menuItem('ticket',   Icons.confirmation_number_outlined, _orange, 'Raise Ticket'),
-              if (challan.status == 'DRAFT')
-                _menuItem('delete', Icons.delete_outline,           _red,   'Delete', textColor: _red),
-            ],
-            onSelected: (v) async {
-              switch (v) {
-                case 'view':      _viewChallanDetails(challan); break;
-                case 'edit':      _openEdit(challan.id);        break;
-                case 'dispatch':  _dispatchChallan(challan);    break;
-                case 'delivered': _markAsDelivered(challan);    break;
-                case 'convert':   _convertToInvoice(challan);   break;
-                case 'send':          _sendChallan(challan);          break;
-                case 'mark_as_sent':  await _markChallanAsSent(challan); break;
-                case 'download':      _downloadPDF(challan);            break;
-                case 'return':    _markAsReturned(challan);     break;
-                case 'ticket':    _raiseTicket(challan);        break;
-                case 'delete':    _deleteChallan(challan);      break;
-              }
-            },
-          ),
-        ]))),
+        DataCell(SizedBox(
+            width: 150,
+            child: Row(children: [
+              // Share
+              Tooltip(
+                  message: 'Share',
+                  child: InkWell(
+                    onTap: () => _shareChallan(challan),
+                    child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                            color: _blue.withOpacity(0.10),
+                            borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.share, size: 15, color: _blue)),
+                  )),
+              const SizedBox(width: 4),
+              // WhatsApp
+              // Tooltip(message: 'WhatsApp', child: InkWell(
+              //   onTap: () => _whatsApp(challan),
+              //   child: Container(width: 30, height: 30,
+              //       decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+              //       child: const Icon(Icons.chat, size: 15, color: Color(0xFF25D366))),
+              // )),
+              // const SizedBox(width: 4),
+              // More popup
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                itemBuilder: (_) => [
+                  _menuItem(
+                      'view', Icons.visibility_outlined, _blue, 'View Details'),
+                  _menuItem('edit', Icons.edit_outlined, _navy, 'Edit'),
+                  if (challan.status == 'DRAFT')
+                    _menuItem('dispatch', Icons.local_shipping_outlined,
+                        _orange, 'Dispatch'),
+                  if (challan.status == 'OPEN')
+                    _menuItem('delivered', Icons.check_circle_outline, _green,
+                        'Mark as Delivered'),
+                  if (challan.status == 'DELIVERED' ||
+                      challan.status == 'PARTIALLY_INVOICED')
+                    _menuItem('convert', Icons.receipt_long_outlined, _blue,
+                        'Convert to Invoice'),
+                  _menuItem(
+                      'send', Icons.send_outlined, _purple, 'Send via Email'),
+                  if (challan.status == 'DRAFT')
+                    _menuItem('mark_as_sent', Icons.mark_email_read_outlined,
+                        _orange, 'Mark as Sent'),
+                  _menuItem('download', Icons.download_outlined, _navy,
+                      'Download PDF'),
+                  if (challan.status != 'DRAFT' &&
+                      challan.status != 'CANCELLED')
+                    _menuItem('return', Icons.keyboard_return_outlined, _orange,
+                        'Mark as Returned'),
+                  _menuItem('ticket', Icons.confirmation_number_outlined,
+                      _orange, 'Raise Ticket'),
+                  if (challan.status == 'DRAFT')
+                    _menuItem('delete', Icons.delete_outline, _red, 'Delete',
+                        textColor: _red),
+                ],
+                onSelected: (v) async {
+                  switch (v) {
+                    case 'view':
+                      _viewChallanDetails(challan);
+                      break;
+                    case 'edit':
+                      _openEdit(challan.id);
+                      break;
+                    case 'dispatch':
+                      _dispatchChallan(challan);
+                      break;
+                    case 'delivered':
+                      _markAsDelivered(challan);
+                      break;
+                    case 'convert':
+                      _convertToInvoice(challan);
+                      break;
+                    case 'send':
+                      _sendChallan(challan);
+                      break;
+                    case 'mark_as_sent':
+                      await _markChallanAsSent(challan);
+                      break;
+                    case 'download':
+                      _downloadPDF(challan);
+                      break;
+                    case 'return':
+                      _markAsReturned(challan);
+                      break;
+                    case 'ticket':
+                      _raiseTicket(challan);
+                      break;
+                    case 'delete':
+                      _deleteChallan(challan);
+                      break;
+                  }
+                },
+              ),
+            ]))),
       ],
     );
   }
 
-  PopupMenuItem<String> _menuItem(String value, IconData icon, Color iconColor, String label, {Color? textColor}) {
-    return PopupMenuItem(value: value, child: ListTile(
-      leading: Icon(icon, size: 17, color: iconColor),
-      title: Text(label, style: TextStyle(color: textColor)),
-      contentPadding: EdgeInsets.zero, dense: true,
-    ));
+  PopupMenuItem<String> _menuItem(
+      String value, IconData icon, Color iconColor, String label,
+      {Color? textColor}) {
+    return PopupMenuItem(
+        value: value,
+        child: ListTile(
+          leading: Icon(icon, size: 17, color: iconColor),
+          title: Text(label, style: TextStyle(color: textColor)),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+        ));
   }
 
   Widget _statusBadge(String status) {
     const map = <String, List<Color>>{
-      'DRAFT':               [Color(0xFFF1F5F9), Color(0xFF64748B)],
-      'OPEN':                [Color(0xFFFEF3C7), Color(0xFFB45309)],
-      'DELIVERED':           [Color(0xFFDCFCE7), Color(0xFF15803D)],
-      'INVOICED':            [Color(0xFFDBEAFE), Color(0xFF1D4ED8)],
-      'PARTIALLY_INVOICED':  [Color(0xFFF3E8FF), Color(0xFF7C3AED)],
-      'RETURNED':            [Color(0xFFFEE2E2), Color(0xFFDC2626)],
-      'PARTIALLY_RETURNED':  [Color(0xFFFFEDD5), Color(0xFFEA580C)],
-      'CANCELLED':           [Color(0xFFF1F5F9), Color(0xFF94A3B8)],
+      'DRAFT': [Color(0xFFF1F5F9), Color(0xFF64748B)],
+      'OPEN': [Color(0xFFFEF3C7), Color(0xFFB45309)],
+      'DELIVERED': [Color(0xFFDCFCE7), Color(0xFF15803D)],
+      'INVOICED': [Color(0xFFDBEAFE), Color(0xFF1D4ED8)],
+      'PARTIALLY_INVOICED': [Color(0xFFF3E8FF), Color(0xFF7C3AED)],
+      'RETURNED': [Color(0xFFFEE2E2), Color(0xFFDC2626)],
+      'PARTIALLY_RETURNED': [Color(0xFFFFEDD5), Color(0xFFEA580C)],
+      'CANCELLED': [Color(0xFFF1F5F9), Color(0xFF94A3B8)],
     };
     final c = map[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20), border: Border.all(color: c[1].withOpacity(0.3))),
+      decoration: BoxDecoration(
+          color: c[0],
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: c[1].withOpacity(0.3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 6, height: 6, decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
+        Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
         const SizedBox(width: 5),
-        Flexible(child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.w700, fontSize: 10), overflow: TextOverflow.ellipsis)),
+        Flexible(
+            child: Text(status.replaceAll('_', ' '),
+                style: TextStyle(
+                    color: c[1], fontWeight: FontWeight.w700, fontSize: 10),
+                overflow: TextOverflow.ellipsis)),
       ]),
     );
   }
@@ -1262,30 +1935,57 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFEEF2F7)))),
+      decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Color(0xFFEEF2F7)))),
       child: LayoutBuilder(builder: (_, c) {
         return Wrap(
-          alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, runSpacing: 8,
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          runSpacing: 8,
           children: [
             Text(
               'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–${(_currentPage * _itemsPerPage).clamp(0, _filtered.length)} of ${_filtered.length}'
               '${_filtered.length != _challans.length ? ' (filtered from ${_challans.length})' : ''}',
-              style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500),
             ),
             Row(mainAxisSize: MainAxisSize.min, children: [
-              _pageNavBtn(icon: Icons.chevron_left, enabled: _currentPage > 1, onTap: () { setState(() => _currentPage--); _applyFilters(); }),
+              _pageNavBtn(
+                  icon: Icons.chevron_left,
+                  enabled: _currentPage > 1,
+                  onTap: () {
+                    setState(() => _currentPage--);
+                    _applyFilters();
+                  }),
               const SizedBox(width: 4),
               if (pages.first > 1) ...[
                 _pageNumBtn(1),
-                if (pages.first > 2) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                if (pages.first > 2)
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
               ],
               ...pages.map((p) => _pageNumBtn(p)),
               if (pages.last < _totalPages) ...[
-                if (pages.last < _totalPages - 1) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                if (pages.last < _totalPages - 1)
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
                 _pageNumBtn(_totalPages),
               ],
               const SizedBox(width: 4),
-              _pageNavBtn(icon: Icons.chevron_right, enabled: _currentPage < _totalPages, onTap: () { setState(() => _currentPage++); _applyFilters(); }),
+              _pageNavBtn(
+                  icon: Icons.chevron_right,
+                  enabled: _currentPage < _totalPages,
+                  onTap: () {
+                    setState(() => _currentPage++);
+                    _applyFilters();
+                  }),
             ]),
           ],
         );
@@ -1296,22 +1996,44 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   Widget _pageNumBtn(int page) {
     final isActive = _currentPage == page;
     return GestureDetector(
-      onTap: () { if (!isActive) { setState(() => _currentPage = page); _applyFilters(); } },
+      onTap: () {
+        if (!isActive) {
+          setState(() => _currentPage = page);
+          _applyFilters();
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        margin: const EdgeInsets.symmetric(horizontal: 2), width: 34, height: 34,
-        decoration: BoxDecoration(color: isActive ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(8), border: Border.all(color: isActive ? _navy : Colors.grey[300]!)),
-        child: Center(child: Text('$page', style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.bold : FontWeight.normal, color: isActive ? Colors.white : Colors.grey[700]))),
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+            color: isActive ? _navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: isActive ? _navy : Colors.grey[300]!)),
+        child: Center(
+            child: Text('$page',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                    color: isActive ? Colors.white : Colors.grey[700]))),
       ),
     );
   }
 
-  Widget _pageNavBtn({required IconData icon, required bool enabled, required VoidCallback onTap}) {
+  Widget _pageNavBtn(
+      {required IconData icon,
+      required bool enabled,
+      required VoidCallback onTap}) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
-        width: 34, height: 34,
-        decoration: BoxDecoration(color: enabled ? Colors.white : Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[300]!)),
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+            color: enabled ? Colors.white : Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[300]!)),
         child: Icon(icon, size: 18, color: enabled ? _navy : Colors.grey[300]),
       ),
     );
@@ -1320,39 +2042,84 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   // ── empty / error states ──────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(padding: const EdgeInsets.all(28), decoration: BoxDecoration(color: _navy.withOpacity(0.06), shape: BoxShape.circle),
-          child: Icon(Icons.local_shipping_outlined, size: 64, color: _navy.withOpacity(0.4))),
-      const SizedBox(height: 20),
-      const Text('No Delivery Challans Found', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-      const SizedBox(height: 8),
-      Text(_hasAnyFilter ? 'Try adjusting your filters' : 'Create your first delivery challan', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
-      const SizedBox(height: 28),
-      ElevatedButton.icon(
-        onPressed: _hasAnyFilter ? _clearFilters : _openNew,
-        icon: Icon(_hasAnyFilter ? Icons.filter_list_off : Icons.add),
-        label: Text(_hasAnyFilter ? 'Clear Filters' : 'Create Challan', style: const TextStyle(fontWeight: FontWeight.w600)),
-        style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      ),
-    ])));
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                      color: _navy.withOpacity(0.06), shape: BoxShape.circle),
+                  child: Icon(Icons.local_shipping_outlined,
+                      size: 64, color: _navy.withOpacity(0.4))),
+              const SizedBox(height: 20),
+              const Text('No Delivery Challans Found',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A202C))),
+              const SizedBox(height: 8),
+              Text(
+                  _hasAnyFilter
+                      ? 'Try adjusting your filters'
+                      : 'Create your first delivery challan',
+                  style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: _hasAnyFilter ? _clearFilters : _openNew,
+                icon: Icon(_hasAnyFilter ? Icons.filter_list_off : Icons.add),
+                label: Text(_hasAnyFilter ? 'Clear Filters' : 'Create Challan',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+              ),
+            ])));
   }
 
   Widget _buildErrorState() {
-    return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
-          child: Icon(Icons.error_outline, size: 56, color: Colors.red[400])),
-      const SizedBox(height: 20),
-      const Text('Failed to Load Challans', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 8),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Text(_errorMessage ?? 'Unknown error', style: TextStyle(color: Colors.grey[500]), textAlign: TextAlign.center)),
-      const SizedBox(height: 28),
-      ElevatedButton.icon(
-        onPressed: _loadAll, icon: const Icon(Icons.refresh),
-        label: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w600)),
-        style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      ),
-    ])));
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                      color: Colors.red[50], shape: BoxShape.circle),
+                  child: Icon(Icons.error_outline,
+                      size: 56, color: Colors.red[400])),
+              const SizedBox(height: 20),
+              const Text('Failed to Load Challans',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(_errorMessage ?? 'Unknown error',
+                      style: TextStyle(color: Colors.grey[500]),
+                      textAlign: TextAlign.center)),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: _loadAll,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+              ),
+            ])));
   }
 
   // ── details dialog (kept from original) ───────────────────────────────────
@@ -1368,46 +2135,68 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
           Row(children: [
             const Icon(Icons.local_shipping, color: _blue, size: 28),
             const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(challan.challanNumber, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
-              Text('Delivery Challan Details', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(challan.challanNumber,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2C3E50))),
+                  Text('Delivery Challan Details',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                ])),
             _statusBadge(challan.status),
             const SizedBox(width: 12),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context)),
           ]),
           const Divider(height: 32),
-          Expanded(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _detailSection('Customer Information', [
-              _detailRow('Customer Name', challan.customerName),
-              _detailRow('Email', challan.customerEmail),
-              _detailRow('Phone', challan.customerPhone),
-              if (challan.deliveryAddress != null)
-                _detailRow('Address',
-                    '${challan.deliveryAddress!.street ?? ''}, ${challan.deliveryAddress!.city ?? ''}, ${challan.deliveryAddress!.state ?? ''} ${challan.deliveryAddress!.pincode ?? ''}'),
-            ]),
-            const SizedBox(height: 20),
-            _detailSection('Challan Information', [
-              _detailRow('Challan Number', challan.challanNumber),
-              _detailRow('Date', DateFormat('dd MMM yyyy').format(challan.challanDate)),
-              _detailRow('Reference', challan.referenceNumber),
-              _detailRow('Purpose', challan.purpose),
-            ]),
-            const SizedBox(height: 20),
-            if (challan.transportMode.isNotEmpty)
-              _detailSection('Transport Details', [
-                _detailRow('Mode', challan.transportMode),
-                _detailRow('Vehicle', challan.vehicleNumber),
-                _detailRow('Driver', challan.driverName),
-                _detailRow('Transporter', challan.transporterName),
-              ]),
-            const SizedBox(height: 20),
-            _itemsSection(challan.items),
-            if (challan.customerNotes != null && challan.customerNotes!.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _detailSection('Notes', [Padding(padding: const EdgeInsets.all(8), child: Text(challan.customerNotes!, style: TextStyle(fontSize: 13, color: Colors.grey[800])))]),
-            ],
-          ]))),
+          Expanded(
+              child: SingleChildScrollView(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                _detailSection('Customer Information', [
+                  _detailRow('Customer Name', challan.customerName),
+                  _detailRow('Email', challan.customerEmail),
+                  _detailRow('Phone', challan.customerPhone),
+                  if (challan.deliveryAddress != null)
+                    _detailRow('Address',
+                        '${challan.deliveryAddress!.street ?? ''}, ${challan.deliveryAddress!.city ?? ''}, ${challan.deliveryAddress!.state ?? ''} ${challan.deliveryAddress!.pincode ?? ''}'),
+                ]),
+                const SizedBox(height: 20),
+                _detailSection('Challan Information', [
+                  _detailRow('Challan Number', challan.challanNumber),
+                  _detailRow('Date',
+                      DateFormat('dd MMM yyyy').format(challan.challanDate)),
+                  _detailRow('Reference', challan.referenceNumber),
+                  _detailRow('Purpose', challan.purpose),
+                ]),
+                const SizedBox(height: 20),
+                if (challan.transportMode.isNotEmpty)
+                  _detailSection('Transport Details', [
+                    _detailRow('Mode', challan.transportMode),
+                    _detailRow('Vehicle', challan.vehicleNumber),
+                    _detailRow('Driver', challan.driverName),
+                    _detailRow('Transporter', challan.transporterName),
+                  ]),
+                const SizedBox(height: 20),
+                _itemsSection(challan.items),
+                if (challan.customerNotes != null &&
+                    challan.customerNotes!.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _detailSection('Notes', [
+                    Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(challan.customerNotes!,
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey[800])))
+                  ]),
+                ],
+              ]))),
         ]),
       ),
     );
@@ -1415,11 +2204,18 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
 
   Widget _detailSection(String title, List<Widget> children) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
+      Text(title,
+          style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2C3E50))),
       const SizedBox(height: 10),
       Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+        decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[200]!)),
         child: Column(children: children),
       ),
     ]);
@@ -1430,32 +2226,74 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 140, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2C3E50), fontSize: 13))),
-        Expanded(child: Text(value, style: TextStyle(color: Colors.grey[800], fontSize: 13))),
+        SizedBox(
+            width: 140,
+            child: Text(label,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2C3E50),
+                    fontSize: 13))),
+        Expanded(
+            child: Text(value,
+                style: TextStyle(color: Colors.grey[800], fontSize: 13))),
       ]),
     );
   }
 
   Widget _itemsSection(List<ChallanItem> items) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Items', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
+      const Text('Items',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2C3E50))),
       const SizedBox(height: 10),
       Container(
-        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+        decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[200]!)),
         child: Table(
           border: TableBorder.all(color: Colors.grey[300]!, width: 1),
-          columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(1), 2: FlexColumnWidth(1)},
+          columnWidths: const {
+            0: FlexColumnWidth(3),
+            1: FlexColumnWidth(1),
+            2: FlexColumnWidth(1)
+          },
           children: [
-            TableRow(decoration: BoxDecoration(color: Colors.grey[200]), children: const [
-              Padding(padding: EdgeInsets.all(10), child: Text('Item', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-              Padding(padding: EdgeInsets.all(10), child: Text('Qty', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-              Padding(padding: EdgeInsets.all(10), child: Text('Unit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-            ]),
+            TableRow(
+                decoration: BoxDecoration(color: Colors.grey[200]),
+                children: const [
+                  Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Text('Item',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13))),
+                  Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Text('Qty',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13))),
+                  Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Text('Unit',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13))),
+                ]),
             ...items.map((item) => TableRow(children: [
-              Padding(padding: const EdgeInsets.all(10), child: Text(item.itemDetails, style: const TextStyle(fontSize: 13))),
-              Padding(padding: const EdgeInsets.all(10), child: Text(item.quantity.toString(), style: const TextStyle(fontSize: 13))),
-              Padding(padding: const EdgeInsets.all(10), child: Text(item.unit, style: const TextStyle(fontSize: 13))),
-            ])),
+                  Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(item.itemDetails,
+                          style: const TextStyle(fontSize: 13))),
+                  Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(item.quantity.toString(),
+                          style: const TextStyle(fontSize: 13))),
+                  Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Text(item.unit,
+                          style: const TextStyle(fontSize: 13))),
+                ])),
           ],
         ),
       ),
@@ -1471,7 +2309,8 @@ class _RaiseTicketOverlay extends StatefulWidget {
   final DeliveryChallan? challan;
   final void Function(String) onTicketRaised;
   final void Function(String) onError;
-  const _RaiseTicketOverlay({this.challan, required this.onTicketRaised, required this.onError});
+  const _RaiseTicketOverlay(
+      {this.challan, required this.onTicketRaised, required this.onError});
 
   @override
   State<_RaiseTicketOverlay> createState() => _RaiseTicketOverlayState();
@@ -1482,9 +2321,9 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
   final _searchCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _employees = [];
-  List<Map<String, dynamic>> _filtered  = [];
-  Map<String, dynamic>?       _selectedEmp;
-  bool _loading   = true;
+  List<Map<String, dynamic>> _filtered = [];
+  Map<String, dynamic>? _selectedEmp;
+  bool _loading = true;
   bool _assigning = false;
   String _priority = 'Medium';
 
@@ -1496,15 +2335,18 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
   }
 
   @override
-  void dispose() { _searchCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadEmployees() async {
     final resp = await _tmsService.fetchEmployees();
     if (resp['success'] == true && resp['data'] != null) {
       setState(() {
         _employees = List<Map<String, dynamic>>.from(resp['data']);
-        _filtered  = _employees;
-        _loading   = false;
+        _filtered = _employees;
+        _loading = false;
       });
     } else {
       setState(() => _loading = false);
@@ -1515,11 +2357,13 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
   void _filter() {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
-      _filtered = q.isEmpty ? _employees : _employees.where((e) {
-        return (e['name_parson'] ?? '').toLowerCase().contains(q) ||
-               (e['email'] ?? '').toLowerCase().contains(q) ||
-               (e['role'] ?? '').toLowerCase().contains(q);
-      }).toList();
+      _filtered = q.isEmpty
+          ? _employees
+          : _employees.where((e) {
+              return (e['name_parson'] ?? '').toLowerCase().contains(q) ||
+                  (e['email'] ?? '').toLowerCase().contains(q) ||
+                  (e['role'] ?? '').toLowerCase().contains(q);
+            }).toList();
     });
   }
 
@@ -1530,16 +2374,16 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
     final c = widget.challan!;
     final totalQty = c.items.fold(0.0, (s, i) => s + i.quantity);
     return 'Delivery Challan "${c.challanNumber}" for customer "${c.customerName}" requires attention.\n\n'
-           'Challan Details:\n'
-           '• Date: ${DateFormat('dd MMM yyyy').format(c.challanDate)}\n'
-           '• Status: ${c.status.replaceAll('_', ' ')}\n'
-           '• Customer: ${c.customerName}\n'
-           '${c.customerEmail != null ? '• Email: ${c.customerEmail}\n' : ''}'
-           '• Items: ${c.items.length} | Total Qty: ${totalQty.toStringAsFixed(0)}\n'
-           '• Purpose: ${c.purpose}\n'
-           '${c.referenceNumber != null ? '• Reference: ${c.referenceNumber}\n' : ''}'
-           '${c.vehicleNumber != null ? '• Vehicle: ${c.vehicleNumber}\n' : ''}'
-           '\nPlease review and take necessary action.';
+        'Challan Details:\n'
+        '• Date: ${DateFormat('dd MMM yyyy').format(c.challanDate)}\n'
+        '• Status: ${c.status.replaceAll('_', ' ')}\n'
+        '• Customer: ${c.customerName}\n'
+        '${c.customerEmail != null ? '• Email: ${c.customerEmail}\n' : ''}'
+        '• Items: ${c.items.length} | Total Qty: ${totalQty.toStringAsFixed(0)}\n'
+        '• Purpose: ${c.purpose}\n'
+        '${c.referenceNumber != null ? '• Reference: ${c.referenceNumber}\n' : ''}'
+        '${c.vehicleNumber != null ? '• Vehicle: ${c.vehicleNumber}\n' : ''}'
+        '\nPlease review and take necessary action.';
   }
 
   Future<void> _assign() async {
@@ -1550,14 +2394,15 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
         subject: widget.challan != null
             ? 'Delivery Challan: ${widget.challan!.challanNumber}'
             : 'Delivery Challans — Action Required',
-        message:  _buildTicketMessage(),
+        message: _buildTicketMessage(),
         priority: _priority,
         timeline: 1440,
         assignedTo: _selectedEmp!['_id'].toString(),
       );
       setState(() => _assigning = false);
       if (resp['success'] == true) {
-        widget.onTicketRaised('Ticket assigned to ${_selectedEmp!['name_parson']}');
+        widget.onTicketRaised(
+            'Ticket assigned to ${_selectedEmp!['name_parson']}');
         if (mounted) Navigator.pop(context);
       } else {
         widget.onError(resp['message'] ?? 'Failed to create ticket');
@@ -1575,56 +2420,94 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Container(
         width: 520,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.80),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.80),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           // Header
           Container(
             padding: const EdgeInsets.all(20),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF2463AE)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+              gradient: LinearGradient(
+                  colors: [Color(0xFF1e3a8a), Color(0xFF2463AE)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight),
+              borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(20), topRight: Radius.circular(20)),
             ),
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 22),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.confirmation_number_rounded,
+                    color: Colors.white, size: 22),
               ),
               const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Raise a Ticket', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                if (widget.challan != null)
-                  Text('Challan: ${widget.challan!.challanNumber}',
-                      style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12), overflow: TextOverflow.ellipsis),
-              ])),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white)),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    const Text('Raise a Ticket',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                    if (widget.challan != null)
+                      Text('Challan: ${widget.challan!.challanNumber}',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12),
+                          overflow: TextOverflow.ellipsis),
+                  ])),
+              IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: Colors.white)),
             ]),
           ),
 
           // Body
-          Flexible(child: SingleChildScrollView(
+          Flexible(
+              child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               // Auto-message preview
               if (widget.challan != null) ...[
-                const Text('Auto-generated message', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+                const Text('Auto-generated message',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: _navy)),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: const Color(0xFFF0F4F8), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFDDE3EE))),
-                  child: Text(_buildTicketMessage(), style: TextStyle(fontSize: 12, color: Colors.grey[700], height: 1.5)),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFF0F4F8),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFDDE3EE))),
+                  child: Text(_buildTicketMessage(),
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey[700], height: 1.5)),
                 ),
                 const SizedBox(height: 20),
               ],
 
               // Priority
-              const Text('Priority', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+              const Text('Priority',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
               const SizedBox(height: 8),
-              Row(children: ['Low', 'Medium', 'High'].map((pr) {
+              Row(
+                  children: ['Low', 'Medium', 'High'].map((pr) {
                 final isSel = _priority == pr;
-                final color = pr == 'High' ? _red : pr == 'Medium' ? _orange : _green;
-                return Expanded(child: Padding(
+                final color = pr == 'High'
+                    ? _red
+                    : pr == 'Medium'
+                        ? _orange
+                        : _green;
+                return Expanded(
+                    child: Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: InkWell(
                     onTap: () => setState(() => _priority = pr),
@@ -1635,10 +2518,25 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
                       decoration: BoxDecoration(
                         color: isSel ? color : Colors.white,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isSel ? color : Colors.grey[300]!),
-                        boxShadow: isSel ? [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))] : [],
+                        border: Border.all(
+                            color: isSel ? color : Colors.grey[300]!),
+                        boxShadow: isSel
+                            ? [
+                                BoxShadow(
+                                    color: color.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3))
+                              ]
+                            : [],
                       ),
-                      child: Center(child: Text(pr, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSel ? Colors.white : Colors.grey[700]))),
+                      child: Center(
+                          child: Text(pr,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSel
+                                      ? Colors.white
+                                      : Colors.grey[700]))),
                     ),
                   ),
                 ));
@@ -1646,63 +2544,126 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
               const SizedBox(height: 20),
 
               // Employee search
-              const Text('Assign To', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+              const Text('Assign To',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
               const SizedBox(height: 8),
               TextField(
                 controller: _searchCtrl,
                 decoration: InputDecoration(
                   hintText: 'Search employees…',
-                  prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey[400]),
-                  filled: true, fillColor: const Color(0xFFF7F9FC),
+                  prefixIcon:
+                      Icon(Icons.search, size: 18, color: Colors.grey[400]),
+                  filled: true,
+                  fillColor: const Color(0xFFF7F9FC),
                   contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _navy, width: 1.5)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _navy, width: 1.5)),
                 ),
               ),
               const SizedBox(height: 8),
 
               // Employee list
               _loading
-                  ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator(color: _navy)))
+                  ? const SizedBox(
+                      height: 120,
+                      child: Center(
+                          child: CircularProgressIndicator(color: _navy)))
                   : _filtered.isEmpty
-                      ? Container(height: 80, alignment: Alignment.center, child: Text('No employees found', style: TextStyle(color: Colors.grey[500])))
+                      ? Container(
+                          height: 80,
+                          alignment: Alignment.center,
+                          child: Text('No employees found',
+                              style: TextStyle(color: Colors.grey[500])))
                       : Container(
                           constraints: const BoxConstraints(maxHeight: 260),
-                          decoration: BoxDecoration(border: Border.all(color: const Color(0xFFDDE3EE)), borderRadius: BorderRadius.circular(10)),
+                          decoration: BoxDecoration(
+                              border:
+                                  Border.all(color: const Color(0xFFDDE3EE)),
+                              borderRadius: BorderRadius.circular(10)),
                           child: ListView.separated(
                             shrinkWrap: true,
                             itemCount: _filtered.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEF2F7)),
+                            separatorBuilder: (_, __) => const Divider(
+                                height: 1, color: Color(0xFFEEF2F7)),
                             itemBuilder: (_, i) {
-                              final emp   = _filtered[i];
+                              final emp = _filtered[i];
                               final isSel = _selectedEmp?['_id'] == emp['_id'];
                               return InkWell(
-                                onTap: () => setState(() => _selectedEmp = isSel ? null : emp),
+                                onTap: () => setState(
+                                    () => _selectedEmp = isSel ? null : emp),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  color: isSel ? _navy.withOpacity(0.06) : Colors.transparent,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  color: isSel
+                                      ? _navy.withOpacity(0.06)
+                                      : Colors.transparent,
                                   child: Row(children: [
                                     CircleAvatar(
                                       radius: 18,
-                                      backgroundColor: isSel ? _navy : _navy.withOpacity(0.10),
-                                      child: Text((emp['name_parson'] ?? 'U')[0].toUpperCase(),
-                                          style: TextStyle(color: isSel ? Colors.white : _navy, fontWeight: FontWeight.bold, fontSize: 13)),
+                                      backgroundColor: isSel
+                                          ? _navy
+                                          : _navy.withOpacity(0.10),
+                                      child: Text(
+                                          (emp['name_parson'] ?? 'U')[0]
+                                              .toUpperCase(),
+                                          style: TextStyle(
+                                              color:
+                                                  isSel ? Colors.white : _navy,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13)),
                                     ),
                                     const SizedBox(width: 12),
-                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(emp['name_parson'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                      if (emp['email'] != null)
-                                        Text(emp['email'], style: TextStyle(fontSize: 11, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
-                                      if (emp['role'] != null)
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 3),
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(color: _navy.withOpacity(0.08), borderRadius: BorderRadius.circular(4)),
-                                          child: Text(emp['role'].toString().toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _navy)),
-                                        ),
-                                    ])),
-                                    if (isSel) const Icon(Icons.check_circle, color: _navy, size: 20),
+                                    Expanded(
+                                        child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                          Text(emp['name_parson'] ?? 'Unknown',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 13)),
+                                          if (emp['email'] != null)
+                                            Text(emp['email'],
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey[600]),
+                                                overflow:
+                                                    TextOverflow.ellipsis),
+                                          if (emp['role'] != null)
+                                            Container(
+                                              margin:
+                                                  const EdgeInsets.only(top: 3),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                  color:
+                                                      _navy.withOpacity(0.08),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4)),
+                                              child: Text(
+                                                  emp['role']
+                                                      .toString()
+                                                      .toUpperCase(),
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: _navy)),
+                                            ),
+                                        ])),
+                                    if (isSel)
+                                      const Icon(Icons.check_circle,
+                                          color: _navy, size: 20),
                                   ]),
                                 ),
                               );
@@ -1718,27 +2679,47 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
             decoration: const BoxDecoration(
               color: Color(0xFFF7F9FC),
               border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
-              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+              borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20)),
             ),
             child: Row(children: [
-              Expanded(child: OutlinedButton(
+              Expanded(
+                  child: OutlinedButton(
                 onPressed: () => Navigator.pop(context),
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.grey[700], side: BorderSide(color: Colors.grey[300]!), padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                    side: BorderSide(color: Colors.grey[300]!),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                child: const Text('Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
               )),
               const SizedBox(width: 12),
-              Expanded(child: ElevatedButton(
-                onPressed: (_selectedEmp == null || _assigning) ? null : _assign,
+              Expanded(
+                  child: ElevatedButton(
+                onPressed:
+                    (_selectedEmp == null || _assigning) ? null : _assign,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _navy, foregroundColor: Colors.white,
+                  backgroundColor: _navy,
+                  foregroundColor: Colors.white,
                   disabledBackgroundColor: _navy.withOpacity(0.4),
-                  elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
                 child: _assigning
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : Text(
-                        _selectedEmp != null ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}' : 'Select Employee',
+                        _selectedEmp != null
+                            ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}'
+                            : 'Select Employee',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1757,15 +2738,17 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
 
 class BulkImportChallansDialog extends StatefulWidget {
   final Future<void> Function() onImportComplete;
-  const BulkImportChallansDialog({Key? key, required this.onImportComplete}) : super(key: key);
+  const BulkImportChallansDialog({Key? key, required this.onImportComplete})
+      : super(key: key);
 
   @override
-  State<BulkImportChallansDialog> createState() => _BulkImportChallansDialogState();
+  State<BulkImportChallansDialog> createState() =>
+      _BulkImportChallansDialogState();
 }
 
 class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
   bool _downloading = false;
-  bool _uploading   = false;
+  bool _uploading = false;
   String? _fileName;
   Map<String, dynamic>? _results;
 
@@ -1824,7 +2807,8 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
           'Delete this instructions row before uploading',
         ],
       ];
-      await ExportHelper.exportToExcel(data: data, filename: 'delivery_challans_import_template');
+      await ExportHelper.exportToExcel(
+          data: data, filename: 'delivery_challans_import_template');
       setState(() => _downloading = false);
       _showSnack('Template downloaded!', _green);
     } catch (e) {
@@ -1843,11 +2827,18 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
       );
       if (result == null || result.files.isEmpty) return;
 
-      final file  = result.files.first;
+      final file = result.files.first;
       final bytes = file.bytes;
-      if (bytes == null) { _showSnack('Could not read file', _red); return; }
+      if (bytes == null) {
+        _showSnack('Could not read file', _red);
+        return;
+      }
 
-      setState(() { _fileName = file.name; _uploading = true; _results = null; });
+      setState(() {
+        _fileName = file.name;
+        _uploading = true;
+        _results = null;
+      });
 
       List<List<dynamic>> rows;
       final ext = file.extension?.toLowerCase() ?? '';
@@ -1857,10 +2848,11 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
         rows = _parseExcel(bytes);
       }
 
-      if (rows.length < 2) throw Exception('File must contain header row + at least one data row');
+      if (rows.length < 2)
+        throw Exception('File must contain header row + at least one data row');
 
-      final List<Map<String, dynamic>> valid  = [];
-      final List<String>               errors = [];
+      final List<Map<String, dynamic>> valid = [];
+      final List<String> errors = [];
 
       for (int i = 1; i < rows.length; i++) {
         final row = rows[i];
@@ -1868,77 +2860,108 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
         if (_sv(row, 0).toUpperCase().startsWith('INSTRUCTION')) continue;
 
         final rowErrors = <String>[];
-        final customerId    = _sv(row, 0);
-        final customerName  = _sv(row, 1);
+        final customerId = _sv(row, 0);
+        final customerName = _sv(row, 1);
         final customerEmail = _sv(row, 2);
         final customerPhone = _sv(row, 3);
         final challanDateStr = _sv(row, 4);
-        final expDateStr    = _sv(row, 5);
-        final refNumber     = _sv(row, 6);
-        final purpose       = _sv(row, 7, 'Sales');
+        final expDateStr = _sv(row, 5);
+        final refNumber = _sv(row, 6);
+        final purpose = _sv(row, 7, 'Sales');
         final transportMode = _sv(row, 8, 'Road');
         final vehicleNumber = _sv(row, 9);
-        final driverName    = _sv(row, 10);
+        final driverName = _sv(row, 10);
         final transporterName = _sv(row, 11);
-        final itemsRaw      = _sv(row, 12);
-        final qtysRaw       = _sv(row, 13);
-        final unitsRaw      = _sv(row, 14, 'Pcs');
-        final notes         = _sv(row, 15);
-        final createdBy     = _sv(row, 16, 'import');
+        final itemsRaw = _sv(row, 12);
+        final qtysRaw = _sv(row, 13);
+        final unitsRaw = _sv(row, 14, 'Pcs');
+        final notes = _sv(row, 15);
+        final createdBy = _sv(row, 16, 'import');
 
-        if (customerId.isEmpty)   rowErrors.add('Customer ID required');
+        if (customerId.isEmpty) rowErrors.add('Customer ID required');
         if (customerName.isEmpty) rowErrors.add('Customer Name required');
-        if (itemsRaw.isEmpty)     rowErrors.add('Item Details required');
-        if (qtysRaw.isEmpty)      rowErrors.add('Quantities required');
+        if (itemsRaw.isEmpty) rowErrors.add('Item Details required');
+        if (qtysRaw.isEmpty) rowErrors.add('Quantities required');
 
-        final validPurposes = ['Sales', 'Job Work', 'Stock Transfer', 'Exhibition/Display', 'Replacement/Repair', 'Supply on Approval', 'Other'];
-        if (!validPurposes.any((p) => purpose.toLowerCase().contains(p.toLowerCase().split('/')[0].toLowerCase()))) {
+        final validPurposes = [
+          'Sales',
+          'Job Work',
+          'Stock Transfer',
+          'Exhibition/Display',
+          'Replacement/Repair',
+          'Supply on Approval',
+          'Other'
+        ];
+        if (!validPurposes.any((p) => purpose
+            .toLowerCase()
+            .contains(p.toLowerCase().split('/')[0].toLowerCase()))) {
           rowErrors.add('Invalid Purpose (use: ${validPurposes.join('/')})');
         }
 
         DateTime? challanDate;
         DateTime? expDate;
-        try { challanDate = DateFormat('dd/MM/yyyy').parse(challanDateStr); }
-        catch (_) { rowErrors.add('Invalid Challan Date (use dd/MM/yyyy)'); }
+        try {
+          challanDate = DateFormat('dd/MM/yyyy').parse(challanDateStr);
+        } catch (_) {
+          rowErrors.add('Invalid Challan Date (use dd/MM/yyyy)');
+        }
         if (expDateStr.isNotEmpty) {
-          try { expDate = DateFormat('dd/MM/yyyy').parse(expDateStr); } catch (_) { rowErrors.add('Invalid Expected Delivery Date'); }
+          try {
+            expDate = DateFormat('dd/MM/yyyy').parse(expDateStr);
+          } catch (_) {
+            rowErrors.add('Invalid Expected Delivery Date');
+          }
         }
 
-        if (rowErrors.isNotEmpty) { errors.add('Row ${i + 1}: ${rowErrors.join(', ')}'); continue; }
+        if (rowErrors.isNotEmpty) {
+          errors.add('Row ${i + 1}: ${rowErrors.join(', ')}');
+          continue;
+        }
 
         // Parse items
-        final itemNames = itemsRaw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-        final qtys      = qtysRaw.split('|').map((s) => double.tryParse(s.trim()) ?? 0.0).toList();
-        final units     = unitsRaw.split('|').map((s) => s.trim()).toList();
+        final itemNames = itemsRaw
+            .split('|')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        final qtys = qtysRaw
+            .split('|')
+            .map((s) => double.tryParse(s.trim()) ?? 0.0)
+            .toList();
+        final units = unitsRaw.split('|').map((s) => s.trim()).toList();
 
-        if (itemNames.isEmpty) { errors.add('Row ${i + 1}: No valid items found'); continue; }
+        if (itemNames.isEmpty) {
+          errors.add('Row ${i + 1}: No valid items found');
+          continue;
+        }
 
         final items = <Map<String, dynamic>>[];
         for (int j = 0; j < itemNames.length; j++) {
           items.add({
             'itemDetails': itemNames[j],
-            'quantity':    j < qtys.length ? qtys[j] : 1.0,
-            'unit':        j < units.length && units[j].isNotEmpty ? units[j] : 'Pcs',
+            'quantity': j < qtys.length ? qtys[j] : 1.0,
+            'unit': j < units.length && units[j].isNotEmpty ? units[j] : 'Pcs',
           });
         }
 
         valid.add({
-          'customerId':    customerId,
-          'customerName':  customerName,
+          'customerId': customerId,
+          'customerName': customerName,
           'customerEmail': customerEmail,
           'customerPhone': customerPhone,
-          'challanDate':   challanDate!.toIso8601String(),
-          if (expDate != null) 'expectedDeliveryDate': expDate.toIso8601String(),
+          'challanDate': challanDate!.toIso8601String(),
+          if (expDate != null)
+            'expectedDeliveryDate': expDate.toIso8601String(),
           'referenceNumber': refNumber.isNotEmpty ? refNumber : null,
-          'purpose':       purpose,
+          'purpose': purpose,
           'transportMode': transportMode,
-          if (vehicleNumber.isNotEmpty)    'vehicleNumber':    vehicleNumber,
-          if (driverName.isNotEmpty)       'driverName':       driverName,
-          if (transporterName.isNotEmpty)  'transporterName':  transporterName,
-          'items':         items,
+          if (vehicleNumber.isNotEmpty) 'vehicleNumber': vehicleNumber,
+          if (driverName.isNotEmpty) 'driverName': driverName,
+          if (transporterName.isNotEmpty) 'transporterName': transporterName,
+          'items': items,
           if (notes.isNotEmpty) 'customerNotes': notes,
-          'createdBy':     createdBy,
-          'status':        'DRAFT',
+          'createdBy': createdBy,
+          'status': 'DRAFT',
         });
       }
 
@@ -1948,25 +2971,37 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Confirm Import'),
-          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${valid.length} challan(s) will be created.'),
-            if (errors.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('${errors.length} row(s) skipped:', style: const TextStyle(color: _red, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 150),
-                child: SingleChildScrollView(child: Text(errors.join('\n'), style: const TextStyle(fontSize: 12))),
-              ),
-            ],
-          ])),
+          content: SingleChildScrollView(
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text('${valid.length} challan(s) will be created.'),
+                if (errors.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('${errors.length} row(s) skipped:',
+                      style: const TextStyle(
+                          color: _red, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 150),
+                    child: SingleChildScrollView(
+                        child: Text(errors.join('\n'),
+                            style: const TextStyle(fontSize: 12))),
+                  ),
+                ],
+              ])),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: _navy, foregroundColor: Colors.white),
               child: const Text('Import'),
             ),
           ],
@@ -1974,7 +3009,10 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
       );
 
       if (confirmed != true) {
-        setState(() { _uploading = false; _fileName = null; });
+        setState(() {
+          _uploading = false;
+          _fileName = null;
+        });
         return;
       }
 
@@ -1991,33 +3029,44 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
 
       setState(() {
         _uploading = false;
-        _results = {'success': success, 'failed': failed, 'total': valid.length};
+        _results = {
+          'success': success,
+          'failed': failed,
+          'total': valid.length
+        };
       });
 
       if (success > 0) {
         _showSnack('✅ $success challan(s) imported!', _green);
         await widget.onImportComplete();
       }
-      if (failed > 0) _showSnack('⚠ $failed challan(s) failed to import', _orange);
-
+      if (failed > 0)
+        _showSnack('⚠ $failed challan(s) failed to import', _orange);
     } catch (e) {
-      setState(() { _uploading = false; _fileName = null; });
+      setState(() {
+        _uploading = false;
+        _fileName = null;
+      });
       _showSnack('Import failed: $e', _red);
     }
   }
 
   List<List<dynamic>> _parseExcel(Uint8List bytes) {
-    final ex    = excel_pkg.Excel.decodeBytes(bytes);
+    final ex = excel_pkg.Excel.decodeBytes(bytes);
     final sheet = ex.tables.keys.first;
-    return (ex.tables[sheet]?.rows ?? []).map((row) => row.map((cell) {
-      if (cell?.value == null) return '';
-      if (cell!.value is excel_pkg.TextCellValue) return (cell.value as excel_pkg.TextCellValue).value;
-      return cell.value;
-    }).toList()).toList();
+    return (ex.tables[sheet]?.rows ?? [])
+        .map((row) => row.map((cell) {
+              if (cell?.value == null) return '';
+              if (cell!.value is excel_pkg.TextCellValue)
+                return (cell.value as excel_pkg.TextCellValue).value;
+              return cell.value;
+            }).toList())
+        .toList();
   }
 
   List<List<dynamic>> _parseCSV(Uint8List bytes) {
-    return utf8.decode(bytes, allowMalformed: true)
+    return utf8
+        .decode(bytes, allowMalformed: true)
         .split(RegExp(r'\r?\n'))
         .where((l) => l.trim().isNotEmpty)
         .map(_parseCSVLine)
@@ -2031,11 +3080,18 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
     for (int i = 0; i < line.length; i++) {
       final ch = line[i];
       if (ch == '"') {
-        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') { buf.write('"'); i++; }
-        else { inQuotes = !inQuotes; }
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          buf.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
       } else if (ch == ',' && !inQuotes) {
-        fields.add(buf.toString().trim()); buf.clear();
-      } else { buf.write(ch); }
+        fields.add(buf.toString().trim());
+        buf.clear();
+      } else {
+        buf.write(ch);
+      }
     }
     fields.add(buf.toString().trim());
     return fields;
@@ -2048,11 +3104,7 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
 
   void _showSnack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg), backgroundColor: color,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   @override
@@ -2064,79 +3116,121 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
             ? 560
             : MediaQuery.of(context).size.width * 0.92,
         padding: const EdgeInsets.all(28),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header
-          Row(children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: _purple.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.upload_file_rounded, color: _purple, size: 24),
-            ),
-            const SizedBox(width: 14),
-            const Text('Import Delivery Challans', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
-          ]),
-          const SizedBox(height: 24),
-
-          // Step 1
-          _importStep(
-            step: '1', color: _blue, icon: Icons.download_rounded,
-            title: 'Download Template',
-            subtitle: 'Get the Excel template with required columns and an example row.',
-            buttonLabel: _downloading ? 'Downloading…' : 'Download Template',
-            onPressed: _downloading || _uploading ? null : _downloadTemplate,
-          ),
-          const SizedBox(height: 16),
-
-          // Step 2
-          _importStep(
-            step: '2', color: _green, icon: Icons.upload_rounded,
-            title: 'Upload Filled File',
-            subtitle: 'Fill the template and upload (XLSX / XLS / CSV).',
-            buttonLabel: _uploading ? 'Uploading…' : (_fileName != null ? 'Change File' : 'Select File'),
-            onPressed: _downloading || _uploading ? null : _uploadFile,
-          ),
-
-          // Results
-          if (_results != null) ...[
-            const Divider(height: 28),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey[200]!)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Import Results', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 10),
-                Row(children: [
-                  const Icon(Icons.check_circle, color: _green, size: 18),
-                  const SizedBox(width: 8),
-                  Text('Successfully created: ${_results!['success']}'),
-                ]),
-                if ((_results!['failed'] ?? 0) > 0) ...[
-                  const SizedBox(height: 6),
-                  Row(children: [
-                    const Icon(Icons.cancel, color: _red, size: 18),
-                    const SizedBox(width: 8),
-                    Text('Failed: ${_results!['failed']}', style: const TextStyle(color: _red)),
-                  ]),
-                ],
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                      color: _purple.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.upload_file_rounded,
+                      color: _purple, size: 24),
+                ),
+                const SizedBox(width: 14),
+                const Text('Import Delivery Challans',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close)),
               ]),
-            ),
-          ],
-        ]),
+              const SizedBox(height: 24),
+
+              // Step 1
+              _importStep(
+                step: '1',
+                color: _blue,
+                icon: Icons.download_rounded,
+                title: 'Download Template',
+                subtitle:
+                    'Get the Excel template with required columns and an example row.',
+                buttonLabel:
+                    _downloading ? 'Downloading…' : 'Download Template',
+                onPressed:
+                    _downloading || _uploading ? null : _downloadTemplate,
+              ),
+              const SizedBox(height: 16),
+
+              // Step 2
+              _importStep(
+                step: '2',
+                color: _green,
+                icon: Icons.upload_rounded,
+                title: 'Upload Filled File',
+                subtitle: 'Fill the template and upload (XLSX / XLS / CSV).',
+                buttonLabel: _uploading
+                    ? 'Uploading…'
+                    : (_fileName != null ? 'Change File' : 'Select File'),
+                onPressed: _downloading || _uploading ? null : _uploadFile,
+              ),
+
+              // Results
+              if (_results != null) ...[
+                const Divider(height: 28),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey[200]!)),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Import Results',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          const Icon(Icons.check_circle,
+                              color: _green, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Successfully created: ${_results!['success']}'),
+                        ]),
+                        if ((_results!['failed'] ?? 0) > 0) ...[
+                          const SizedBox(height: 6),
+                          Row(children: [
+                            const Icon(Icons.cancel, color: _red, size: 18),
+                            const SizedBox(width: 8),
+                            Text('Failed: ${_results!['failed']}',
+                                style: const TextStyle(color: _red)),
+                          ]),
+                        ],
+                      ]),
+                ),
+              ],
+            ]),
       ),
     );
   }
 
   Widget _importStep({
-    required String step, required Color color, required IconData icon,
-    required String title, required String subtitle,
-    required String buttonLabel, required VoidCallback? onPressed,
+    required String step,
+    required Color color,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String buttonLabel,
+    required VoidCallback? onPressed,
   }) {
-    final circle = Container(width: 36, height: 36, decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Center(child: Text(step, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))));
-    final textBlock = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+    final circle = Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: Center(
+            child: Text(step,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16))));
+    final textBlock =
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
       const SizedBox(height: 4),
       Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
     ]);
@@ -2145,7 +3239,8 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
       icon: Icon(icon, size: 16),
       label: Text(buttonLabel, style: const TextStyle(fontSize: 12)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: color, foregroundColor: Colors.white,
+        backgroundColor: color,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: color.withOpacity(0.5),
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2154,16 +3249,31 @@ class _BulkImportChallansDialogState extends State<BulkImportChallansDialog> {
     );
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: color.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.25))),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.25))),
       child: LayoutBuilder(builder: (context, constraints) {
         if (constraints.maxWidth < 340) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [circle, const SizedBox(width: 10), Expanded(child: textBlock)]),
-            const SizedBox(height: 10),
-            SizedBox(width: double.infinity, child: button),
-          ]);
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  circle,
+                  const SizedBox(width: 10),
+                  Expanded(child: textBlock)
+                ]),
+                const SizedBox(height: 10),
+                SizedBox(width: double.infinity, child: button),
+              ]);
         }
-        return Row(children: [circle, const SizedBox(width: 14), Expanded(child: textBlock), const SizedBox(width: 12), button]);
+        return Row(children: [
+          circle,
+          const SizedBox(width: 14),
+          Expanded(child: textBlock),
+          const SizedBox(width: 12),
+          button
+        ]);
       }),
     );
   }

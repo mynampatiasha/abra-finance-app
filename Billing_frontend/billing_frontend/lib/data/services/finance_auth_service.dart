@@ -16,13 +16,13 @@ class FinanceAuthService {
   static String get _baseUrl => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _authHeaders() async {
-    final token     = await FinanceSecureStorage.getToken();
-    final orgHdr    = await FinanceSecureStorage.getOrgHeader();    // ← NEW
+    final token = await FinanceSecureStorage.getToken();
+    final orgHdr = await FinanceSecureStorage.getOrgHeader(); // ← NEW
     final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
-      'x-org-ids': orgHdr,        // ← NEW
+      'x-org-ids': orgHdr, // ← NEW
       'x-branch-ids': branchHdr,
     };
   }
@@ -38,7 +38,7 @@ class FinanceAuthService {
   // ── HELPER: persist full session from a login/select-org response data ───────
   static Future<void> _persistSession(Map<String, dynamic> data) async {
     try {
-      final user  = data['user']  as Map<String, dynamic>? ?? {};
+      final user = data['user'] as Map<String, dynamic>? ?? {};
       final token = data['token'] as String? ?? '';
 
       // ✅ Extract orgLogoUrl and entityName from user object
@@ -46,19 +46,20 @@ class FinanceAuthService {
       final entityName = user['entityName']?.toString();
 
       await FinanceSecureStorage.saveSession(
-        token:      token,
-        userId:     user['id']?.toString()      ?? '',
-        name:       user['name']?.toString()    ?? '',
-        email:      user['email']?.toString()   ?? '',
-        phone:      user['phone']?.toString()   ?? '',
-        role:       user['role']?.toString()    ?? '',
-        orgId:      user['orgId']?.toString()   ?? '',
-        orgName:    user['orgName']?.toString() ?? '',
-        orgLogoUrl: orgLogoUrl,                         // ✅ NEW
-        entityName: entityName,                         // ✅ NEW: Entity name
+        token: token,
+        userId: user['id']?.toString() ?? '',
+        name: user['name']?.toString() ?? '',
+        email: user['email']?.toString() ?? '',
+        phone: user['phone']?.toString() ?? '',
+        role: user['role']?.toString() ?? '',
+        orgId: user['orgId']?.toString() ?? '',
+        orgName: user['orgName']?.toString() ?? '',
+        orgLogoUrl: orgLogoUrl, // ✅ NEW
+        entityName: entityName, // ✅ NEW: Entity name
       );
 
-      debugPrint('✅ Finance session saved (logo: ${orgLogoUrl ?? 'none'}, entity: ${entityName ?? 'none'})');
+      debugPrint(
+          '✅ Finance session saved (logo: ${orgLogoUrl ?? 'none'}, entity: ${entityName ?? 'none'})');
 
       // ── Save permissions ─────────────────────────────────────────────────────
       final rawPerms = user['permissions'];
@@ -86,19 +87,20 @@ class FinanceAuthService {
           (o) => (o as Map)['orgId'] == currentOrgId,
           orElse: () => <String, dynamic>{},
         ) as Map;
-        final allowedBranches = List<String>.from(orgEntry['allowedBranches'] ?? []);
+        final allowedBranches =
+            List<String>.from(orgEntry['allowedBranches'] ?? []);
         await FinanceSecureStorage.saveAllowedBranchIds(allowedBranches);
         debugPrint('✅ Finance allowedBranches saved: $allowedBranches');
       } else {
-        final orgId      = user['orgId']?.toString()   ?? '';
-        final orgName    = user['orgName']?.toString() ?? '';
-        final role       = user['role']?.toString()    ?? '';
+        final orgId = user['orgId']?.toString() ?? '';
+        final orgName = user['orgName']?.toString() ?? '';
+        final role = user['role']?.toString() ?? '';
         if (orgId.isNotEmpty) {
           await FinanceSecureStorage.saveOrganizations([
             {
-              'orgId':   orgId,
+              'orgId': orgId,
               'orgName': orgName,
-              'role':    role,
+              'role': role,
               'logoUrl': orgLogoUrl, // ✅
             },
           ]);
@@ -128,19 +130,19 @@ class FinanceAuthService {
     required String password,
     required String phone,
     required String orgName,
-    String? entityName,  // ✅ NEW: Optional entity name
+    String? entityName, // ✅ NEW: Optional entity name
   }) async {
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/api/finance/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'name':       name,
-          'email':      email,
-          'password':   password,
-          'phone':      phone,
-          'orgName':    orgName,
-          'entityName': entityName ?? '',  // ✅ NEW: Include entity name
+          'name': name,
+          'email': email,
+          'password': password,
+          'phone': phone,
+          'orgName': orgName,
+          'entityName': entityName ?? '', // ✅ NEW: Include entity name
         }),
       );
       final result = jsonDecode(response.body) as Map<String, dynamic>;
@@ -176,7 +178,7 @@ class FinanceAuthService {
           await _persistSession(result['data'] as Map<String, dynamic>);
           debugPrint('✅ Finance login: single org — session persisted');
         } else if (requireOrgSelect && result['data'] != null) {
-          final data    = result['data'] as Map<String, dynamic>;
+          final data = result['data'] as Map<String, dynamic>;
           final tempTok = data['tempToken'] as String? ?? '';
           if (tempTok.isNotEmpty) {
             await FinanceSecureStorage.saveTempToken(tempTok);
@@ -187,7 +189,8 @@ class FinanceAuthService {
           final orgs = data['organizations'];
           if (orgs is List) {
             await FinanceSecureStorage.saveOrganizations(orgs);
-            debugPrint('✅ Finance login: organizations list saved (${orgs.length})');
+            debugPrint(
+                '✅ Finance login: organizations list saved (${orgs.length})');
           }
         }
       }
@@ -200,16 +203,17 @@ class FinanceAuthService {
   }
 
   // ── Select Org ────────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> selectOrg(String orgId, {String? directToken}) async {
+  static Future<Map<String, dynamic>> selectOrg(String orgId,
+      {String? directToken}) async {
     try {
-      final mainToken  = await FinanceSecureStorage.getToken();
-      final tempToken  = directToken ?? await FinanceSecureStorage.getTempToken();
+      final mainToken = await FinanceSecureStorage.getToken();
+      final tempToken =
+          directToken ?? await FinanceSecureStorage.getTempToken();
       // Prefer tempToken for org selection — it's the multi-org flow token
       // issued by login. Falling back to mainToken handles re-selection from
       // within an already-authenticated session (e.g. switching orgs).
-      final activeToken = (tempToken != null && tempToken.isNotEmpty)
-          ? tempToken
-          : mainToken;
+      final activeToken =
+          (tempToken != null && tempToken.isNotEmpty) ? tempToken : mainToken;
 
       final headers = {
         'Content-Type': 'application/json',
@@ -225,27 +229,31 @@ class FinanceAuthService {
 
       // Auto-logout if token is expired/invalid
       if (await _checkForTokenExpiry(response)) {
-        return {'success': false, 'message': 'Session expired. Please log in again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please log in again.'
+        };
       }
 
       final result = jsonDecode(response.body) as Map<String, dynamic>;
 
       if (result['success'] == true && result['data'] != null) {
-        final data      = result['data'] as Map<String, dynamic>;
+        final data = result['data'] as Map<String, dynamic>;
         final savedOrgs = await FinanceSecureStorage.getOrganizations();
 
         // ✅ _persistSession now saves orgLogoUrl for the selected org
         await _persistSession(data);
 
         // Preserve full org list (backend returns enriched list with logos)
-        final returnedOrgs = (data['user'] as Map?)
-            ?['organizations'] as List?;
+        final returnedOrgs = (data['user'] as Map?)?['organizations'] as List?;
         if (returnedOrgs != null && returnedOrgs.isNotEmpty) {
           await FinanceSecureStorage.saveOrganizations(returnedOrgs);
-          debugPrint('✅ Finance select-org: enriched org list saved (${returnedOrgs.length})');
+          debugPrint(
+              '✅ Finance select-org: enriched org list saved (${returnedOrgs.length})');
         } else if (savedOrgs.isNotEmpty) {
           await FinanceSecureStorage.saveOrganizations(savedOrgs);
-          debugPrint('✅ Finance select-org: preserved existing org list (${savedOrgs.length})');
+          debugPrint(
+              '✅ Finance select-org: preserved existing org list (${savedOrgs.length})');
         }
 
         await FinanceSecureStorage.clearTempToken();
@@ -270,17 +278,20 @@ class FinanceAuthService {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-logo');
+      final uri = Uri.parse('$_baseUrl/api/finance/auth/upload-org-logo');
 
       final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
+        ..headers['x-branch-ids'] = branchHdr;
 
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png'  ? 'image/png'  :
-                       ext == 'webp' ? 'image/webp' : 'image/jpeg';
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
 
       if (imageFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
@@ -292,23 +303,23 @@ class FinanceAuthService {
         request.files.add(http.MultipartFile.fromBytes(
           'logo',
           imageBytes,
-          filename:    filename,
+          filename: filename,
           contentType: MediaType.parse(mimeType),
         ));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
 
-      final streamed  = await request.send();
-      final response  = await http.Response.fromStream(streamed);
-      final result    = jsonDecode(response.body) as Map<String, dynamic>;
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      final result = jsonDecode(response.body) as Map<String, dynamic>;
 
       // ✅ Update stored orgLogoUrl immediately on success
       if (result['success'] == true) {
         final logoUrl = result['data']?['logoUrl']?.toString();
         if (logoUrl != null && logoUrl.isNotEmpty) {
           // Re-save session with updated logo URL
-          final orgId   = await FinanceSecureStorage.getOrgId()   ?? '';
+          final orgId = await FinanceSecureStorage.getOrgId() ?? '';
           final orgName = await FinanceSecureStorage.getOrgName() ?? '';
 
           // Update organizations list with new logo
@@ -320,22 +331,22 @@ class FinanceAuthService {
           await FinanceSecureStorage.saveOrganizations(updatedOrgs);
 
           // Update the stored orgLogoUrl directly
-          final token2 = await FinanceSecureStorage.getToken()  ?? '';
+          final token2 = await FinanceSecureStorage.getToken() ?? '';
           final userId = await FinanceSecureStorage.getUserId() ?? '';
-          final name   = await FinanceSecureStorage.getName()   ?? '';
-          final email  = await FinanceSecureStorage.getEmail()  ?? '';
-          final phone  = await FinanceSecureStorage.getPhone()  ?? '';
-          final role   = await FinanceSecureStorage.getRole()   ?? '';
+          final name = await FinanceSecureStorage.getName() ?? '';
+          final email = await FinanceSecureStorage.getEmail() ?? '';
+          final phone = await FinanceSecureStorage.getPhone() ?? '';
+          final role = await FinanceSecureStorage.getRole() ?? '';
           await FinanceSecureStorage.saveSession(
-            token:      token2,
-            userId:     userId,
-            name:       name,
-            email:      email,
-            phone:      phone,
-            role:       role,
-            orgId:      orgId,
-            orgName:    orgName,
-            orgLogoUrl: logoUrl,   // ✅
+            token: token2,
+            userId: userId,
+            name: name,
+            email: email,
+            phone: phone,
+            role: role,
+            orgId: orgId,
+            orgName: orgName,
+            orgLogoUrl: logoUrl, // ✅
           );
           debugPrint('✅ orgLogoUrl updated in storage: $logoUrl');
         }
@@ -354,13 +365,13 @@ class FinanceAuthService {
       final result = await delete('/api/finance/auth/delete-org-logo');
       if (result['success'] == true) {
         // Clear the stored logo URL
-        final orgId   = await FinanceSecureStorage.getOrgId()   ?? '';
-        final token2  = await FinanceSecureStorage.getToken()   ?? '';
-        final userId  = await FinanceSecureStorage.getUserId()  ?? '';
-        final name    = await FinanceSecureStorage.getName()    ?? '';
-        final email   = await FinanceSecureStorage.getEmail()   ?? '';
-        final phone   = await FinanceSecureStorage.getPhone()   ?? '';
-        final role    = await FinanceSecureStorage.getRole()    ?? '';
+        final orgId = await FinanceSecureStorage.getOrgId() ?? '';
+        final token2 = await FinanceSecureStorage.getToken() ?? '';
+        final userId = await FinanceSecureStorage.getUserId() ?? '';
+        final name = await FinanceSecureStorage.getName() ?? '';
+        final email = await FinanceSecureStorage.getEmail() ?? '';
+        final phone = await FinanceSecureStorage.getPhone() ?? '';
+        final role = await FinanceSecureStorage.getRole() ?? '';
         final orgName = await FinanceSecureStorage.getOrgName() ?? '';
 
         final orgs = await FinanceSecureStorage.getOrganizations();
@@ -371,14 +382,14 @@ class FinanceAuthService {
         await FinanceSecureStorage.saveOrganizations(updatedOrgs);
 
         await FinanceSecureStorage.saveSession(
-          token:      token2,
-          userId:     userId,
-          name:       name,
-          email:      email,
-          phone:      phone,
-          role:       role,
-          orgId:      orgId,
-          orgName:    orgName,
+          token: token2,
+          userId: userId,
+          name: name,
+          email: email,
+          phone: phone,
+          role: role,
+          orgId: orgId,
+          orgName: orgName,
           orgLogoUrl: null,
         );
         debugPrint('✅ orgLogoUrl cleared from storage');
@@ -398,13 +409,16 @@ class FinanceAuthService {
   // ── Generic authenticated GET ─────────────────────────────────────────────────
   static Future<Map<String, dynamic>> get(String endpoint) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.get(
         Uri.parse('$_baseUrl$endpoint'),
         headers: headers,
       );
       if (await _checkForTokenExpiry(response)) {
-        return {'success': false, 'message': 'Session expired. Please log in again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please log in again.'
+        };
       }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
@@ -416,14 +430,17 @@ class FinanceAuthService {
   static Future<Map<String, dynamic>> post(
       String endpoint, Map<String, dynamic> body) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.post(
         Uri.parse('$_baseUrl$endpoint'),
         headers: headers,
         body: jsonEncode(body),
       );
       if (await _checkForTokenExpiry(response)) {
-        return {'success': false, 'message': 'Session expired. Please log in again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please log in again.'
+        };
       }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
@@ -435,14 +452,17 @@ class FinanceAuthService {
   static Future<Map<String, dynamic>> put(
       String endpoint, Map<String, dynamic> body) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.put(
         Uri.parse('$_baseUrl$endpoint'),
         headers: headers,
         body: jsonEncode(body),
       );
       if (await _checkForTokenExpiry(response)) {
-        return {'success': false, 'message': 'Session expired. Please log in again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please log in again.'
+        };
       }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
@@ -451,7 +471,8 @@ class FinanceAuthService {
   }
 
   // ── Generic authenticated DELETE ──────────────────────────────────────────────
-  static Future<Map<String, dynamic>> delete(String endpoint, {Map<String, dynamic>? body}) async {
+  static Future<Map<String, dynamic>> delete(String endpoint,
+      {Map<String, dynamic>? body}) async {
     try {
       final headers = await _authHeaders();
       final response = await http.delete(
@@ -460,7 +481,10 @@ class FinanceAuthService {
         body: body != null ? jsonEncode(body) : null,
       );
       if (await _checkForTokenExpiry(response)) {
-        return {'success': false, 'message': 'Session expired. Please log in again.'};
+        return {
+          'success': false,
+          'message': 'Session expired. Please log in again.'
+        };
       }
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
@@ -475,19 +499,19 @@ class FinanceAuthService {
     if (response.statusCode != 401) return false;
     try {
       final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final code    = body['code']    as String? ?? '';
+      final code = body['code'] as String? ?? '';
       final message = body['message'] as String? ?? '';
 
-      final isTokenError =
-          code == 'TOKEN_EXPIRED'   ||
-          code == 'INVALID_TOKEN'   ||
-          code == 'MISSING_TOKEN'   ||
-          code == 'USER_NOT_FOUND'  ||
+      final isTokenError = code == 'TOKEN_EXPIRED' ||
+          code == 'INVALID_TOKEN' ||
+          code == 'MISSING_TOKEN' ||
+          code == 'USER_NOT_FOUND' ||
           message.toLowerCase().contains('expired') ||
           message.toLowerCase().contains('invalid or expired');
 
       if (isTokenError) {
-        debugPrint('🔒 FinanceAuthService: $code / "$message" — triggering auto-logout');
+        debugPrint(
+            '🔒 FinanceAuthService: $code / "$message" — triggering auto-logout');
         await handleTokenExpired();
         return true;
       }
@@ -507,13 +531,13 @@ class FinanceAuthServiceExtra {
   static String get _baseUrl => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _authHeaders() async {
-    final token     = await FinanceSecureStorage.getToken();
-    final orgHdr    = await FinanceSecureStorage.getOrgHeader();    // ← NEW
+    final token = await FinanceSecureStorage.getToken();
+    final orgHdr = await FinanceSecureStorage.getOrgHeader(); // ← NEW
     final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
-      'x-org-ids': orgHdr,        // ← NEW
+      'x-org-ids': orgHdr, // ← NEW
       'x-branch-ids': branchHdr,
     };
   }
@@ -525,18 +549,25 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-qr');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri = Uri.parse('$_baseUrl/api/finance/auth/upload-org-qr');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+        ..headers['x-branch-ids'] = branchHdr;
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       if (imageFile != null) {
-        request.files.add(await http.MultipartFile.fromPath('qr', imageFile.path, contentType: MediaType.parse(mimeType)));
+        request.files.add(await http.MultipartFile.fromPath(
+            'qr', imageFile.path,
+            contentType: MediaType.parse(mimeType)));
       } else if (imageBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes('qr', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+        request.files.add(http.MultipartFile.fromBytes('qr', imageBytes,
+            filename: filename, contentType: MediaType.parse(mimeType)));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
@@ -556,17 +587,19 @@ class FinanceAuthServiceExtra {
     required String label,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-org-document');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri = Uri.parse('$_baseUrl/api/finance/auth/upload-org-document');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr
+        ..headers['x-branch-ids'] = branchHdr
         ..fields['label'] = label;
       if (docFile != null) {
-        request.files.add(await http.MultipartFile.fromPath('document', docFile.path));
+        request.files
+            .add(await http.MultipartFile.fromPath('document', docFile.path));
       } else if (docBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes('document', docBytes, filename: filename));
+        request.files.add(http.MultipartFile.fromBytes('document', docBytes,
+            filename: filename));
       } else {
         return {'success': false, 'message': 'No file provided'};
       }
@@ -581,7 +614,7 @@ class FinanceAuthServiceExtra {
   // ── Delete Org Document ─────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> deleteOrgDocument(String docId) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.delete(
         Uri.parse('$_baseUrl/api/finance/auth/org-document/$docId'),
         headers: headers,
@@ -599,20 +632,26 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/auth/upload-digital-signature');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri =
+          Uri.parse('$_baseUrl/api/finance/auth/upload-digital-signature');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+        ..headers['x-branch-ids'] = branchHdr;
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       if (imageFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
-          'signature', imageFile.path, contentType: MediaType.parse(mimeType)));
+            'signature', imageFile.path,
+            contentType: MediaType.parse(mimeType)));
       } else if (imageBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'signature', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+        request.files.add(http.MultipartFile.fromBytes('signature', imageBytes,
+            filename: filename, contentType: MediaType.parse(mimeType)));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
@@ -627,7 +666,7 @@ class FinanceAuthServiceExtra {
   // ── Delete Digital Signature ────────────────────────────────────────────────
   static Future<Map<String, dynamic>> deleteDigitalSignature() async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.delete(
         Uri.parse('$_baseUrl/api/finance/auth/delete-digital-signature'),
         headers: headers,
@@ -647,20 +686,26 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-logo');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri =
+          Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-logo');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+        ..headers['x-branch-ids'] = branchHdr;
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       if (imageFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
-          'logo', imageFile.path, contentType: MediaType.parse(mimeType)));
+            'logo', imageFile.path,
+            contentType: MediaType.parse(mimeType)));
       } else if (imageBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'logo', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+        request.files.add(http.MultipartFile.fromBytes('logo', imageBytes,
+            filename: filename, contentType: MediaType.parse(mimeType)));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
@@ -681,20 +726,26 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-qr');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri =
+          Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-qr');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+        ..headers['x-branch-ids'] = branchHdr;
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       if (imageFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
-          'qr', imageFile.path, contentType: MediaType.parse(mimeType)));
+            'qr', imageFile.path,
+            contentType: MediaType.parse(mimeType)));
       } else if (imageBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'qr', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+        request.files.add(http.MultipartFile.fromBytes('qr', imageBytes,
+            filename: filename, contentType: MediaType.parse(mimeType)));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
@@ -709,7 +760,7 @@ class FinanceAuthServiceExtra {
   // ── Delete Branch QR Code ───────────────────────────────────────────────────
   static Future<Map<String, dynamic>> deleteBranchQr(String branchId) async {
     try {
-      final headers  = await _authHeaders();
+      final headers = await _authHeaders();
       final response = await http.delete(
         Uri.parse('$_baseUrl/api/finance/branches/$branchId/delete-qr'),
         headers: headers,
@@ -729,20 +780,26 @@ class FinanceAuthServiceExtra {
     required String filename,
   }) async {
     try {
-      final token     = await FinanceSecureStorage.getToken();
+      final token = await FinanceSecureStorage.getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final uri       = Uri.parse('$_baseUrl/api/finance/branches/$branchId/upload-signature');
-      final request   = http.MultipartRequest('POST', uri)
+      final uri = Uri.parse(
+          '$_baseUrl/api/finance/branches/$branchId/upload-signature');
+      final request = http.MultipartRequest('POST', uri)
         ..headers['Authorization'] = 'Bearer ${token ?? ''}'
-        ..headers['x-branch-ids']  = branchHdr;
-      final ext      = filename.split('.').last.toLowerCase();
-      final mimeType = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+        ..headers['x-branch-ids'] = branchHdr;
+      final ext = filename.split('.').last.toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
       if (imageFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
-          'signature', imageFile.path, contentType: MediaType.parse(mimeType)));
+            'signature', imageFile.path,
+            contentType: MediaType.parse(mimeType)));
       } else if (imageBytes != null) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'signature', imageBytes, filename: filename, contentType: MediaType.parse(mimeType)));
+        request.files.add(http.MultipartFile.fromBytes('signature', imageBytes,
+            filename: filename, contentType: MediaType.parse(mimeType)));
       } else {
         return {'success': false, 'message': 'No image provided'};
       }
@@ -750,7 +807,10 @@ class FinanceAuthServiceExtra {
       final response = await http.Response.fromStream(streamed);
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
-      return {'success': false, 'message': 'Branch signature upload failed: $e'};
+      return {
+        'success': false,
+        'message': 'Branch signature upload failed: $e'
+      };
     }
   }
 }

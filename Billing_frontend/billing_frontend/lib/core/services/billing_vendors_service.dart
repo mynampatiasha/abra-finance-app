@@ -27,8 +27,8 @@ import 'api_service.dart';
 // ============================================================================
 
 class BillingVendorsException implements Exception {
-  final String      message;
-  final int?        statusCode;
+  final String message;
+  final int? statusCode;
   final List<String>? errors;
 
   BillingVendorsException(this.message, [this.statusCode, this.errors]);
@@ -36,18 +36,26 @@ class BillingVendorsException implements Exception {
   String toUserMessage() {
     if (errors != null && errors!.isNotEmpty) return errors!.join('\n');
     switch (statusCode) {
-      case 400: return message.isNotEmpty ? message : 'Invalid vendor data.';
-      case 401: return 'Authentication failed. Please login again.';
-      case 403: return 'You do not have permission for this action.';
-      case 404: return 'Vendor not found.';
-      case 409: return 'A vendor with this email already exists.';
-      case 500: return 'Server error. Please try again later.';
-      default : return message.isNotEmpty ? message : 'An unexpected error occurred.';
+      case 400:
+        return message.isNotEmpty ? message : 'Invalid vendor data.';
+      case 401:
+        return 'Authentication failed. Please login again.';
+      case 403:
+        return 'You do not have permission for this action.';
+      case 404:
+        return 'Vendor not found.';
+      case 409:
+        return 'A vendor with this email already exists.';
+      case 500:
+        return 'Server error. Please try again later.';
+      default:
+        return message.isNotEmpty ? message : 'An unexpected error occurred.';
     }
   }
 
   @override
-  String toString() => 'BillingVendorsException: $message (Status: $statusCode)';
+  String toString() =>
+      'BillingVendorsException: $message (Status: $statusCode)';
 }
 
 // ============================================================================
@@ -66,53 +74,58 @@ class VendorAddress {
 
   const VendorAddress({
     this.attention = '',
-    this.street    = '',
-    this.city      = '',
-    this.state     = '',
-    this.zip       = '',
-    this.country   = 'India',
-    this.phone     = '',
-    this.fax       = '',
+    this.street = '',
+    this.city = '',
+    this.state = '',
+    this.zip = '',
+    this.country = 'India',
+    this.phone = '',
+    this.fax = '',
   });
 
   factory VendorAddress.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const VendorAddress();
     return VendorAddress(
       attention: json['attention'] ?? '',
-      street   : json['street']    ?? '',
-      city     : json['city']      ?? '',
-      state    : json['state']     ?? '',
-      zip      : json['zip']       ?? '',
-      country  : json['country']   ?? 'India',
-      phone    : json['phone']     ?? '',
-      fax      : json['fax']       ?? '',
+      street: json['street'] ?? '',
+      city: json['city'] ?? '',
+      state: json['state'] ?? '',
+      zip: json['zip'] ?? '',
+      country: json['country'] ?? 'India',
+      phone: json['phone'] ?? '',
+      fax: json['fax'] ?? '',
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'attention': attention,
-    'street'   : street,
-    'city'     : city,
-    'state'    : state,
-    'zip'      : zip,
-    'country'  : country,
-    'phone'    : phone,
-    'fax'      : fax,
-  };
+        'attention': attention,
+        'street': street,
+        'city': city,
+        'state': state,
+        'zip': zip,
+        'country': country,
+        'phone': phone,
+        'fax': fax,
+      };
 
   bool get isEmpty =>
-      attention.isEmpty && street.isEmpty && city.isEmpty &&
-      state.isEmpty     && zip.isEmpty    && country == 'India' &&
-      phone.isEmpty     && fax.isEmpty;
+      attention.isEmpty &&
+      street.isEmpty &&
+      city.isEmpty &&
+      state.isEmpty &&
+      zip.isEmpty &&
+      country == 'India' &&
+      phone.isEmpty &&
+      fax.isEmpty;
 
   String get formatted {
     final parts = <String>[
       if (attention.isNotEmpty) attention,
-      if (street.isNotEmpty)    street,
-      if (city.isNotEmpty)      city,
-      if (state.isNotEmpty)     state,
-      if (zip.isNotEmpty)       zip,
-      if (country.isNotEmpty)   country,
+      if (street.isNotEmpty) street,
+      if (city.isNotEmpty) city,
+      if (state.isNotEmpty) state,
+      if (zip.isNotEmpty) zip,
+      if (country.isNotEmpty) country,
     ];
     return parts.join(', ');
   }
@@ -123,56 +136,56 @@ class VendorAddress {
 // ============================================================================
 
 class VendorContactPerson {
-  final String  id;
-  final String  salutation;
-  final String  firstName;
-  final String  lastName;
-  final String  email;
-  final String  workPhone;
-  final String  mobile;
-  final String  designation;
-  final String  department;
-  final bool    portalAccess;
+  final String id;
+  final String salutation;
+  final String firstName;
+  final String lastName;
+  final String email;
+  final String workPhone;
+  final String mobile;
+  final String designation;
+  final String department;
+  final bool portalAccess;
 
   const VendorContactPerson({
-    this.id           = '',
-    this.salutation   = '',
-    this.firstName    = '',
-    this.lastName     = '',
-    this.email        = '',
-    this.workPhone    = '',
-    this.mobile       = '',
-    this.designation  = '',
-    this.department   = '',
+    this.id = '',
+    this.salutation = '',
+    this.firstName = '',
+    this.lastName = '',
+    this.email = '',
+    this.workPhone = '',
+    this.mobile = '',
+    this.designation = '',
+    this.department = '',
     this.portalAccess = false,
   });
 
   factory VendorContactPerson.fromJson(Map<String, dynamic> json) {
     return VendorContactPerson(
-      id          : json['_id']         ?? '',
-      salutation  : json['salutation']  ?? '',
-      firstName   : json['firstName']   ?? '',
-      lastName    : json['lastName']    ?? '',
-      email       : json['email']       ?? '',
-      workPhone   : json['workPhone']   ?? '',
-      mobile      : json['mobile']      ?? '',
-      designation : json['designation'] ?? '',
-      department  : json['department']  ?? '',
+      id: json['_id'] ?? '',
+      salutation: json['salutation'] ?? '',
+      firstName: json['firstName'] ?? '',
+      lastName: json['lastName'] ?? '',
+      email: json['email'] ?? '',
+      workPhone: json['workPhone'] ?? '',
+      mobile: json['mobile'] ?? '',
+      designation: json['designation'] ?? '',
+      department: json['department'] ?? '',
       portalAccess: json['portalAccess'] == true,
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'salutation'  : salutation,
-    'firstName'   : firstName,
-    'lastName'    : lastName,
-    'email'       : email,
-    'workPhone'   : workPhone,
-    'mobile'      : mobile,
-    'designation' : designation,
-    'department'  : department,
-    'portalAccess': portalAccess,
-  };
+        'salutation': salutation,
+        'firstName': firstName,
+        'lastName': lastName,
+        'email': email,
+        'workPhone': workPhone,
+        'mobile': mobile,
+        'designation': designation,
+        'department': department,
+        'portalAccess': portalAccess,
+      };
 
   String get fullName => '$salutation $firstName $lastName'.trim();
 }
@@ -182,9 +195,9 @@ class VendorContactPerson {
 // ============================================================================
 
 class VendorComment {
-  final String   id;
-  final String   text;
-  final String   createdBy;
+  final String id;
+  final String text;
+  final String createdBy;
   final DateTime createdAt;
 
   const VendorComment({
@@ -196,8 +209,8 @@ class VendorComment {
 
   factory VendorComment.fromJson(Map<String, dynamic> json) {
     return VendorComment(
-      id       : json['_id']       ?? '',
-      text     : json['text']      ?? '',
+      id: json['_id'] ?? '',
+      text: json['text'] ?? '',
       createdBy: json['createdBy'] ?? '',
       createdAt: json['createdAt'] != null
           ? DateTime.parse(json['createdAt'])
@@ -211,8 +224,8 @@ class VendorComment {
 // ============================================================================
 
 class MonthlyExpense {
-  final int    year;
-  final int    month;
+  final int year;
+  final int month;
   final String label;
   final double total;
 
@@ -225,7 +238,7 @@ class MonthlyExpense {
 
   factory MonthlyExpense.fromJson(Map<String, dynamic> json) {
     return MonthlyExpense(
-      year : json['year']  ?? 0,
+      year: json['year'] ?? 0,
       month: json['month'] ?? 0,
       label: json['label'] ?? '',
       total: (json['total'] ?? 0).toDouble(),
@@ -238,28 +251,28 @@ class MonthlyExpense {
 // ============================================================================
 
 class VendorOverviewData {
-  final String        currency;
-  final double        outstandingPayables;
-  final double        unusedCredits;
+  final String currency;
+  final double outstandingPayables;
+  final double unusedCredits;
   final List<MonthlyExpense> monthlyExpenses;
 
   const VendorOverviewData({
-    this.currency            = 'INR',
+    this.currency = 'INR',
     this.outstandingPayables = 0,
-    this.unusedCredits       = 0,
-    this.monthlyExpenses     = const [],
+    this.unusedCredits = 0,
+    this.monthlyExpenses = const [],
   });
 
   factory VendorOverviewData.fromJson(Map<String, dynamic> json) {
     final payables = json['payables'] as Map<String, dynamic>? ?? {};
-    final monthly  = (json['monthlyExpenses'] as List? ?? [])
+    final monthly = (json['monthlyExpenses'] as List? ?? [])
         .map((e) => MonthlyExpense.fromJson(e))
         .toList();
     return VendorOverviewData(
-      currency            : payables['currency']            ?? 'INR',
-      outstandingPayables : (payables['outstandingPayables'] ?? 0).toDouble(),
-      unusedCredits       : (payables['unusedCredits']       ?? 0).toDouble(),
-      monthlyExpenses     : monthly,
+      currency: payables['currency'] ?? 'INR',
+      outstandingPayables: (payables['outstandingPayables'] ?? 0).toDouble(),
+      unusedCredits: (payables['unusedCredits'] ?? 0).toDouble(),
+      monthlyExpenses: monthly,
     );
   }
 }
@@ -269,15 +282,15 @@ class VendorOverviewData {
 // ============================================================================
 
 class VendorTransaction {
-  final String   type;   // Bill | PurchaseOrder | PaymentMade | VendorCredit
-  final String   id;
-  final String   number;
+  final String type; // Bill | PurchaseOrder | PaymentMade | VendorCredit
+  final String id;
+  final String number;
   final DateTime date;
-  final String   status;
-  final double   amount;
-  final double?  amountDue;
-  final double?  amountPaid;
-  final double?  balanceAmount;
+  final String status;
+  final double amount;
+  final double? amountDue;
+  final double? amountPaid;
+  final double? balanceAmount;
   final DateTime? dueDate;
 
   const VendorTransaction({
@@ -295,16 +308,23 @@ class VendorTransaction {
 
   factory VendorTransaction.fromJson(Map<String, dynamic> json) {
     return VendorTransaction(
-      type         : json['type']          ?? '',
-      id           : json['id']            ?? '',
-      number       : json['number']        ?? '',
-      date         : json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
-      status       : json['status']        ?? '',
-      amount       : (json['amount']       ?? 0).toDouble(),
-      amountDue    : json['amountDue']    != null ? (json['amountDue'] as num).toDouble()    : null,
-      amountPaid   : json['amountPaid']   != null ? (json['amountPaid'] as num).toDouble()   : null,
-      balanceAmount: json['balanceAmount'] != null ? (json['balanceAmount'] as num).toDouble(): null,
-      dueDate      : json['dueDate'] != null ? DateTime.parse(json['dueDate']) : null,
+      type: json['type'] ?? '',
+      id: json['id'] ?? '',
+      number: json['number'] ?? '',
+      date:
+          json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
+      status: json['status'] ?? '',
+      amount: (json['amount'] ?? 0).toDouble(),
+      amountDue: json['amountDue'] != null
+          ? (json['amountDue'] as num).toDouble()
+          : null,
+      amountPaid: json['amountPaid'] != null
+          ? (json['amountPaid'] as num).toDouble()
+          : null,
+      balanceAmount: json['balanceAmount'] != null
+          ? (json['balanceAmount'] as num).toDouble()
+          : null,
+      dueDate: json['dueDate'] != null ? DateTime.parse(json['dueDate']) : null,
     );
   }
 }
@@ -314,12 +334,12 @@ class VendorTransaction {
 // ============================================================================
 
 class VendorMail {
-  final String   source;
-  final String   documentNumber;
-  final String   sentTo;
+  final String source;
+  final String documentNumber;
+  final String sentTo;
   final DateTime sentAt;
-  final String   subject;
-  final String   emailType;
+  final String subject;
+  final String emailType;
 
   const VendorMail({
     required this.source,
@@ -332,14 +352,14 @@ class VendorMail {
 
   factory VendorMail.fromJson(Map<String, dynamic> json) {
     return VendorMail(
-      source        : json['source']         ?? '',
+      source: json['source'] ?? '',
       documentNumber: json['documentNumber'] ?? '',
-      sentTo        : json['sentTo']         ?? '',
-      sentAt        : json['sentAt'] != null
+      sentTo: json['sentTo'] ?? '',
+      sentAt: json['sentAt'] != null
           ? DateTime.parse(json['sentAt'])
           : DateTime.now(),
-      subject       : json['subject']   ?? '',
-      emailType     : json['emailType'] ?? '',
+      subject: json['subject'] ?? '',
+      emailType: json['emailType'] ?? '',
     );
   }
 }
@@ -350,12 +370,12 @@ class VendorMail {
 
 class VendorStatementEntry {
   final DateTime date;
-  final String   type;
-  final String   number;
-  final double   debit;
-  final double   credit;
-  final double   balance;
-  final String   description;
+  final String type;
+  final String number;
+  final double debit;
+  final double credit;
+  final double balance;
+  final String description;
 
   const VendorStatementEntry({
     required this.date,
@@ -369,12 +389,13 @@ class VendorStatementEntry {
 
   factory VendorStatementEntry.fromJson(Map<String, dynamic> json) {
     return VendorStatementEntry(
-      date       : json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
-      type       : json['type']        ?? '',
-      number     : json['number']      ?? '',
-      debit      : (json['debit']      ?? 0).toDouble(),
-      credit     : (json['credit']     ?? 0).toDouble(),
-      balance    : (json['balance']    ?? 0).toDouble(),
+      date:
+          json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
+      type: json['type'] ?? '',
+      number: json['number'] ?? '',
+      debit: (json['debit'] ?? 0).toDouble(),
+      credit: (json['credit'] ?? 0).toDouble(),
+      balance: (json['balance'] ?? 0).toDouble(),
       description: json['description'] ?? '',
     );
   }
@@ -396,13 +417,13 @@ class BillingVendor {
   final String status;
 
   // Other Details
-  final String  defaultCurrency;
-  final String  paymentTerms;
-  final String  portalLanguage;
-  final bool    portalEnabled;
-  final String  facebook;
-  final String  twitter;
-  final double  openingBalance;
+  final String defaultCurrency;
+  final String paymentTerms;
+  final String portalLanguage;
+  final bool portalEnabled;
+  final String facebook;
+  final String twitter;
+  final double openingBalance;
   final DateTime? openingBalanceAsOf;
 
   // Tax Info
@@ -412,7 +433,7 @@ class BillingVendor {
   final String panNumber;
   final String taxPreference;
   final String exemptionReason;
-  final bool   tdsApplicable;
+  final bool tdsApplicable;
   final String tdsSection;
   final double tdsRate;
 
@@ -421,14 +442,14 @@ class BillingVendor {
   final VendorAddress shippingAddress;
 
   // Bank Details
-  final bool   bankDetailsProvided;
+  final bool bankDetailsProvided;
   final String accountHolderName;
   final String bankName;
   final String accountNumber;
   final String ifscCode;
 
   // Legacy flat address (backward compat)
-  final bool   addressProvided;
+  final bool addressProvided;
   final String addressLine1;
   final String addressLine2;
   final String city;
@@ -440,7 +461,7 @@ class BillingVendor {
   final List<VendorContactPerson> contactPersons;
 
   // Remarks / Comments
-  final String             remarks;
+  final String remarks;
   final List<VendorComment> comments;
 
   // Additional
@@ -454,114 +475,114 @@ class BillingVendor {
     required this.id,
     required this.vendorId,
     required this.vendorName,
-    this.companyName        = '',
+    this.companyName = '',
     required this.email,
     required this.phoneNumber,
-    this.alternatePhone     = '',
-    this.vendorType         = 'External Vendor',
-    this.status             = 'Active',
-    this.defaultCurrency    = 'INR',
-    this.paymentTerms       = 'Net 30',
-    this.portalLanguage     = 'English',
-    this.portalEnabled      = false,
-    this.facebook           = '',
-    this.twitter            = '',
-    this.openingBalance     = 0,
+    this.alternatePhone = '',
+    this.vendorType = 'External Vendor',
+    this.status = 'Active',
+    this.defaultCurrency = 'INR',
+    this.paymentTerms = 'Net 30',
+    this.portalLanguage = 'English',
+    this.portalEnabled = false,
+    this.facebook = '',
+    this.twitter = '',
+    this.openingBalance = 0,
     this.openingBalanceAsOf,
-    this.gstNumber          = '',
+    this.gstNumber = '',
     this.gstRegistrationType = '',
-    this.placeOfSupply      = '',
-    this.panNumber          = '',
-    this.taxPreference      = 'Taxable',
-    this.exemptionReason    = '',
-    this.tdsApplicable      = false,
-    this.tdsSection         = '',
-    this.tdsRate            = 0,
-    this.billingAddress     = const VendorAddress(),
-    this.shippingAddress    = const VendorAddress(),
+    this.placeOfSupply = '',
+    this.panNumber = '',
+    this.taxPreference = 'Taxable',
+    this.exemptionReason = '',
+    this.tdsApplicable = false,
+    this.tdsSection = '',
+    this.tdsRate = 0,
+    this.billingAddress = const VendorAddress(),
+    this.shippingAddress = const VendorAddress(),
     this.bankDetailsProvided = false,
-    this.accountHolderName  = '',
-    this.bankName           = '',
-    this.accountNumber      = '',
-    this.ifscCode           = '',
-    this.addressProvided    = false,
-    this.addressLine1       = '',
-    this.addressLine2       = '',
-    this.city               = '',
-    this.state              = '',
-    this.postalCode         = '',
-    this.country            = 'India',
-    this.contactPersons     = const [],
-    this.remarks            = '',
-    this.comments           = const [],
-    this.serviceCategory    = '',
-    this.notes              = '',
+    this.accountHolderName = '',
+    this.bankName = '',
+    this.accountNumber = '',
+    this.ifscCode = '',
+    this.addressProvided = false,
+    this.addressLine1 = '',
+    this.addressLine2 = '',
+    this.city = '',
+    this.state = '',
+    this.postalCode = '',
+    this.country = 'India',
+    this.contactPersons = const [],
+    this.remarks = '',
+    this.comments = const [],
+    this.serviceCategory = '',
+    this.notes = '',
     this.createdDate,
   });
 
   factory BillingVendor.fromJson(Map<String, dynamic> json) {
     return BillingVendor(
-      id              : json['_id']           ?? '',
-      vendorId        : json['vendorId']       ?? '',
-      vendorName      : json['vendorName']     ?? '',
-      companyName     : json['companyName']    ?? '',
-      email           : json['email']          ?? '',
-      phoneNumber     : json['phoneNumber']    ?? '',
-      alternatePhone  : json['alternatePhone'] ?? '',
-      vendorType      : json['vendorType']     ?? 'External Vendor',
-      status          : json['status']         ?? 'Active',
-      defaultCurrency : json['defaultCurrency']     ?? 'INR',
-      paymentTerms    : json['paymentTerms']        ?? 'Net 30',
-      portalLanguage  : json['portalLanguage']      ?? 'English',
-      portalEnabled   : json['portalEnabled']       == true,
-      facebook        : json['facebook']            ?? '',
-      twitter         : json['twitter']             ?? '',
-      openingBalance  : (json['openingBalance']     ?? 0).toDouble(),
+      id: json['_id'] ?? '',
+      vendorId: json['vendorId'] ?? '',
+      vendorName: json['vendorName'] ?? '',
+      companyName: json['companyName'] ?? '',
+      email: json['email'] ?? '',
+      phoneNumber: json['phoneNumber'] ?? '',
+      alternatePhone: json['alternatePhone'] ?? '',
+      vendorType: json['vendorType'] ?? 'External Vendor',
+      status: json['status'] ?? 'Active',
+      defaultCurrency: json['defaultCurrency'] ?? 'INR',
+      paymentTerms: json['paymentTerms'] ?? 'Net 30',
+      portalLanguage: json['portalLanguage'] ?? 'English',
+      portalEnabled: json['portalEnabled'] == true,
+      facebook: json['facebook'] ?? '',
+      twitter: json['twitter'] ?? '',
+      openingBalance: (json['openingBalance'] ?? 0).toDouble(),
       openingBalanceAsOf: json['openingBalanceAsOf'] != null
           ? DateTime.parse(json['openingBalanceAsOf'])
           : null,
-      gstNumber           : json['gstNumber']            ?? '',
-      gstRegistrationType : json['gstRegistrationType']  ?? '',
-      placeOfSupply       : json['placeOfSupply']         ?? '',
-      panNumber           : json['panNumber']             ?? '',
-      taxPreference       : json['taxPreference']         ?? 'Taxable',
-      exemptionReason     : json['exemptionReason']       ?? '',
-      tdsApplicable       : json['tdsApplicable']         == true,
-      tdsSection          : json['tdsSection']            ?? '',
-      tdsRate             : (json['tdsRate']              ?? 0).toDouble(),
-      billingAddress      : VendorAddress.fromJson(json['billingAddress']),
-      shippingAddress     : VendorAddress.fromJson(json['shippingAddress']),
-      bankDetailsProvided : json['bankDetailsProvided']   == true,
-      accountHolderName   : json['accountHolderName']     ?? '',
-      bankName            : json['bankName']              ?? '',
-      accountNumber       : json['accountNumber']         ?? '',
-      ifscCode            : json['ifscCode']              ?? '',
-      addressProvided     : json['addressProvided']       == true,
-      addressLine1        : json['addressLine1']          ?? '',
-      addressLine2        : json['addressLine2']          ?? '',
-      city                : json['city']                  ?? '',
-      state               : json['state']                 ?? '',
-      postalCode          : json['postalCode']            ?? '',
-      country             : json['country']               ?? 'India',
-      contactPersons      : (json['contactPersons'] as List? ?? [])
+      gstNumber: json['gstNumber'] ?? '',
+      gstRegistrationType: json['gstRegistrationType'] ?? '',
+      placeOfSupply: json['placeOfSupply'] ?? '',
+      panNumber: json['panNumber'] ?? '',
+      taxPreference: json['taxPreference'] ?? 'Taxable',
+      exemptionReason: json['exemptionReason'] ?? '',
+      tdsApplicable: json['tdsApplicable'] == true,
+      tdsSection: json['tdsSection'] ?? '',
+      tdsRate: (json['tdsRate'] ?? 0).toDouble(),
+      billingAddress: VendorAddress.fromJson(json['billingAddress']),
+      shippingAddress: VendorAddress.fromJson(json['shippingAddress']),
+      bankDetailsProvided: json['bankDetailsProvided'] == true,
+      accountHolderName: json['accountHolderName'] ?? '',
+      bankName: json['bankName'] ?? '',
+      accountNumber: json['accountNumber'] ?? '',
+      ifscCode: json['ifscCode'] ?? '',
+      addressProvided: json['addressProvided'] == true,
+      addressLine1: json['addressLine1'] ?? '',
+      addressLine2: json['addressLine2'] ?? '',
+      city: json['city'] ?? '',
+      state: json['state'] ?? '',
+      postalCode: json['postalCode'] ?? '',
+      country: json['country'] ?? 'India',
+      contactPersons: (json['contactPersons'] as List? ?? [])
           .map((e) => VendorContactPerson.fromJson(e))
           .toList(),
-      remarks  : json['remarks']  ?? '',
-      comments : (json['comments'] as List? ?? [])
+      remarks: json['remarks'] ?? '',
+      comments: (json['comments'] as List? ?? [])
           .map((e) => VendorComment.fromJson(e))
           .toList(),
       serviceCategory: json['serviceCategory'] ?? '',
-      notes          : json['notes']           ?? '',
-      createdDate    : json['createdDate'] != null
+      notes: json['notes'] ?? '',
+      createdDate: json['createdDate'] != null
           ? DateTime.parse(json['createdDate'])
           : null,
     );
   }
 
   // Backward-compat getters used by existing UI code
-  String get vendorDisplayName      => vendorName;
-  String get primaryEmail           => email;
-  String get primaryPhone           => phoneNumber;
+  String get vendorDisplayName => vendorName;
+  String get primaryEmail => email;
+  String get primaryPhone => phoneNumber;
   String get gstRegistrationTypeLeg => gstRegistrationType;
 }
 
@@ -581,38 +602,38 @@ class BillingVendorsService {
     required String email,
     required String phoneNumber,
     String? alternatePhone,
-    String  status           = 'Active',
+    String status = 'Active',
     // Other Details
-    String  defaultCurrency  = 'INR',
-    String  paymentTerms     = 'Net 30',
+    String defaultCurrency = 'INR',
+    String paymentTerms = 'Net 30',
     String? portalLanguage,
-    bool    portalEnabled    = false,
+    bool portalEnabled = false,
     String? facebook,
     String? twitter,
-    double  openingBalance   = 0,
+    double openingBalance = 0,
     String? openingBalanceAsOf,
     // Tax Info
     String? gstNumber,
     String? gstRegistrationType,
     String? placeOfSupply,
     String? panNumber,
-    String  taxPreference    = 'Taxable',
+    String taxPreference = 'Taxable',
     String? exemptionReason,
-    bool    tdsApplicable    = false,
+    bool tdsApplicable = false,
     String? tdsSection,
-    double  tdsRate          = 0,
+    double tdsRate = 0,
     // Address
     Map<String, dynamic>? billingAddress,
     Map<String, dynamic>? shippingAddress,
     // Bank Details (legacy)
-    bool    bankDetailsProvided = false,
+    bool bankDetailsProvided = false,
     String? accountHolderName,
     String? bankName,
     String? accountNumber,
     String? accountNumberConfirm,
     String? ifscCode,
     // Flat address (legacy)
-    bool    addressProvided  = false,
+    bool addressProvided = false,
     String? addressLine1,
     String? addressLine2,
     String? city,
@@ -628,49 +649,49 @@ class BillingVendorsService {
   }) async {
     try {
       final body = <String, dynamic>{
-        'vendorType'    : vendorType,
-        'vendorName'    : vendorName,
-        'companyName'   : companyName    ?? '',
-        'email'         : email,
-        'phoneNumber'   : phoneNumber,
+        'vendorType': vendorType,
+        'vendorName': vendorName,
+        'companyName': companyName ?? '',
+        'email': email,
+        'phoneNumber': phoneNumber,
         'alternatePhone': alternatePhone ?? '',
-        'status'        : status,
-        'defaultCurrency'   : defaultCurrency,
-        'paymentTerms'      : paymentTerms,
-        'portalLanguage'    : portalLanguage    ?? 'English',
-        'portalEnabled'     : portalEnabled,
-        'facebook'          : facebook          ?? '',
-        'twitter'           : twitter           ?? '',
-        'openingBalance'    : openingBalance,
+        'status': status,
+        'defaultCurrency': defaultCurrency,
+        'paymentTerms': paymentTerms,
+        'portalLanguage': portalLanguage ?? 'English',
+        'portalEnabled': portalEnabled,
+        'facebook': facebook ?? '',
+        'twitter': twitter ?? '',
+        'openingBalance': openingBalance,
         'openingBalanceAsOf': openingBalanceAsOf,
-        'gstNumber'          : gstNumber           ?? '',
+        'gstNumber': gstNumber ?? '',
         'gstRegistrationType': gstRegistrationType ?? '',
-        'placeOfSupply'      : placeOfSupply        ?? '',
-        'panNumber'          : panNumber            ?? '',
-        'taxPreference'      : taxPreference,
-        'exemptionReason'    : exemptionReason      ?? '',
-        'tdsApplicable'      : tdsApplicable,
-        'tdsSection'         : tdsSection           ?? '',
-        'tdsRate'            : tdsRate,
-        'billingAddress'     : billingAddress        ?? {},
-        'shippingAddress'    : shippingAddress       ?? {},
+        'placeOfSupply': placeOfSupply ?? '',
+        'panNumber': panNumber ?? '',
+        'taxPreference': taxPreference,
+        'exemptionReason': exemptionReason ?? '',
+        'tdsApplicable': tdsApplicable,
+        'tdsSection': tdsSection ?? '',
+        'tdsRate': tdsRate,
+        'billingAddress': billingAddress ?? {},
+        'shippingAddress': shippingAddress ?? {},
         'bankDetailsProvided': bankDetailsProvided,
-        'accountHolderName'  : accountHolderName     ?? '',
-        'bankName'           : bankName              ?? '',
-        'accountNumber'      : accountNumber         ?? '',
+        'accountHolderName': accountHolderName ?? '',
+        'bankName': bankName ?? '',
+        'accountNumber': accountNumber ?? '',
         'accountNumberConfirm': accountNumberConfirm ?? '',
-        'ifscCode'           : ifscCode              ?? '',
-        'addressProvided'    : addressProvided,
-        'addressLine1'       : addressLine1          ?? '',
-        'addressLine2'       : addressLine2          ?? '',
-        'city'               : city                  ?? '',
-        'state'              : state                 ?? '',
-        'postalCode'         : postalCode            ?? '',
-        'country'            : country               ?? 'India',
-        'contactPersons'     : contactPersons        ?? [],
-        'remarks'            : remarks               ?? '',
-        'serviceCategory'    : serviceCategory       ?? '',
-        'notes'              : notes                 ?? '',
+        'ifscCode': ifscCode ?? '',
+        'addressProvided': addressProvided,
+        'addressLine1': addressLine1 ?? '',
+        'addressLine2': addressLine2 ?? '',
+        'city': city ?? '',
+        'state': state ?? '',
+        'postalCode': postalCode ?? '',
+        'country': country ?? 'India',
+        'contactPersons': contactPersons ?? [],
+        'remarks': remarks ?? '',
+        'serviceCategory': serviceCategory ?? '',
+        'notes': notes ?? '',
       };
 
       return await _api.post('/api/finance/vendors', body: body);
@@ -690,19 +711,20 @@ class BillingVendorsService {
     String? search,
     String? vendorType,
     String? status,
-    int     page      = 1,
-    int     limit     = 1000,
-    String  sortBy    = 'createdDate',
-    String  sortOrder = 'desc',
+    int page = 1,
+    int limit = 1000,
+    String sortBy = 'createdDate',
+    String sortOrder = 'desc',
   }) async {
     try {
       final q = <String, String>{};
-      if (search     != null && search.isNotEmpty)     q['search']     = search;
-      if (vendorType != null && vendorType.isNotEmpty) q['vendorType'] = vendorType;
-      if (status     != null && status.isNotEmpty)     q['status']     = status;
-      q['page']      = page.toString();
-      q['limit']     = limit.toString();
-      q['sortBy']    = sortBy;
+      if (search != null && search.isNotEmpty) q['search'] = search;
+      if (vendorType != null && vendorType.isNotEmpty)
+        q['vendorType'] = vendorType;
+      if (status != null && status.isNotEmpty) q['status'] = status;
+      q['page'] = page.toString();
+      q['limit'] = limit.toString();
+      q['sortBy'] = sortBy;
       q['sortOrder'] = sortOrder;
 
       return await _api.get('/api/finance/vendors', queryParams: q);
@@ -718,10 +740,8 @@ class BillingVendorsService {
   static Future<List<BillingVendor>> getVendors() async {
     try {
       final response = await getAllVendors(limit: 1000);
-      final raw      = response['data'];
-      final list     = raw is List
-          ? raw
-          : (raw['vendors'] as List? ?? []);
+      final raw = response['data'];
+      final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
       return list.map((v) => BillingVendor.fromJson(v)).toList();
     } catch (e) {
       debugPrint('❌ Error in getVendors: $e');
@@ -745,7 +765,8 @@ class BillingVendorsService {
 
   static Future<VendorOverviewData> getVendorOverview(String vendorId) async {
     try {
-      final response = await _api.get('/api/finance/vendors/$vendorId/overview');
+      final response =
+          await _api.get('/api/finance/vendors/$vendorId/overview');
       return VendorOverviewData.fromJson(response['data'] ?? {});
     } on ApiException catch (e) {
       throw BillingVendorsException(e.message, e.statusCode);
@@ -765,8 +786,8 @@ class BillingVendorsService {
     try {
       final q = <String, String>{};
       if (fromDate != null) q['fromDate'] = fromDate;
-      if (toDate   != null) q['toDate']   = toDate;
-      if (type     != null) q['type']     = type;
+      if (toDate != null) q['toDate'] = toDate;
+      if (type != null) q['type'] = type;
 
       final response = await _api.get(
         '/api/finance/vendors/$vendorId/transactions',
@@ -786,7 +807,7 @@ class BillingVendorsService {
   static Future<List<VendorMail>> getVendorMails(String vendorId) async {
     try {
       final response = await _api.get('/api/finance/vendors/$vendorId/mails');
-      final list     = response['data'] as List? ?? [];
+      final list = response['data'] as List? ?? [];
       return list.map((e) => VendorMail.fromJson(e)).toList();
     } on ApiException catch (e) {
       throw BillingVendorsException(e.message, e.statusCode);
@@ -805,7 +826,7 @@ class BillingVendorsService {
     try {
       final q = <String, String>{};
       if (fromDate != null) q['fromDate'] = fromDate;
-      if (toDate   != null) q['toDate']   = toDate;
+      if (toDate != null) q['toDate'] = toDate;
 
       final response = await _api.get(
         '/api/finance/vendors/$vendorId/statement',
@@ -868,7 +889,7 @@ class BillingVendorsService {
     String? defaultCurrency,
     String? paymentTerms,
     String? portalLanguage,
-    bool?   portalEnabled,
+    bool? portalEnabled,
     String? facebook,
     String? twitter,
     double? openingBalance,
@@ -879,18 +900,18 @@ class BillingVendorsService {
     String? panNumber,
     String? taxPreference,
     String? exemptionReason,
-    bool?   tdsApplicable,
+    bool? tdsApplicable,
     String? tdsSection,
     double? tdsRate,
     Map<String, dynamic>? billingAddress,
     Map<String, dynamic>? shippingAddress,
-    bool?   bankDetailsProvided,
+    bool? bankDetailsProvided,
     String? accountHolderName,
     String? bankName,
     String? accountNumber,
     String? accountNumberConfirm,
     String? ifscCode,
-    bool?   addressProvided,
+    bool? addressProvided,
     String? addressLine1,
     String? addressLine2,
     String? city,
@@ -904,49 +925,54 @@ class BillingVendorsService {
   }) async {
     try {
       final body = <String, dynamic>{};
-      if (vendorType          != null) body['vendorType']           = vendorType;
-      if (vendorName          != null) body['vendorName']           = vendorName;
-      if (companyName         != null) body['companyName']          = companyName;
-      if (email               != null) body['email']                = email;
-      if (phoneNumber         != null) body['phoneNumber']          = phoneNumber;
-      if (alternatePhone      != null) body['alternatePhone']       = alternatePhone;
-      if (status              != null) body['status']               = status;
-      if (defaultCurrency     != null) body['defaultCurrency']      = defaultCurrency;
-      if (paymentTerms        != null) body['paymentTerms']         = paymentTerms;
-      if (portalLanguage      != null) body['portalLanguage']       = portalLanguage;
-      if (portalEnabled       != null) body['portalEnabled']        = portalEnabled;
-      if (facebook            != null) body['facebook']             = facebook;
-      if (twitter             != null) body['twitter']              = twitter;
-      if (openingBalance      != null) body['openingBalance']       = openingBalance;
-      if (openingBalanceAsOf  != null) body['openingBalanceAsOf']   = openingBalanceAsOf;
-      if (gstNumber           != null) body['gstNumber']            = gstNumber;
-      if (gstRegistrationType != null) body['gstRegistrationType']  = gstRegistrationType;
-      if (placeOfSupply       != null) body['placeOfSupply']        = placeOfSupply;
-      if (panNumber           != null) body['panNumber']            = panNumber;
-      if (taxPreference       != null) body['taxPreference']        = taxPreference;
-      if (exemptionReason     != null) body['exemptionReason']      = exemptionReason;
-      if (tdsApplicable       != null) body['tdsApplicable']        = tdsApplicable;
-      if (tdsSection          != null) body['tdsSection']           = tdsSection;
-      if (tdsRate             != null) body['tdsRate']              = tdsRate;
-      if (billingAddress      != null) body['billingAddress']       = billingAddress;
-      if (shippingAddress     != null) body['shippingAddress']      = shippingAddress;
-      if (bankDetailsProvided != null) body['bankDetailsProvided']  = bankDetailsProvided;
-      if (accountHolderName   != null) body['accountHolderName']    = accountHolderName;
-      if (bankName            != null) body['bankName']             = bankName;
-      if (accountNumber       != null) body['accountNumber']        = accountNumber;
-      if (accountNumberConfirm != null) body['accountNumberConfirm'] = accountNumberConfirm;
-      if (ifscCode            != null) body['ifscCode']             = ifscCode;
-      if (addressProvided     != null) body['addressProvided']      = addressProvided;
-      if (addressLine1        != null) body['addressLine1']         = addressLine1;
-      if (addressLine2        != null) body['addressLine2']         = addressLine2;
-      if (city                != null) body['city']                 = city;
-      if (state               != null) body['state']               = state;
-      if (postalCode          != null) body['postalCode']           = postalCode;
-      if (country             != null) body['country']              = country;
-      if (contactPersons      != null) body['contactPersons']       = contactPersons;
-      if (remarks             != null) body['remarks']              = remarks;
-      if (serviceCategory     != null) body['serviceCategory']      = serviceCategory;
-      if (notes               != null) body['notes']                = notes;
+      if (vendorType != null) body['vendorType'] = vendorType;
+      if (vendorName != null) body['vendorName'] = vendorName;
+      if (companyName != null) body['companyName'] = companyName;
+      if (email != null) body['email'] = email;
+      if (phoneNumber != null) body['phoneNumber'] = phoneNumber;
+      if (alternatePhone != null) body['alternatePhone'] = alternatePhone;
+      if (status != null) body['status'] = status;
+      if (defaultCurrency != null) body['defaultCurrency'] = defaultCurrency;
+      if (paymentTerms != null) body['paymentTerms'] = paymentTerms;
+      if (portalLanguage != null) body['portalLanguage'] = portalLanguage;
+      if (portalEnabled != null) body['portalEnabled'] = portalEnabled;
+      if (facebook != null) body['facebook'] = facebook;
+      if (twitter != null) body['twitter'] = twitter;
+      if (openingBalance != null) body['openingBalance'] = openingBalance;
+      if (openingBalanceAsOf != null)
+        body['openingBalanceAsOf'] = openingBalanceAsOf;
+      if (gstNumber != null) body['gstNumber'] = gstNumber;
+      if (gstRegistrationType != null)
+        body['gstRegistrationType'] = gstRegistrationType;
+      if (placeOfSupply != null) body['placeOfSupply'] = placeOfSupply;
+      if (panNumber != null) body['panNumber'] = panNumber;
+      if (taxPreference != null) body['taxPreference'] = taxPreference;
+      if (exemptionReason != null) body['exemptionReason'] = exemptionReason;
+      if (tdsApplicable != null) body['tdsApplicable'] = tdsApplicable;
+      if (tdsSection != null) body['tdsSection'] = tdsSection;
+      if (tdsRate != null) body['tdsRate'] = tdsRate;
+      if (billingAddress != null) body['billingAddress'] = billingAddress;
+      if (shippingAddress != null) body['shippingAddress'] = shippingAddress;
+      if (bankDetailsProvided != null)
+        body['bankDetailsProvided'] = bankDetailsProvided;
+      if (accountHolderName != null)
+        body['accountHolderName'] = accountHolderName;
+      if (bankName != null) body['bankName'] = bankName;
+      if (accountNumber != null) body['accountNumber'] = accountNumber;
+      if (accountNumberConfirm != null)
+        body['accountNumberConfirm'] = accountNumberConfirm;
+      if (ifscCode != null) body['ifscCode'] = ifscCode;
+      if (addressProvided != null) body['addressProvided'] = addressProvided;
+      if (addressLine1 != null) body['addressLine1'] = addressLine1;
+      if (addressLine2 != null) body['addressLine2'] = addressLine2;
+      if (city != null) body['city'] = city;
+      if (state != null) body['state'] = state;
+      if (postalCode != null) body['postalCode'] = postalCode;
+      if (country != null) body['country'] = country;
+      if (contactPersons != null) body['contactPersons'] = contactPersons;
+      if (remarks != null) body['remarks'] = remarks;
+      if (serviceCategory != null) body['serviceCategory'] = serviceCategory;
+      if (notes != null) body['notes'] = notes;
 
       return await _api.put('/api/finance/vendors/$vendorId', body: body);
     } on ApiException catch (e) {

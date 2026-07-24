@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // EXPENSE DETAIL PAGE — with PDF/Image download, Share, Proof viewer + upload
 // ============================================================================
@@ -19,14 +20,15 @@ import '../../../../core/services/expenses_service.dart';
 import '../../../../core/services/api_service.dart';
 import 'new_expenses.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class ExpenseDetailPage extends StatefulWidget {
   final String expenseId;
-  const ExpenseDetailPage({Key? key, required this.expenseId}) : super(key: key);
+  const ExpenseDetailPage({Key? key, required this.expenseId})
+      : super(key: key);
 
   @override
   State<ExpenseDetailPage> createState() => _ExpenseDetailPageState();
@@ -41,25 +43,39 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   final ApiService _api = ApiService();
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+  }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final resp = await _service.getExpenseById(widget.expenseId);
-      setState(() { _expense = Expense.fromJson(resp['data']); _isLoading = false; });
+      setState(() {
+        _expense = Expense.fromJson(resp['data']);
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   // ── Auth-header blob fetch ─────────────────────────────────────────────────
-  Future<void> _fetchAndOpen(String url, String filename, {bool download = false}) async {
+  Future<void> _fetchAndOpen(String url, String filename,
+      {bool download = false}) async {
     try {
       _snack('Preparing file…', Colors.blue);
       final headers = await _api.getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      if (response.statusCode != 200) throw Exception('Server returned ${response.statusCode}');
+      if (response.statusCode != 200)
+        throw Exception('Server returned ${response.statusCode}');
 
       final bytes = response.bodyBytes;
       final ct = response.headers['content-type'] ?? 'application/octet-stream';
@@ -75,7 +91,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         } else {
           html.window.open(blobUrl, '_blank');
         }
-        Future.delayed(const Duration(seconds: 5), () => html.Url.revokeObjectUrl(blobUrl));
+        Future.delayed(const Duration(seconds: 5),
+            () => html.Url.revokeObjectUrl(blobUrl));
         _snack(download ? '✅ Download started' : '✅ File opened', Colors.green);
       } else {
         // Mobile — save to temp directory and open with system viewer
@@ -114,14 +131,21 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       final replace = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Replace Existing Proof', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Text('A proof file "${_expense!.proofFile!.originalName}" is already attached. Replace it?'),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Replace Existing Proof',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(
+              'A proof file "${_expense!.proofFile!.originalName}" is already attached. Replace it?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white),
               child: const Text('Replace'),
             ),
           ],
@@ -143,8 +167,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
     if (source == null) return;
 
     Uint8List? bytes;
-    String?    fileName;
-    String?    mimeType;
+    String? fileName;
+    String? mimeType;
 
     if (source == 'camera') {
       if (kIsWeb) {
@@ -155,12 +179,17 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         input.click();
         input.onChange.listen((e) {
           final file = input.files?.first;
-          if (file == null) { completer.complete(); return; }
+          if (file == null) {
+            completer.complete();
+            return;
+          }
           final reader = html.FileReader();
           reader.readAsArrayBuffer(file);
           reader.onLoad.listen((_) {
-            bytes    = Uint8List.fromList(reader.result as List<int>);
-            fileName = file.name.isNotEmpty ? file.name : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            bytes = Uint8List.fromList(reader.result as List<int>);
+            fileName = file.name.isNotEmpty
+                ? file.name
+                : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
             mimeType = file.type.isNotEmpty ? file.type : 'image/jpeg';
             completer.complete();
           });
@@ -178,8 +207,10 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
             maxHeight: 2048,
           );
           if (picked == null) return;
-          bytes    = await picked.readAsBytes();
-          fileName = picked.name.isNotEmpty ? picked.name : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          bytes = await picked.readAsBytes();
+          fileName = picked.name.isNotEmpty
+              ? picked.name
+              : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
           mimeType = 'image/jpeg';
         } catch (e) {
           _snack('Could not open camera: $e', Colors.red);
@@ -196,11 +227,14 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         );
         if (result == null || result.files.isEmpty) return;
         final file = result.files.first;
-        bytes    = file.bytes;
+        bytes = file.bytes;
         fileName = file.name;
         final ext = (file.extension ?? '').toLowerCase();
         mimeType = ext == 'pdf' ? 'application/pdf' : 'image/$ext';
-        if (bytes == null) { _snack('Could not read file', Colors.red); return; }
+        if (bytes == null) {
+          _snack('Could not read file', Colors.red);
+          return;
+        }
       } catch (e) {
         _snack('File picker error: $e', Colors.red);
         return;
@@ -211,37 +245,50 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
     const maxBytes = 10 * 1024 * 1024;
     final nonNullBytes = bytes!;
     if (nonNullBytes.length > maxBytes) {
-      _snack('File too large (${(nonNullBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Max 10 MB.', Colors.red);
+      _snack(
+          'File too large (${(nonNullBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Max 10 MB.',
+          Colors.red);
       return;
     }
 
     // Upload
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+    });
     try {
       final headers = await _api.getHeaders();
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof'),
+        Uri.parse(
+            '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof'),
       );
       headers.forEach((k, v) {
         if (k.toLowerCase() != 'content-type') request.headers[k] = v;
       });
-      request.files.add(http.MultipartFile.fromBytes('proof', nonNullBytes, filename: fileName));
+      request.files.add(http.MultipartFile.fromBytes('proof', nonNullBytes,
+          filename: fileName));
 
-      final streamed  = await request.send();
-      final response  = await http.Response.fromStream(streamed);
-      setState(() { _isLoading = false; _changed = true; });
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      setState(() {
+        _isLoading = false;
+        _changed = true;
+      });
 
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
-        _snack('✅ Proof uploaded: ${body['data']?['originalName'] ?? fileName}', Colors.green);
+        _snack('✅ Proof uploaded: ${body['data']?['originalName'] ?? fileName}',
+            Colors.green);
         _load(); // Reload to show updated proof inline
       } else {
         final err = json.decode(response.body);
-        _snack('Upload failed: ${err['message'] ?? response.statusCode}', Colors.red);
+        _snack('Upload failed: ${err['message'] ?? response.statusCode}',
+            Colors.red);
       }
     } catch (e) {
-      setState(() { _isLoading = false; });
+      setState(() {
+        _isLoading = false;
+      });
       _snack('Upload error: $e', Colors.red);
     }
   }
@@ -250,11 +297,13 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   Future<void> _downloadPDF() async {
     if (_expense == null) return;
     final url = '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/pdf';
-    await _fetchAndOpen(url, '${_expense!.expenseNumber ?? 'expense'}.pdf', download: true);
+    await _fetchAndOpen(url, '${_expense!.expenseNumber ?? 'expense'}.pdf',
+        download: true);
   }
 
   // ── View proof/receipt ─────────────────────────────────────────────────────
-  Future<void> _viewAttachment(String url, String filename, {bool download = false}) async {
+  Future<void> _viewAttachment(String url, String filename,
+      {bool download = false}) async {
     await _fetchAndOpen(url, filename, download: download);
   }
 
@@ -262,7 +311,9 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   Future<void> _share() async {
     if (_expense == null) return;
     String date = _expense!.date;
-    try { date = DateFormat('dd MMM yyyy').format(DateTime.parse(_expense!.date)); } catch (_) {}
+    try {
+      date = DateFormat('dd MMM yyyy').format(DateTime.parse(_expense!.date));
+    } catch (_) {}
     final text = 'Expense Details\n'
         '─────────────────────────\n'
         'Expense # : ${_expense!.expenseNumber ?? '-'}\n'
@@ -274,7 +325,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         'Total     : ₹${_expense!.total.toStringAsFixed(2)}\n'
         'Paid Via  : ${_expense!.paidThrough}';
     try {
-      await Share.share(text, subject: 'Expense: ${_expense!.expenseNumber ?? ''}');
+      await Share.share(text,
+          subject: 'Expense: ${_expense!.expenseNumber ?? ''}');
     } catch (e) {
       _snack('Share failed: $e', Colors.red);
     }
@@ -282,22 +334,24 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -309,7 +363,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [_navyDark, _navyMid, _navyLight],
-            begin: Alignment.centerLeft, end: Alignment.centerRight,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
         child: AppBar(
@@ -333,14 +388,23 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
             ],
             TextButton.icon(
               onPressed: () async {
-                final r = await Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => NewExpensePage(expenseId: widget.expenseId)));
-                if (r == true) { setState(() => _changed = true); _load(); }
+                final r = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            NewExpensePage(expenseId: widget.expenseId)));
+                if (r == true) {
+                  setState(() => _changed = true);
+                  _load();
+                }
               },
               icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-              label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+              label:
+                  const Text('Edit', style: TextStyle(color: Colors.white70)),
             ),
-            IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
+            IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _load),
             const SizedBox(width: 8),
           ],
         ),
@@ -355,15 +419,22 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       if (isWide) {
         return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(flex: 3, child: _buildMainScroll(e)),
-          SizedBox(width: 320, child: Container(
-            color: Colors.white,
-            child: SingleChildScrollView(padding: const EdgeInsets.all(20), child: _buildSidebar(e)),
-          )),
+          SizedBox(
+              width: 320,
+              child: Container(
+                color: Colors.white,
+                child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20), child: _buildSidebar(e)),
+              )),
         ]);
       } else {
-        return SingleChildScrollView(child: Column(children: [
+        return SingleChildScrollView(
+            child: Column(children: [
           _buildMainScroll(e, isScrollable: false),
-          Container(color: Colors.white, padding: const EdgeInsets.all(20), child: _buildSidebar(e)),
+          Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(20),
+              child: _buildSidebar(e)),
         ]));
       }
     });
@@ -371,7 +442,9 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
 
   Widget _buildMainScroll(Expense e, {bool isScrollable = true}) {
     String formattedDate = e.date;
-    try { formattedDate = DateFormat('dd MMM yyyy').format(DateTime.parse(e.date)); } catch (_) {}
+    try {
+      formattedDate = DateFormat('dd MMM yyyy').format(DateTime.parse(e.date));
+    } catch (_) {}
 
     final content = Column(children: [
       // Header card
@@ -379,28 +452,46 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [_navyDark, _navyMid],
-              begin: Alignment.topLeft, end: Alignment.bottomRight),
+          gradient: const LinearGradient(
+              colors: [_navyDark, _navyMid],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+                color: _navyDark.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4))
+          ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.expenseNumber ?? 'Expense',
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              if ((e.vendor ?? '').isNotEmpty)
-                Text(e.vendor!, style: const TextStyle(color: Colors.white70, fontSize: 15)),
-              Text(formattedDate, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(e.expenseNumber ?? 'Expense',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  if ((e.vendor ?? '').isNotEmpty)
+                    Text(e.vendor!,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 15)),
+                  Text(formattedDate,
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 13)),
+                ])),
             _glowBadge('RECORDED'),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 24, runSpacing: 8, children: [
             _headerInfo('Account', e.expenseAccount),
             _headerInfo('Paid Through', e.paidThrough),
-            if ((e.invoiceNumber ?? '').isNotEmpty) _headerInfo('Invoice #', e.invoiceNumber!),
+            if ((e.invoiceNumber ?? '').isNotEmpty)
+              _headerInfo('Invoice #', e.invoiceNumber!),
           ]),
         ]),
       ),
@@ -409,7 +500,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
 
       // Details card
       _detailCard(
-        title: 'Expense Details', icon: Icons.receipt_long,
+        title: 'Expense Details',
+        icon: Icons.receipt_long,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
@@ -417,8 +509,10 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
             _infoRow('Expense Account', e.expenseAccount),
             _infoRow('Paid Through', e.paidThrough),
             if ((e.vendor ?? '').isNotEmpty) _infoRow('Vendor', e.vendor!),
-            if ((e.customerName ?? '').isNotEmpty) _infoRow('Customer', e.customerName!),
-            if ((e.invoiceNumber ?? '').isNotEmpty) _infoRow('Invoice #', e.invoiceNumber!),
+            if ((e.customerName ?? '').isNotEmpty)
+              _infoRow('Customer', e.customerName!),
+            if ((e.invoiceNumber ?? '').isNotEmpty)
+              _infoRow('Invoice #', e.invoiceNumber!),
             _infoRow('Billable', e.isBillable ? 'Yes' : 'No'),
           ]),
         ),
@@ -427,23 +521,34 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       if (e.isItemized && e.itemizedExpenses.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Itemized Expenses', icon: Icons.list_alt,
+          title: 'Itemized Expenses',
+          icon: Icons.list_alt,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-              headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+              headingRowColor:
+                  WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+              headingTextStyle: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12),
               columns: const [
                 DataColumn(label: Text('ACCOUNT')),
                 DataColumn(label: Text('DESCRIPTION')),
                 DataColumn(label: Text('AMOUNT')),
               ],
-              rows: e.itemizedExpenses.map((item) => DataRow(cells: [
-                DataCell(Text(item.expenseAccount ?? '—')),
-                DataCell(SizedBox(width: 200, child: Text(item.description ?? '—', overflow: TextOverflow.ellipsis))),
-                DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600))),
-              ])).toList(),
+              rows: e.itemizedExpenses
+                  .map((item) => DataRow(cells: [
+                        DataCell(Text(item.expenseAccount ?? '—')),
+                        DataCell(SizedBox(
+                            width: 200,
+                            child: Text(item.description ?? '—',
+                                overflow: TextOverflow.ellipsis))),
+                        DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600))),
+                      ]))
+                  .toList(),
             ),
           ),
         ),
@@ -453,22 +558,26 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       if (e.proofFile != null || e.receiptFile != null) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Attachments', icon: Icons.attach_file,
+          title: 'Attachments',
+          icon: Icons.attach_file,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(children: [
               if (e.proofFile != null)
                 _attachmentWidget(
                   label: 'Proof: ${e.proofFile!.originalName}',
-                  url: '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof',
+                  url:
+                      '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof',
                   filename: e.proofFile!.originalName,
                   isImage: _isImageFile(e.proofFile!.originalName),
                 ),
-              if (e.proofFile != null && e.receiptFile != null) const SizedBox(height: 16),
+              if (e.proofFile != null && e.receiptFile != null)
+                const SizedBox(height: 16),
               if (e.receiptFile != null)
                 _attachmentWidget(
                   label: 'Receipt: ${e.receiptFile!.originalName}',
-                  url: '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/receipt',
+                  url:
+                      '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/receipt',
                   filename: e.receiptFile!.originalName,
                   isImage: _isImageFile(e.receiptFile!.originalName),
                 ),
@@ -479,7 +588,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         // No attachments yet — show Upload Proof button
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Attachments', icon: Icons.attach_file,
+          title: 'Attachments',
+          icon: Icons.attach_file,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(children: [
@@ -491,24 +601,38 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                   border: Border.all(color: Colors.orange.withOpacity(0.25)),
                 ),
                 child: Row(children: [
-                  Icon(Icons.upload_file_outlined, color: Colors.orange.shade700, size: 28),
+                  Icon(Icons.upload_file_outlined,
+                      color: Colors.orange.shade700, size: 28),
                   const SizedBox(width: 14),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('No proof attached', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.orange.shade800)),
-                    const SizedBox(height: 3),
-                    Text('Upload a photo or file as proof for this expense', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  ])),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('No proof attached',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Colors.orange.shade800)),
+                        const SizedBox(height: 3),
+                        Text('Upload a photo or file as proof for this expense',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[600])),
+                      ])),
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
                     onPressed: _uploadProof,
                     icon: const Icon(Icons.upload, size: 16),
-                    label: const Text('Upload', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    label: const Text('Upload',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange.shade700,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
                 ]),
@@ -521,10 +645,12 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       if ((e.notes ?? '').isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Notes', icon: Icons.note,
+          title: 'Notes',
+          icon: Icons.note,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(e.notes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(e.notes!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
@@ -550,9 +676,11 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           Row(children: [
             Icon(Icons.image_outlined, color: _navyAccent, size: 18),
             const SizedBox(width: 8),
-            Expanded(child: Text(label,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                overflow: TextOverflow.ellipsis)),
+            Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13),
+                    overflow: TextOverflow.ellipsis)),
             OutlinedButton.icon(
               icon: const Icon(Icons.upload, size: 14),
               label: const Text('Replace', style: TextStyle(fontSize: 12)),
@@ -598,10 +726,14 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: Colors.grey.shade200),
                   ),
-                  child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.broken_image_outlined, size: 36, color: Colors.grey.shade400),
+                  child: Center(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.broken_image_outlined,
+                        size: 36, color: Colors.grey.shade400),
                     const SizedBox(height: 6),
-                    Text('Could not load image', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                    Text('Could not load image',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade500)),
                   ])),
                 );
               }
@@ -619,20 +751,28 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                     ),
                     child: Stack(
                       children: [
-                        Image.memory(bytes, fit: BoxFit.contain, width: double.infinity),
+                        Image.memory(bytes,
+                            fit: BoxFit.contain, width: double.infinity),
                         Positioned(
-                          bottom: 8, right: 8,
+                          bottom: 8,
+                          right: 8,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.55),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(Icons.zoom_in, color: Colors.white, size: 14),
-                              SizedBox(width: 4),
-                              Text('Tap to expand', style: TextStyle(color: Colors.white, fontSize: 11)),
-                            ]),
+                            child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.zoom_in,
+                                      color: Colors.white, size: 14),
+                                  SizedBox(width: 4),
+                                  Text('Tap to expand',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 11)),
+                                ]),
                           ),
                         ),
                       ],
@@ -672,7 +812,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
             ),
           ),
           Positioned(
-            top: 40, right: 16,
+            top: 40,
+            right: 16,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white, size: 26),
@@ -702,8 +843,11 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
             ]),
           ),
           Positioned(
-            bottom: 20, left: 0, right: 0,
-            child: Center(child: Container(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+                child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.55),
@@ -740,9 +884,11 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       child: Row(children: [
         Icon(icon, color: _navyAccent, size: 22),
         const SizedBox(width: 10),
-        Expanded(child: Text(label,
-            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-            overflow: TextOverflow.ellipsis)),
+        Expanded(
+            child: Text(label,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: _uploadProof,
@@ -805,7 +951,9 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           child: const Icon(Icons.summarize, color: Colors.white, size: 16),
         ),
         const SizedBox(width: 8),
-        const Text('Amount Summary', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+        const Text('Amount Summary',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
       ]),
       const SizedBox(height: 16),
       _amtRow('Amount', e.amount),
@@ -815,22 +963,26 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       const SizedBox(height: 16),
       // Quick action buttons
       Row(children: [
-        Expanded(child: OutlinedButton.icon(
+        Expanded(
+            child: OutlinedButton.icon(
           onPressed: _downloadPDF,
           icon: const Icon(Icons.download, size: 16),
           label: const Text('PDF'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: _navyMid, side: BorderSide(color: _navyMid),
+            foregroundColor: _navyMid,
+            side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 10),
           ),
         )),
         const SizedBox(width: 8),
-        Expanded(child: OutlinedButton.icon(
+        Expanded(
+            child: OutlinedButton.icon(
           onPressed: _share,
           icon: const Icon(Icons.share, size: 16),
           label: const Text('Share'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: _navyMid, side: BorderSide(color: _navyMid),
+            foregroundColor: _navyMid,
+            side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 10),
           ),
         )),
@@ -843,22 +995,30 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           icon: const Icon(Icons.arrow_back, size: 18),
           label: const Text('Back to List'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: _navyMid, side: BorderSide(color: _navyMid),
+            foregroundColor: _navyMid,
+            side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
     ]);
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
@@ -873,7 +1033,11 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
               child: Icon(icon, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
           ]),
         ),
         const Divider(height: 1),
@@ -883,36 +1047,50 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   }
 
   Widget _headerInfo(String label, String value) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
-      const SizedBox(height: 2),
-      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          const SizedBox(height: 2),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
+        ],
+      );
 
   Widget _infoRow(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 140, child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 13))),
-      Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13))),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+              width: 140,
+              child: Text(label,
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13))),
+          Expanded(
+              child: Text(value,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w500, fontSize: 13))),
+        ]),
+      );
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: TextStyle(
-          fontSize: isTotal ? 14 : 13,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-        )),
-        Text('₹${amount.toStringAsFixed(2)}', style: TextStyle(
-          fontSize: isTotal ? 16 : 13,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-          color: color ?? (isTotal ? _navyAccent : _navyDark),
-        )),
+        Text(label,
+            style: TextStyle(
+              fontSize: isTotal ? 14 : 13,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+            )),
+        Text('₹${amount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: isTotal ? 16 : 13,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              color: color ?? (isTotal ? _navyAccent : _navyDark),
+            )),
       ]),
     );
   }
@@ -920,11 +1098,21 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   Widget _glowBadge(String status) {
     Color bg;
     switch (status.toUpperCase()) {
-      case 'OPEN': bg = Colors.orange; break;
-      case 'PAID': bg = Colors.green; break;
-      case 'VOID': case 'CANCELLED': bg = Colors.grey; break;
-      case 'OVERDUE': bg = Colors.red; break;
-      default: bg = _navyAccent;
+      case 'OPEN':
+        bg = Colors.orange;
+        break;
+      case 'PAID':
+        bg = Colors.green;
+        break;
+      case 'VOID':
+      case 'CANCELLED':
+        bg = Colors.grey;
+        break;
+      case 'OVERDUE':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -933,22 +1121,32 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style:
+              TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
-  Widget _buildError() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-    Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
-    const SizedBox(height: 16),
-    Text('Error Loading Expense', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
-    const SizedBox(height: 8),
-    Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
-    const SizedBox(height: 24),
-    ElevatedButton.icon(
-      onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('Retry'),
-      style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
-    ),
-  ]));
+  Widget _buildError() => Center(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
+        const SizedBox(height: 16),
+        Text('Error Loading Expense',
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[700])),
+        const SizedBox(height: 8),
+        Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _load,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: _navyAccent, foregroundColor: Colors.white),
+        ),
+      ]));
 }
 
 // =============================================================================
@@ -974,7 +1172,10 @@ class _DetailProofSourceSheet extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             hasExisting ? 'Replace Proof' : 'Upload Proof',
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Color(0xFF1A202C)),
+            style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1A202C)),
           ),
         ]),
         const SizedBox(height: 8),
@@ -1061,9 +1262,12 @@ class _DetailSourceTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 3),
-                Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(subtitle,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               ],
             ),
           ),

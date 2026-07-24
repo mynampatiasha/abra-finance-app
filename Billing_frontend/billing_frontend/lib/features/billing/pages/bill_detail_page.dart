@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // BILL DETAIL PAGE
 // ============================================================================
@@ -9,9 +10,9 @@ import 'new_bill.dart';
 
 // ignore_for_file: use_build_context_synchronously
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class BillDetailPage extends StatefulWidget {
@@ -35,25 +36,39 @@ class _BillDetailPageState extends State<BillDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final b = await BillService.getBill(widget.billId);
-      setState(() { _bill = b; _isLoading = false; });
+      setState(() {
+        _bill = b;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -82,7 +97,10 @@ class _BillDetailPageState extends State<BillDetailPage> {
                 tooltip: 'Download PDF',
                 onPressed: () async {
                   final url = await BillService.downloadPDF(widget.billId);
-                  if (mounted) await fetchAndHandleFile(context, url, '${_bill!.billNumber}.pdf', download: true);
+                  if (mounted)
+                    await fetchAndHandleFile(
+                        context, url, '${_bill!.billNumber}.pdf',
+                        download: true);
                 },
               ),
               IconButton(
@@ -101,15 +119,24 @@ class _BillDetailPageState extends State<BillDetailPage> {
                 },
               ),
             ],
-            if (_bill != null && _bill!.status != 'PAID' && _bill!.status != 'VOID')
+            if (_bill != null &&
+                _bill!.status != 'PAID' &&
+                _bill!.status != 'VOID')
               TextButton.icon(
                 onPressed: () async {
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewBillScreen(billId: widget.billId)));
-                  if (r == true) { setState(() => _changed = true); _load(); }
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              NewBillScreen(billId: widget.billId)));
+                  if (r == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white70)),
               ),
             // ── Apply Credits button ──────────────────────────────────────────
             if (_bill != null &&
@@ -120,7 +147,10 @@ class _BillDetailPageState extends State<BillDetailPage> {
                     context: context,
                     builder: (_) => _ApplyCreditsDialog(bill: _bill!),
                   );
-                  if (changed == true) { setState(() => _changed = true); _load(); }
+                  if (changed == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.account_balance_wallet_outlined,
                     color: Colors.white70, size: 18),
@@ -128,7 +158,9 @@ class _BillDetailPageState extends State<BillDetailPage> {
                     style: TextStyle(color: Colors.white70)),
               ),
             const SizedBox(width: 8),
-            IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
+            IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _load),
             const SizedBox(width: 8),
           ],
         ),
@@ -162,7 +194,10 @@ class _BillDetailPageState extends State<BillDetailPage> {
           child: Column(
             children: [
               _buildMainScroll(b, isScrollable: false),
-              Container(color: Colors.white, padding: const EdgeInsets.all(20), child: _buildSidebar(b)),
+              Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(20),
+                  child: _buildSidebar(b)),
             ],
           ),
         );
@@ -179,10 +214,17 @@ class _BillDetailPageState extends State<BillDetailPage> {
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [_navyDark, _navyMid],
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: const LinearGradient(
+                colors: [_navyDark, _navyMid],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: _navyDark.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4))
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,11 +236,18 @@ class _BillDetailPageState extends State<BillDetailPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(b.billNumber,
-                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text(b.vendorName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                        Text(b.vendorName,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 15)),
                         if ((b.vendorEmail ?? '').isNotEmpty)
-                          Text(b.vendorEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                          Text(b.vendorEmail!,
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 13)),
                       ],
                     ),
                   ),
@@ -228,8 +277,12 @@ class _BillDetailPageState extends State<BillDetailPage> {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-              headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+              headingRowColor:
+                  WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+              headingTextStyle: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12),
               columns: const [
                 DataColumn(label: Text('ITEM')),
                 DataColumn(label: Text('QTY')),
@@ -237,16 +290,22 @@ class _BillDetailPageState extends State<BillDetailPage> {
                 DataColumn(label: Text('DISCOUNT')),
                 DataColumn(label: Text('AMOUNT')),
               ],
-              rows: b.items.map((item) => DataRow(cells: [
-                DataCell(SizedBox(width: 200, child: Text(item.itemDetails, overflow: TextOverflow.ellipsis))),
-                DataCell(Text(item.quantity.toStringAsFixed(0))),
-                DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
-                DataCell(Text(item.discount > 0
-                    ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
-                    : '—')),
-                DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600))),
-              ])).toList(),
+              rows: b.items
+                  .map((item) => DataRow(cells: [
+                        DataCell(SizedBox(
+                            width: 200,
+                            child: Text(item.itemDetails,
+                                overflow: TextOverflow.ellipsis))),
+                        DataCell(Text(item.quantity.toStringAsFixed(0))),
+                        DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
+                        DataCell(Text(item.discount > 0
+                            ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
+                            : '—')),
+                        DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600))),
+                      ]))
+                  .toList(),
             ),
           ),
         ),
@@ -260,28 +319,41 @@ class _BillDetailPageState extends State<BillDetailPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: b.payments.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey[200]),
               itemBuilder: (_, i) {
                 final p = b.payments[i];
                 return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.check_circle,
+                        color: Colors.green, size: 20),
                   ),
-                  title: Text(p.paymentMode, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(p.paymentMode,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(fmt.format(p.paymentDate), style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                      Text(fmt.format(p.paymentDate),
+                          style:
+                              TextStyle(color: Colors.grey[600], fontSize: 12)),
                       if ((p.referenceNumber ?? '').isNotEmpty)
-                        Text('Ref: ${p.referenceNumber}', style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                        Text('Ref: ${p.referenceNumber}',
+                            style: TextStyle(
+                                color: Colors.grey[600], fontSize: 11)),
                     ],
                   ),
                   isThreeLine: (p.referenceNumber ?? '').isNotEmpty,
                   trailing: Text('₹${p.amount.toStringAsFixed(2)}',
-                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 15)),
+                      style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15)),
                 );
               },
             ),
@@ -295,7 +367,8 @@ class _BillDetailPageState extends State<BillDetailPage> {
             icon: Icons.note,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(b.notes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+              child: Text(b.notes!,
+                  style: TextStyle(color: Colors.grey[800], fontSize: 14)),
             ),
           ),
         ],
@@ -320,11 +393,14 @@ class _BillDetailPageState extends State<BillDetailPage> {
             child: const Icon(Icons.summarize, color: Colors.white, size: 16),
           ),
           const SizedBox(width: 8),
-          const Text('Bill Summary', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('Bill Summary',
+              style: TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
         ]),
         const SizedBox(height: 16),
         _amtRow('Sub Total', b.subTotal),
-        if (b.tdsAmount > 0) _amtRow('TDS', -b.tdsAmount, color: Colors.red[700]),
+        if (b.tdsAmount > 0)
+          _amtRow('TDS', -b.tdsAmount, color: Colors.red[700]),
         if (b.tcsAmount > 0) _amtRow('TCS', b.tcsAmount),
         if (b.cgst > 0) _amtRow('CGST', b.cgst),
         if (b.sgst > 0) _amtRow('SGST', b.sgst),
@@ -335,20 +411,26 @@ class _BillDetailPageState extends State<BillDetailPage> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [_navyDark.withOpacity(0.06), _navyLight.withOpacity(0.08)]),
+            gradient: LinearGradient(colors: [
+              _navyDark.withOpacity(0.06),
+              _navyLight.withOpacity(0.08)
+            ]),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: _navyAccent.withOpacity(0.2)),
           ),
           child: Column(
             children: [
-              _balanceRow('Total Amount', '₹${b.totalAmount.toStringAsFixed(2)}', Colors.blue),
+              _balanceRow('Total Amount',
+                  '₹${b.totalAmount.toStringAsFixed(2)}', Colors.blue),
               const SizedBox(height: 8),
-              _balanceRow('Amount Paid', '₹${b.amountPaid.toStringAsFixed(2)}', Colors.green),
+              _balanceRow('Amount Paid', '₹${b.amountPaid.toStringAsFixed(2)}',
+                  Colors.green),
               const SizedBox(height: 8),
               const Divider(height: 1),
               const SizedBox(height: 8),
               _balanceRow('Amount Due', '₹${b.amountDue.toStringAsFixed(2)}',
-                  b.amountDue > 0 ? _navyAccent : Colors.grey, isBold: true),
+                  b.amountDue > 0 ? _navyAccent : Colors.grey,
+                  isBold: true),
             ],
           ),
         ),
@@ -360,7 +442,8 @@ class _BillDetailPageState extends State<BillDetailPage> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF0D7377), Color(0xFF14A085)]),
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF0D7377), Color(0xFF14A085)]),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: const Icon(Icons.account_balance_wallet_outlined,
@@ -368,86 +451,96 @@ class _BillDetailPageState extends State<BillDetailPage> {
             ),
             const SizedBox(width: 8),
             const Text('Applied Credits',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyDark)),
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
           ]),
           const SizedBox(height: 10),
           ...b.vendorCreditsApplied.map((c) => Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.teal[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.teal[200]!),
-            ),
-            child: Row(children: [
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(c.paymentNumber ?? 'Advance',
-                      style: const TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w600, color: _navyDark)),
-                  Text(DateFormat('dd MMM yyyy').format(c.appliedDate),
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                ],
-              )),
-              Text('₹${c.amount.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.bold, color: Color(0xFF0D7377))),
-              const SizedBox(width: 6),
-              if (!['PAID', 'VOID'].contains(b.status))
-                InkWell(
-                  onTap: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                        title: const Text('Remove Credit?',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        content: Text(
-                            'Remove ₹${c.amount.toStringAsFixed(2)} credit '
-                            'from ${c.paymentNumber ?? "this advance"}?\n\n'
-                            'The advance balance will be restored.'),
-                        actions: [
-                          TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Cancel')),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white),
-                            child: const Text('Remove'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (ok != true) return;
-                    try {
-                      await BillService.removeCredit(widget.billId, c.id);
-                      setState(() => _changed = true);
-                      _load();
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text('Failed to remove credit: $e'),
-                        backgroundColor: Colors.red,
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.red[50],
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.red[200]!),
-                    ),
-                    child: Icon(Icons.close, size: 14, color: Colors.red[700]),
-                  ),
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.teal[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.teal[200]!),
                 ),
-            ]),
-          )),
+                child: Row(children: [
+                  Expanded(
+                      child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(c.paymentNumber ?? 'Advance',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _navyDark)),
+                      Text(DateFormat('dd MMM yyyy').format(c.appliedDate),
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    ],
+                  )),
+                  Text('₹${c.amount.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0D7377))),
+                  const SizedBox(width: 6),
+                  if (!['PAID', 'VOID'].contains(b.status))
+                    InkWell(
+                      onTap: () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                            title: const Text('Remove Credit?',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            content: Text(
+                                'Remove ₹${c.amount.toStringAsFixed(2)} credit '
+                                'from ${c.paymentNumber ?? "this advance"}?\n\n'
+                                'The advance balance will be restored.'),
+                            actions: [
+                              TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel')),
+                              ElevatedButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white),
+                                child: const Text('Remove'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok != true) return;
+                        try {
+                          await BillService.removeCredit(widget.billId, c.id);
+                          setState(() => _changed = true);
+                          _load();
+                        } catch (e) {
+                          AppSnackbar.show(context,
+                              message: 'Failed to remove credit: $e',
+                              isError: true);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.red[50],
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.red[200]!),
+                        ),
+                        child:
+                            Icon(Icons.close, size: 14, color: Colors.red[700]),
+                      ),
+                    ),
+                ]),
+              )),
         ],
 
         const SizedBox(height: 16),
@@ -462,7 +555,10 @@ class _BillDetailPageState extends State<BillDetailPage> {
                   context: context,
                   builder: (_) => _ApplyCreditsDialog(bill: b),
                 );
-                if (changed == true) { setState(() => _changed = true); _load(); }
+                if (changed == true) {
+                  setState(() => _changed = true);
+                  _load();
+                }
               },
               icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
               label: const Text('Apply Credits'),
@@ -487,7 +583,8 @@ class _BillDetailPageState extends State<BillDetailPage> {
               foregroundColor: _navyMid,
               side: BorderSide(color: _navyMid),
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -495,13 +592,19 @@ class _BillDetailPageState extends State<BillDetailPage> {
     );
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -512,13 +615,18 @@ class _BillDetailPageState extends State<BillDetailPage> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(icon, color: Colors.white, size: 16),
               ),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: _navyDark)),
             ]),
           ),
           const Divider(height: 1),
@@ -532,42 +640,57 @@ class _BillDetailPageState extends State<BillDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11)),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13)),
       ],
     );
   }
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(
-            fontSize: isTotal ? 14 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-          )),
-          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}', style: TextStyle(
-            fontSize: isTotal ? 16 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            color: color ?? (isTotal ? _navyAccent : _navyDark),
-          )),
+          Text(label,
+              style: TextStyle(
+                fontSize: isTotal ? 14 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+              )),
+          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: isTotal ? 16 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color ?? (isTotal ? _navyAccent : _navyDark),
+              )),
         ],
       ),
     );
   }
 
-  Widget _balanceRow(String label, String value, Color color, {bool isBold = false}) {
+  Widget _balanceRow(String label, String value, Color color,
+      {bool isBold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.w600 : FontWeight.normal, color: Colors.grey[700])),
-        Text(value, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500, color: color)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+                color: Colors.grey[700])),
+        Text(value,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color)),
       ],
     );
   }
@@ -575,12 +698,25 @@ class _BillDetailPageState extends State<BillDetailPage> {
   Widget _glowBadge(String status) {
     Color bg;
     switch (status.toUpperCase()) {
-      case 'OPEN': bg = Colors.orange; break;
-      case 'PAID': case 'CLOSED': bg = Colors.green; break;
-      case 'VOID': case 'CANCELLED': bg = Colors.grey; break;
-      case 'DRAFT': bg = Colors.grey; break;
-      case 'OVERDUE': bg = Colors.red; break;
-      default: bg = _navyAccent;
+      case 'OPEN':
+        bg = Colors.orange;
+        break;
+      case 'PAID':
+      case 'CLOSED':
+        bg = Colors.green;
+        break;
+      case 'VOID':
+      case 'CANCELLED':
+        bg = Colors.grey;
+        break;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'OVERDUE':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -589,7 +725,9 @@ class _BillDetailPageState extends State<BillDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style:
+              TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
@@ -600,7 +738,11 @@ class _BillDetailPageState extends State<BillDetailPage> {
         children: [
           Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
           const SizedBox(height: 16),
-          Text('Error Loading Bill', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          Text('Error Loading Bill',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700])),
           const SizedBox(height: 8),
           Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
           const SizedBox(height: 24),
@@ -608,7 +750,8 @@ class _BillDetailPageState extends State<BillDetailPage> {
             onPressed: _load,
             icon: const Icon(Icons.refresh),
             label: const Text('Retry'),
-            style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent, foregroundColor: Colors.white),
           ),
         ],
       ),
@@ -645,58 +788,58 @@ class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
 
   @override
   void dispose() {
-    for (final c in _amtCtrls.values) { c.dispose(); }
+    for (final c in _amtCtrls.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _loadAdvances() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final list = await BillService.getAvailableCredits(widget.bill.id);
       setState(() {
         _advances = list;
-        _loading  = false;
+        _loading = false;
         // Pre-fill each controller with min(unused, amountDue)
         for (final a in list) {
           final suggested = a.amountUnused < widget.bill.amountDue
               ? a.amountUnused
               : widget.bill.amountDue;
-          _amtCtrls[a.id] = TextEditingController(
-              text: suggested.toStringAsFixed(2));
+          _amtCtrls[a.id] =
+              TextEditingController(text: suggested.toStringAsFixed(2));
         }
       });
     } catch (e) {
-      setState(() { _error = e.toString(); _loading = false; });
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
   Future<void> _apply(VendorAdvance advance) async {
     final ctrl = _amtCtrls[advance.id];
-    final amt  = double.tryParse(ctrl?.text.trim() ?? '');
+    final amt = double.tryParse(ctrl?.text.trim() ?? '');
     if (amt == null || amt <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter a valid amount'),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppSnackbar.show(context, message: 'Enter a valid amount', isError: true);
       return;
     }
     if (amt > advance.amountUnused + 0.001) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Amount exceeds available balance '
-            '(₹${advance.amountUnused.toStringAsFixed(2)})'),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppSnackbar.show(context,
+          message: 'Amount exceeds available balance '
+              '(₹${advance.amountUnused.toStringAsFixed(2)})',
+          isError: true);
       return;
     }
     if (amt > widget.bill.amountDue + 0.001) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Amount exceeds bill due '
-            '(₹${widget.bill.amountDue.toStringAsFixed(2)})'),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppSnackbar.show(context,
+          message: 'Amount exceeds bill due '
+              '(₹${widget.bill.amountDue.toStringAsFixed(2)})',
+          isError: true);
       return;
     }
 
@@ -706,11 +849,8 @@ class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _applying = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Failed to apply credit: $e'),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
+      AppSnackbar.show(context,
+          message: 'Failed to apply credit: $e', isError: true);
     }
   }
 
@@ -736,15 +876,20 @@ class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
               const Icon(Icons.account_balance_wallet_outlined,
                   color: Colors.white, size: 22),
               const SizedBox(width: 10),
-              Expanded(child: Column(
+              Expanded(
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Apply Vendor Credits',
-                      style: TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text('Bill: ${widget.bill.billNumber}  •  '
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                  Text(
+                      'Bill: ${widget.bill.billNumber}  •  '
                       'Due: ₹${widget.bill.amountDue.toStringAsFixed(2)}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               )),
               IconButton(
@@ -757,151 +902,172 @@ class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
           ),
 
           // ── Body ────────────────────────────────────────────────────────────
-          Expanded(child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Center(child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
-                        const SizedBox(height: 12),
-                        Text(_error!, textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey[700])),
-                        const SizedBox(height: 16),
-                        ElevatedButton(onPressed: _loadAdvances,
-                            child: const Text('Retry')),
-                      ]),
-                    ))
-                  : _advances.isEmpty
-                      ? Center(child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.account_balance_wallet_outlined,
-                                size: 56, color: Colors.grey[300]),
+          Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.error_outline,
+                                size: 48, color: Colors.red[300]),
                             const SizedBox(height: 12),
-                            Text('No available vendor advances',
-                                style: TextStyle(fontSize: 15,
-                                    color: Colors.grey[600],
-                                    fontWeight: FontWeight.w500)),
-                            const SizedBox(height: 6),
-                            Text('Record an advance payment for '
-                                '${widget.bill.vendorName} first.',
+                            Text(_error!,
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 13,
-                                    color: Colors.grey[500])),
+                                style: TextStyle(color: Colors.grey[700])),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                                onPressed: _loadAdvances,
+                                child: const Text('Retry')),
                           ]),
                         ))
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _advances.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (_, i) {
-                            final a = _advances[i];
-                            final ctrl = _amtCtrls[a.id]!;
-                            return Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: Colors.teal[50],
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.teal[200]!),
-                              ),
+                      : _advances.isEmpty
+                          ? Center(
+                              child: Padding(
+                              padding: const EdgeInsets.all(24),
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(children: [
-                                    Expanded(child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(a.paymentNumber,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 14,
-                                                color: _navyDark)),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '${DateFormat('dd MMM yyyy').format(a.paymentDate)}'
-                                          '  •  ${a.paymentMode}',
-                                          style: TextStyle(fontSize: 12,
-                                              color: Colors.grey[600]),
-                                        ),
-                                      ],
-                                    )),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text('₹${a.amount.toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.grey)),
-                                        Text(
-                                          'Available: ₹${a.amountUnused.toStringAsFixed(2)}',
-                                          style: const TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold,
-                                              color: Color(0xFF0D7377)),
-                                        ),
-                                      ],
-                                    ),
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.account_balance_wallet_outlined,
+                                        size: 56, color: Colors.grey[300]),
+                                    const SizedBox(height: 12),
+                                    Text('No available vendor advances',
+                                        style: TextStyle(
+                                            fontSize: 15,
+                                            color: Colors.grey[600],
+                                            fontWeight: FontWeight.w500)),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                        'Record an advance payment for '
+                                        '${widget.bill.vendorName} first.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.grey[500])),
                                   ]),
+                            ))
+                          : ListView.separated(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _advances.length,
+                              separatorBuilder: (_, __) =>
                                   const SizedBox(height: 12),
-                                  Row(children: [
-                                    Expanded(
-                                      child: TextFormField(
-                                        controller: ctrl,
-                                        keyboardType: const TextInputType
-                                            .numberWithOptions(decimal: true),
-                                        decoration: InputDecoration(
-                                          labelText: 'Amount to Apply (₹)',
-                                          prefixText: '₹ ',
-                                          border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(8)),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            borderSide: const BorderSide(
-                                                color: Color(0xFF0D7377),
-                                                width: 2),
-                                          ),
-                                          isDense: true,
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                  horizontal: 12, vertical: 10),
+                              itemBuilder: (_, i) {
+                                final a = _advances[i];
+                                final ctrl = _amtCtrls[a.id]!;
+                                return Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal[50],
+                                    borderRadius: BorderRadius.circular(10),
+                                    border:
+                                        Border.all(color: Colors.teal[200]!),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(children: [
+                                        Expanded(
+                                            child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(a.paymentNumber,
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                    color: _navyDark)),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${DateFormat('dd MMM yyyy').format(a.paymentDate)}'
+                                              '  •  ${a.paymentMode}',
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey[600]),
+                                            ),
+                                          ],
+                                        )),
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                                '₹${a.amount.toStringAsFixed(2)}',
+                                                style: const TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.grey)),
+                                            Text(
+                                              'Available: ₹${a.amountUnused.toStringAsFixed(2)}',
+                                              style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF0D7377)),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    ElevatedButton(
-                                      onPressed: _applying
-                                          ? null
-                                          : () => _apply(a),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor:
-                                            const Color(0xFF0D7377),
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 20, vertical: 12),
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(8)),
-                                      ),
-                                      child: _applying
-                                          ? const SizedBox(
-                                              width: 16, height: 16,
-                                              child: CircularProgressIndicator(
-                                                  color: Colors.white,
-                                                  strokeWidth: 2))
-                                          : const Text('Apply'),
-                                    ),
-                                  ]),
-                                ],
-                              ),
-                            );
-                          },
-                        )),
+                                      ]),
+                                      const SizedBox(height: 12),
+                                      Row(children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: ctrl,
+                                            keyboardType: const TextInputType
+                                                .numberWithOptions(
+                                                decimal: true),
+                                            decoration: InputDecoration(
+                                              labelText: 'Amount to Apply (₹)',
+                                              prefixText: '₹ ',
+                                              border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8)),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                borderSide: const BorderSide(
+                                                    color: Color(0xFF0D7377),
+                                                    width: 2),
+                                              ),
+                                              isDense: true,
+                                              contentPadding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 10),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        ElevatedButton(
+                                          onPressed: _applying
+                                              ? null
+                                              : () => _apply(a),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor:
+                                                const Color(0xFF0D7377),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 20, vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8)),
+                                          ),
+                                          child: _applying
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                          color: Colors.white,
+                                                          strokeWidth: 2))
+                                              : const Text('Apply'),
+                                        ),
+                                      ]),
+                                    ],
+                                  ),
+                                );
+                              },
+                            )),
 
           // ── Footer ──────────────────────────────────────────────────────────
           Container(
@@ -909,13 +1075,14 @@ class _ApplyCreditsDialogState extends State<_ApplyCreditsDialog> {
             decoration: BoxDecoration(
               color: Colors.grey[50],
               border: Border(top: BorderSide(color: Colors.grey[200]!)),
-              borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(14)),
+              borderRadius:
+                  const BorderRadius.vertical(bottom: Radius.circular(14)),
             ),
             child: Row(children: [
               Icon(Icons.info_outline, size: 14, color: Colors.grey[500]),
               const SizedBox(width: 6),
-              Expanded(child: Text(
+              Expanded(
+                  child: Text(
                 'Applying credits reduces the bill balance and '
                 'consumes the vendor advance.',
                 style: TextStyle(fontSize: 11, color: Colors.grey[600]),

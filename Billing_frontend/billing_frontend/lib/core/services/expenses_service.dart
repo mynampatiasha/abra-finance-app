@@ -9,22 +9,22 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 class ExpenseService {
   // Use ApiService singleton for all authenticated API calls
   static final ApiService _api = ApiService();
-  
+
   // Base endpoint for expenses
   static const String _baseEndpoint = '/api/finance/expenses';
-  
+
   // ============================================================================
   // GET ALL EXPENSES
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> getAllExpenses() async {
     try {
       print('📤 GET: $_baseEndpoint');
-      
+
       final data = await _api.get(_baseEndpoint);
-      
+
       print('✅ Expenses fetched: ${data['data']?.length ?? 0}');
-      
+
       return data;
     } catch (e) {
       print('❌ Error fetching expenses: $e');
@@ -35,15 +35,15 @@ class ExpenseService {
   // ============================================================================
   // GET SINGLE EXPENSE BY ID
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> getExpenseById(String id) async {
     try {
       print('📤 GET: $_baseEndpoint/$id');
-      
+
       final data = await _api.get('$_baseEndpoint/$id');
-      
+
       print('✅ Expense fetched: ID $id');
-      
+
       return data;
     } catch (e) {
       print('❌ Error fetching expense: $e');
@@ -54,7 +54,7 @@ class ExpenseService {
   // ============================================================================
   // CREATE NEW EXPENSE WITH PROPER WEB/MOBILE FILE HANDLING
   // ============================================================================
-  
+
   // FIXED: expenses_service.dart - Critical fixes in createExpense method
 
 // Around line 70-120 in createExpense method:
@@ -79,189 +79,190 @@ if (!isItemized && amount != null && amount.isNotEmpty && amount != '0') {
 
 // FULL FIXED createExpense METHOD:
 
-Future<Map<String, dynamic>> createExpense({
-  required String date,
-  required String expenseAccount,
-  required String paidThrough,
-  String? amount,
-  String? tax,
-  String? vendor,
-  String? invoiceNumber,
-  String? customerName,
-  bool isBillable = false,
-  String? project,
-  double markupPercentage = 0.0,
-  List<String>? reportingTags,
-  String? notes,
-  bool isItemized = false,
-  List<Map<String, dynamic>>? itemizedExpenses,
-  File? receiptFile,
-  String? providerTransactionId,
-}) async {
-  try {
-    print('📤 POST: $_baseEndpoint (multipart)');
-    print('📊 Creating expense:');
-    print('  - Date: $date');
-    print('  - Account: $expenseAccount');
-    print('  - Amount: $amount');
-    print('  - Tax: $tax');
-    print('  - Paid Through: $paidThrough');
-    print('  - Is Itemized: $isItemized');
-    
-    // Get auth headers from ApiService
-    final headers = await _api.getHeaders();
-    
-    // Create multipart request with auth headers
-    var request = http.MultipartRequest(
-      'POST',
-      Uri.parse('${_api.baseUrl}$_baseEndpoint'),
-    );
-    
-    // Add auth headers (remove Content-Type as it's set automatically for multipart)
-    headers.forEach((key, value) {
-      if (key.toLowerCase() != 'content-type') {
-        request.headers[key] = value;
-      }
-    });
+  Future<Map<String, dynamic>> createExpense({
+    required String date,
+    required String expenseAccount,
+    required String paidThrough,
+    String? amount,
+    String? tax,
+    String? vendor,
+    String? invoiceNumber,
+    String? customerName,
+    bool isBillable = false,
+    String? project,
+    double markupPercentage = 0.0,
+    List<String>? reportingTags,
+    String? notes,
+    bool isItemized = false,
+    List<Map<String, dynamic>>? itemizedExpenses,
+    File? receiptFile,
+    String? providerTransactionId,
+  }) async {
+    try {
+      print('📤 POST: $_baseEndpoint (multipart)');
+      print('📊 Creating expense:');
+      print('  - Date: $date');
+      print('  - Account: $expenseAccount');
+      print('  - Amount: $amount');
+      print('  - Tax: $tax');
+      print('  - Paid Through: $paidThrough');
+      print('  - Is Itemized: $isItemized');
 
-    // Add REQUIRED form fields
-    request.fields['date'] = date;
-    request.fields['expenseAccount'] = expenseAccount;
-    request.fields['paidThrough'] = paidThrough;
-    
-    // FIXED: Only send amount for NON-itemized expenses
-    if (!isItemized && amount != null && amount.isNotEmpty && amount != '0') {
-      request.fields['amount'] = amount;
-      print('  ✅ Amount field set to: $amount');
-    } else if (isItemized) {
-      print('  ℹ️  Skipping amount field (itemized expense)');
-    }
-    
-    // FIXED: Always send tax, but as '0' if empty
-    if (tax != null && tax.isNotEmpty) {
-      request.fields['tax'] = tax;
-      print('  ✅ Tax field set to: $tax');
-    } else {
-      request.fields['tax'] = '0';
-      print('  ✅ Tax field set to: 0 (default)');
-    }
-    
-    // Add optional fields
-    if (vendor != null && vendor.isNotEmpty) {
-      request.fields['vendor'] = vendor;
-    }
-    if (invoiceNumber != null && invoiceNumber.isNotEmpty) {
-      request.fields['invoiceNumber'] = invoiceNumber;
-    }
-    if (customerName != null && customerName.isNotEmpty) {
-      request.fields['customerName'] = customerName;
-    }
-    
-    request.fields['isBillable'] = isBillable.toString();
-    
-    if (project != null && project.isNotEmpty) {
-      request.fields['project'] = project;
-    }
-    request.fields['markupPercentage'] = markupPercentage.toString();
-    
-    if (reportingTags != null && reportingTags.isNotEmpty) {
-      request.fields['reportingTags'] = json.encode(reportingTags);
-    }
-    
-    if (notes != null && notes.isNotEmpty) {
-      request.fields['notes'] = notes;
-    }
-    
-    request.fields['isItemized'] = isItemized.toString();
-    
-    if (providerTransactionId != null && providerTransactionId.isNotEmpty) {
-      request.fields['providerTransactionId'] = providerTransactionId;
-    }
-    
-    if (itemizedExpenses != null && itemizedExpenses.isNotEmpty) {
-      request.fields['itemizedExpenses'] = json.encode(itemizedExpenses);
-      print('  ✅ Itemized expenses: ${itemizedExpenses.length} items');
-      
-      // Calculate and log total for itemized expenses
-      double itemizedTotal = 0;
-      for (var item in itemizedExpenses) {
-        itemizedTotal += (item['amount'] as num).toDouble();
-      }
-      print('  ℹ️  Itemized total: ₹$itemizedTotal');
-    }
+      // Get auth headers from ApiService
+      final headers = await _api.getHeaders();
 
-    // Add receipt file with web support
-    if (receiptFile != null) {
-      try {
-        String? mimeType = lookupMimeType(receiptFile.path);
-        List<String> mimeTypeParts = mimeType?.split('/') ?? ['application', 'octet-stream'];
-        
-        if (kIsWeb) {
-          final bytes = await receiptFile.readAsBytes();
-          request.files.add(
-            http.MultipartFile.fromBytes(
-              'receipt',
-              bytes,
-              filename: receiptFile.path.split('/').last,
-              contentType: MediaType(mimeTypeParts[0], mimeTypeParts[1]),
-            ),
-          );
-        } else {
-          request.files.add(
-            await http.MultipartFile.fromPath(
-              'receipt',
-              receiptFile.path,
-              contentType: MediaType(mimeTypeParts[0], mimeTypeParts[1]),
-            ),
-          );
+      // Create multipart request with auth headers
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${_api.baseUrl}$_baseEndpoint'),
+      );
+
+      // Add auth headers (remove Content-Type as it's set automatically for multipart)
+      headers.forEach((key, value) {
+        if (key.toLowerCase() != 'content-type') {
+          request.headers[key] = value;
         }
-        print('  ✅ Receipt attached: ${receiptFile.path.split('/').last}');
-      } catch (e) {
-        print('⚠️ Warning: Could not attach receipt: $e');
-      }
-    }
+      });
 
-    // Send request
-    print('📡 Sending request...');
-    print('📋 Request fields: ${request.fields}');
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
+      // Add REQUIRED form fields
+      request.fields['date'] = date;
+      request.fields['expenseAccount'] = expenseAccount;
+      request.fields['paidThrough'] = paidThrough;
 
-    print('📥 Response status: ${response.statusCode}');
-    print('📥 Response body: ${response.body}');
-    
-    if (response.statusCode == 201) {
-      print('✅ Expense created successfully');
-      final responseData = json.decode(response.body);
-      
-      // Log the created expense details
-      if (responseData['data'] != null) {
-        final expense = responseData['data'];
-        print('✅ Created expense ID: ${expense['_id']}');
-        print('✅ Amount: ₹${expense['amount']}');
-        print('✅ Tax: ₹${expense['tax']}');
-        print('✅ Total: ₹${expense['total']}');
+      // FIXED: Only send amount for NON-itemized expenses
+      if (!isItemized && amount != null && amount.isNotEmpty && amount != '0') {
+        request.fields['amount'] = amount;
+        print('  ✅ Amount field set to: $amount');
+      } else if (isItemized) {
+        print('  ℹ️  Skipping amount field (itemized expense)');
       }
-      
-      return responseData;
-    } else {
-      final errorBody = json.decode(response.body);
-      print('❌ Error creating expense: ${errorBody['message']}');
-      if (errorBody['errors'] != null) {
-        print('❌ Validation errors: ${errorBody['errors']}');
+
+      // FIXED: Always send tax, but as '0' if empty
+      if (tax != null && tax.isNotEmpty) {
+        request.fields['tax'] = tax;
+        print('  ✅ Tax field set to: $tax');
+      } else {
+        request.fields['tax'] = '0';
+        print('  ✅ Tax field set to: 0 (default)');
       }
-      throw Exception(errorBody['message'] ?? 'Failed to create expense');
+
+      // Add optional fields
+      if (vendor != null && vendor.isNotEmpty) {
+        request.fields['vendor'] = vendor;
+      }
+      if (invoiceNumber != null && invoiceNumber.isNotEmpty) {
+        request.fields['invoiceNumber'] = invoiceNumber;
+      }
+      if (customerName != null && customerName.isNotEmpty) {
+        request.fields['customerName'] = customerName;
+      }
+
+      request.fields['isBillable'] = isBillable.toString();
+
+      if (project != null && project.isNotEmpty) {
+        request.fields['project'] = project;
+      }
+      request.fields['markupPercentage'] = markupPercentage.toString();
+
+      if (reportingTags != null && reportingTags.isNotEmpty) {
+        request.fields['reportingTags'] = json.encode(reportingTags);
+      }
+
+      if (notes != null && notes.isNotEmpty) {
+        request.fields['notes'] = notes;
+      }
+
+      request.fields['isItemized'] = isItemized.toString();
+
+      if (providerTransactionId != null && providerTransactionId.isNotEmpty) {
+        request.fields['providerTransactionId'] = providerTransactionId;
+      }
+
+      if (itemizedExpenses != null && itemizedExpenses.isNotEmpty) {
+        request.fields['itemizedExpenses'] = json.encode(itemizedExpenses);
+        print('  ✅ Itemized expenses: ${itemizedExpenses.length} items');
+
+        // Calculate and log total for itemized expenses
+        double itemizedTotal = 0;
+        for (var item in itemizedExpenses) {
+          itemizedTotal += (item['amount'] as num).toDouble();
+        }
+        print('  ℹ️  Itemized total: ₹$itemizedTotal');
+      }
+
+      // Add receipt file with web support
+      if (receiptFile != null) {
+        try {
+          String? mimeType = lookupMimeType(receiptFile.path);
+          List<String> mimeTypeParts =
+              mimeType?.split('/') ?? ['application', 'octet-stream'];
+
+          if (kIsWeb) {
+            final bytes = await receiptFile.readAsBytes();
+            request.files.add(
+              http.MultipartFile.fromBytes(
+                'receipt',
+                bytes,
+                filename: receiptFile.path.split('/').last,
+                contentType: MediaType(mimeTypeParts[0], mimeTypeParts[1]),
+              ),
+            );
+          } else {
+            request.files.add(
+              await http.MultipartFile.fromPath(
+                'receipt',
+                receiptFile.path,
+                contentType: MediaType(mimeTypeParts[0], mimeTypeParts[1]),
+              ),
+            );
+          }
+          print('  ✅ Receipt attached: ${receiptFile.path.split('/').last}');
+        } catch (e) {
+          print('⚠️ Warning: Could not attach receipt: $e');
+        }
+      }
+
+      // Send request
+      print('📡 Sending request...');
+      print('📋 Request fields: ${request.fields}');
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      print('📥 Response status: ${response.statusCode}');
+      print('📥 Response body: ${response.body}');
+
+      if (response.statusCode == 201) {
+        print('✅ Expense created successfully');
+        final responseData = json.decode(response.body);
+
+        // Log the created expense details
+        if (responseData['data'] != null) {
+          final expense = responseData['data'];
+          print('✅ Created expense ID: ${expense['_id']}');
+          print('✅ Amount: ₹${expense['amount']}');
+          print('✅ Tax: ₹${expense['tax']}');
+          print('✅ Total: ₹${expense['total']}');
+        }
+
+        return responseData;
+      } else {
+        final errorBody = json.decode(response.body);
+        print('❌ Error creating expense: ${errorBody['message']}');
+        if (errorBody['errors'] != null) {
+          print('❌ Validation errors: ${errorBody['errors']}');
+        }
+        throw Exception(errorBody['message'] ?? 'Failed to create expense');
+      }
+    } catch (e) {
+      print('❌ Error creating expense: $e');
+      rethrow;
     }
-  } catch (e) {
-    print('❌ Error creating expense: $e');
-    rethrow;
   }
-}
 
   // ============================================================================
   // UPDATE EXPENSE WITH PROPER WEB/MOBILE FILE HANDLING
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> updateExpense({
     required String id,
     String? date,
@@ -285,16 +286,16 @@ Future<Map<String, dynamic>> createExpense({
   }) async {
     try {
       print('📤 PUT: $_baseEndpoint/$id (multipart)');
-      
+
       // Get auth headers from ApiService
       final headers = await _api.getHeaders();
-      
+
       // Create multipart request with auth headers
       var request = http.MultipartRequest(
         'PUT',
         Uri.parse('${_api.baseUrl}$_baseEndpoint/$id'),
       );
-      
+
       // Add auth headers (remove Content-Type as it's set automatically for multipart)
       headers.forEach((key, value) {
         if (key.toLowerCase() != 'content-type') {
@@ -304,25 +305,31 @@ Future<Map<String, dynamic>> createExpense({
 
       // Add form fields (only if provided)
       if (date != null) request.fields['date'] = date;
-      if (expenseAccount != null) request.fields['expenseAccount'] = expenseAccount;
+      if (expenseAccount != null)
+        request.fields['expenseAccount'] = expenseAccount;
       if (paidThrough != null) request.fields['paidThrough'] = paidThrough;
       if (amount != null) request.fields['amount'] = amount;
       if (tax != null) request.fields['tax'] = tax;
       if (vendor != null) request.fields['vendor'] = vendor;
-      if (invoiceNumber != null) request.fields['invoiceNumber'] = invoiceNumber;
+      if (invoiceNumber != null)
+        request.fields['invoiceNumber'] = invoiceNumber;
       if (customerName != null) request.fields['customerName'] = customerName;
-      if (isBillable != null) request.fields['isBillable'] = isBillable.toString();
+      if (isBillable != null)
+        request.fields['isBillable'] = isBillable.toString();
       if (project != null) request.fields['project'] = project;
-      if (markupPercentage != null) request.fields['markupPercentage'] = markupPercentage.toString();
-      
+      if (markupPercentage != null)
+        request.fields['markupPercentage'] = markupPercentage.toString();
+
       if (reportingTags != null) {
         request.fields['reportingTags'] = json.encode(reportingTags);
       }
-      
+
       if (notes != null) request.fields['notes'] = notes;
-      if (isItemized != null) request.fields['isItemized'] = isItemized.toString();
-      if (providerTransactionId != null) request.fields['providerTransactionId'] = providerTransactionId;
-      
+      if (isItemized != null)
+        request.fields['isItemized'] = isItemized.toString();
+      if (providerTransactionId != null)
+        request.fields['providerTransactionId'] = providerTransactionId;
+
       if (itemizedExpenses != null) {
         request.fields['itemizedExpenses'] = json.encode(itemizedExpenses);
       }
@@ -335,8 +342,9 @@ Future<Map<String, dynamic>> createExpense({
       if (receiptFile != null) {
         try {
           String? mimeType = lookupMimeType(receiptFile.path);
-          List<String> mimeTypeParts = mimeType?.split('/') ?? ['application', 'octet-stream'];
-          
+          List<String> mimeTypeParts =
+              mimeType?.split('/') ?? ['application', 'octet-stream'];
+
           if (kIsWeb) {
             // For web: Read file as bytes
             final bytes = await receiptFile.readAsBytes();
@@ -387,15 +395,15 @@ Future<Map<String, dynamic>> createExpense({
   // ============================================================================
   // DELETE EXPENSE
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> deleteExpense(String id) async {
     try {
       print('📤 DELETE: $_baseEndpoint/$id');
-      
+
       final data = await _api.delete('$_baseEndpoint/$id');
-      
+
       print('✅ Expense deleted successfully');
-      
+
       return data;
     } catch (e) {
       print('❌ Error deleting expense: $e');
@@ -406,16 +414,16 @@ Future<Map<String, dynamic>> createExpense({
   // ============================================================================
   // DOWNLOAD RECEIPT
   // ============================================================================
-  
+
   Future<String> downloadReceipt(String id) async {
     try {
       print('📤 GET: $_baseEndpoint/$id/receipt (Receipt download)');
-      
+
       // Return the URL for download
       final url = '${_api.baseUrl}$_baseEndpoint/$id/receipt';
-      
+
       print('✅ Receipt URL: $url');
-      
+
       return url;
     } catch (e) {
       print('❌ Error getting receipt URL: $e');
@@ -426,15 +434,15 @@ Future<Map<String, dynamic>> createExpense({
   // ============================================================================
   // GET EXPENSE STATISTICS
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> getExpenseStatistics() async {
     try {
       print('📤 GET: $_baseEndpoint/stats/summary');
-      
+
       final data = await _api.get('$_baseEndpoint/stats/summary');
-      
+
       print('✅ Expense statistics fetched');
-      
+
       return data;
     } catch (e) {
       print('❌ Error fetching statistics: $e');
@@ -445,21 +453,21 @@ Future<Map<String, dynamic>> createExpense({
   // ============================================================================
   // BULK IMPORT EXPENSES FROM EXCEL/CSV
   // ============================================================================
-  
+
   Future<Map<String, dynamic>> bulkImportExpenses(File file) async {
     try {
       print('📤 POST: $_baseEndpoint/import/bulk (Bulk import)');
       print('📊 File: ${file.path}');
-      
+
       // Get auth headers from ApiService
       final headers = await _api.getHeaders();
-      
+
       // Create multipart request with auth headers
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('${_api.baseUrl}$_baseEndpoint/import/bulk'),
       );
-      
+
       // Add auth headers (remove Content-Type as it's set automatically for multipart)
       headers.forEach((key, value) {
         if (key.toLowerCase() != 'content-type') {
@@ -470,12 +478,13 @@ Future<Map<String, dynamic>> createExpense({
       // Add file with web support
       try {
         String? mimeType = lookupMimeType(file.path);
-        
+
         // Default to Excel MIME type if not detected
         if (mimeType == null) {
           final extension = file.path.split('.').last.toLowerCase();
           if (extension == 'xlsx') {
-            mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            mimeType =
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
           } else if (extension == 'xls') {
             mimeType = 'application/vnd.ms-excel';
           } else if (extension == 'csv') {
@@ -484,9 +493,9 @@ Future<Map<String, dynamic>> createExpense({
             mimeType = 'application/octet-stream';
           }
         }
-        
+
         List<String> mimeTypeParts = mimeType.split('/');
-        
+
         if (kIsWeb) {
           // For web: Read file as bytes
           final bytes = await file.readAsBytes();
@@ -542,7 +551,7 @@ Future<Map<String, dynamic>> createExpense({
   // ============================================================================
   // DOWNLOAD IMPORT TEMPLATE
   // ============================================================================
-  
+
   Future<String> getImportTemplateUrl() async {
     try {
       final url = '${_api.baseUrl}$_baseEndpoint/import/template';
@@ -560,7 +569,7 @@ Future<Map<String, dynamic>> createExpense({
 // ============================================================================
 
 class Expense {
-  final String id;  // Changed from int to String for MongoDB _id
+  final String id; // Changed from int to String for MongoDB _id
   final String? expenseNumber;
   final String date;
   final String expenseAccount;
@@ -627,7 +636,7 @@ class Expense {
       print('⚠️ Warning: Unexpected type for number: ${value.runtimeType}');
       return 0.0;
     }
-    
+
     // FIXED: Parse MongoDB _id as String
     String _parseId(dynamic value) {
       if (value == null) return '';
@@ -637,13 +646,13 @@ class Expense {
       }
       return value.toString();
     }
-    
+
     // Helper function to safely parse strings
     String _parseString(dynamic value, String defaultValue) {
       if (value == null) return defaultValue;
       return value.toString();
     }
-    
+
     // Helper function to safely parse booleans
     bool _parseBool(dynamic value) {
       if (value == null) return false;
@@ -654,10 +663,11 @@ class Expense {
       if (value is num) return value != 0;
       return false;
     }
-    
+
     try {
       return Expense(
-        id: _parseId(json['_id'] ?? json['id']),  // FIXED: Handle both _id and id
+        id: _parseId(
+            json['_id'] ?? json['id']), // FIXED: Handle both _id and id
         expenseNumber: json['expenseNumber'],
         date: _parseString(json['date'], ''),
         expenseAccount: _parseString(json['expenseAccount'], ''),
@@ -672,7 +682,10 @@ class Expense {
         project: json['project'],
         markupPercentage: _parseDouble(json['markupPercentage']),
         billableAmount: _parseDouble(json['billableAmount']),
-        reportingTags: (json['reportingTags'] as List?)?.map((e) => e.toString()).toList() ?? [],
+        reportingTags: (json['reportingTags'] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [],
         notes: json['notes'],
         isItemized: _parseBool(json['isItemized']),
         itemizedExpenses: (json['itemizedExpenses'] as List?)
@@ -743,7 +756,7 @@ class ItemizedExpenseData {
       if (value is String) return double.tryParse(value) ?? 0.0;
       return 0.0;
     }
-    
+
     return ItemizedExpenseData(
       expenseAccount: json['expenseAccount'],
       amount: _parseDouble(json['amount']),
@@ -812,21 +825,21 @@ class ProofFile {
   });
 
   factory ProofFile.fromJson(Map<String, dynamic> j) => ProofFile(
-    filename:     j['filename']     as String,
-    originalName: j['originalName'] as String,
-    size:         (j['size'] as num).toInt(),
-    mimetype:     j['mimetype']     as String,
-    uploadedAt:   j['uploadedAt']   as String?,
-  );
+        filename: j['filename'] as String,
+        originalName: j['originalName'] as String,
+        size: (j['size'] as num).toInt(),
+        mimetype: j['mimetype'] as String,
+        uploadedAt: j['uploadedAt'] as String?,
+      );
 
   Map<String, dynamic> toJson() => {
-    'filename':     filename,
-    'originalName': originalName,
-    'size':         size,
-    'mimetype':     mimetype,
-    'uploadedAt':   uploadedAt,
-  };
+        'filename': filename,
+        'originalName': originalName,
+        'size': size,
+        'mimetype': mimetype,
+        'uploadedAt': uploadedAt,
+      };
 
   bool get isImage => mimetype.startsWith('image/');
-  bool get isPdf   => mimetype == 'application/pdf';
+  bool get isPdf => mimetype == 'application/pdf';
 }

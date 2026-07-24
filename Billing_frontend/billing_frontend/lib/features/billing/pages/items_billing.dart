@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // ITEMS BILLING PAGE — Upgraded UI matching credit_notes_list_page.dart
 // ============================================================================
@@ -61,10 +62,10 @@ class ItemsBilling extends StatefulWidget {
 
 class _ItemsBillingState extends State<ItemsBilling> {
   // ── Brand palette (matches credit_notes) ─────────────────────────────────
-  static const Color _navy   = Color(0xFF1e3a8a);
+  static const Color _navy = Color(0xFF1e3a8a);
   static const Color _purple = Color(0xFF9B59B6);
-  static const Color _green  = Color(0xFF27AE60);
-  static const Color _blue   = Color(0xFF2980B9);
+  static const Color _green = Color(0xFF27AE60);
+  static const Color _blue = Color(0xFF2980B9);
   static const Color _orange = Color(0xFFE67E22);
 
   final ItemBillingService _itemService = ItemBillingService();
@@ -78,21 +79,26 @@ class _ItemsBillingState extends State<ItemsBilling> {
 
   // ── Filters ───────────────────────────────────────────────────────────────
   String _selectedStatus = 'All Items';
-  String _selectedType   = 'All Types';
-  final List<String> _statusFilters = ['All Items', 'Active Items', 'Inactive Items'];
-  final List<String> _typeFilters   = ['All Types', 'Service', 'Goods'];
+  String _selectedType = 'All Types';
+  final List<String> _statusFilters = [
+    'All Items',
+    'Active Items',
+    'Inactive Items'
+  ];
+  final List<String> _typeFilters = ['All Types', 'Service', 'Goods'];
 
   // ── Search ────────────────────────────────────────────────────────────────
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
   // ── Pagination ────────────────────────────────────────────────────────────
-  int _currentPage  = 1;
+  int _currentPage = 1;
   static const int _itemsPerPage = 20;
-  int get _totalPages => (_filtered.length / _itemsPerPage).ceil().clamp(1, 9999);
+  int get _totalPages =>
+      (_filtered.length / _itemsPerPage).ceil().clamp(1, 9999);
   List<ItemData> get _pageItems {
     final start = (_currentPage - 1) * _itemsPerPage;
-    final end   = (start + _itemsPerPage).clamp(0, _filtered.length);
+    final end = (start + _itemsPerPage).clamp(0, _filtered.length);
     return _filtered.sublist(start, end);
   }
 
@@ -113,8 +119,8 @@ class _ItemsBillingState extends State<ItemsBilling> {
     _loadStats();
     _searchController.addListener(() {
       setState(() {
-        _searchQuery  = _searchController.text.toLowerCase();
-        _currentPage  = 1;
+        _searchQuery = _searchController.text.toLowerCase();
+        _currentPage = 1;
       });
       _applyFilters();
     });
@@ -133,16 +139,22 @@ class _ItemsBillingState extends State<ItemsBilling> {
   // ==========================================================================
 
   Future<void> _loadItems() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final result = await _itemService.fetchAllItems();
       setState(() {
-        _items    = result.map((j) => ItemData.fromJson(j)).toList();
+        _items = result.map((j) => ItemData.fromJson(j)).toList();
         _isLoading = false;
       });
       _applyFilters();
     } catch (e) {
-      setState(() { _isLoading = false; _errorMessage = e.toString(); });
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.toString();
+      });
     }
   }
 
@@ -161,9 +173,12 @@ class _ItemsBillingState extends State<ItemsBilling> {
               (item.description?.toLowerCase().contains(_searchQuery) ?? false);
           if (!ok) return false;
         }
-        if (_selectedStatus == 'Active Items'   && item.status != 'Active')   return false;
-        if (_selectedStatus == 'Inactive Items' && item.status != 'Inactive') return false;
-        if (_selectedType != 'All Types' && item.type != _selectedType) return false;
+        if (_selectedStatus == 'Active Items' && item.status != 'Active')
+          return false;
+        if (_selectedStatus == 'Inactive Items' && item.status != 'Inactive')
+          return false;
+        if (_selectedType != 'All Types' && item.type != _selectedType)
+          return false;
         return true;
       }).toList();
       _selectedIds.clear();
@@ -183,7 +198,9 @@ class _ItemsBillingState extends State<ItemsBilling> {
 
   void _toggleSelect(String id) {
     setState(() {
-      _selectedIds.contains(id) ? _selectedIds.remove(id) : _selectedIds.add(id);
+      _selectedIds.contains(id)
+          ? _selectedIds.remove(id)
+          : _selectedIds.add(id);
       _selectAll = _selectedIds.length == _pageItems.length;
     });
   }
@@ -204,14 +221,16 @@ class _ItemsBillingState extends State<ItemsBilling> {
   // ==========================================================================
 
   void _openNew() async {
-    final ok = await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => const NewItemBilling()));
+    final ok = await Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const NewItemBilling()));
     if (ok == true) _refresh();
   }
 
   void _openEdit(ItemData item) async {
-    final ok = await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => NewItemBilling(itemToEdit: item.toJson())));
+    final ok = await Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => NewItemBilling(itemToEdit: item.toJson())));
     if (ok == true) _refresh();
   }
 
@@ -224,13 +243,17 @@ class _ItemsBillingState extends State<ItemsBilling> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Item', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Delete Item',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: Text('Delete "${item.name}"? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
             child: const Text('Delete'),
           ),
         ],
@@ -251,8 +274,7 @@ class _ItemsBillingState extends State<ItemsBilling> {
   // ==========================================================================
 
   Future<void> _shareItem(ItemData item) async {
-    final text =
-        'Item Details\n'
+    final text = 'Item Details\n'
         '─────────────────────────\n'
         'Name    : ${item.name}\n'
         'Type    : ${item.type}\n'
@@ -325,7 +347,8 @@ class _ItemsBillingState extends State<ItemsBilling> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Export Items', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Export Items',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -335,22 +358,33 @@ class _ItemsBillingState extends State<ItemsBilling> {
             ListTile(
               leading: const Icon(Icons.table_chart, color: _green),
               title: const Text('Excel (XLSX)'),
-              onTap: () { Navigator.pop(context); _exportToExcel(); },
+              onTap: () {
+                Navigator.pop(context);
+                _exportToExcel();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
               title: const Text('PDF'),
-              onTap: () { Navigator.pop(context); _exportToPDF(); },
+              onTap: () {
+                Navigator.pop(context);
+                _exportToPDF();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.code, color: _blue),
               title: const Text('CSV'),
-              onTap: () { Navigator.pop(context); _exportToCSV(); },
+              onTap: () {
+                Navigator.pop(context);
+                _exportToCSV();
+              },
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
         ],
       ),
     );
@@ -358,16 +392,29 @@ class _ItemsBillingState extends State<ItemsBilling> {
 
   Future<void> _exportToExcel() async {
     try {
-      if (_filtered.isEmpty) { _snackError('No items to export'); return; }
+      if (_filtered.isEmpty) {
+        _snackError('No items to export');
+        return;
+      }
       List<List<dynamic>> data = [
-        ['Item Name', 'Type', 'Unit', 'Selling Price', 'Cost Price', 'Status', 'Created Date'],
+        [
+          'Item Name',
+          'Type',
+          'Unit',
+          'Selling Price',
+          'Cost Price',
+          'Status',
+          'Created Date'
+        ],
         ..._filtered.map((item) => [
-          item.name, item.type, item.unit ?? '',
-          item.sellingPrice.toStringAsFixed(2),
-          item.costPrice?.toStringAsFixed(2) ?? '0.00',
-          item.status,
-          DateFormat('dd/MM/yyyy').format(item.createdDate),
-        ]),
+              item.name,
+              item.type,
+              item.unit ?? '',
+              item.sellingPrice.toStringAsFixed(2),
+              item.costPrice?.toStringAsFixed(2) ?? '0.00',
+              item.status,
+              DateFormat('dd/MM/yyyy').format(item.createdDate),
+            ]),
       ];
       await ExportHelper.exportToExcel(data: data, filename: 'items');
       _snackSuccess('✅ Excel downloaded with ${_filtered.length} items!');
@@ -378,13 +425,21 @@ class _ItemsBillingState extends State<ItemsBilling> {
 
   Future<void> _exportToPDF() async {
     try {
-      if (_filtered.isEmpty) { _snackError('No items to export'); return; }
+      if (_filtered.isEmpty) {
+        _snackError('No items to export');
+        return;
+      }
       await ExportHelper.exportToPDF(
         title: 'Items Report',
         headers: ['Name', 'Type', 'Price', 'Status'],
-        data: _filtered.map((i) => [
-          i.name, i.type, i.sellingPrice.toStringAsFixed(2), i.status,
-        ]).toList(),
+        data: _filtered
+            .map((i) => [
+                  i.name,
+                  i.type,
+                  i.sellingPrice.toStringAsFixed(2),
+                  i.status,
+                ])
+            .toList(),
         filename: 'items',
       );
       _snackSuccess('✅ PDF downloaded!');
@@ -399,7 +454,7 @@ class _ItemsBillingState extends State<ItemsBilling> {
   //  IMPORT DIALOG
   // ==========================================================================
 
-void _showImportDialog() {
+  void _showImportDialog() {
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -427,11 +482,13 @@ void _showImportDialog() {
                     color: _purple.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.upload_file, color: _purple, size: 24),
+                  child:
+                      const Icon(Icons.upload_file, color: _purple, size: 24),
                 ),
                 const SizedBox(width: 14),
                 const Text('Import Items',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
@@ -445,7 +502,8 @@ void _showImportDialog() {
                 color: _blue,
                 icon: Icons.download,
                 title: 'Download Template',
-                subtitle: 'Get the Excel/CSV template with required columns and sample data.',
+                subtitle:
+                    'Get the Excel/CSV template with required columns and sample data.',
                 buttonLabel: 'Download Template',
                 onPressed: () async {
                   Navigator.pop(context);
@@ -464,7 +522,8 @@ void _showImportDialog() {
                 color: _green,
                 icon: Icons.upload,
                 title: 'Upload Filled File',
-                subtitle: 'Fill in the template and upload it (.xlsx, .xls, or .csv).',
+                subtitle:
+                    'Fill in the template and upload it (.xlsx, .xls, or .csv).',
                 buttonLabel: 'Select File',
                 onPressed: () {
                   Navigator.pop(context);
@@ -497,17 +556,25 @@ void _showImportDialog() {
       child: LayoutBuilder(builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 360;
         final circle = Container(
-          width: 36, height: 36,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          child: Center(child: Text(step,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
+          child: Center(
+              child: Text(step,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18))),
         );
         final textBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            Text(title,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             const SizedBox(height: 4),
-            Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+            Text(subtitle,
+                style: TextStyle(fontSize: 13, color: Colors.grey[600])),
           ],
         );
         final button = ElevatedButton.icon(
@@ -518,19 +585,22 @@ void _showImportDialog() {
             backgroundColor: color,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         );
         if (isNarrow) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              circle,
-              const SizedBox(width: 10),
-              Expanded(child: textBlock),
-            ]),
-            const SizedBox(height: 10),
-            SizedBox(width: double.infinity, child: button),
-          ]);
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  circle,
+                  const SizedBox(width: 10),
+                  Expanded(child: textBlock),
+                ]),
+                const SizedBox(height: 10),
+                SizedBox(width: double.infinity, child: button),
+              ]);
         }
         return Row(children: [
           circle,
@@ -543,7 +613,7 @@ void _showImportDialog() {
     );
   }
 
-Future<void> _runBulkImport() async {
+  Future<void> _runBulkImport() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -554,7 +624,10 @@ Future<void> _runBulkImport() async {
 
       final file = result.files.first;
       final bytes = file.bytes;
-      if (bytes == null) { _snackError('Failed to read file'); return; }
+      if (bytes == null) {
+        _snackError('Failed to read file');
+        return;
+      }
 
       // Parse
       List<List<dynamic>> rows;
@@ -565,7 +638,10 @@ Future<void> _runBulkImport() async {
         rows = _parseExcel(bytes);
       }
 
-      if (rows.length < 2) { _snackError('File must have header + at least 1 data row'); return; }
+      if (rows.length < 2) {
+        _snackError('File must have header + at least 1 data row');
+        return;
+      }
 
       // Template columns:
       // 0: Name
@@ -586,15 +662,15 @@ Future<void> _runBulkImport() async {
 
       for (int i = 1; i < rows.length; i++) {
         final row = rows[i];
-        final name  = _str(row, 0);
-        final type  = _str(row, 1);
-        final unit  = _str(row, 2);
+        final name = _str(row, 0);
+        final type = _str(row, 1);
+        final unit = _str(row, 2);
         final spStr = _str(row, 3);
         final cpStr = _str(row, 4);
-        final salesAccount    = _str(row, 5);
+        final salesAccount = _str(row, 5);
         final purchaseAccount = _str(row, 6);
-        final salesDesc       = _str(row, 7);
-        final purchaseDesc    = _str(row, 8);
+        final salesDesc = _str(row, 7);
+        final purchaseDesc = _str(row, 8);
         const status = 'Active'; // always default — not in template
 
         if (name.isEmpty) {
@@ -602,7 +678,8 @@ Future<void> _runBulkImport() async {
           continue;
         }
         if (type != 'Goods' && type != 'Service') {
-          errors.add('Row ${i + 1}: Type must be "Goods" or "Service", got "$type"');
+          errors.add(
+              'Row ${i + 1}: Type must be "Goods" or "Service", got "$type"');
           continue;
         }
         if (spStr.isEmpty) {
@@ -611,46 +688,56 @@ Future<void> _runBulkImport() async {
         }
         final sp = double.tryParse(spStr);
         if (sp == null) {
-          errors.add('Row ${i + 1}: Selling Price "$spStr" is not a valid number');
+          errors.add(
+              'Row ${i + 1}: Selling Price "$spStr" is not a valid number');
           continue;
         }
         final cp = cpStr.isNotEmpty ? double.tryParse(cpStr) : null;
 
         toImport.add({
-          'name':                name,
-          'type':                type,
-          'unit':                unit.isNotEmpty ? unit : null,
-          'sellingPrice':        sp,
-          'costPrice':           cp,
-          'status':              status,
-          'isSellable':          true,
-          'isPurchasable':       cp != null && cp > 0,
-          'salesAccount':        salesAccount.isNotEmpty ? salesAccount : 'Sales',
-          'purchaseAccount':     purchaseAccount.isNotEmpty ? purchaseAccount : 'Cost of Goods Sold',
-          'salesDescription':    salesDesc,
+          'name': name,
+          'type': type,
+          'unit': unit.isNotEmpty ? unit : null,
+          'sellingPrice': sp,
+          'costPrice': cp,
+          'status': status,
+          'isSellable': true,
+          'isPurchasable': cp != null && cp > 0,
+          'salesAccount': salesAccount.isNotEmpty ? salesAccount : 'Sales',
+          'purchaseAccount': purchaseAccount.isNotEmpty
+              ? purchaseAccount
+              : 'Cost of Goods Sold',
+          'salesDescription': salesDesc,
           'purchaseDescription': purchaseDesc,
         });
       }
 
-      if (toImport.isEmpty) { _snackError('No valid data found in file'); return; }
+      if (toImport.isEmpty) {
+        _snackError('No valid data found in file');
+        return;
+      }
 
       // Confirm dialog
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Confirm Import', style: TextStyle(fontWeight: FontWeight.bold)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Confirm Import',
+              style: TextStyle(fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Found ${toImport.length} item(s) to import.',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 18)),
                 if (errors.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Text('${errors.length} row(s) skipped:',
-                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                      style: const TextStyle(
+                          color: Colors.red, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
                   Container(
                     constraints: const BoxConstraints(maxHeight: 140),
@@ -662,7 +749,8 @@ Future<void> _runBulkImport() async {
                     ),
                     child: SingleChildScrollView(
                       child: Text(errors.join('\n'),
-                          style: const TextStyle(fontSize: 14, color: Colors.red)),
+                          style:
+                              const TextStyle(fontSize: 14, color: Colors.red)),
                     ),
                   ),
                 ],
@@ -672,10 +760,13 @@ Future<void> _runBulkImport() async {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: _navy, foregroundColor: Colors.white),
               child: const Text('Import'),
             ),
           ],
@@ -700,29 +791,38 @@ Future<void> _runBulkImport() async {
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Import Complete', style: TextStyle(fontWeight: FontWeight.bold)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Import Complete',
+              style: TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('✅ Successfully imported: $success'),
               if (failed > 0)
-                Text('❌ Failed: $failed', style: const TextStyle(color: Colors.red)),
+                Text('❌ Failed: $failed',
+                    style: const TextStyle(color: Colors.red)),
               if (importErrors.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text('Errors:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Errors:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 ...importErrors.take(5).map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('• $e', style: const TextStyle(fontSize: 14, color: Colors.red)),
-                )),
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('• $e',
+                          style:
+                              const TextStyle(fontSize: 14, color: Colors.red)),
+                    )),
               ],
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () { Navigator.pop(context); _refresh(); },
+              onPressed: () {
+                Navigator.pop(context);
+                _refresh();
+              },
               child: const Text('OK'),
             ),
           ],
@@ -736,18 +836,23 @@ Future<void> _runBulkImport() async {
   List<List<dynamic>> _parseExcel(Uint8List bytes) {
     final ex = excel_pkg.Excel.decodeBytes(bytes);
     final sheet = ex.tables[ex.tables.keys.first];
-    return (sheet?.rows ?? []).map((row) => row.map((cell) {
-      if (cell?.value == null) return '';
-      if (cell!.value is excel_pkg.TextCellValue) {
-        return (cell.value as excel_pkg.TextCellValue).value;
-      }
-      return cell.value;
-    }).toList()).toList();
+    return (sheet?.rows ?? [])
+        .map((row) => row.map((cell) {
+              if (cell?.value == null) return '';
+              if (cell!.value is excel_pkg.TextCellValue) {
+                return (cell.value as excel_pkg.TextCellValue).value;
+              }
+              return cell.value;
+            }).toList())
+        .toList();
   }
 
   List<List<dynamic>> _parseCSV(Uint8List bytes) {
     final str = utf8.decode(bytes, allowMalformed: true);
-    return str.split(RegExp(r'\r?\n')).where((l) => l.trim().isNotEmpty).map((line) {
+    return str
+        .split(RegExp(r'\r?\n'))
+        .where((l) => l.trim().isNotEmpty)
+        .map((line) {
       final fields = <String>[];
       final buf = StringBuffer();
       bool inQ = false;
@@ -794,30 +899,12 @@ Future<void> _runBulkImport() async {
 
   void _snackSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.check_circle, color: Colors.white, size: 18),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: _green,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   void _snackError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.error_outline, color: Colors.white, size: 18),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: Colors.red[700],
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg, isError: true);
   }
 
   // ==========================================================================
@@ -837,12 +924,15 @@ Future<void> _runBulkImport() async {
             _isLoading
                 ? const SizedBox(
                     height: 400,
-                    child: Center(child: CircularProgressIndicator(color: _navy)))
+                    child:
+                        Center(child: CircularProgressIndicator(color: _navy)))
                 : _errorMessage != null
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _filtered.isEmpty
                         ? SizedBox(height: 400, child: _buildEmptyState())
-                        : _isTableView ? _buildTable() : _buildItemListView(),
+                        : _isTableView
+                            ? _buildTable()
+                            : _buildItemListView(),
             if (!_isLoading && _filtered.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -862,13 +952,16 @@ Future<void> _runBulkImport() async {
         color: Colors.white,
         border: const Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: LayoutBuilder(builder: (_, constraints) {
         final w = constraints.maxWidth;
         if (w >= 1100) return _topBarDesktop();
-        if (w >= 700)  return _topBarTablet();
+        if (w >= 700) return _topBarTablet();
         return _topBarMobile();
       }),
     );
@@ -876,94 +969,116 @@ Future<void> _runBulkImport() async {
 
   // ── Desktop ────────────────────────────────────────────────────────────────
   Widget _topBarDesktop() => Row(children: [
-    _statusDropdown(),
-    const SizedBox(width: 10),
-    _typeDropdown(),
-    const SizedBox(width: 10),
-    _searchField(width: 220),
-    const SizedBox(width: 8),
-    _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-    const Spacer(),
-    _buildViewToggle(), const SizedBox(width: 12),
-    _actionBtn('New Item',     Icons.add_rounded,        _navy,   _openNew),
-    const SizedBox(width: 8),
-    _actionBtn('Import',       Icons.upload_file_rounded, _purple, _showImportDialog),
-    const SizedBox(width: 8),
-    _actionBtn('Export',       Icons.download_rounded,    _green,  _handleExport),
-    const SizedBox(width: 8),
-    _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange, () => _raiseTicket()),
-  ]);
+        _statusDropdown(),
+        const SizedBox(width: 10),
+        _typeDropdown(),
+        const SizedBox(width: 10),
+        _searchField(width: 220),
+        const SizedBox(width: 8),
+        _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+            tooltip: 'Refresh'),
+        const Spacer(),
+        _buildViewToggle(),
+        const SizedBox(width: 12),
+        _actionBtn('New Item', Icons.add_rounded, _navy, _openNew),
+        const SizedBox(width: 8),
+        _actionBtn(
+            'Import', Icons.upload_file_rounded, _purple, _showImportDialog),
+        const SizedBox(width: 8),
+        _actionBtn('Export', Icons.download_rounded, _green, _handleExport),
+        const SizedBox(width: 8),
+        _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
+            () => _raiseTicket()),
+      ]);
 
   // ── Tablet ─────────────────────────────────────────────────────────────────
   Widget _topBarTablet() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(children: [
-        _statusDropdown(),
-        const SizedBox(width: 8),
-        _typeDropdown(),
-        const SizedBox(width: 8),
-        Expanded(child: _searchField(width: double.infinity)),
-        const SizedBox(width: 8),
-        _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-      ]),
-      const SizedBox(height: 10),
-      Row(children: [
-        _buildViewToggle(), const SizedBox(width: 10),
-        _actionBtn('New Item',     Icons.add_rounded,        _navy,   _openNew),
-        const SizedBox(width: 8),
-        _actionBtn('Import',       Icons.upload_file_rounded, _purple, _showImportDialog),
-        const SizedBox(width: 8),
-        _actionBtn('Export',       Icons.download_rounded,    _green,  _handleExport),
-        const SizedBox(width: 8),
-        _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange, () => _raiseTicket()),
-      ]),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _statusDropdown(),
+            const SizedBox(width: 8),
+            _typeDropdown(),
+            const SizedBox(width: 8),
+            Expanded(child: _searchField(width: double.infinity)),
+            const SizedBox(width: 8),
+            _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+                tooltip: 'Refresh'),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            _buildViewToggle(),
+            const SizedBox(width: 10),
+            _actionBtn('New Item', Icons.add_rounded, _navy, _openNew),
+            const SizedBox(width: 8),
+            _actionBtn('Import', Icons.upload_file_rounded, _purple,
+                _showImportDialog),
+            const SizedBox(width: 8),
+            _actionBtn('Export', Icons.download_rounded, _green, _handleExport),
+            const SizedBox(width: 8),
+            _actionBtn('Raise Ticket', Icons.confirmation_number_rounded,
+                _orange, () => _raiseTicket()),
+          ]),
+        ],
+      );
 
   // ── Mobile ─────────────────────────────────────────────────────────────────
   Widget _topBarMobile() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(children: [
-        _statusDropdown(),
-        const SizedBox(width: 8),
-        Expanded(child: _searchField(width: double.infinity)),
-        const SizedBox(width: 8),
-        _actionBtn('New', Icons.add_rounded, _navy, _openNew),
-      ]),
-      const SizedBox(height: 10),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          _buildViewToggle(), const SizedBox(width: 8),
-          _typeDropdown(),
-          const SizedBox(width: 8),
-          _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh, tooltip: 'Refresh'),
-          const SizedBox(width: 6),
-          _compactBtn('Import', _purple, _showImportDialog),
-          const SizedBox(width: 6),
-          _compactBtn('Export', _green,  _handleExport),
-          const SizedBox(width: 6),
-          _compactBtn('Ticket', _orange, () => _raiseTicket()),
-        ]),
-      ),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _statusDropdown(),
+            const SizedBox(width: 8),
+            Expanded(child: _searchField(width: double.infinity)),
+            const SizedBox(width: 8),
+            _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+          ]),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _buildViewToggle(),
+              const SizedBox(width: 8),
+              _typeDropdown(),
+              const SizedBox(width: 8),
+              _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refresh,
+                  tooltip: 'Refresh'),
+              const SizedBox(width: 6),
+              _compactBtn('Import', _purple, _showImportDialog),
+              const SizedBox(width: 6),
+              _compactBtn('Export', _green, _handleExport),
+              const SizedBox(width: 6),
+              _compactBtn('Ticket', _orange, () => _raiseTicket()),
+            ]),
+          ),
+        ],
+      );
 
   // ── Shared top-bar widgets ─────────────────────────────────────────────────
 
   Widget _statusDropdown() => _dropdownBox(
-    value: _selectedStatus,
-    items: _statusFilters,
-    onChanged: (v) { setState(() { _selectedStatus = v!; _currentPage = 1; }); _applyFilters(); },
-  );
+        value: _selectedStatus,
+        items: _statusFilters,
+        onChanged: (v) {
+          setState(() {
+            _selectedStatus = v!;
+            _currentPage = 1;
+          });
+          _applyFilters();
+        },
+      );
 
   Widget _typeDropdown() => _dropdownBox(
-    value: _selectedType,
-    items: _typeFilters,
-    onChanged: (v) { setState(() { _selectedType = v!; _currentPage = 1; }); _applyFilters(); },
-  );
+        value: _selectedType,
+        items: _typeFilters,
+        onChanged: (v) {
+          setState(() {
+            _selectedType = v!;
+            _currentPage = 1;
+          });
+          _applyFilters();
+        },
+      );
 
   Widget _dropdownBox({
     required String value,
@@ -982,8 +1097,11 @@ Future<void> _runBulkImport() async {
         child: DropdownButton<String>(
           value: value,
           icon: const Icon(Icons.expand_more, size: 18, color: _navy),
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: _navy),
-          items: items.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+          style: const TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w600, color: _navy),
+          items: items
+              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+              .toList(),
           onChanged: onChanged,
         ),
       ),
@@ -1003,7 +1121,10 @@ Future<void> _runBulkImport() async {
                 icon: const Icon(Icons.clear, size: 16),
                 onPressed: () {
                   _searchController.clear();
-                  setState(() { _searchQuery = ''; _currentPage = 1; });
+                  setState(() {
+                    _searchQuery = '';
+                    _currentPage = 1;
+                  });
                   _applyFilters();
                 })
             : null,
@@ -1027,33 +1148,42 @@ Future<void> _runBulkImport() async {
   }
 
   Widget _iconBtn(IconData icon, VoidCallback? onTap,
-      {String tooltip = '', Color color = const Color(0xFF7F8C8D), Color bg = const Color(0xFFF1F1F1)}) {
+      {String tooltip = '',
+      Color color = const Color(0xFF7F8C8D),
+      Color bg = const Color(0xFFF1F1F1)}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          width: 42, height: 42,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: bg, borderRadius: BorderRadius.circular(10),
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: color.withOpacity(0.25)),
           ),
-          child: Icon(icon, size: 20, color: onTap == null ? Colors.grey[300] : color),
+          child: Icon(icon,
+              size: 20, color: onTap == null ? Colors.grey[300] : color),
         ),
       ),
     );
   }
 
-  Widget _actionBtn(String label, IconData icon, Color bg, VoidCallback? onTap) {
+  Widget _actionBtn(
+      String label, IconData icon, Color bg, VoidCallback? onTap) {
     return ElevatedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+      label: Text(label,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -1064,13 +1194,16 @@ Future<void> _runBulkImport() async {
     return ElevatedButton(
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+      child: Text(label,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -1079,10 +1212,10 @@ Future<void> _runBulkImport() async {
   // ==========================================================================
 
   Widget _buildStatsCards() {
-    final totalItems    = _items.length;
-    final activeItems   = _items.where((i) => i.status == 'Active').length;
+    final totalItems = _items.length;
+    final activeItems = _items.where((i) => i.status == 'Active').length;
     final inactiveItems = _items.where((i) => i.status == 'Inactive').length;
-    final goodsCount    = _items.where((i) => i.type == 'Goods').length;
+    final goodsCount = _items.where((i) => i.type == 'Goods').length;
 
     // Use stats from API if available, otherwise derive from loaded data
     final cards = <_StatCardData>[
@@ -1130,7 +1263,8 @@ Future<void> _runBulkImport() async {
               children: cards.asMap().entries.map((e) {
                 return Container(
                   width: 160,
-                  margin: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
+                  margin:
+                      EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
                   child: _buildStatCard(e.value, compact: true),
                 );
               }).toList(),
@@ -1141,7 +1275,8 @@ Future<void> _runBulkImport() async {
           children: cards.asMap().entries.map((e) {
             return Expanded(
               child: Padding(
-                padding: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
+                padding:
+                    EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
                 child: _buildStatCard(e.value, compact: false),
               ),
             );
@@ -1158,53 +1293,95 @@ Future<void> _runBulkImport() async {
           : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [data.gradientColors[0].withOpacity(0.15), data.gradientColors[1].withOpacity(0.08)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [
+            data.gradientColors[0].withOpacity(0.15),
+            data.gradientColors[1].withOpacity(0.08)
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: data.color.withOpacity(0.22)),
-        boxShadow: [BoxShadow(color: data.color.withOpacity(0.10), blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: data.color.withOpacity(0.10),
+              blurRadius: 12,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: compact
-          ? Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: data.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(data.icon, color: Colors.white, size: 20),
-              ),
-              const SizedBox(height: 10),
-              Text(data.label,
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 4),
-              Text(data.value,
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: data.color),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
-            ])
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                          colors: data.gradientColors,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(data.icon, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(data.label,
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text(data.value,
+                      style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: data.color),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ])
           : Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: data.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  gradient: LinearGradient(
+                      colors: data.gradientColors,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight),
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: data.color.withOpacity(0.30), blurRadius: 8, offset: const Offset(0, 3))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: data.color.withOpacity(0.30),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3))
+                  ],
                 ),
                 child: Icon(data.icon, color: Colors.white, size: 24),
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Text(data.label,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w500),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 5),
-                  Text(data.value,
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: data.color),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(data.label,
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 5),
+                      Text(data.value,
+                          style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: data.color),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ]),
               ),
             ]),
     );
@@ -1219,23 +1396,48 @@ Future<void> _runBulkImport() async {
   // ==========================================================================
 
   Widget _buildViewToggle() => Container(
-    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
-      Container(width: 1, height: 24, color: Colors.grey.shade300),
-      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
-    ]),
-  );
+        decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _toggleButton(
+              icon: Icons.view_list_rounded,
+              label: 'List',
+              isSelected: !_isTableView,
+              onTap: () => setState(() => _isTableView = false)),
+          Container(width: 1, height: 24, color: Colors.grey.shade300),
+          _toggleButton(
+              icon: Icons.table_chart_rounded,
+              label: 'Table',
+              isSelected: _isTableView,
+              onTap: () => setState(() => _isTableView = true)),
+        ]),
+      );
 
-  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
-      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+  Widget _toggleButton(
+          {required IconData icon,
+          required String label,
+          required bool isSelected,
+          required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: isSelected ? _navy : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          decoration: BoxDecoration(
+              color: isSelected ? _navy : Colors.transparent,
+              borderRadius: BorderRadius.circular(7)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+            Icon(icon,
+                size: 16,
+                color: isSelected ? Colors.white : Colors.grey.shade600),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, color: isSelected ? Colors.white : Colors.grey.shade600)),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected ? Colors.white : Colors.grey.shade600)),
           ]),
         ),
       );
@@ -1246,7 +1448,8 @@ Future<void> _runBulkImport() async {
     return Container(
       margin: const EdgeInsets.all(16),
       child: ListView.separated(
-        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, i) => _buildItemListCard(items[i]),
@@ -1258,22 +1461,43 @@ Future<void> _runBulkImport() async {
     final isSelected = _selectedIds.contains(item.id);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: isSelected ? _navy.withOpacity(0.4) : Colors.grey.shade200,
+            width: isSelected ? 1.5 : 1),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: InkWell(
-        onTap: () => _openEdit(item), borderRadius: BorderRadius.circular(12),
+        onTap: () => _openEdit(item),
+        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Row 1: Checkbox + Name + Status
             Row(children: [
-              Checkbox(value: isSelected, onChanged: (_) => _toggleSelect(item.id), materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact),
+              Checkbox(
+                  value: isSelected,
+                  onChanged: (_) => _toggleSelect(item.id),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact),
               const SizedBox(width: 4),
-              Expanded(child: InkWell(
+              Expanded(
+                  child: InkWell(
                 onTap: () => _openEdit(item),
-                child: Text(item.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navy, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+                child: Text(item.name,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navy,
+                        decoration: TextDecoration.underline),
+                    overflow: TextOverflow.ellipsis),
               )),
               const SizedBox(width: 8),
               _buildStatusBadge(item.status),
@@ -1283,7 +1507,10 @@ Future<void> _runBulkImport() async {
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 40),
-                child: Text(item.description!, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 2, overflow: TextOverflow.ellipsis),
+                child: Text(item.description!,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
               ),
             ],
             const SizedBox(height: 10),
@@ -1292,21 +1519,41 @@ Future<void> _runBulkImport() async {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: item.type == 'Service' ? Colors.blue[50] : Colors.green[50],
+                  color: item.type == 'Service'
+                      ? Colors.blue[50]
+                      : Colors.green[50],
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: (item.type == 'Service' ? Colors.blue[200] : Colors.green[200])!),
+                  border: Border.all(
+                      color: (item.type == 'Service'
+                          ? Colors.blue[200]
+                          : Colors.green[200])!),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Container(width: 6, height: 6, decoration: BoxDecoration(color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700], shape: BoxShape.circle)),
+                  Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                          color: item.type == 'Service'
+                              ? Colors.blue[700]
+                              : Colors.green[700],
+                          shape: BoxShape.circle)),
                   const SizedBox(width: 4),
-                  Text(item.type, style: TextStyle(color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700], fontSize: 12, fontWeight: FontWeight.w700)),
+                  Text(item.type,
+                      style: TextStyle(
+                          color: item.type == 'Service'
+                              ? Colors.blue[700]
+                              : Colors.green[700],
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700)),
                 ]),
               ),
               if (item.unit != null && item.unit!.isNotEmpty) ...[
                 const SizedBox(width: 10),
-                Icon(Icons.straighten_outlined, size: 13, color: Colors.grey[500]),
+                Icon(Icons.straighten_outlined,
+                    size: 13, color: Colors.grey[500]),
                 const SizedBox(width: 4),
-                Text(item.unit!, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(item.unit!,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               ],
             ]),
             const SizedBox(height: 10),
@@ -1314,42 +1561,114 @@ Future<void> _runBulkImport() async {
             const SizedBox(height: 10),
             // Row 3: Prices + Actions
             Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Selling Price', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-                const SizedBox(height: 3),
-                Text('₹${item.sellingPrice.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-              ])),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Cost Price', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500)),
-                const SizedBox(height: 3),
-                Text(item.costPrice != null ? '₹${item.costPrice!.toStringAsFixed(2)}' : '—', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.grey[600])),
-              ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('Selling Price',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 3),
+                    Text('₹${item.sellingPrice.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B))),
+                  ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('Cost Price',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 3),
+                    Text(
+                        item.costPrice != null
+                            ? '₹${item.costPrice!.toStringAsFixed(2)}'
+                            : '—',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[600])),
+                  ])),
               // Actions
               Row(mainAxisSize: MainAxisSize.min, children: [
-                Tooltip(message: 'Share', child: InkWell(
-                  onTap: () => _shareItem(item), borderRadius: BorderRadius.circular(8),
-                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: _blue)),
-                )),
+                Tooltip(
+                    message: 'Share',
+                    child: InkWell(
+                      onTap: () => _shareItem(item),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: _blue.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(8)),
+                          child:
+                              const Icon(Icons.share, size: 16, color: _blue)),
+                    )),
                 const SizedBox(width: 6),
-                Tooltip(message: 'WhatsApp', child: InkWell(
-                  onTap: () => _whatsAppItem(item), borderRadius: BorderRadius.circular(8),
-                  child: Container(width: 34, height: 34, decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.chat, size: 16, color: Color(0xFF25D366))),
-                )),
+                Tooltip(
+                    message: 'WhatsApp',
+                    child: InkWell(
+                      onTap: () => _whatsAppItem(item),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: const Color(0xFF25D366).withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(8)),
+                          child: const Icon(Icons.chat,
+                              size: 16, color: Color(0xFF25D366))),
+                    )),
                 const SizedBox(width: 6),
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                   onSelected: (value) async {
                     switch (value) {
-                      case 'edit':   _openEdit(item);         break;
-                      case 'ticket': _raiseTicket(item);      break;
-                      case 'delete': await _deleteItem(item); break;
+                      case 'edit':
+                        _openEdit(item);
+                        break;
+                      case 'ticket':
+                        _raiseTicket(item);
+                        break;
+                      case 'delete':
+                        await _deleteItem(item);
+                        break;
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'ticket', child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: Color(0xFFE67E22)), title: Text('Raise Ticket', style: TextStyle(color: Color(0xFFE67E22))), contentPadding: EdgeInsets.zero)),
-                    const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'edit',
+                        child: ListTile(
+                            leading: Icon(Icons.edit_outlined,
+                                size: 17, color: _navy),
+                            title: Text('Edit'),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'ticket',
+                        child: ListTile(
+                            leading: Icon(Icons.confirmation_number_outlined,
+                                size: 17, color: Color(0xFFE67E22)),
+                            title: Text('Raise Ticket',
+                                style: TextStyle(color: Color(0xFFE67E22))),
+                            contentPadding: EdgeInsets.zero)),
+                    const PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                            leading: Icon(Icons.delete_outline,
+                                size: 17, color: Colors.red),
+                            title: Text('Delete',
+                                style: TextStyle(color: Colors.red)),
+                            contentPadding: EdgeInsets.zero)),
                   ],
                 ),
               ]),
@@ -1370,7 +1689,12 @@ Future<void> _runBulkImport() async {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         return Scrollbar(
@@ -1393,15 +1717,20 @@ Future<void> _runBulkImport() async {
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFF0D1B3E)),
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFF0D1B3E)),
                   headingTextStyle: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 0.4),
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      letterSpacing: 0.4),
                   headingRowHeight: 52,
                   dataRowMinHeight: 58,
                   dataRowMaxHeight: 72,
                   dataTextStyle: const TextStyle(fontSize: 16),
                   dataRowColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.hovered)) return _navy.withOpacity(0.04);
+                    if (states.contains(WidgetState.hovered))
+                      return _navy.withOpacity(0.04);
                     return null;
                   }),
                   dividerThickness: 1,
@@ -1419,13 +1748,21 @@ Future<void> _runBulkImport() async {
                         ),
                       ),
                     ),
-                    const DataColumn(label: SizedBox(width: 160, child: Text('ITEM NAME'))),
-                    const DataColumn(label: SizedBox(width: 90,  child: Text('TYPE'))),
-                    const DataColumn(label: SizedBox(width: 70,  child: Text('UNIT'))),
-                    const DataColumn(label: SizedBox(width: 120, child: Text('SELLING PRICE'))),
-                    const DataColumn(label: SizedBox(width: 110, child: Text('COST PRICE'))),
-                    const DataColumn(label: SizedBox(width: 90,  child: Text('STATUS'))),
-                    const DataColumn(label: SizedBox(width: 150, child: Text('ACTIONS'))),
+                    const DataColumn(
+                        label: SizedBox(width: 160, child: Text('ITEM NAME'))),
+                    const DataColumn(
+                        label: SizedBox(width: 90, child: Text('TYPE'))),
+                    const DataColumn(
+                        label: SizedBox(width: 70, child: Text('UNIT'))),
+                    const DataColumn(
+                        label:
+                            SizedBox(width: 120, child: Text('SELLING PRICE'))),
+                    const DataColumn(
+                        label: SizedBox(width: 110, child: Text('COST PRICE'))),
+                    const DataColumn(
+                        label: SizedBox(width: 90, child: Text('STATUS'))),
+                    const DataColumn(
+                        label: SizedBox(width: 150, child: Text('ACTIONS'))),
                   ],
                   rows: _pageItems.map((item) => _buildRow(item)).toList(),
                 ),
@@ -1443,7 +1780,8 @@ Future<void> _runBulkImport() async {
       selected: isSelected,
       color: WidgetStateProperty.resolveWith((states) {
         if (isSelected) return _navy.withOpacity(0.06);
-        if (states.contains(WidgetState.hovered)) return _navy.withOpacity(0.04);
+        if (states.contains(WidgetState.hovered))
+          return _navy.withOpacity(0.04);
         return null;
       }),
       cells: [
@@ -1463,12 +1801,15 @@ Future<void> _runBulkImport() async {
               children: [
                 Text(item.name,
                     style: const TextStyle(
-                        color: _navy, fontWeight: FontWeight.w600, decoration: TextDecoration.underline),
+                        color: _navy,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline),
                     overflow: TextOverflow.ellipsis),
                 if (item.description != null && item.description!.isNotEmpty)
                   Text(item.description!,
                       style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -1479,43 +1820,56 @@ Future<void> _runBulkImport() async {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: item.type == 'Service' ? Colors.blue[50] : Colors.green[50],
+              color:
+                  item.type == 'Service' ? Colors.blue[50] : Colors.green[50],
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                  color: (item.type == 'Service' ? Colors.blue[200] : Colors.green[200])!),
+                  color: (item.type == 'Service'
+                      ? Colors.blue[200]
+                      : Colors.green[200])!),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Container(
-                width: 6, height: 6,
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
-                  color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700],
+                  color: item.type == 'Service'
+                      ? Colors.blue[700]
+                      : Colors.green[700],
                   shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: 4),
               Text(item.type,
                   style: TextStyle(
-                      color: item.type == 'Service' ? Colors.blue[700] : Colors.green[700],
-                      fontSize: 13, fontWeight: FontWeight.w700)),
+                      color: item.type == 'Service'
+                          ? Colors.blue[700]
+                          : Colors.green[700],
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700)),
             ]),
           ),
         )),
         // Unit
         DataCell(SizedBox(
           width: 70,
-          child: Text(item.unit ?? '—', style: TextStyle(color: Colors.grey[600], fontSize: 15)),
+          child: Text(item.unit ?? '—',
+              style: TextStyle(color: Colors.grey[600], fontSize: 15)),
         )),
         // Selling price
         DataCell(SizedBox(
           width: 120,
           child: Text('₹${item.sellingPrice.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.w600), textAlign: TextAlign.right),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.right),
         )),
         // Cost price
         DataCell(SizedBox(
           width: 110,
           child: Text(
-            item.costPrice != null ? '₹${item.costPrice!.toStringAsFixed(2)}' : '—',
+            item.costPrice != null
+                ? '₹${item.costPrice!.toStringAsFixed(2)}'
+                : '—',
             style: TextStyle(color: Colors.grey[600], fontSize: 15),
             textAlign: TextAlign.right,
           ),
@@ -1533,9 +1887,11 @@ Future<void> _runBulkImport() async {
                 onTap: () => _shareItem(item),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  width: 32, height: 32,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
-                    color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8),
+                    color: _blue.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.share, size: 16, color: _blue),
                 ),
@@ -1549,12 +1905,14 @@ Future<void> _runBulkImport() async {
                 onTap: () => _whatsAppItem(item),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  width: 32, height: 32,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
                     color: const Color(0xFF25D366).withOpacity(0.10),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.chat, size: 16, color: Color(0xFF25D366)),
+                  child: const Icon(Icons.chat,
+                      size: 16, color: Color(0xFF25D366)),
                 ),
               ),
             ),
@@ -1562,12 +1920,19 @@ Future<void> _runBulkImport() async {
             // More actions popup
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
               onSelected: (value) async {
                 switch (value) {
-                  case 'edit':   _openEdit(item); break;
-                  case 'ticket': _raiseTicket(item); break;
-                  case 'delete': await _deleteItem(item); break;
+                  case 'edit':
+                    _openEdit(item);
+                    break;
+                  case 'ticket':
+                    _raiseTicket(item);
+                    break;
+                  case 'delete':
+                    await _deleteItem(item);
+                    break;
                 }
               },
               itemBuilder: (_) => [
@@ -1582,15 +1947,18 @@ Future<void> _runBulkImport() async {
                 const PopupMenuItem(
                   value: 'ticket',
                   child: ListTile(
-                    leading: Icon(Icons.confirmation_number_outlined, size: 17, color: Color(0xFFE67E22)),
-                    title: Text('Raise Ticket', style: TextStyle(color: Color(0xFFE67E22))),
+                    leading: Icon(Icons.confirmation_number_outlined,
+                        size: 17, color: Color(0xFFE67E22)),
+                    title: Text('Raise Ticket',
+                        style: TextStyle(color: Color(0xFFE67E22))),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
                 const PopupMenuItem(
                   value: 'delete',
                   child: ListTile(
-                    leading: Icon(Icons.delete_outline, size: 17, color: Colors.red),
+                    leading:
+                        Icon(Icons.delete_outline, size: 17, color: Colors.red),
                     title: Text('Delete', style: TextStyle(color: Colors.red)),
                     contentPadding: EdgeInsets.zero,
                   ),
@@ -1605,7 +1973,7 @@ Future<void> _runBulkImport() async {
 
   Widget _buildStatusBadge(String status) {
     final Map<String, List<Color>> map = {
-      'Active':   [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+      'Active': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
       'Inactive': [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
     };
     final c = map[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
@@ -1617,10 +1985,17 @@ Future<void> _runBulkImport() async {
         border: Border.all(color: c[1].withOpacity(0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 6, height: 6, decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
+        Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
         const SizedBox(width: 5),
         Text(status,
-            style: TextStyle(color: c[1], fontWeight: FontWeight.w700, fontSize: 13, letterSpacing: 0.3)),
+            style: TextStyle(
+                color: c[1],
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                letterSpacing: 0.3)),
       ]),
     );
   }
@@ -1655,30 +2030,45 @@ Future<void> _runBulkImport() async {
               'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–'
               '${(_currentPage * _itemsPerPage).clamp(0, _filtered.length)}'
               ' of ${_filtered.length}',
-              style: TextStyle(fontSize: 15, color: Colors.grey[600], fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  fontSize: 15,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500),
             ),
             Row(mainAxisSize: MainAxisSize.min, children: [
-              _pageNavBtn(icon: Icons.chevron_left, enabled: _currentPage > 1, onTap: () {
-                setState(() => _currentPage--); _applyFilters();
-              }),
+              _pageNavBtn(
+                  icon: Icons.chevron_left,
+                  enabled: _currentPage > 1,
+                  onTap: () {
+                    setState(() => _currentPage--);
+                    _applyFilters();
+                  }),
               const SizedBox(width: 4),
               if (pages.first > 1) ...[
                 _pageNumBtn(1),
                 if (pages.first > 2)
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
               ],
               ...pages.map((p) => _pageNumBtn(p)),
               if (pages.last < _totalPages) ...[
                 if (pages.last < _totalPages - 1)
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
                 _pageNumBtn(_totalPages),
               ],
               const SizedBox(width: 4),
-              _pageNavBtn(icon: Icons.chevron_right, enabled: _currentPage < _totalPages, onTap: () {
-                setState(() => _currentPage++); _applyFilters();
-              }),
+              _pageNavBtn(
+                  icon: Icons.chevron_right,
+                  enabled: _currentPage < _totalPages,
+                  onTap: () {
+                    setState(() => _currentPage++);
+                    _applyFilters();
+                  }),
             ]),
           ],
         );
@@ -1689,11 +2079,17 @@ Future<void> _runBulkImport() async {
   Widget _pageNumBtn(int page) {
     final bool isActive = _currentPage == page;
     return GestureDetector(
-      onTap: () { if (!isActive) { setState(() => _currentPage = page); _applyFilters(); } },
+      onTap: () {
+        if (!isActive) {
+          setState(() => _currentPage = page);
+          _applyFilters();
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.symmetric(horizontal: 2),
-        width: 34, height: 34,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color: isActive ? _navy : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -1710,11 +2106,15 @@ Future<void> _runBulkImport() async {
     );
   }
 
-  Widget _pageNavBtn({required IconData icon, required bool enabled, required VoidCallback onTap}) {
+  Widget _pageNavBtn(
+      {required IconData icon,
+      required bool enabled,
+      required VoidCallback onTap}) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
-        width: 34, height: 34,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color: enabled ? Colors.white : Colors.grey[50],
           borderRadius: BorderRadius.circular(8),
@@ -1736,15 +2136,22 @@ Future<void> _runBulkImport() async {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(color: _navy.withOpacity(0.06), shape: BoxShape.circle),
-            child: Icon(Icons.inventory_2_outlined, size: 64, color: _navy.withOpacity(0.4)),
+            decoration: BoxDecoration(
+                color: _navy.withOpacity(0.06), shape: BoxShape.circle),
+            child: Icon(Icons.inventory_2_outlined,
+                size: 64, color: _navy.withOpacity(0.4)),
           ),
           const SizedBox(height: 20),
           const Text('No items found',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A202C))),
           const SizedBox(height: 8),
           Text(
-            _searchQuery.isNotEmpty || _selectedStatus != 'All Items' || _selectedType != 'All Types'
+            _searchQuery.isNotEmpty ||
+                    _selectedStatus != 'All Items' ||
+                    _selectedType != 'All Types'
                 ? 'Try adjusting your filters'
                 : 'Get started by adding your first item',
             style: TextStyle(fontSize: 16, color: Colors.grey[500]),
@@ -1753,11 +2160,15 @@ Future<void> _runBulkImport() async {
           ElevatedButton.icon(
             onPressed: _openNew,
             icon: const Icon(Icons.add),
-            label: const Text('Add Item', style: TextStyle(fontWeight: FontWeight.w600)),
+            label: const Text('Add Item',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0,
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ]),
@@ -1772,24 +2183,33 @@ Future<void> _runBulkImport() async {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
+            decoration:
+                BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
             child: Icon(Icons.error_outline, size: 56, color: Colors.red[400]),
           ),
           const SizedBox(height: 20),
           const Text('Failed to Load Items',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A202C))),
           const SizedBox(height: 8),
           Text(_errorMessage ?? 'An unknown error occurred',
-              style: TextStyle(fontSize: 16, color: Colors.grey[500]), textAlign: TextAlign.center),
+              style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+              textAlign: TextAlign.center),
           const SizedBox(height: 28),
           ElevatedButton.icon(
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
-            label: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.w600)),
+            label: const Text('Try Again',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0,
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ]),
@@ -1814,24 +2234,25 @@ class _ItemRaiseTicketOverlay extends StatefulWidget {
   });
 
   @override
-  State<_ItemRaiseTicketOverlay> createState() => _ItemRaiseTicketOverlayState();
+  State<_ItemRaiseTicketOverlay> createState() =>
+      _ItemRaiseTicketOverlayState();
 }
 
 class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
-  final _tmsService  = TMSService();
-  final _searchCtrl  = TextEditingController();
+  final _tmsService = TMSService();
+  final _searchCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _employees = [];
-  List<Map<String, dynamic>> _filtered  = [];
-  Map<String, dynamic>?      _selectedEmp;
-  bool   _loading   = true;
-  bool   _assigning = false;
-  String _priority  = 'Medium';
+  List<Map<String, dynamic>> _filtered = [];
+  Map<String, dynamic>? _selectedEmp;
+  bool _loading = true;
+  bool _assigning = false;
+  String _priority = 'Medium';
 
-  static const Color _navy   = Color(0xFF1e3a8a);
+  static const Color _navy = Color(0xFF1e3a8a);
   static const Color _orange = Color(0xFFE67E22);
-  static const Color _green  = Color(0xFF27AE60);
-  static const Color _red    = Color(0xFFE74C3C);
+  static const Color _green = Color(0xFF27AE60);
+  static const Color _red = Color(0xFFE74C3C);
 
   @override
   void initState() {
@@ -1851,8 +2272,8 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
     if (resp['success'] == true && resp['data'] != null) {
       setState(() {
         _employees = List<Map<String, dynamic>>.from(resp['data']);
-        _filtered  = _employees;
-        _loading   = false;
+        _filtered = _employees;
+        _loading = false;
       });
     } else {
       setState(() => _loading = false);
@@ -1865,10 +2286,12 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
     setState(() {
       _filtered = q.isEmpty
           ? _employees
-          : _employees.where((e) =>
-              (e['name_parson'] ?? '').toLowerCase().contains(q) ||
-              (e['email'] ?? '').toLowerCase().contains(q) ||
-              (e['role'] ?? '').toLowerCase().contains(q)).toList();
+          : _employees
+              .where((e) =>
+                  (e['name_parson'] ?? '').toLowerCase().contains(q) ||
+                  (e['email'] ?? '').toLowerCase().contains(q) ||
+                  (e['role'] ?? '').toLowerCase().contains(q))
+              .toList();
     });
   }
 
@@ -1891,15 +2314,18 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
     setState(() => _assigning = true);
     try {
       final resp = await _tmsService.createTicket(
-        subject: widget.item != null ? 'Item: ${widget.item!.name}' : 'Items — Action Required',
-        message:    _buildMessage(),
-        priority:   _priority,
-        timeline:   1440,
+        subject: widget.item != null
+            ? 'Item: ${widget.item!.name}'
+            : 'Items — Action Required',
+        message: _buildMessage(),
+        priority: _priority,
+        timeline: 1440,
         assignedTo: _selectedEmp!['_id'].toString(),
       );
       setState(() => _assigning = false);
       if (resp['success'] == true) {
-        widget.onTicketRaised('Ticket assigned to ${_selectedEmp!['name_parson']}');
+        widget.onTicketRaised(
+            'Ticket assigned to ${_selectedEmp!['name_parson']}');
         if (mounted) Navigator.pop(context);
       } else {
         widget.onError(resp['message'] ?? 'Failed to create ticket');
@@ -1917,7 +2343,8 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Container(
         width: 520,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.82),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           // Header
           Container(
@@ -1925,30 +2352,43 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [Color(0xFF1e3a8a), Color(0xFF2463AE)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+              borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(20), topRight: Radius.circular(20)),
             ),
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12),
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 22),
+                child: const Icon(Icons.confirmation_number_rounded,
+                    color: Colors.white, size: 22),
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Raise a Ticket',
-                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                  if (widget.item != null)
-                    Text('Item: ${widget.item!.name}',
-                        style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14),
-                        overflow: TextOverflow.ellipsis),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Raise a Ticket',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold)),
+                      if (widget.item != null)
+                        Text('Item: ${widget.item!.name}',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 14),
+                            overflow: TextOverflow.ellipsis),
+                    ]),
               ),
-              IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context)),
+              IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context)),
             ]),
           ),
 
@@ -1956,153 +2396,239 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // Auto message preview
-                if (widget.item != null) ...[
-                  const Text('Auto-generated message',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: _navy)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF0F4F8), borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFDDE3EE)),
-                    ),
-                    child: Text(_buildMessage(),
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700], height: 1.5)),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-
-                // Priority
-                const Text('Priority',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: _navy)),
-                const SizedBox(height: 8),
-                Row(
-                  children: ['Low', 'Medium', 'High'].map((pr) {
-                    final isSel = _priority == pr;
-                    final color = pr == 'High' ? _red : pr == 'Medium' ? _orange : _green;
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: InkWell(
-                          onTap: () => setState(() => _priority = pr),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Auto message preview
+                    if (widget.item != null) ...[
+                      const Text('Auto-generated message',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              color: _navy)),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F4F8),
                           borderRadius: BorderRadius.circular(10),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isSel ? color : Colors.white,
+                          border: Border.all(color: const Color(0xFFDDE3EE)),
+                        ),
+                        child: Text(_buildMessage(),
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                                height: 1.5)),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
+                    // Priority
+                    const Text('Priority',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: _navy)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: ['Low', 'Medium', 'High'].map((pr) {
+                        final isSel = _priority == pr;
+                        final color = pr == 'High'
+                            ? _red
+                            : pr == 'Medium'
+                                ? _orange
+                                : _green;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: InkWell(
+                              onTap: () => setState(() => _priority = pr),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: isSel ? color : Colors.grey[300]!),
-                              boxShadow: isSel
-                                  ? [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))]
-                                  : [],
-                            ),
-                            child: Center(
-                              child: Text(pr,
-                                  style: TextStyle(
-                                      fontSize: 15, fontWeight: FontWeight.w600,
-                                      color: isSel ? Colors.white : Colors.grey[700])),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: isSel ? color : Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                      color: isSel ? color : Colors.grey[300]!),
+                                  boxShadow: isSel
+                                      ? [
+                                          BoxShadow(
+                                              color: color.withOpacity(0.3),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 3))
+                                        ]
+                                      : [],
+                                ),
+                                child: Center(
+                                  child: Text(pr,
+                                      style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSel
+                                              ? Colors.white
+                                              : Colors.grey[700])),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Assign To
+                    const Text('Assign To',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: _navy)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Search employees…',
+                        prefixIcon: Icon(Icons.search,
+                            size: 18, color: Colors.grey[400]),
+                        filled: true,
+                        fillColor: const Color(0xFFF7F9FC),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFDDE3EE))),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFDDE3EE))),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide:
+                                const BorderSide(color: _navy, width: 1.5)),
                       ),
-                    );
-                  }).toList(),
-                ),
+                    ),
+                    const SizedBox(height: 8),
 
-                const SizedBox(height: 20),
-
-                // Assign To
-                const Text('Assign To',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: _navy)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _searchCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'Search employees…',
-                    prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey[400]),
-                    filled: true, fillColor: const Color(0xFFF7F9FC),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: _navy, width: 1.5)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Employee list
-                _loading
-                    ? const SizedBox(height: 120,
-                        child: Center(child: CircularProgressIndicator(color: _navy)))
-                    : _filtered.isEmpty
-                        ? Container(height: 80, alignment: Alignment.center,
-                            child: Text('No employees found', style: TextStyle(color: Colors.grey[500])))
-                        : Container(
-                            constraints: const BoxConstraints(maxHeight: 240),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: const Color(0xFFDDE3EE)),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: _filtered.length,
-                              separatorBuilder: (_, __) =>
-                                  const Divider(height: 1, color: Color(0xFFEEF2F7)),
-                              itemBuilder: (_, i) {
-                                final emp   = _filtered[i];
-                                final isSel = _selectedEmp?['_id'] == emp['_id'];
-                                return InkWell(
-                                  onTap: () => setState(() => _selectedEmp = isSel ? null : emp),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    color: isSel ? _navy.withOpacity(0.06) : Colors.transparent,
-                                    child: Row(children: [
-                                      CircleAvatar(
-                                        radius: 18,
-                                        backgroundColor: isSel ? _navy : _navy.withOpacity(0.10),
-                                        child: Text(
-                                          (emp['name_parson'] ?? 'U')[0].toUpperCase(),
-                                          style: TextStyle(
-                                              color: isSel ? Colors.white : _navy,
-                                              fontWeight: FontWeight.bold, fontSize: 15),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                          Text(emp['name_parson'] ?? 'Unknown',
-                                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                                          if (emp['email'] != null)
-                                            Text(emp['email'],
-                                                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                                                overflow: TextOverflow.ellipsis),
-                                          if (emp['role'] != null)
-                                            Container(
-                                              margin: const EdgeInsets.only(top: 3),
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: _navy.withOpacity(0.08),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(emp['role'].toString().toUpperCase(),
-                                                  style: const TextStyle(
-                                                      fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
+                    // Employee list
+                    _loading
+                        ? const SizedBox(
+                            height: 120,
+                            child: Center(
+                                child: CircularProgressIndicator(color: _navy)))
+                        : _filtered.isEmpty
+                            ? Container(
+                                height: 80,
+                                alignment: Alignment.center,
+                                child: Text('No employees found',
+                                    style: TextStyle(color: Colors.grey[500])))
+                            : Container(
+                                constraints:
+                                    const BoxConstraints(maxHeight: 240),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                      color: const Color(0xFFDDE3EE)),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: _filtered.length,
+                                  separatorBuilder: (_, __) => const Divider(
+                                      height: 1, color: Color(0xFFEEF2F7)),
+                                  itemBuilder: (_, i) {
+                                    final emp = _filtered[i];
+                                    final isSel =
+                                        _selectedEmp?['_id'] == emp['_id'];
+                                    return InkWell(
+                                      onTap: () => setState(() =>
+                                          _selectedEmp = isSel ? null : emp),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 10),
+                                        color: isSel
+                                            ? _navy.withOpacity(0.06)
+                                            : Colors.transparent,
+                                        child: Row(children: [
+                                          CircleAvatar(
+                                            radius: 18,
+                                            backgroundColor: isSel
+                                                ? _navy
+                                                : _navy.withOpacity(0.10),
+                                            child: Text(
+                                              (emp['name_parson'] ?? 'U')[0]
+                                                  .toUpperCase(),
+                                              style: TextStyle(
+                                                  color: isSel
+                                                      ? Colors.white
+                                                      : _navy,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 15),
                                             ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                      emp['name_parson'] ??
+                                                          'Unknown',
+                                                      style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          fontSize: 15)),
+                                                  if (emp['email'] != null)
+                                                    Text(emp['email'],
+                                                        style: TextStyle(
+                                                            fontSize: 13,
+                                                            color: Colors
+                                                                .grey[600]),
+                                                        overflow: TextOverflow
+                                                            .ellipsis),
+                                                  if (emp['role'] != null)
+                                                    Container(
+                                                      margin:
+                                                          const EdgeInsets.only(
+                                                              top: 3),
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: _navy
+                                                            .withOpacity(0.08),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(4),
+                                                      ),
+                                                      child: Text(
+                                                          emp['role']
+                                                              .toString()
+                                                              .toUpperCase(),
+                                                          style:
+                                                              const TextStyle(
+                                                                  fontSize: 12,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w600,
+                                                                  color:
+                                                                      _navy)),
+                                                    ),
+                                                ]),
+                                          ),
+                                          if (isSel)
+                                            const Icon(Icons.check_circle,
+                                                color: _navy, size: 20),
                                         ]),
                                       ),
-                                      if (isSel) const Icon(Icons.check_circle, color: _navy, size: 20),
-                                    ]),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-              ]),
+                                    );
+                                  },
+                                ),
+                              ),
+                  ]),
             ),
           ),
 
@@ -2113,7 +2639,8 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
               color: Color(0xFFF7F9FC),
               border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
               borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20)),
             ),
             child: Row(children: [
               Expanded(
@@ -2123,24 +2650,33 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
                     foregroundColor: Colors.grey[700],
                     side: BorderSide(color: Colors.grey[300]!),
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                  child: const Text('Cancel',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: (_selectedEmp == null || _assigning) ? null : _assign,
+                  onPressed:
+                      (_selectedEmp == null || _assigning) ? null : _assign,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _navy, foregroundColor: Colors.white,
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
                     disabledBackgroundColor: _navy.withOpacity(0.4),
-                    elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   child: _assigning
-                      ? const SizedBox(width: 20, height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
                       : Text(
                           _selectedEmp != null
                               ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}'
@@ -2163,14 +2699,14 @@ class _ItemRaiseTicketOverlayState extends State<_ItemRaiseTicketOverlay> {
 // =============================================================================
 
 class ItemData {
-  final String  id;
-  final String  name;
+  final String id;
+  final String name;
   final String? description;
-  final String  type;
+  final String type;
   final String? unit;
-  final double  sellingPrice;
+  final double sellingPrice;
   final double? costPrice;
-  final String  status;
+  final String status;
   final DateTime createdDate;
 
   ItemData({
@@ -2187,27 +2723,30 @@ class ItemData {
 
   factory ItemData.fromJson(Map<String, dynamic> json) {
     return ItemData(
-      id:           json['_id'] ?? '',
-      name:         json['name'] ?? 'Unknown Item',
-      description:  json['description'],
-      type:         json['type'] ?? 'Goods',
-      unit:         json['unit'],
+      id: json['_id'] ?? '',
+      name: json['name'] ?? 'Unknown Item',
+      description: json['description'],
+      type: json['type'] ?? 'Goods',
+      unit: json['unit'],
       sellingPrice: (json['sellingPrice'] ?? 0).toDouble(),
-      costPrice:    json['costPrice'] != null ? (json['costPrice']).toDouble() : null,
-      status:       json['status'] ?? 'Active',
-      createdDate:  json['createdAt'] != null ? DateTime.parse(json['createdAt']) : DateTime.now(),
+      costPrice:
+          json['costPrice'] != null ? (json['costPrice']).toDouble() : null,
+      status: json['status'] ?? 'Active',
+      createdDate: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
+          : DateTime.now(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    '_id':         id,
-    'name':        name,
-    'description': description,
-    'type':        type,
-    'unit':        unit,
-    'sellingPrice': sellingPrice,
-    'costPrice':   costPrice,
-    'status':      status,
-    'createdAt':   createdDate.toIso8601String(),
-  };
+        '_id': id,
+        'name': name,
+        'description': description,
+        'type': type,
+        'unit': unit,
+        'sellingPrice': sellingPrice,
+        'costPrice': costPrice,
+        'status': status,
+        'createdAt': createdDate.toIso8601String(),
+      };
 }

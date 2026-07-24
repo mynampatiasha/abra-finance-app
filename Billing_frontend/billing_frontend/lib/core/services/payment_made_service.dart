@@ -271,8 +271,7 @@ class PaymentMadeListResponse {
   final List<PaymentMade> payments;
   final PaymentMadePagination pagination;
 
-  PaymentMadeListResponse(
-      {required this.payments, required this.pagination});
+  PaymentMadeListResponse({required this.payments, required this.pagination});
 }
 
 class PaymentMadePagination {
@@ -328,7 +327,9 @@ class PaymentMadeService {
     _checkStatus(response);
     final body = jsonDecode(response.body);
     final data = body['data'] as List? ?? [];
-    return data.map<Map<String, dynamic>>((b) => Map<String, dynamic>.from(b)).toList();
+    return data
+        .map<Map<String, dynamic>>((b) => Map<String, dynamic>.from(b))
+        .toList();
   }
 
   // ── List ──────────────────────────────────────────────────────────────────
@@ -356,8 +357,7 @@ class PaymentMadeService {
       if (toDate != null) 'toDate': toDate.toIso8601String(),
     };
 
-    final uri =
-        Uri.parse(_endpoint).replace(queryParameters: params);
+    final uri = Uri.parse(_endpoint).replace(queryParameters: params);
     final headers = await _getHeaders();
     final response = await http.get(uri, headers: headers);
     _checkStatus(response);
@@ -365,8 +365,7 @@ class PaymentMadeService {
     final data = body['data'] as List;
     return PaymentMadeListResponse(
       payments: data.map((j) => PaymentMade.fromJson(j)).toList(),
-      pagination:
-          PaymentMadePagination.fromJson(body['pagination'] ?? {}),
+      pagination: PaymentMadePagination.fromJson(body['pagination'] ?? {}),
     );
   }
 
@@ -374,9 +373,8 @@ class PaymentMadeService {
 
   static Future<PaymentMadeStats> getStats() async {
     final headers = await _getHeaders();
-    final response = await http.get(
-        Uri.parse('$_endpoint/stats'),
-        headers: headers);
+    final response =
+        await http.get(Uri.parse('$_endpoint/stats'), headers: headers);
     _checkStatus(response);
     final body = jsonDecode(response.body);
     return PaymentMadeStats.fromJson(body['data'] ?? {});
@@ -386,24 +384,20 @@ class PaymentMadeService {
 
   static Future<PaymentMade> getPayment(String id) async {
     final headers = await _getHeaders();
-    final response = await http.get(
-        Uri.parse('$_endpoint/$id'),
-        headers: headers);
+    final response =
+        await http.get(Uri.parse('$_endpoint/$id'), headers: headers);
     _checkStatus(response);
-    return PaymentMade.fromJson(
-        jsonDecode(response.body)['data']);
+    return PaymentMade.fromJson(jsonDecode(response.body)['data']);
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
 
-  static Future<PaymentMade> createPayment(
-      Map<String, dynamic> data) async {
+  static Future<PaymentMade> createPayment(Map<String, dynamic> data) async {
     final headers = await _getHeaders();
     final response = await http.post(Uri.parse(_endpoint),
         headers: headers, body: jsonEncode(data));
     _checkStatus(response);
-    return PaymentMade.fromJson(
-        jsonDecode(response.body)['data']);
+    return PaymentMade.fromJson(jsonDecode(response.body)['data']);
   }
 
   // ── Update ────────────────────────────────────────────────────────────────
@@ -411,13 +405,10 @@ class PaymentMadeService {
   static Future<PaymentMade> updatePayment(
       String id, Map<String, dynamic> data) async {
     final headers = await _getHeaders();
-    final response = await http.put(
-        Uri.parse('$_endpoint/$id'),
-        headers: headers,
-        body: jsonEncode(data));
+    final response = await http.put(Uri.parse('$_endpoint/$id'),
+        headers: headers, body: jsonEncode(data));
     _checkStatus(response);
-    return PaymentMade.fromJson(
-        jsonDecode(response.body)['data']);
+    return PaymentMade.fromJson(jsonDecode(response.body)['data']);
   }
 
   // ── Mark as Sent ─────────────────────────────────────────────────────────
@@ -432,17 +423,16 @@ class PaymentMadeService {
   }
 
   // ── Vendor Phone (live lookup from DB) ────────────────────────────────────
-static Future<String> getVendorPhone(String paymentId) async {
-  final headers = await _getHeaders();
-  final response = await http.get(
-    Uri.parse('$_endpoint/$paymentId/vendor-phone'),
-    headers: headers,
-  );
-  _checkStatus(response);
-  final body = jsonDecode(response.body);
-  return (body['phone'] as String? ?? '').trim();
-}
-
+  static Future<String> getVendorPhone(String paymentId) async {
+    final headers = await _getHeaders();
+    final response = await http.get(
+      Uri.parse('$_endpoint/$paymentId/vendor-phone'),
+      headers: headers,
+    );
+    _checkStatus(response);
+    final body = jsonDecode(response.body);
+    return (body['phone'] as String? ?? '').trim();
+  }
 
   // ── Apply to Bills ────────────────────────────────────────────────────────
 
@@ -455,8 +445,7 @@ static Future<String> getVendorPhone(String paymentId) async {
       body: jsonEncode({'bills': bills}),
     );
     _checkStatus(response);
-    return PaymentMade.fromJson(
-        jsonDecode(response.body)['data']);
+    return PaymentMade.fromJson(jsonDecode(response.body)['data']);
   }
 
   // ── Refund ────────────────────────────────────────────────────────────────
@@ -470,17 +459,15 @@ static Future<String> getVendorPhone(String paymentId) async {
       body: jsonEncode(refundData),
     );
     _checkStatus(response);
-    return PaymentMade.fromJson(
-        jsonDecode(response.body)['data']);
+    return PaymentMade.fromJson(jsonDecode(response.body)['data']);
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
   static Future<void> deletePayment(String id) async {
     final headers = await _getHeaders();
-    final response = await http.delete(
-        Uri.parse('$_endpoint/$id'),
-        headers: headers);
+    final response =
+        await http.delete(Uri.parse('$_endpoint/$id'), headers: headers);
     _checkStatus(response);
   }
 
@@ -488,8 +475,7 @@ static Future<String> getVendorPhone(String paymentId) async {
 
   static Future<String> downloadPDF(String id) async {
     final headers = await _getHeaders();
-    final response = await http.get(
-        Uri.parse('$_endpoint/$id/download-url'),
+    final response = await http.get(Uri.parse('$_endpoint/$id/download-url'),
         headers: headers);
     _checkStatus(response);
     final body = jsonDecode(response.body);
@@ -502,13 +488,13 @@ static Future<String> getVendorPhone(String paymentId) async {
       List<Map<String, dynamic>> paymentsData,
       Uint8List fileBytes,
       String fileName) async {
-    final request = http.MultipartRequest(
-        'POST', Uri.parse('$_endpoint/bulk-import'));
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$_endpoint/bulk-import'));
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? '';
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(http.MultipartFile.fromBytes('file', fileBytes,
-        filename: fileName));
+    request.files.add(
+        http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
     request.fields['paymentsData'] = jsonEncode(paymentsData);
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
@@ -519,14 +505,9 @@ static Future<String> getVendorPhone(String paymentId) async {
   // ── All (for export) ──────────────────────────────────────────────────────
 
   static Future<List<PaymentMade>> getAllPayments(
-      {String? status,
-      DateTime? fromDate,
-      DateTime? toDate}) async {
+      {String? status, DateTime? fromDate, DateTime? toDate}) async {
     final result = await getPayments(
-        status: status,
-        fromDate: fromDate,
-        toDate: toDate,
-        limit: 10000);
+        status: status, fromDate: fromDate, toDate: toDate, limit: 10000);
     return result.payments;
   }
 
@@ -572,6 +553,8 @@ static Future<String> getVendorPhone(String paymentId) async {
     _checkStatus(response);
     final body = jsonDecode(response.body);
     final data = body['data'] as List? ?? [];
-    return data.map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p)).toList();
+    return data
+        .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p))
+        .toList();
   }
 }

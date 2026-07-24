@@ -8,7 +8,8 @@ import 'features/billing/billing_main_shell.dart';
 // ─── Global navigator key ─────────────────────────────────────────────────────
 // Used by handleTokenExpired() to navigate from anywhere (e.g. API service)
 // without needing a BuildContext.
-final GlobalKey<NavigatorState> financeNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> financeNavigatorKey =
+    GlobalKey<NavigatorState>();
 
 // ─── Global token-expired handler ────────────────────────────────────────────
 // Call this from any API response handler when a 401/TOKEN_EXPIRED is received.
@@ -31,7 +32,8 @@ void main() async {
   try {
     await dotenv.load(fileName: '.env');
     debugPrint('✅ .env loaded');
-    debugPrint('📍 FINANCE_API_BASE_URL: ${dotenv.env['FINANCE_API_BASE_URL']}');
+    debugPrint(
+        '📍 FINANCE_API_BASE_URL: ${dotenv.env['FINANCE_API_BASE_URL']}');
   } catch (e) {
     debugPrint('⚠️ .env load failed: $e — using fallback');
     dotenv.testLoad(fileInput: '''

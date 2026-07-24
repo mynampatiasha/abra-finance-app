@@ -34,7 +34,8 @@ class PurchaseOrderService {
       };
 
       if (status != null) queryParams['status'] = status;
-      if (fromDate != null) queryParams['fromDate'] = fromDate.toIso8601String();
+      if (fromDate != null)
+        queryParams['fromDate'] = fromDate.toIso8601String();
       if (toDate != null) queryParams['toDate'] = toDate.toIso8601String();
       if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
@@ -83,8 +84,7 @@ class PurchaseOrderService {
     try {
       print('📤 POST: $_baseEndpoint');
       print('📦 Data: ${json.encode(purchaseOrderData)}');
-      final data =
-          await _api.post(_baseEndpoint, body: purchaseOrderData);
+      final data = await _api.post(_baseEndpoint, body: purchaseOrderData);
       print('✅ Purchase order created: ${data['data']['purchaseOrderNumber']}');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
@@ -109,14 +109,11 @@ class PurchaseOrderService {
   }
 
   /// Send purchase order via email to vendor
-  static Future<PurchaseOrder> sendPurchaseOrder(
-      String purchaseOrderId) async {
+  static Future<PurchaseOrder> sendPurchaseOrder(String purchaseOrderId) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/send');
-      final data =
-          await _api.post('$_baseEndpoint/$purchaseOrderId/send');
-      print(
-          '✅ Purchase order sent: ${data['data']['purchaseOrderNumber']}');
+      final data = await _api.post('$_baseEndpoint/$purchaseOrderId/send');
+      print('✅ Purchase order sent: ${data['data']['purchaseOrderNumber']}');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
       print('❌ Error sending purchase order: $e');
@@ -129,8 +126,7 @@ class PurchaseOrderService {
       String purchaseOrderId) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/issue');
-      final data =
-          await _api.post('$_baseEndpoint/$purchaseOrderId/issue');
+      final data = await _api.post('$_baseEndpoint/$purchaseOrderId/issue');
       print('✅ Purchase order issued');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
@@ -143,7 +139,8 @@ class PurchaseOrderService {
   static Future<PurchaseOrder> markAsSent(String purchaseOrderId) async {
     try {
       print('📤 PATCH: $_baseEndpoint/$purchaseOrderId/mark-as-sent');
-      final data = await _api.patch('$_baseEndpoint/$purchaseOrderId/mark-as-sent');
+      final data =
+          await _api.patch('$_baseEndpoint/$purchaseOrderId/mark-as-sent');
       print('✅ Purchase order marked as sent');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
@@ -157,8 +154,7 @@ class PurchaseOrderService {
       String purchaseOrderId, Map<String, dynamic> receiveData) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/receive');
-      final data = await _api.post(
-          '$_baseEndpoint/$purchaseOrderId/receive',
+      final data = await _api.post('$_baseEndpoint/$purchaseOrderId/receive',
           body: receiveData);
       print('✅ Purchase receive recorded');
       return PurchaseOrder.fromJson(data['data']);
@@ -173,8 +169,8 @@ class PurchaseOrderService {
       String purchaseOrderId) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/convert-to-bill');
-      final data = await _api
-          .post('$_baseEndpoint/$purchaseOrderId/convert-to-bill');
+      final data =
+          await _api.post('$_baseEndpoint/$purchaseOrderId/convert-to-bill');
       print('✅ Purchase order converted to bill');
       return data;
     } catch (e) {
@@ -188,8 +184,7 @@ class PurchaseOrderService {
       String purchaseOrderId) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/cancel');
-      final data =
-          await _api.post('$_baseEndpoint/$purchaseOrderId/cancel');
+      final data = await _api.post('$_baseEndpoint/$purchaseOrderId/cancel');
       print('✅ Purchase order cancelled');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
@@ -203,8 +198,7 @@ class PurchaseOrderService {
       String purchaseOrderId) async {
     try {
       print('📤 POST: $_baseEndpoint/$purchaseOrderId/close');
-      final data =
-          await _api.post('$_baseEndpoint/$purchaseOrderId/close');
+      final data = await _api.post('$_baseEndpoint/$purchaseOrderId/close');
       print('✅ Purchase order closed');
       return PurchaseOrder.fromJson(data['data']);
     } catch (e) {
@@ -217,7 +211,8 @@ class PurchaseOrderService {
   static Future<String> downloadPDF(String purchaseOrderId) async {
     try {
       print('📤 GET: $_baseEndpoint/$purchaseOrderId/download-url');
-      final data = await _api.get('$_baseEndpoint/$purchaseOrderId/download-url');
+      final data =
+          await _api.get('$_baseEndpoint/$purchaseOrderId/download-url');
       final url = data['downloadUrl'] as String? ?? '';
       print('✅ PDF URL: $url');
       return url;
@@ -278,8 +273,7 @@ class PurchaseOrderService {
       print('📤 GET: /api/finance/vendors');
       final data =
           await _api.get('/api/finance/vendors', queryParams: queryParams);
-      print(
-          '✅ Vendors fetched: ${data['data']?['vendors']?.length ?? 0}');
+      print('✅ Vendors fetched: ${data['data']?['vendors']?.length ?? 0}');
       return VendorListResponse.fromJson(data);
     } catch (e) {
       print('❌ Error fetching vendors: $e');
@@ -288,8 +282,7 @@ class PurchaseOrderService {
   }
 
   /// Create new vendor
-  static Future<Vendor> createVendor(
-      Map<String, dynamic> vendorData) async {
+  static Future<Vendor> createVendor(Map<String, dynamic> vendorData) async {
     try {
       print('📤 POST: /api/finance/vendors');
       final data = await _api.post('/api/finance/vendors', body: vendorData);
@@ -318,49 +311,55 @@ class POAddress {
 
   const POAddress({
     this.attention = '',
-    this.street    = '',
-    this.city      = '',
-    this.state     = '',
-    this.zip       = '',
-    this.country   = 'India',
-    this.phone     = '',
+    this.street = '',
+    this.city = '',
+    this.state = '',
+    this.zip = '',
+    this.country = 'India',
+    this.phone = '',
   });
 
   factory POAddress.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const POAddress();
     return POAddress(
       attention: json['attention'] ?? '',
-      street:    json['street']    ?? '',
-      city:      json['city']      ?? '',
-      state:     json['state']     ?? '',
-      zip:       json['zip']       ?? '',
-      country:   json['country']   ?? 'India',
-      phone:     json['phone']     ?? '',
+      street: json['street'] ?? '',
+      city: json['city'] ?? '',
+      state: json['state'] ?? '',
+      zip: json['zip'] ?? '',
+      country: json['country'] ?? 'India',
+      phone: json['phone'] ?? '',
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'attention': attention,
-    'street':    street,
-    'city':      city,
-    'state':     state,
-    'zip':       zip,
-    'country':   country,
-    'phone':     phone,
-  };
+        'attention': attention,
+        'street': street,
+        'city': city,
+        'state': state,
+        'zip': zip,
+        'country': country,
+        'phone': phone,
+      };
 
   POAddress copyWith({
-    String? attention, String? street, String? city,
-    String? state, String? zip, String? country, String? phone,
-  }) => POAddress(
-    attention: attention ?? this.attention,
-    street:    street    ?? this.street,
-    city:      city      ?? this.city,
-    state:     state     ?? this.state,
-    zip:       zip       ?? this.zip,
-    country:   country   ?? this.country,
-    phone:     phone     ?? this.phone,
-  );
+    String? attention,
+    String? street,
+    String? city,
+    String? state,
+    String? zip,
+    String? country,
+    String? phone,
+  }) =>
+      POAddress(
+        attention: attention ?? this.attention,
+        street: street ?? this.street,
+        city: city ?? this.city,
+        state: state ?? this.state,
+        zip: zip ?? this.zip,
+        country: country ?? this.country,
+        phone: phone ?? this.phone,
+      );
 }
 
 class PurchaseOrder {
@@ -412,13 +411,13 @@ class PurchaseOrder {
     required this.vendorName,
     this.vendorEmail,
     this.vendorPhone,
-    this.vendorGSTIN       = '',
-    this.vendorPAN         = '',
+    this.vendorGSTIN = '',
+    this.vendorPAN = '',
     this.gstRegistrationType = '',
-    this.billingAddress    = const POAddress(),
-    this.shippingAddress   = const POAddress(),
-    this.placeOfSupply     = '',
-    this.isInterState      = false,
+    this.billingAddress = const POAddress(),
+    this.shippingAddress = const POAddress(),
+    this.placeOfSupply = '',
+    this.isInterState = false,
     this.referenceNumber,
     required this.purchaseOrderDate,
     this.expectedDeliveryDate,
@@ -431,10 +430,10 @@ class PurchaseOrder {
     this.vendorNotes,
     this.termsAndConditions,
     required this.subTotal,
-    this.totalCGST   = 0,
-    this.totalSGST   = 0,
-    this.totalIGST   = 0,
-    this.totalTax    = 0,
+    this.totalCGST = 0,
+    this.totalSGST = 0,
+    this.totalIGST = 0,
+    this.totalTax = 0,
     required this.tdsRate,
     required this.tdsAmount,
     required this.tcsRate,
@@ -456,13 +455,15 @@ class PurchaseOrder {
       vendorName: json['vendorName'] ?? '',
       vendorEmail: json['vendorEmail'],
       vendorPhone: json['vendorPhone'],
-      vendorGSTIN:          json['vendorGSTIN']          ?? '',
-      vendorPAN:            json['vendorPAN']            ?? '',
-      gstRegistrationType:  json['gstRegistrationType']  ?? '',
-      billingAddress:  POAddress.fromJson(json['billingAddress']  as Map<String, dynamic>?),
-      shippingAddress: POAddress.fromJson(json['shippingAddress'] as Map<String, dynamic>?),
-      placeOfSupply:   json['placeOfSupply'] ?? '',
-      isInterState:    json['isInterState']  ?? false,
+      vendorGSTIN: json['vendorGSTIN'] ?? '',
+      vendorPAN: json['vendorPAN'] ?? '',
+      gstRegistrationType: json['gstRegistrationType'] ?? '',
+      billingAddress:
+          POAddress.fromJson(json['billingAddress'] as Map<String, dynamic>?),
+      shippingAddress:
+          POAddress.fromJson(json['shippingAddress'] as Map<String, dynamic>?),
+      placeOfSupply: json['placeOfSupply'] ?? '',
+      isInterState: json['isInterState'] ?? false,
       referenceNumber: json['referenceNumber'],
       purchaseOrderDate: json['purchaseOrderDate'] != null
           ? DateTime.parse(json['purchaseOrderDate'])
@@ -480,15 +481,15 @@ class PurchaseOrder {
           .toList(),
       vendorNotes: json['vendorNotes'],
       termsAndConditions: json['termsAndConditions'],
-      subTotal:   (json['subTotal']   ?? 0).toDouble(),
-      totalCGST:  (json['totalCGST']  ?? 0).toDouble(),
-      totalSGST:  (json['totalSGST']  ?? 0).toDouble(),
-      totalIGST:  (json['totalIGST']  ?? 0).toDouble(),
-      totalTax:   (json['totalTax']   ?? 0).toDouble(),
-      tdsRate:    (json['tdsRate']    ?? 0).toDouble(),
-      tdsAmount:  (json['tdsAmount']  ?? 0).toDouble(),
-      tcsRate:    (json['tcsRate']    ?? 0).toDouble(),
-      tcsAmount:  (json['tcsAmount']  ?? 0).toDouble(),
+      subTotal: (json['subTotal'] ?? 0).toDouble(),
+      totalCGST: (json['totalCGST'] ?? 0).toDouble(),
+      totalSGST: (json['totalSGST'] ?? 0).toDouble(),
+      totalIGST: (json['totalIGST'] ?? 0).toDouble(),
+      totalTax: (json['totalTax'] ?? 0).toDouble(),
+      tdsRate: (json['tdsRate'] ?? 0).toDouble(),
+      tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
+      tcsRate: (json['tcsRate'] ?? 0).toDouble(),
+      tcsAmount: (json['tcsAmount'] ?? 0).toDouble(),
       totalAmount: (json['totalAmount'] ?? 0).toDouble(),
       status: json['status'] ?? 'DRAFT',
       receiveStatus: json['receiveStatus'],
@@ -526,54 +527,54 @@ class PurchaseOrderItem {
   double igstAmount;
 
   PurchaseOrderItem({
-    this.itemDetails  = '',
-    this.quantity     = 0,
-    this.rate         = 0,
-    this.discount     = 0,
+    this.itemDetails = '',
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
     this.discountType = 'percentage',
-    this.amount       = 0,
-    this.hsnCode      = '',
-    this.unit         = 'Nos',
-    this.itemGstRate  = 18,
-    this.taxableAmount= 0,
-    this.cgstAmount   = 0,
-    this.sgstAmount   = 0,
-    this.igstAmount   = 0,
+    this.amount = 0,
+    this.hsnCode = '',
+    this.unit = 'Nos',
+    this.itemGstRate = 18,
+    this.taxableAmount = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   factory PurchaseOrderItem.fromJson(Map<String, dynamic> json) {
     return PurchaseOrderItem(
-      itemDetails:   json['itemDetails']   ?? '',
-      quantity:      (json['quantity']     ?? 0).toDouble(),
-      rate:          (json['rate']         ?? 0).toDouble(),
-      discount:      (json['discount']     ?? 0).toDouble(),
-      discountType:  json['discountType']  ?? 'percentage',
-      amount:        (json['amount']       ?? 0).toDouble(),
-      hsnCode:       json['hsnCode']       ?? '',
-      unit:          json['unit']          ?? 'Nos',
-      itemGstRate:   (json['itemGstRate']  ?? 18).toDouble(),
-      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
-      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
-      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
-      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
+      itemDetails: json['itemDetails'] ?? '',
+      quantity: (json['quantity'] ?? 0).toDouble(),
+      rate: (json['rate'] ?? 0).toDouble(),
+      discount: (json['discount'] ?? 0).toDouble(),
+      discountType: json['discountType'] ?? 'percentage',
+      amount: (json['amount'] ?? 0).toDouble(),
+      hsnCode: json['hsnCode'] ?? '',
+      unit: json['unit'] ?? 'Nos',
+      itemGstRate: (json['itemGstRate'] ?? 18).toDouble(),
+      taxableAmount: (json['taxableAmount'] ?? 0).toDouble(),
+      cgstAmount: (json['cgstAmount'] ?? 0).toDouble(),
+      sgstAmount: (json['sgstAmount'] ?? 0).toDouble(),
+      igstAmount: (json['igstAmount'] ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails':   itemDetails,
-      'quantity':      quantity,
-      'rate':          rate,
-      'discount':      discount,
-      'discountType':  discountType,
-      'amount':        amount,
-      'hsnCode':       hsnCode,
-      'unit':          unit,
-      'itemGstRate':   itemGstRate,
+      'itemDetails': itemDetails,
+      'quantity': quantity,
+      'rate': rate,
+      'discount': discount,
+      'discountType': discountType,
+      'amount': amount,
+      'hsnCode': hsnCode,
+      'unit': unit,
+      'itemGstRate': itemGstRate,
       'taxableAmount': taxableAmount,
-      'cgstAmount':    cgstAmount,
-      'sgstAmount':    sgstAmount,
-      'igstAmount':    igstAmount,
+      'cgstAmount': cgstAmount,
+      'sgstAmount': sgstAmount,
+      'igstAmount': igstAmount,
     };
   }
 }
@@ -650,8 +651,7 @@ class PurchaseOrderListResponse {
   factory PurchaseOrderListResponse.fromJson(Map<String, dynamic> json) {
     final dataList = json['data'] as List? ?? [];
     return PurchaseOrderListResponse(
-      purchaseOrders:
-          dataList.map((po) => PurchaseOrder.fromJson(po)).toList(),
+      purchaseOrders: dataList.map((po) => PurchaseOrder.fromJson(po)).toList(),
       pagination: json['pagination'] != null
           ? Pagination.fromJson(json['pagination'])
           : Pagination(total: dataList.length, page: 1, limit: 20, pages: 1),
@@ -719,8 +719,12 @@ class Vendor {
     return Vendor(
       id: json['_id'] ?? json['id'] ?? '',
       vendorName: json['vendorName'] ?? json['vendorDisplayName'] ?? '',
-      vendorEmail: json['email'] ?? json['vendorEmail'] ?? json['primaryEmail'] ?? '',
-      vendorPhone: json['phoneNumber'] ?? json['vendorPhone'] ?? json['primaryPhone'] ?? '',
+      vendorEmail:
+          json['email'] ?? json['vendorEmail'] ?? json['primaryEmail'] ?? '',
+      vendorPhone: json['phoneNumber'] ??
+          json['vendorPhone'] ??
+          json['primaryPhone'] ??
+          '',
       companyName: json['companyName'],
       gstNumber: json['gstNumber'],
       vendorStatus: json['status'] ?? json['vendorStatus'] ?? 'Active',
@@ -738,8 +742,7 @@ class VendorListResponse {
   });
 
   factory VendorListResponse.fromJson(Map<String, dynamic> json) {
-    final vendorsData =
-        json['data']?['vendors'] ?? json['data'] ?? [];
+    final vendorsData = json['data']?['vendors'] ?? json['data'] ?? [];
     final paginationData = json['data']?['pagination'] ??
         json['pagination'] ??
         {
@@ -750,9 +753,7 @@ class VendorListResponse {
         };
 
     return VendorListResponse(
-      vendors: (vendorsData as List)
-          .map((v) => Vendor.fromJson(v))
-          .toList(),
+      vendors: (vendorsData as List).map((v) => Vendor.fromJson(v)).toList(),
       pagination: Pagination.fromJson(paginationData),
     );
   }

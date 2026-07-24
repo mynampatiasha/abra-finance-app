@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // RECONCILIATION — COMPLETE ZOHO BOOKS PIN-TO-PIN
 // ============================================================================
@@ -29,18 +30,18 @@ import '../../../core/finance_secure_storage.dart';
 import '../../../app/config/api_config.dart';
 
 // ── colours ──────────────────────────────────────────────────────────────────
-const Color _navy       = Color(0xFF0D1B3E);
+const Color _navy = Color(0xFF0D1B3E);
 const Color _navyAccent = Color(0xFF3D8EFF);
-const Color _green      = Color(0xFF27AE60);
-const Color _red        = Color(0xFFE74C3C);
-const Color _orange     = Color(0xFFE67E22);
-const Color _blue       = Color(0xFF2980B9);
-const Color _teal       = Color(0xFF16A085);
-const Color _grey       = Color(0xFF7F8C8D);
-const Color _bg         = Color(0xFFF4F6F9);
-const Color _white      = Colors.white;
+const Color _green = Color(0xFF27AE60);
+const Color _red = Color(0xFFE74C3C);
+const Color _orange = Color(0xFFE67E22);
+const Color _blue = Color(0xFF2980B9);
+const Color _teal = Color(0xFF16A085);
+const Color _grey = Color(0xFF7F8C8D);
+const Color _bg = Color(0xFFF4F6F9);
+const Color _white = Colors.white;
 
-final _fmt  = NumberFormat('#,##,##0.00');
+final _fmt = NumberFormat('#,##,##0.00');
 final _dfmt = DateFormat('dd MMM yyyy');
 final _ifmt = DateFormat('dd/MM/yyyy');
 
@@ -48,7 +49,8 @@ final _ifmt = DateFormat('dd/MM/yyyy');
 class _RecService {
   final BankTransactionService _base = BankTransactionService();
 
-  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? params}) =>
+  Future<Map<String, dynamic>> _get(String path,
+          {Map<String, String>? params}) =>
       _base.publicGet(path, params: params);
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) =>
@@ -57,8 +59,7 @@ class _RecService {
   Future<Map<String, dynamic>> _put(String path, Map<String, dynamic> body) =>
       _base.publicPut(path, body);
 
-  Future<Map<String, dynamic>> _delete(String path) =>
-      _base.publicDelete(path);
+  Future<Map<String, dynamic>> _delete(String path) => _base.publicDelete(path);
 
   // History
   Future<Map<String, dynamic>> getHistory(String accountId) =>
@@ -70,12 +71,13 @@ class _RecService {
     required String startDate,
     required String endDate,
     required double closingBalance,
-  }) => _post('/api/finance/reconciliation/initiate', {
-    'accountId':      accountId,
-    'startDate':      startDate,
-    'endDate':        endDate,
-    'closingBalance': closingBalance,
-  });
+  }) =>
+      _post('/api/finance/reconciliation/initiate', {
+        'accountId': accountId,
+        'startDate': startDate,
+        'endDate': endDate,
+        'closingBalance': closingBalance,
+      });
 
   // Transactions for working screen
   Future<Map<String, dynamic>> getTransactions(String recId) =>
@@ -86,10 +88,11 @@ class _RecService {
     required String recId,
     required List<String> clearedTxnIds,
     double? closingBalance,
-  }) => _put('/api/finance/reconciliation/$recId/save-progress', {
-    'clearedTxnIds': clearedTxnIds,
-    if (closingBalance != null) 'closingBalance': closingBalance,
-  });
+  }) =>
+      _put('/api/finance/reconciliation/$recId/save-progress', {
+        'clearedTxnIds': clearedTxnIds,
+        if (closingBalance != null) 'closingBalance': closingBalance,
+      });
 
   // +Add Transaction
   Future<Map<String, dynamic>> addTransaction({
@@ -100,14 +103,15 @@ class _RecService {
     required String coaAccountId,
     String? description,
     String? reference,
-  }) => _post('/api/finance/reconciliation/$recId/add-transaction', {
-    'type':         type,
-    'date':         date,
-    'amount':       amount,
-    'coaAccountId': coaAccountId,
-    if (description != null) 'description': description,
-    if (reference   != null) 'reference':   reference,
-  });
+  }) =>
+      _post('/api/finance/reconciliation/$recId/add-transaction', {
+        'type': type,
+        'date': date,
+        'amount': amount,
+        'coaAccountId': coaAccountId,
+        if (description != null) 'description': description,
+        if (reference != null) 'reference': reference,
+      });
 
   // Complete
   Future<Map<String, dynamic>> complete(String recId) =>
@@ -152,8 +156,7 @@ class ReconciliationBillingPage extends StatefulWidget {
       _ReconciliationBillingPageState();
 }
 
-class _ReconciliationBillingPageState
-    extends State<ReconciliationBillingPage> {
+class _ReconciliationBillingPageState extends State<ReconciliationBillingPage> {
   final _svc = _RecService();
 
   List<Map<String, dynamic>> _history = [];
@@ -186,7 +189,7 @@ class _ReconciliationBillingPageState
       context: context,
       barrierDismissible: false,
       builder: (_) => _InitiateDialog(
-        svc:       _svc,
+        svc: _svc,
         accountId: widget.accountId,
         onCreated: (rec) {
           Navigator.pop(context);
@@ -206,10 +209,10 @@ class _ReconciliationBillingPageState
       context,
       MaterialPageRoute(
         builder: (_) => _WorkingScreen(
-          svc:         _svc,
-          rec:         rec,
+          svc: _svc,
+          rec: rec,
           accountName: widget.accountName,
-          onDone:      _loadHistory,
+          onDone: _loadHistory,
         ),
       ),
     );
@@ -221,10 +224,10 @@ class _ReconciliationBillingPageState
       context,
       MaterialPageRoute(
         builder: (_) => _CompletedView(
-          svc:         _svc,
-          rec:         rec,
+          svc: _svc,
+          rec: rec,
           accountName: widget.accountName,
-          accountId:   widget.accountId,
+          accountId: widget.accountId,
         ),
       ),
     );
@@ -277,7 +280,8 @@ class _ReconciliationBillingPageState
         title: Text(title,
             style: const TextStyle(
                 fontSize: 15, fontWeight: FontWeight.bold, color: _navy)),
-        content: Text(msg, style: const TextStyle(fontSize: 13, color: Color(0xFF5D6D7E))),
+        content: Text(msg,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF5D6D7E))),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -285,8 +289,8 @@ class _ReconciliationBillingPageState
           ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(backgroundColor: _red),
-              child: const Text('Proceed',
-                  style: TextStyle(color: Colors.white))),
+              child:
+                  const Text('Proceed', style: TextStyle(color: Colors.white))),
         ],
       ),
     );
@@ -295,13 +299,7 @@ class _ReconciliationBillingPageState
 
   void _showSnack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:          Text(msg),
-      backgroundColor:  color,
-      behavior:         SnackBarBehavior.floating,
-      shape:            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration:         const Duration(seconds: 3),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
@@ -309,8 +307,7 @@ class _ReconciliationBillingPageState
   Widget build(BuildContext context) {
     // Is the most-recent reconciliation RECONCILED?
     String? mostRecentReconciledId;
-    if (_history.isNotEmpty &&
-        _history.first['status'] == 'RECONCILED') {
+    if (_history.isNotEmpty && _history.first['status'] == 'RECONCILED') {
       mostRecentReconciledId = _history.first['_id']?.toString();
     }
 
@@ -318,7 +315,7 @@ class _ReconciliationBillingPageState
       backgroundColor: _bg,
       appBar: AppBar(
         backgroundColor: _white,
-        elevation:       0,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: _navy),
           onPressed: () => Navigator.pop(context),
@@ -337,13 +334,15 @@ class _ReconciliationBillingPageState
               context,
               MaterialPageRoute(
                 builder: (_) => _ReportScreen(
-                    svc:              _svc,
-                    accountId:        widget.accountId,
-                    accountName:      widget.accountName,
-                    reconciliationId: _history.isNotEmpty ? _history.first['_id']?.toString() : null),
+                    svc: _svc,
+                    accountId: widget.accountId,
+                    accountName: widget.accountName,
+                    reconciliationId: _history.isNotEmpty
+                        ? _history.first['_id']?.toString()
+                        : null),
               ),
             ),
-            icon:  const Icon(Icons.bar_chart_outlined, size: 16, color: _blue),
+            icon: const Icon(Icons.bar_chart_outlined, size: 16, color: _blue),
             label: const Text('Report',
                 style: TextStyle(fontSize: 12, color: _blue)),
           ),
@@ -357,13 +356,14 @@ class _ReconciliationBillingPageState
           const SizedBox(width: 8),
           ElevatedButton.icon(
             onPressed: _showInitiateDialog,
-            icon:      const Icon(Icons.add, size: 14, color: Colors.white),
-            label:     const Text('Initiate Reconciliation',
+            icon: const Icon(Icons.add, size: 14, color: Colors.white),
+            label: const Text('Initiate Reconciliation',
                 style: TextStyle(fontSize: 12, color: Colors.white)),
             style: ElevatedButton.styleFrom(
               backgroundColor: _navyAccent,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6)),
             ),
           ),
           const SizedBox(width: 12),
@@ -378,28 +378,30 @@ class _ReconciliationBillingPageState
   }
 
   Widget _buildEmpty() => Center(
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.account_balance_outlined, size: 64, color: Colors.grey[300]),
-      const SizedBox(height: 16),
-      const Text('No reconciliations yet',
-          style: TextStyle(fontSize: 15, color: _grey)),
-      const SizedBox(height: 8),
-      const Text('Click "Initiate Reconciliation" to start',
-          style: TextStyle(fontSize: 12, color: Color(0xFFADB5BD))),
-      const SizedBox(height: 24),
-      ElevatedButton.icon(
-        onPressed: _showInitiateDialog,
-        icon:  const Icon(Icons.add, size: 16),
-        label: const Text('Initiate Reconciliation'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _navyAccent,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      ),
-    ]),
-  );
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.account_balance_outlined,
+              size: 64, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          const Text('No reconciliations yet',
+              style: TextStyle(fontSize: 15, color: _grey)),
+          const SizedBox(height: 8),
+          const Text('Click "Initiate Reconciliation" to start',
+              style: TextStyle(fontSize: 12, color: Color(0xFFADB5BD))),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _showInitiateDialog,
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Initiate Reconciliation'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _navyAccent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ]),
+      );
 
   Widget _buildHistoryList(String? mostRecentReconciledId) {
     return Column(children: [
@@ -417,18 +419,18 @@ class _ReconciliationBillingPageState
       const Divider(height: 1, color: Color(0xFFEEF2F7)),
       Expanded(
         child: ListView.separated(
-          itemCount:       _history.length,
+          itemCount: _history.length,
           separatorBuilder: (_, __) =>
               const Divider(height: 1, color: Color(0xFFEEF2F7)),
           itemBuilder: (_, i) {
-            final rec      = _history[i];
-            final recId    = rec['_id']?.toString() ?? '';
-            final status   = rec['status']?.toString() ?? 'IN_PROGRESS';
+            final rec = _history[i];
+            final recId = rec['_id']?.toString() ?? '';
+            final status = rec['status']?.toString() ?? 'IN_PROGRESS';
             final isReconciled = status == 'RECONCILED';
-            final closing  = (rec['closingBalance'] ?? 0).toDouble();
-            final start    = _parseDate(rec['startDate']);
-            final end      = _parseDate(rec['endDate']);
-            final canUndo  = isReconciled && recId == mostRecentReconciledId;
+            final closing = (rec['closingBalance'] ?? 0).toDouble();
+            final start = _parseDate(rec['startDate']);
+            final end = _parseDate(rec['endDate']);
+            final canUndo = isReconciled && recId == mostRecentReconciledId;
 
             return InkWell(
               onTap: () => isReconciled
@@ -445,21 +447,20 @@ class _ReconciliationBillingPageState
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      Text(
-                          '${_dfmt.format(start)} – ${_dfmt.format(end)}',
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF2C3E50))),
-                      const SizedBox(height: 3),
-                      Text(
-                          isReconciled
-                              ? 'Reconciled on ${_dfmt.format(_parseDate(rec['reconciledAt']))}'
-                              : 'In progress — tap to continue',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: isReconciled ? _green : _orange)),
-                    ]),
+                          Text('${_dfmt.format(start)} – ${_dfmt.format(end)}',
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF2C3E50))),
+                          const SizedBox(height: 3),
+                          Text(
+                              isReconciled
+                                  ? 'Reconciled on ${_dfmt.format(_parseDate(rec['reconciledAt']))}'
+                                  : 'In progress — tap to continue',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: isReconciled ? _green : _orange)),
+                        ]),
                   ),
                   // Closing balance
                   Expanded(
@@ -484,11 +485,9 @@ class _ReconciliationBillingPageState
                               : _orange.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                              color: isReconciled ? _green : _orange,
-                              width: 1),
+                              color: isReconciled ? _green : _orange, width: 1),
                         ),
-                        child: Text(
-                            isReconciled ? 'Reconciled' : 'In Progress',
+                        child: Text(isReconciled ? 'Reconciled' : 'In Progress',
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
@@ -502,19 +501,13 @@ class _ReconciliationBillingPageState
                     child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                      if (canUndo)
-                        _actionBtn(
-                            'Undo',
-                            Icons.undo_outlined,
-                            _orange,
-                            () => _undo(rec)),
-                      const SizedBox(width: 4),
-                      _actionBtn(
-                          'Delete',
-                          Icons.delete_outline,
-                          _red,
-                          () => _delete(rec)),
-                    ]),
+                          if (canUndo)
+                            _actionBtn('Undo', Icons.undo_outlined, _orange,
+                                () => _undo(rec)),
+                          const SizedBox(width: 4),
+                          _actionBtn('Delete', Icons.delete_outline, _red,
+                              () => _delete(rec)),
+                        ]),
                   ),
                 ]),
               ),
@@ -596,7 +589,7 @@ class _InitiateDialogState extends State<_InitiateDialog> {
     // Default: first and last day of current month
     final now = DateTime.now();
     _startDate = DateTime(now.year, now.month, 1);
-    _endDate   = DateTime(now.year, now.month + 1, 0);
+    _endDate = DateTime(now.year, now.month + 1, 0);
   }
 
   @override
@@ -607,11 +600,13 @@ class _InitiateDialogState extends State<_InitiateDialog> {
 
   Future<void> _pickDate(bool isStart) async {
     final picked = await showDatePicker(
-      context:     context,
-      initialDate: isStart ? (_startDate ?? DateTime.now()) : (_endDate ?? DateTime.now()),
-      firstDate:   DateTime(2020),
-      lastDate:    DateTime(2030),
-      builder:     (ctx, child) => Theme(
+      context: context,
+      initialDate: isStart
+          ? (_startDate ?? DateTime.now())
+          : (_endDate ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.light(primary: _navyAccent),
         ),
@@ -638,7 +633,8 @@ class _InitiateDialogState extends State<_InitiateDialog> {
       setState(() => _error = 'Closing balance is required');
       return;
     }
-    final closing = double.tryParse(_closingCtrl.text.trim().replaceAll(',', ''));
+    final closing =
+        double.tryParse(_closingCtrl.text.trim().replaceAll(',', ''));
     if (closing == null) {
       setState(() => _error = 'Enter a valid closing balance');
       return;
@@ -648,12 +644,15 @@ class _InitiateDialogState extends State<_InitiateDialog> {
       return;
     }
 
-    setState(() { _saving = true; _error = null; });
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
       final r = await widget.svc.initiate(
-        accountId:      widget.accountId,
-        startDate:      _startDate!.toIso8601String(),
-        endDate:        _endDate!.toIso8601String(),
+        accountId: widget.accountId,
+        startDate: _startDate!.toIso8601String(),
+        endDate: _endDate!.toIso8601String(),
         closingBalance: closing,
       );
       if (r['success'] == true) {
@@ -666,20 +665,9 @@ class _InitiateDialogState extends State<_InitiateDialog> {
           Navigator.pop(context);
           // Show a snackbar to inform the user
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: const Text('A reconciliation is already in progress. Please complete or delete it first.'),
-              backgroundColor: _orange,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              duration: const Duration(seconds: 4),
-              action: SnackBarAction(
-                label: 'Refresh',
-                textColor: Colors.white,
-                onPressed: () {
-                  // The parent page will be refreshed when we return
-                },
-              ),
-            ));
+            AppSnackbar.show(context,
+                message:
+                    'A reconciliation is already in progress. Please complete or delete it first.');
           }
           return;
         }
@@ -698,154 +686,168 @@ class _InitiateDialogState extends State<_InitiateDialog> {
       child: Container(
         width: 440,
         padding: const EdgeInsets.all(28),
-        child: Column(mainAxisSize: MainAxisSize.min,
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          // Header
-          Row(children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                  color: _navyAccent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.account_balance_outlined,
-                  color: _navyAccent, size: 20),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text('Initiate Reconciliation',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: _navy)),
-            ),
-            IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, size: 18, color: _grey)),
-          ]),
-          const SizedBox(height: 16),
+              // Header
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                      color: _navyAccent.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.account_balance_outlined,
+                      color: _navyAccent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Initiate Reconciliation',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: _navy)),
+                ),
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 18, color: _grey)),
+              ]),
+              const SizedBox(height: 16),
 
-          // Warning
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _orange.withOpacity(0.07),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _orange.withOpacity(0.3)),
-            ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.warning_amber_rounded, color: _orange, size: 16),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Opening balance cannot be edited once transactions are reconciled. '
-                  'Ensure it is correct before proceeding.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF5D6D7E)),
+              // Warning
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _orange.withOpacity(0.07),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _orange.withOpacity(0.3)),
+                ),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: _orange, size: 16),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Opening balance cannot be edited once transactions are reconciled. '
+                          'Ensure it is correct before proceeding.',
+                          style:
+                              TextStyle(fontSize: 12, color: Color(0xFF5D6D7E)),
+                        ),
+                      ),
+                    ]),
+              ),
+              const SizedBox(height: 20),
+
+              // Start Date
+              const Text('Start Date *',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151))),
+              const SizedBox(height: 6),
+              _DateField(
+                  value: _startDate,
+                  hint: 'Select start date',
+                  onTap: () => _pickDate(true)),
+              const SizedBox(height: 14),
+
+              // End Date
+              const Text('End Date *',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151))),
+              const SizedBox(height: 6),
+              _DateField(
+                  value: _endDate,
+                  hint: 'Select end date',
+                  onTap: () => _pickDate(false)),
+              const SizedBox(height: 14),
+
+              // Closing Balance
+              const Text('Closing Balance (from bank statement) *',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151))),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _closingCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]')),
+                ],
+                decoration: InputDecoration(
+                  hintText: 'Enter closing balance as shown on bank statement',
+                  hintStyle:
+                      const TextStyle(fontSize: 12, color: Color(0xFFADB5BD)),
+                  prefixIcon:
+                      const Icon(Icons.currency_rupee, size: 16, color: _grey),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: _navyAccent)),
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                 ),
               ),
+
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  const Icon(Icons.error_outline, size: 14, color: _red),
+                  const SizedBox(width: 6),
+                  Expanded(
+                      child: Text(_error!,
+                          style: const TextStyle(fontSize: 12, color: _red))),
+                ]),
+              ],
+
+              const SizedBox(height: 24),
+
+              // Buttons
+              Row(children: [
+                Expanded(
+                    child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('Cancel', style: TextStyle(color: _grey)),
+                )),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: ElevatedButton(
+                  onPressed: _saving ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _navyAccent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Text('Start Reconciliation',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                )),
+              ]),
             ]),
-          ),
-          const SizedBox(height: 20),
-
-          // Start Date
-          const Text('Start Date *',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF374151))),
-          const SizedBox(height: 6),
-          _DateField(
-              value:    _startDate,
-              hint:     'Select start date',
-              onTap:    () => _pickDate(true)),
-          const SizedBox(height: 14),
-
-          // End Date
-          const Text('End Date *',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF374151))),
-          const SizedBox(height: 6),
-          _DateField(
-              value:    _endDate,
-              hint:     'Select end date',
-              onTap:    () => _pickDate(false)),
-          const SizedBox(height: 14),
-
-          // Closing Balance
-          const Text('Closing Balance (from bank statement) *',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF374151))),
-          const SizedBox(height: 6),
-          TextField(
-            controller:   _closingCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]')),
-            ],
-            decoration: InputDecoration(
-              hintText:      'Enter closing balance as shown on bank statement',
-              hintStyle:     const TextStyle(fontSize: 12, color: Color(0xFFADB5BD)),
-              prefixIcon:    const Icon(Icons.currency_rupee, size: 16, color: _grey),
-              border:        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:   const BorderSide(color: Color(0xFFCBD5E1))),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:   const BorderSide(color: _navyAccent)),
-              isDense:       true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            ),
-          ),
-
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Row(children: [
-              const Icon(Icons.error_outline, size: 14, color: _red),
-              const SizedBox(width: 6),
-              Expanded(child: Text(_error!,
-                  style: const TextStyle(fontSize: 12, color: _red))),
-            ]),
-          ],
-
-          const SizedBox(height: 24),
-
-          // Buttons
-          Row(children: [
-            Expanded(child: OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFCBD5E1)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Cancel',
-                  style: TextStyle(color: _grey)),
-            )),
-            const SizedBox(width: 12),
-            Expanded(child: ElevatedButton(
-              onPressed: _saving ? null : _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _navyAccent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: _saving
-                  ? const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Text('Start Reconciliation',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-            )),
-          ]),
-        ]),
       ),
     );
   }
@@ -855,33 +857,34 @@ class _DateField extends StatelessWidget {
   final DateTime? value;
   final String hint;
   final VoidCallback onTap;
-  const _DateField({required this.value, required this.hint, required this.onTap});
+  const _DateField(
+      {required this.value, required this.hint, required this.onTap});
 
   @override
   Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFCBD5E1)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(children: [
-        const Icon(Icons.calendar_today_outlined, size: 15, color: _grey),
-        const SizedBox(width: 10),
-        Text(
-          value != null ? _dfmt.format(value!) : hint,
-          style: TextStyle(
-              fontSize: 13,
-              color: value != null
-                  ? const Color(0xFF2C3E50)
-                  : const Color(0xFFADB5BD)),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFCBD5E1)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            const Icon(Icons.calendar_today_outlined, size: 15, color: _grey),
+            const SizedBox(width: 10),
+            Text(
+              value != null ? _dfmt.format(value!) : hint,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: value != null
+                      ? const Color(0xFF2C3E50)
+                      : const Color(0xFFADB5BD)),
+            ),
+            const Spacer(),
+            const Icon(Icons.arrow_drop_down, color: _grey),
+          ]),
         ),
-        const Spacer(),
-        const Icon(Icons.arrow_drop_down, color: _grey),
-      ]),
-    ),
-  );
+      );
 }
 
 // ============================================================================
@@ -907,14 +910,14 @@ class _WorkingScreen extends StatefulWidget {
 class _WorkingScreenState extends State<_WorkingScreen> {
   late Map<String, dynamic> _rec;
   List<Map<String, dynamic>> _txns = [];
-  bool _loading  = true;
-  bool _saving   = false;
+  bool _loading = true;
+  bool _saving = false;
   bool _completing = false;
 
   double _openingBalance = 0;
   double _closingBalance = 0;
-  double _clearedAmount  = 0;
-  double _difference     = 0;
+  double _clearedAmount = 0;
+  double _difference = 0;
 
   Set<String> _clearedIds = {};
 
@@ -942,11 +945,11 @@ class _WorkingScreenState extends State<_WorkingScreen> {
       if (r['success'] == true) {
         final txns = List<Map<String, dynamic>>.from(r['data'] ?? []);
         setState(() {
-          _txns           = txns;
+          _txns = txns;
           _openingBalance = (r['openingBalance'] ?? 0).toDouble();
           _closingBalance = (r['closingBalance'] ?? 0).toDouble();
-          _clearedAmount  = (r['clearedAmount']  ?? 0).toDouble();
-          _difference     = (r['difference']     ?? _closingBalance).toDouble();
+          _clearedAmount = (r['clearedAmount'] ?? 0).toDouble();
+          _difference = (r['difference'] ?? _closingBalance).toDouble();
 
           // Pre-select already cleared ones
           _clearedIds = txns
@@ -988,14 +991,14 @@ class _WorkingScreenState extends State<_WorkingScreen> {
       }
     }
     _clearedAmount = cleared;
-    _difference    = _closingBalance - _clearedAmount;
+    _difference = _closingBalance - _clearedAmount;
   }
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
   Future<void> _autoSave() async {
     try {
       await widget.svc.saveProgress(
-        recId:        _rec['_id'].toString(),
+        recId: _rec['_id'].toString(),
         clearedTxnIds: _clearedIds.toList(),
       );
     } catch (_) {}
@@ -1006,7 +1009,7 @@ class _WorkingScreenState extends State<_WorkingScreen> {
     setState(() => _saving = true);
     try {
       final r = await widget.svc.saveProgress(
-        recId:         _rec['_id'].toString(),
+        recId: _rec['_id'].toString(),
         clearedTxnIds: _clearedIds.toList(),
       );
       if (r['success'] == true) {
@@ -1037,7 +1040,7 @@ class _WorkingScreenState extends State<_WorkingScreen> {
       _recalcLive();
     });
     await widget.svc.saveProgress(
-      recId:         _rec['_id'].toString(),
+      recId: _rec['_id'].toString(),
       clearedTxnIds: _clearedIds.toList(),
       closingBalance: val,
     );
@@ -1059,10 +1062,10 @@ class _WorkingScreenState extends State<_WorkingScreen> {
               'This will lock the period and mark all cleared transactions as reconciled.',
               style: TextStyle(fontSize: 13, color: Color(0xFF5D6D7E))),
           const SizedBox(height: 16),
-          _summaryRow('Opening Balance',  '₹${_fmt.format(_openingBalance)}'),
-          _summaryRow('Closing Balance',  '₹${_fmt.format(_closingBalance)}'),
-          _summaryRow('Cleared Amount',   '₹${_fmt.format(_clearedAmount)}'),
-          _summaryRow('Difference',       '₹${_fmt.format(_difference)}',
+          _summaryRow('Opening Balance', '₹${_fmt.format(_openingBalance)}'),
+          _summaryRow('Closing Balance', '₹${_fmt.format(_closingBalance)}'),
+          _summaryRow('Cleared Amount', '₹${_fmt.format(_clearedAmount)}'),
+          _summaryRow('Difference', '₹${_fmt.format(_difference)}',
               color: _difference.abs() < 0.01 ? _green : _red),
         ]),
         actions: [
@@ -1073,8 +1076,8 @@ class _WorkingScreenState extends State<_WorkingScreen> {
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(backgroundColor: _green),
               child: const Text('Reconcile',
-                  style: TextStyle(color: Colors.white,
-                      fontWeight: FontWeight.bold))),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold))),
         ],
       ),
     );
@@ -1084,7 +1087,7 @@ class _WorkingScreenState extends State<_WorkingScreen> {
     try {
       // Save latest progress first
       await widget.svc.saveProgress(
-        recId:         _rec['_id'].toString(),
+        recId: _rec['_id'].toString(),
         clearedTxnIds: _clearedIds.toList(),
       );
       final r = await widget.svc.complete(_rec['_id'].toString());
@@ -1101,13 +1104,12 @@ class _WorkingScreenState extends State<_WorkingScreen> {
     setState(() => _completing = false);
   }
 
-  Widget _summaryRow(String label, String value, {Color? color}) =>
-      Padding(
+  Widget _summaryRow(String label, String value, {Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        child:
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: Color(0xFF5D6D7E))),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E))),
           Text(value,
               style: TextStyle(
                   fontSize: 12,
@@ -1119,14 +1121,14 @@ class _WorkingScreenState extends State<_WorkingScreen> {
   // ── +Add Transaction ───────────────────────────────────────────────────────
   void _showAddTransaction() {
     showModalBottomSheet(
-      context:     context,
+      context: context,
       isScrollControlled: true,
-      shape:       const RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder:     (_) => _AddTransactionSheet(
-        svc:      widget.svc,
-        recId:    _rec['_id'].toString(),
-        onAdded:  () {
+      builder: (_) => _AddTransactionSheet(
+        svc: widget.svc,
+        recId: _rec['_id'].toString(),
+        onAdded: () {
           Navigator.pop(context);
           _loadTransactions();
         },
@@ -1136,21 +1138,15 @@ class _WorkingScreenState extends State<_WorkingScreen> {
 
   void _showSnack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:         Text(msg),
-      backgroundColor: color,
-      behavior:        SnackBarBehavior.floating,
-      shape:           RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isZero = _difference.abs() < 0.01;
-    final start  = _parseDate(_rec['startDate']);
-    final end    = _parseDate(_rec['endDate']);
+    final start = _parseDate(_rec['startDate']);
+    final end = _parseDate(_rec['endDate']);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -1164,34 +1160,36 @@ class _WorkingScreenState extends State<_WorkingScreen> {
           ),
           child: Row(children: [
             IconButton(
-              icon:      const Icon(Icons.arrow_back, size: 18, color: _navy),
+              icon: const Icon(Icons.arrow_back, size: 18, color: _navy),
               onPressed: () => Navigator.pop(context),
             ),
             const SizedBox(width: 6),
-            Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text(widget.accountName,
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: _navy)),
-              Text(
-                  '${_dfmt.format(start)} – ${_dfmt.format(end)}',
-                  style: const TextStyle(fontSize: 11, color: _grey)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(widget.accountName,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: _navy)),
+                  Text('${_dfmt.format(start)} – ${_dfmt.format(end)}',
+                      style: const TextStyle(fontSize: 11, color: _grey)),
+                ])),
             // Save Later
             OutlinedButton(
               onPressed: _saving ? null : _saveAndLater,
               style: OutlinedButton.styleFrom(
-                side:    const BorderSide(color: Color(0xFFCBD5E1)),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6)),
               ),
               child: _saving
-                  ? const SizedBox(width: 14, height: 14,
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: _grey))
                   : const Text('Save and Reconcile Later',
@@ -1204,18 +1202,20 @@ class _WorkingScreenState extends State<_WorkingScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: isZero ? _green : const Color(0xFFCBD5E1),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6)),
               ),
               child: _completing
-                  ? const SizedBox(width: 16, height: 16,
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : const Text('Reconcile',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           ]),
         ),
@@ -1228,13 +1228,13 @@ class _WorkingScreenState extends State<_WorkingScreen> {
             border: Border(bottom: BorderSide(color: Color(0xFFE8ECF0))),
           ),
           child: Row(children: [
-            _balanceCard('Opening Balance',
-                '₹${_fmt.format(_openingBalance)}', _blue),
+            _balanceCard(
+                'Opening Balance', '₹${_fmt.format(_openingBalance)}', _blue),
             const SizedBox(width: 1),
             _closingBalanceCard(),
             const SizedBox(width: 1),
-            _balanceCard('Cleared Amount',
-                '₹${_fmt.format(_clearedAmount)}', _teal),
+            _balanceCard(
+                'Cleared Amount', '₹${_fmt.format(_clearedAmount)}', _teal),
             const SizedBox(width: 1),
             _differenceCard(isZero),
           ]),
@@ -1256,119 +1256,125 @@ class _WorkingScreenState extends State<_WorkingScreen> {
         const Divider(height: 1, color: Color(0xFFEEF2F7)),
 
         // ── TRANSACTION LIST ──────────────────────────────────────────────────
-        Expanded(child: _loading
-          ? const Center(child: CircularProgressIndicator(color: _navyAccent))
-          : _txns.isEmpty
-              ? _buildEmptyTxns()
-              : ListView.separated(
-                  itemCount:        _txns.length + 1, // +1 for +Add Transaction row
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, color: Color(0xFFEEF2F7)),
-                  itemBuilder: (_, i) {
-                    if (i == _txns.length) return _buildAddTxnRow();
-                    return _buildTxnRow(_txns[i]);
-                  },
-                ),
+        Expanded(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(color: _navyAccent))
+              : _txns.isEmpty
+                  ? _buildEmptyTxns()
+                  : ListView.separated(
+                      itemCount:
+                          _txns.length + 1, // +1 for +Add Transaction row
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, color: Color(0xFFEEF2F7)),
+                      itemBuilder: (_, i) {
+                        if (i == _txns.length) return _buildAddTxnRow();
+                        return _buildTxnRow(_txns[i]);
+                      },
+                    ),
         ),
       ]),
     );
   }
 
   Widget _buildEmptyTxns() => Center(
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey[300]),
-      const SizedBox(height: 14),
-      const Text('No categorized transactions for this period',
-          style: TextStyle(fontSize: 13, color: _grey)),
-      const SizedBox(height: 8),
-      const Text(
-          'Categorize transactions first, or use +Add Transaction\nfor bank charges/interest not yet in your books',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 11, color: Color(0xFFADB5BD))),
-      const SizedBox(height: 20),
-      OutlinedButton.icon(
-        onPressed: _showAddTransaction,
-        icon:      const Icon(Icons.add, size: 14, color: _navyAccent),
-        label:     const Text('+Add Transaction',
-            style: TextStyle(fontSize: 12, color: _navyAccent)),
-        style: OutlinedButton.styleFrom(
-            side:  const BorderSide(color: _navyAccent),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6))),
-      ),
-    ]),
-  );
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey[300]),
+          const SizedBox(height: 14),
+          const Text('No categorized transactions for this period',
+              style: TextStyle(fontSize: 13, color: _grey)),
+          const SizedBox(height: 8),
+          const Text(
+              'Categorize transactions first, or use +Add Transaction\nfor bank charges/interest not yet in your books',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: Color(0xFFADB5BD))),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: _showAddTransaction,
+            icon: const Icon(Icons.add, size: 14, color: _navyAccent),
+            label: const Text('+Add Transaction',
+                style: TextStyle(fontSize: 12, color: _navyAccent)),
+            style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: _navyAccent),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6))),
+          ),
+        ]),
+      );
 
   Widget _buildAddTxnRow() => InkWell(
-    onTap: _showAddTransaction,
-    child: Container(
-      color: _white,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(children: [
-        const SizedBox(width: 36),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: _navyAccent.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-                color: _navyAccent.withOpacity(0.3), style: BorderStyle.solid),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: const [
-            Icon(Icons.add, size: 14, color: _navyAccent),
-            SizedBox(width: 6),
-            Text('+Add Transaction',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: _navyAccent,
-                    fontWeight: FontWeight.w600)),
+        onTap: _showAddTransaction,
+        child: Container(
+          color: _white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(children: [
+            const SizedBox(width: 36),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _navyAccent.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                    color: _navyAccent.withOpacity(0.3),
+                    style: BorderStyle.solid),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                Icon(Icons.add, size: 14, color: _navyAccent),
+                SizedBox(width: 6),
+                Text('+Add Transaction',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: _navyAccent,
+                        fontWeight: FontWeight.w600)),
+              ]),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+                'Add bank charges, interest or any transaction not in your books',
+                style: TextStyle(fontSize: 11, color: Color(0xFFADB5BD))),
           ]),
         ),
-        const SizedBox(width: 12),
-        const Text(
-            'Add bank charges, interest or any transaction not in your books',
-            style: TextStyle(fontSize: 11, color: Color(0xFFADB5BD))),
-      ]),
-    ),
-  );
+      );
 
   Widget _buildTxnRow(Map<String, dynamic> txn) {
-    final id        = txn['_id'].toString();
+    final id = txn['_id'].toString();
     final isCleared = _clearedIds.contains(id);
-    final isCredit  = txn['transactionType'] == 'CREDIT';
-    final amount    = (txn['amount'] ?? 0).toDouble();
-    final date      = _parseDate(txn['transactionDate']);
-    final desc      = txn['description']?.toString()   ?? '';
-    final ref       = txn['referenceNumber']?.toString() ?? '';
-    final type      = txn['categoryLabel']?.toString()  ??
-                      txn['reconciliationStatus']?.toString() ?? '';
-    final isAdded   = txn['isManuallyAdded'] == true;
+    final isCredit = txn['transactionType'] == 'CREDIT';
+    final amount = (txn['amount'] ?? 0).toDouble();
+    final date = _parseDate(txn['transactionDate']);
+    final desc = txn['description']?.toString() ?? '';
+    final ref = txn['referenceNumber']?.toString() ?? '';
+    final type = txn['categoryLabel']?.toString() ??
+        txn['reconciliationStatus']?.toString() ??
+        '';
+    final isAdded = txn['isManuallyAdded'] == true;
 
     return InkWell(
       onTap: () => _toggleCleared(txn),
       child: Container(
-        color: isCleared
-            ? _green.withOpacity(0.04)
-            : _white,
+        color: isCleared ? _green.withOpacity(0.04) : _white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Row(children: [
-          SizedBox(width: 36,
+          SizedBox(
+              width: 36,
               child: Checkbox(
-                value:                 isCleared,
-                onChanged:             (_) => _toggleCleared(txn),
-                activeColor:           _green,
+                value: isCleared,
+                onChanged: (_) => _toggleCleared(txn),
+                activeColor: _green,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               )),
-          SizedBox(width: 100,
+          SizedBox(
+              width: 100,
               child: Text(_dfmt.format(date),
-                  style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF5D6D7E)))),
-          SizedBox(width: 120,
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E)))),
+          SizedBox(
+              width: 120,
               child: Row(children: [
                 if (isAdded)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(
                       color: _blue.withOpacity(0.1),
@@ -1380,48 +1386,48 @@ class _WorkingScreenState extends State<_WorkingScreen> {
                             color: _blue,
                             fontWeight: FontWeight.bold)),
                   ),
-                Flexible(child: Text(type,
-                    overflow:  TextOverflow.ellipsis,
-                    style:     const TextStyle(
-                        fontSize: 12, color: Color(0xFF2C3E50)))),
+                Flexible(
+                    child: Text(type,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF2C3E50)))),
               ])),
-          Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-            if (desc.isNotEmpty)
-              Text(desc,
-                  maxLines:  1,
-                  overflow:  TextOverflow.ellipsis,
-                  style:     const TextStyle(
-                      fontSize: 12, color: Color(0xFF2C3E50))),
-            if (ref.isNotEmpty)
-              Text('Ref: $ref',
-                  style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF7F8C8D))),
-          ])),
-          SizedBox(width: 120,
-              child: Text(
-                  isCredit ? '₹${_fmt.format(amount)}' : '',
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                if (desc.isNotEmpty)
+                  Text(desc,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12, color: Color(0xFF2C3E50))),
+                if (ref.isNotEmpty)
+                  Text('Ref: $ref',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF7F8C8D))),
+              ])),
+          SizedBox(
+              width: 120,
+              child: Text(isCredit ? '₹${_fmt.format(amount)}' : '',
                   textAlign: TextAlign.right,
                   style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: _green))),
-          SizedBox(width: 120,
-              child: Text(
-                  !isCredit ? '₹${_fmt.format(amount)}' : '',
+          SizedBox(
+              width: 120,
+              child: Text(!isCredit ? '₹${_fmt.format(amount)}' : '',
                   textAlign: TextAlign.right,
                   style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _red))),
+                      fontSize: 12, fontWeight: FontWeight.w600, color: _red))),
         ]),
       ),
     );
   }
 
-  Widget _balanceCard(String label, String value, Color color) =>
-      Expanded(child: Container(
+  Widget _balanceCard(String label, String value, Color color) => Expanded(
+          child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           border: Border.all(color: color.withOpacity(0.15)),
@@ -1429,94 +1435,95 @@ class _WorkingScreenState extends State<_WorkingScreen> {
           color: color.withOpacity(0.04),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label,
-              style: const TextStyle(fontSize: 10, color: _grey)),
+          Text(label, style: const TextStyle(fontSize: 10, color: _grey)),
           const SizedBox(height: 4),
           Text(value,
               style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
+                  fontSize: 15, fontWeight: FontWeight.bold, color: color)),
         ]),
       ));
 
-  Widget _closingBalanceCard() => Expanded(child: Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    decoration: BoxDecoration(
-      border: Border.all(color: _navyAccent.withOpacity(0.2)),
-      borderRadius: BorderRadius.circular(8),
-      color: _navyAccent.withOpacity(0.04),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Closing Balance',
-          style: TextStyle(fontSize: 10, color: _grey)),
-      const SizedBox(height: 4),
-      _editingClosing
-          ? Row(children: [
-              Expanded(child: TextField(
-                controller:   _closingEditCtrl,
-                autofocus:    true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style:        const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.bold, color: _navy),
-                decoration: const InputDecoration(
-                  isDense:       true,
-                  contentPadding: EdgeInsets.zero,
-                  border:        InputBorder.none,
-                ),
-                onSubmitted: (_) => _updateClosing(),
-              )),
-              GestureDetector(
-                onTap: _updateClosing,
-                child: const Icon(Icons.check_circle,
-                    size: 18, color: _green),
-              ),
-            ])
-          : Row(children: [
-              Text('₹${_fmt.format(_closingBalance)}',
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: _navyAccent)),
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: _startEditClosing,
-                child: const Icon(Icons.edit_outlined,
-                    size: 13, color: _grey),
-              ),
-            ]),
-    ]),
-  ));
+  Widget _closingBalanceCard() => Expanded(
+          child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: _navyAccent.withOpacity(0.2)),
+          borderRadius: BorderRadius.circular(8),
+          color: _navyAccent.withOpacity(0.04),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Closing Balance',
+              style: TextStyle(fontSize: 10, color: _grey)),
+          const SizedBox(height: 4),
+          _editingClosing
+              ? Row(children: [
+                  Expanded(
+                      child: TextField(
+                    controller: _closingEditCtrl,
+                    autofocus: true,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: _navy),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      border: InputBorder.none,
+                    ),
+                    onSubmitted: (_) => _updateClosing(),
+                  )),
+                  GestureDetector(
+                    onTap: _updateClosing,
+                    child:
+                        const Icon(Icons.check_circle, size: 18, color: _green),
+                  ),
+                ])
+              : Row(children: [
+                  Text('₹${_fmt.format(_closingBalance)}',
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: _navyAccent)),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: _startEditClosing,
+                    child:
+                        const Icon(Icons.edit_outlined, size: 13, color: _grey),
+                  ),
+                ]),
+        ]),
+      ));
 
-  Widget _differenceCard(bool isZero) => Expanded(child: Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    decoration: BoxDecoration(
-      border: Border.all(
-          color: (isZero ? _green : _red).withOpacity(0.3)),
-      borderRadius: BorderRadius.circular(8),
-      color: (isZero ? _green : _red).withOpacity(0.05),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Difference',
-          style: TextStyle(fontSize: 10, color: _grey)),
-      const SizedBox(height: 4),
-      Row(children: [
-        Text('₹${_fmt.format(_difference)}',
-            style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: isZero ? _green : _red)),
-        if (isZero) ...[
-          const SizedBox(width: 6),
-          const Icon(Icons.check_circle,
-              size: 16, color: _green),
-        ],
-      ]),
-      if (!isZero)
-        const Text('Must be ₹0.00 to reconcile',
-            style: TextStyle(fontSize: 9, color: _red)),
-    ]),
-  ));
+  Widget _differenceCard(bool isZero) => Expanded(
+          child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: (isZero ? _green : _red).withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(8),
+          color: (isZero ? _green : _red).withOpacity(0.05),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Difference',
+              style: TextStyle(fontSize: 10, color: _grey)),
+          const SizedBox(height: 4),
+          Row(children: [
+            Text('₹${_fmt.format(_difference)}',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isZero ? _green : _red)),
+            if (isZero) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.check_circle, size: 16, color: _green),
+            ],
+          ]),
+          if (!isZero)
+            const Text('Must be ₹0.00 to reconcile',
+                style: TextStyle(fontSize: 9, color: _red)),
+        ]),
+      ));
 }
 
 // ============================================================================
@@ -1534,21 +1541,20 @@ class _AddTransactionSheet extends StatefulWidget {
   });
 
   @override
-  State<_AddTransactionSheet> createState() =>
-      _AddTransactionSheetState();
+  State<_AddTransactionSheet> createState() => _AddTransactionSheetState();
 }
 
 class _AddTransactionSheetState extends State<_AddTransactionSheet> {
   String _type = 'DEBIT';
-  DateTime _date  = DateTime.now();
-  final _amountCtrl  = TextEditingController();
-  final _descCtrl    = TextEditingController();
-  final _refCtrl     = TextEditingController();
+  DateTime _date = DateTime.now();
+  final _amountCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  final _refCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _coaOptions = [];
   Map<String, dynamic>? _selectedCOA;
   bool _loadingCOA = true;
-  bool _saving     = false;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -1569,7 +1575,7 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
       // Load both expense and income COA
       final rExp = await widget.svc.getCOAOptions('expense');
       final rInc = await widget.svc.getCOAOptions('income');
-      final all  = <Map<String, dynamic>>[];
+      final all = <Map<String, dynamic>>[];
       if (rExp['success'] == true) {
         all.addAll(List<Map<String, dynamic>>.from(rExp['data'] ?? []));
       }
@@ -1577,8 +1583,8 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
         all.addAll(List<Map<String, dynamic>>.from(rInc['data'] ?? []));
       }
       setState(() {
-        _coaOptions  = all;
-        _loadingCOA  = false;
+        _coaOptions = all;
+        _loadingCOA = false;
       });
     } catch (_) {
       setState(() => _loadingCOA = false);
@@ -1587,11 +1593,11 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
-      context:     context,
+      context: context,
       initialDate: _date,
-      firstDate:   DateTime(2020),
-      lastDate:    DateTime(2030),
-      builder:     (ctx, child) => Theme(
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.light(primary: _navyAccent),
         ),
@@ -1603,46 +1609,35 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
 
   Future<void> _save() async {
     if (_selectedCOA == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please select a category'),
-          backgroundColor: _red));
+      AppSnackbar.show(context, message: 'Please select a category');
       return;
     }
     final amount = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Enter a valid amount'),
-          backgroundColor: _red));
+      AppSnackbar.show(context, message: 'Enter a valid amount');
       return;
     }
 
     setState(() => _saving = true);
     try {
       final r = await widget.svc.addTransaction(
-        recId:       widget.recId,
-        type:        _type,
-        date:        _date.toIso8601String(),
-        amount:      amount,
+        recId: widget.recId,
+        type: _type,
+        date: _date.toIso8601String(),
+        amount: amount,
         coaAccountId: _selectedCOA!['id'].toString(),
-        description: _descCtrl.text.trim().isEmpty
-            ? null
-            : _descCtrl.text.trim(),
-        reference:   _refCtrl.text.trim().isEmpty
-            ? null
-            : _refCtrl.text.trim(),
+        description:
+            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        reference: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
       );
       if (r['success'] == true) {
         widget.onAdded();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:         Text(r['message'] ?? 'Failed'),
-            backgroundColor: _red));
+        AppSnackbar.show(context, message: r['message'] ?? 'Failed');
         setState(() => _saving = false);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         Text('Error: $e'),
-          backgroundColor: _red));
+      AppSnackbar.show(context, message: 'Error: $e');
       setState(() => _saving = false);
     }
   }
@@ -1650,171 +1645,197 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min,
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          Row(children: [
-            const Text('+Add Transaction',
-                style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: _navy)),
-            const Spacer(),
-            IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, size: 18, color: _grey)),
-          ]),
-          const Text(
-              'Add a transaction that is on your bank statement but not yet in your books '
-              '(e.g. bank charges, interest income)',
-              style: TextStyle(fontSize: 11, color: _grey)),
-          const SizedBox(height: 16),
+              Row(children: [
+                const Text('+Add Transaction',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navy)),
+                const Spacer(),
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 18, color: _grey)),
+              ]),
+              const Text(
+                  'Add a transaction that is on your bank statement but not yet in your books '
+                  '(e.g. bank charges, interest income)',
+                  style: TextStyle(fontSize: 11, color: _grey)),
+              const SizedBox(height: 16),
 
-          // Type selector
-          Row(children: [
-            _typeBtn('DEBIT',  'Money Out (Debit)',  Icons.arrow_upward),
-            const SizedBox(width: 10),
-            _typeBtn('CREDIT', 'Money In (Credit)',  Icons.arrow_downward),
-          ]),
-          const SizedBox(height: 14),
+              // Type selector
+              Row(children: [
+                _typeBtn('DEBIT', 'Money Out (Debit)', Icons.arrow_upward),
+                const SizedBox(width: 10),
+                _typeBtn('CREDIT', 'Money In (Credit)', Icons.arrow_downward),
+              ]),
+              const SizedBox(height: 14),
 
-          // Date + Amount row
-          Row(children: [
-            Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Date *',
+              // Date + Amount row
+              Row(children: [
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      const Text('Date *',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF374151))),
+                      const SizedBox(height: 4),
+                      _DateField(
+                          value: _date, hint: 'Select date', onTap: _pickDate),
+                    ])),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      const Text('Amount *',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF374151))),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: _amountCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.currency_rupee,
+                              size: 14, color: _grey),
+                          hintText: '0.00',
+                          isDense: true,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide:
+                                  const BorderSide(color: Color(0xFFCBD5E1))),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: _navyAccent)),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 12),
+                        ),
+                      ),
+                    ])),
+              ]),
+              const SizedBox(height: 14),
+
+              // Category (COA)
+              const Text('Category *',
                   style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       color: Color(0xFF374151))),
               const SizedBox(height: 4),
-              _DateField(
-                  value: _date, hint: 'Select date', onTap: _pickDate),
-            ])),
-            const SizedBox(width: 12),
-            Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Amount *',
-                  style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w600,
-                      color: Color(0xFF374151))),
-              const SizedBox(height: 4),
-              TextField(
-                controller:   _amountCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  prefixIcon:    const Icon(Icons.currency_rupee, size: 14, color: _grey),
-                  hintText:      '0.00',
-                  isDense:       true,
-                  border:        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide:   const BorderSide(color: Color(0xFFCBD5E1))),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide:   const BorderSide(color: _navyAccent)),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 12),
-                ),
-              ),
-            ])),
-          ]),
-          const SizedBox(height: 14),
+              _loadingCOA
+                  ? const LinearProgressIndicator(color: _navyAccent)
+                  : DropdownButtonFormField<Map<String, dynamic>>(
+                      value: _selectedCOA,
+                      isExpanded: true,
+                      hint: const Text(
+                          'Select category (e.g. Bank Charges, Interest Income)',
+                          style: TextStyle(
+                              fontSize: 12, color: Color(0xFFADB5BD))),
+                      items: _coaOptions
+                          .map((c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(
+                                    '${c['accountName']} (${c['accountType']})',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12)),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setState(() => _selectedCOA = v),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFCBD5E1))),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 12),
+                      ),
+                    ),
+              const SizedBox(height: 14),
 
-          // Category (COA)
-          const Text('Category *',
-              style: TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w600,
-                  color: Color(0xFF374151))),
-          const SizedBox(height: 4),
-          _loadingCOA
-              ? const LinearProgressIndicator(color: _navyAccent)
-              : DropdownButtonFormField<Map<String, dynamic>>(
-                  value:     _selectedCOA,
-                  isExpanded: true,
-                  hint: const Text('Select category (e.g. Bank Charges, Interest Income)',
-                      style: TextStyle(fontSize: 12, color: Color(0xFFADB5BD))),
-                  items: _coaOptions.map((c) => DropdownMenuItem(
-                    value: c,
-                    child: Text('${c['accountName']} (${c['accountType']})',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12)),
-                  )).toList(),
-                  onChanged: (v) => setState(() => _selectedCOA = v),
+              // Description + Reference
+              Row(children: [
+                Expanded(
+                    child: TextField(
+                  controller: _descCtrl,
                   decoration: InputDecoration(
+                    labelText: 'Description (optional)',
+                    labelStyle: const TextStyle(fontSize: 11),
                     isDense: true,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 12),
                   ),
-                ),
-          const SizedBox(height: 14),
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: TextField(
+                  controller: _refCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Reference (optional)',
+                    labelStyle: const TextStyle(fontSize: 11),
+                    isDense: true,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 12),
+                  ),
+                )),
+              ]),
+              const SizedBox(height: 20),
 
-          // Description + Reference
-          Row(children: [
-            Expanded(child: TextField(
-              controller: _descCtrl,
-              decoration: InputDecoration(
-                labelText: 'Description (optional)',
-                labelStyle: const TextStyle(fontSize: 11),
-                isDense:    true,
-                border:     OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 12),
-              ),
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: TextField(
-              controller: _refCtrl,
-              decoration: InputDecoration(
-                labelText: 'Reference (optional)',
-                labelStyle: const TextStyle(fontSize: 11),
-                isDense:    true,
-                border:     OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 12),
-              ),
-            )),
-          ]),
-          const SizedBox(height: 20),
-
-          SizedBox(width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _navyAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                child: _saving
-                    ? const SizedBox(width: 18, height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Text('Add & Mark as Cleared',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13)),
-              )),
-        ]),
+              SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _navyAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('Add & Mark as Cleared',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13)),
+                  )),
+            ]),
       ),
     );
   }
 
-  Widget _typeBtn(String value, String label, IconData icon) =>
-      Expanded(child: InkWell(
+  Widget _typeBtn(String value, String label, IconData icon) => Expanded(
+          child: InkWell(
         onTap: () => setState(() => _type = value),
         borderRadius: BorderRadius.circular(8),
         child: Container(
@@ -1834,7 +1855,7 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon,
-                size:  14,
+                size: 14,
                 color: _type == value
                     ? (value == 'DEBIT' ? _red : _green)
                     : _grey),
@@ -1876,7 +1897,7 @@ class _CompletedViewState extends State<_CompletedView> {
   bool _loading = true;
   double _openingBalance = 0;
   double _closingBalance = 0;
-  double _clearedAmount  = 0;
+  double _clearedAmount = 0;
 
   @override
   void initState() {
@@ -1886,17 +1907,16 @@ class _CompletedViewState extends State<_CompletedView> {
 
   Future<void> _load() async {
     try {
-      final r = await widget.svc.getTransactions(
-          widget.rec['_id'].toString());
+      final r = await widget.svc.getTransactions(widget.rec['_id'].toString());
       if (r['success'] == true) {
         setState(() {
-          _txns           = List<Map<String, dynamic>>.from(r['data'] ?? [])
+          _txns = List<Map<String, dynamic>>.from(r['data'] ?? [])
               .where((t) => t['isCleared'] == true)
               .toList();
           _openingBalance = (r['openingBalance'] ?? 0).toDouble();
           _closingBalance = (r['closingBalance'] ?? 0).toDouble();
-          _clearedAmount  = (r['clearedAmount']  ?? 0).toDouble();
-          _loading        = false;
+          _clearedAmount = (r['clearedAmount'] ?? 0).toDouble();
+          _loading = false;
         });
       }
     } catch (_) {
@@ -1906,8 +1926,8 @@ class _CompletedViewState extends State<_CompletedView> {
 
   @override
   Widget build(BuildContext context) {
-    final start       = _parseDate(widget.rec['startDate']);
-    final end         = _parseDate(widget.rec['endDate']);
+    final start = _parseDate(widget.rec['startDate']);
+    final end = _parseDate(widget.rec['endDate']);
     final reconciledAt = _parseDate(widget.rec['reconciledAt']);
 
     return Scaffold(
@@ -1933,14 +1953,14 @@ class _CompletedViewState extends State<_CompletedView> {
               context,
               MaterialPageRoute(
                 builder: (_) => _ReportScreen(
-                  svc:            widget.svc,
-                  accountId:      widget.accountId,
-                  accountName:    widget.accountName,
+                  svc: widget.svc,
+                  accountId: widget.accountId,
+                  accountName: widget.accountName,
                   reconciliationId: widget.rec['_id']?.toString(),
                 ),
               ),
             ),
-            icon:  const Icon(Icons.bar_chart_outlined, size: 14, color: _blue),
+            icon: const Icon(Icons.bar_chart_outlined, size: 14, color: _blue),
             label: const Text('View Report',
                 style: TextStyle(fontSize: 12, color: _blue)),
           ),
@@ -1955,16 +1975,16 @@ class _CompletedViewState extends State<_CompletedView> {
           child: Row(children: [
             const Icon(Icons.check_circle, color: _green, size: 18),
             const SizedBox(width: 10),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               'Reconciled on ${_dfmt.format(reconciledAt)}',
               style: const TextStyle(
                   fontSize: 13, color: _green, fontWeight: FontWeight.w600),
             )),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color:        _green,
+                color: _green,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text('Reconciled',
@@ -1984,16 +2004,15 @@ class _CompletedViewState extends State<_CompletedView> {
             border: Border(bottom: BorderSide(color: Color(0xFFE8ECF0))),
           ),
           child: Row(children: [
-            _sCard('Opening Balance',
-                '₹${_fmt.format(_openingBalance)}', _blue),
+            _sCard(
+                'Opening Balance', '₹${_fmt.format(_openingBalance)}', _blue),
             const SizedBox(width: 8),
-            _sCard('Closing Balance',
-                '₹${_fmt.format(_closingBalance)}', _navyAccent),
+            _sCard('Closing Balance', '₹${_fmt.format(_closingBalance)}',
+                _navyAccent),
             const SizedBox(width: 8),
-            _sCard('Cleared Amount',
-                '₹${_fmt.format(_clearedAmount)}', _teal),
+            _sCard('Cleared Amount', '₹${_fmt.format(_clearedAmount)}', _teal),
             const SizedBox(width: 8),
-            _sCard('Difference',  '₹0.00', _green),
+            _sCard('Difference', '₹0.00', _green),
           ]),
         ),
 
@@ -2011,77 +2030,84 @@ class _CompletedViewState extends State<_CompletedView> {
         ),
         const Divider(height: 1, color: Color(0xFFEEF2F7)),
 
-        Expanded(child: _loading
-          ? const Center(child: CircularProgressIndicator(color: _navyAccent))
-          : ListView.separated(
-              itemCount:        _txns.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, color: Color(0xFFEEF2F7)),
-              itemBuilder: (_, i) {
-                final txn     = _txns[i];
-                final isCredit = txn['transactionType'] == 'CREDIT';
-                final amount   = (txn['amount'] ?? 0).toDouble();
-                final date     = _parseDate(txn['transactionDate']);
-                final desc     = txn['description']?.toString()    ?? '';
-                final ref      = txn['referenceNumber']?.toString() ?? '';
-                final type     = txn['categoryLabel']?.toString()   ?? '';
+        Expanded(
+            child: _loading
+                ? const Center(
+                    child: CircularProgressIndicator(color: _navyAccent))
+                : ListView.separated(
+                    itemCount: _txns.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, color: Color(0xFFEEF2F7)),
+                    itemBuilder: (_, i) {
+                      final txn = _txns[i];
+                      final isCredit = txn['transactionType'] == 'CREDIT';
+                      final amount = (txn['amount'] ?? 0).toDouble();
+                      final date = _parseDate(txn['transactionDate']);
+                      final desc = txn['description']?.toString() ?? '';
+                      final ref = txn['referenceNumber']?.toString() ?? '';
+                      final type = txn['categoryLabel']?.toString() ?? '';
 
-                return Container(
-                  color: _white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 14),
-                  child: Row(children: [
-                    SizedBox(width: 100,
-                        child: Text(_dfmt.format(date),
-                            style: const TextStyle(
-                                fontSize: 12, color: Color(0xFF5D6D7E)))),
-                    SizedBox(width: 140,
-                        child: Text(type,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12, color: Color(0xFF2C3E50)))),
-                    Expanded(child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      if (desc.isNotEmpty)
-                        Text(desc,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF2C3E50))),
-                      if (ref.isNotEmpty)
-                        Text('Ref: $ref',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF7F8C8D))),
-                    ])),
-                    SizedBox(width: 110,
-                        child: Text(
-                            isCredit ? '₹${_fmt.format(amount)}' : '',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _green))),
-                    SizedBox(width: 110,
-                        child: Text(
-                            !isCredit ? '₹${_fmt.format(amount)}' : '',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _red))),
-                  ]),
-                );
-              },
-            )),
+                      return Container(
+                        color: _white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
+                        child: Row(children: [
+                          SizedBox(
+                              width: 100,
+                              child: Text(_dfmt.format(date),
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Color(0xFF5D6D7E)))),
+                          SizedBox(
+                              width: 140,
+                              child: Text(type,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Color(0xFF2C3E50)))),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                if (desc.isNotEmpty)
+                                  Text(desc,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF2C3E50))),
+                                if (ref.isNotEmpty)
+                                  Text('Ref: $ref',
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF7F8C8D))),
+                              ])),
+                          SizedBox(
+                              width: 110,
+                              child: Text(
+                                  isCredit ? '₹${_fmt.format(amount)}' : '',
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _green))),
+                          SizedBox(
+                              width: 110,
+                              child: Text(
+                                  !isCredit ? '₹${_fmt.format(amount)}' : '',
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _red))),
+                        ]),
+                      );
+                    },
+                  )),
       ]),
     );
   }
 
-  Widget _sCard(String label, String value, Color color) =>
-      Expanded(child: Container(
+  Widget _sCard(String label, String value, Color color) => Expanded(
+          child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           border: Border.all(color: color.withOpacity(0.2)),
@@ -2093,9 +2119,7 @@ class _CompletedViewState extends State<_CompletedView> {
           const SizedBox(height: 3),
           Text(value,
               style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
+                  fontSize: 14, fontWeight: FontWeight.bold, color: color)),
         ]),
       ));
 }
@@ -2135,22 +2159,24 @@ class _ReportScreenState extends State<_ReportScreen> {
   Future<void> _loadReport() async {
     setState(() => _loading = true);
     try {
-      final r = await widget.svc.getReport(
-          widget.accountId,
-          recId: widget.reconciliationId);
+      final r = await widget.svc
+          .getReport(widget.accountId, recId: widget.reconciliationId);
       if (r['success'] == true) {
         setState(() {
-          _report  = Map<String, dynamic>.from(r['data']);
+          _report = Map<String, dynamic>.from(r['data']);
           _loading = false;
         });
       } else {
         setState(() {
-          _error   = r['message'];
+          _error = r['message'];
           _loading = false;
         });
       }
     } catch (e) {
-      setState(() { _error = e.toString(); _loading = false; });
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
@@ -2194,55 +2220,55 @@ class _ReportScreenState extends State<_ReportScreen> {
   /// Builds the flat list of rows used by both PDF and Excel exports.
   /// Returns: { openingBalance, closingBalance, reconciledOn, rows, period }
   Map<String, dynamic> _buildExportData() {
-    final summary  = _report!['summary']  as Map<String, dynamic>;
+    final summary = _report!['summary'] as Map<String, dynamic>;
     final sections = _report!['sections'] as Map<String, dynamic>;
-    final period   = _report!['period']   as Map<String, dynamic>;
+    final period = _report!['period'] as Map<String, dynamic>;
 
     final openingBalance = (summary['openingBalance'] ?? 0).toDouble();
     final closingBalance = (summary['closingBalance'] ?? 0).toDouble();
-    final reconciledOn   = _report!['reconciledAt'] ?? _report!['updatedAt'];
+    final reconciledOn = _report!['reconciledAt'] ?? _report!['updatedAt'];
 
     final List<Map<String, dynamic>> rows = [];
 
     for (final sectionKey in ['cleared', 'unmatched', 'outstanding']) {
-      final sec  = sections[sectionKey] as Map<String, dynamic>;
+      final sec = sections[sectionKey] as Map<String, dynamic>;
       final txns = List<Map<String, dynamic>>.from(sec['transactions'] ?? []);
       for (final t in txns) {
         final isCredit = t['transactionType'] == 'CREDIT';
-        final amount   = (t['amount'] ?? 0).toDouble();
-        final date     = _parseDate(t['transactionDate']);
+        final amount = (t['amount'] ?? 0).toDouble();
+        final date = _parseDate(t['transactionDate']);
 
         // Build "Transaction Details" — description + optional ref
         final desc = t['description']?.toString() ?? '';
-        final ref  = t['referenceNumber']?.toString() ?? '';
+        final ref = t['referenceNumber']?.toString() ?? '';
 
         // Build "Type" — category + optional vendor/customer sub-line
         final typeMain = t['categoryLabel']?.toString() ?? '';
-        final typeSub  = t['vendorName']?.toString() ??
-                         t['customerName']?.toString() ?? '';
+        final typeSub =
+            t['vendorName']?.toString() ?? t['customerName']?.toString() ?? '';
 
         rows.add({
-          'date':      date,
-          'desc':      desc,
-          'ref':       ref,
-          'typeMain':  typeMain,
-          'typeSub':   typeSub,
-          'deposit':   isCredit ? amount : 0.0,
+          'date': date,
+          'desc': desc,
+          'ref': ref,
+          'typeMain': typeMain,
+          'typeSub': typeSub,
+          'deposit': isCredit ? amount : 0.0,
           'withdrawal': !isCredit ? amount : 0.0,
         });
       }
     }
 
     // Sort by date ascending
-    rows.sort((a, b) =>
-        (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+    rows.sort(
+        (a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
 
     return {
       'openingBalance': openingBalance,
       'closingBalance': closingBalance,
-      'reconciledOn':   reconciledOn,
-      'rows':           rows,
-      'period':         period,
+      'reconciledOn': reconciledOn,
+      'rows': rows,
+      'period': period,
     };
   }
 
@@ -2250,18 +2276,19 @@ class _ReportScreenState extends State<_ReportScreen> {
   Future<void> _exportPDF() async {
     if (_report == null) return;
     try {
-      final data           = _buildExportData();
-      final rows           = data['rows'] as List<Map<String, dynamic>>;
+      final data = _buildExportData();
+      final rows = data['rows'] as List<Map<String, dynamic>>;
       final openingBalance = data['openingBalance'] as double;
       final closingBalance = data['closingBalance'] as double;
-      final reconciledOn   = data['reconciledOn'];
-      final period         = data['period'] as Map<String, dynamic>;
+      final reconciledOn = data['reconciledOn'];
+      final period = data['period'] as Map<String, dynamic>;
 
       final startDate = _parseDate(period['startDate']);
-      final endDate   = _parseDate(period['endDate']);
+      final endDate = _parseDate(period['endDate']);
 
       // ── Fetch org/branch info for header ──
-      final orgName    = await FinanceSecureStorage.getOrgName()    ?? widget.accountName;
+      final orgName =
+          await FinanceSecureStorage.getOrgName() ?? widget.accountName;
       final orgLogoUrl = await FinanceSecureStorage.getOrgLogoUrl();
 
       // ── Try to load logo bytes ──
@@ -2281,22 +2308,25 @@ class _ReportScreenState extends State<_ReportScreen> {
       final pdf = pw.Document();
 
       // ── colour palette ──
-      const headerBg    = PdfColor.fromInt(0xFF0D1B3E); // navy
-      const headerFg    = PdfColors.white;
-      const accentBlue  = PdfColor.fromInt(0xFF1E3A8A);
-      const rowAlt      = PdfColor.fromInt(0xFFF4F6F9);
-      const borderCol   = PdfColor.fromInt(0xFFDDE4EF);
-      const greenCol    = PdfColor.fromInt(0xFF27AE60);
-      const redCol      = PdfColor.fromInt(0xFFE74C3C);
-      const greyCol     = PdfColor.fromInt(0xFF7F8C8D);
-      const lightBg     = PdfColor.fromInt(0xFFF7F9FC);
-      const summaryBg   = PdfColor.fromInt(0xFFF0F4FF);
+      const headerBg = PdfColor.fromInt(0xFF0D1B3E); // navy
+      const headerFg = PdfColors.white;
+      const accentBlue = PdfColor.fromInt(0xFF1E3A8A);
+      const rowAlt = PdfColor.fromInt(0xFFF4F6F9);
+      const borderCol = PdfColor.fromInt(0xFFDDE4EF);
+      const greenCol = PdfColor.fromInt(0xFF27AE60);
+      const redCol = PdfColor.fromInt(0xFFE74C3C);
+      const greyCol = PdfColor.fromInt(0xFF7F8C8D);
+      const lightBg = PdfColor.fromInt(0xFFF7F9FC);
+      const summaryBg = PdfColor.fromInt(0xFFF0F4FF);
 
       final summary = _report!['summary'] as Map<String, dynamic>;
-      final totalClearedCredits = (summary['totalClearedCredits'] ?? 0).toDouble();
-      final totalClearedDebits  = (summary['totalClearedDebits']  ?? 0).toDouble();
-      final difference          = (summary['difference']          ?? 0).toDouble();
-      final recStatus           = summary['reconciliationStatus']?.toString() ?? 'IN_PROGRESS';
+      final totalClearedCredits =
+          (summary['totalClearedCredits'] ?? 0).toDouble();
+      final totalClearedDebits =
+          (summary['totalClearedDebits'] ?? 0).toDouble();
+      final difference = (summary['difference'] ?? 0).toDouble();
+      final recStatus =
+          summary['reconciliationStatus']?.toString() ?? 'IN_PROGRESS';
 
       pdf.addPage(
         pw.MultiPage(
@@ -2304,7 +2334,8 @@ class _ReportScreenState extends State<_ReportScreen> {
           margin: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 40),
           header: (ctx) => pw.Container(
             decoration: const pw.BoxDecoration(
-              border: pw.Border(bottom: pw.BorderSide(color: borderCol, width: 0.5)),
+              border: pw.Border(
+                  bottom: pw.BorderSide(color: borderCol, width: 0.5)),
             ),
             padding: const pw.EdgeInsets.only(bottom: 8),
             child: pw.Row(
@@ -2312,7 +2343,8 @@ class _ReportScreenState extends State<_ReportScreen> {
               children: [
                 pw.Text(
                   orgName.toUpperCase(),
-                  style: pw.TextStyle(fontSize: 7, color: greyCol, letterSpacing: 0.5),
+                  style: pw.TextStyle(
+                      fontSize: 7, color: greyCol, letterSpacing: 0.5),
                 ),
                 pw.Text(
                   'Reconciliation Report - ${_ifmt.format(startDate)} to ${_ifmt.format(endDate)}',
@@ -2323,7 +2355,8 @@ class _ReportScreenState extends State<_ReportScreen> {
           ),
           footer: (ctx) => pw.Container(
             decoration: const pw.BoxDecoration(
-              border: pw.Border(top: pw.BorderSide(color: borderCol, width: 0.5)),
+              border:
+                  pw.Border(top: pw.BorderSide(color: borderCol, width: 0.5)),
             ),
             padding: const pw.EdgeInsets.only(top: 6),
             child: pw.Row(
@@ -2354,11 +2387,11 @@ class _ReportScreenState extends State<_ReportScreen> {
 
             // Transaction rows
             for (final r in rows) {
-              final date       = r['date']       as DateTime;
-              final desc       = r['desc']       as String;
-              final ref        = r['ref']        as String;
-              final typeMain   = r['typeMain']   as String;
-              final deposit    = (r['deposit']   as double);
+              final date = r['date'] as DateTime;
+              final desc = r['desc'] as String;
+              final ref = r['ref'] as String;
+              final typeMain = r['typeMain'] as String;
+              final deposit = (r['deposit'] as double);
               final withdrawal = (r['withdrawal'] as double);
 
               final detailCell = ref.isNotEmpty ? '$desc\nRef: $ref' : desc;
@@ -2367,7 +2400,7 @@ class _ReportScreenState extends State<_ReportScreen> {
                 _ifmt.format(date),
                 detailCell,
                 typeMain,
-                deposit    > 0 ? 'Rs. ${_fmt.format(deposit)}'    : '',
+                deposit > 0 ? 'Rs. ${_fmt.format(deposit)}' : '',
                 withdrawal > 0 ? 'Rs. ${_fmt.format(withdrawal)}' : '',
               ]);
             }
@@ -2432,7 +2465,8 @@ class _ReportScreenState extends State<_ReportScreen> {
                   ),
                   // Report title block (right side)
                   pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: pw.BoxDecoration(
                       color: headerBg,
                       borderRadius: pw.BorderRadius.circular(6),
@@ -2457,17 +2491,23 @@ class _ReportScreenState extends State<_ReportScreen> {
                         pw.SizedBox(height: 2),
                         pw.Text(
                           '${_ifmt.format(startDate)} to ${_ifmt.format(endDate)}',
-                          style: pw.TextStyle(fontSize: 8, color: PdfColor.fromInt(0xFFADD8E6)),
+                          style: pw.TextStyle(
+                              fontSize: 8, color: PdfColor.fromInt(0xFFADD8E6)),
                         ),
                         pw.SizedBox(height: 4),
                         pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: pw.BoxDecoration(
-                            color: recStatus == 'RECONCILED' ? greenCol : PdfColor.fromInt(0xFFE67E22),
+                            color: recStatus == 'RECONCILED'
+                                ? greenCol
+                                : PdfColor.fromInt(0xFFE67E22),
                             borderRadius: pw.BorderRadius.circular(10),
                           ),
                           child: pw.Text(
-                            recStatus == 'RECONCILED' ? 'RECONCILED' : 'IN PROGRESS',
+                            recStatus == 'RECONCILED'
+                                ? 'RECONCILED'
+                                : 'IN PROGRESS',
                             style: pw.TextStyle(
                               fontSize: 7,
                               fontWeight: pw.FontWeight.bold,
@@ -2495,13 +2535,17 @@ class _ReportScreenState extends State<_ReportScreen> {
                 padding: const pw.EdgeInsets.all(12),
                 child: pw.Row(
                   children: [
-                    _summaryCard('Opening Balance', 'Rs. ${_fmt.format(openingBalance)}', accentBlue),
+                    _summaryCard('Opening Balance',
+                        'Rs. ${_fmt.format(openingBalance)}', accentBlue),
                     pw.SizedBox(width: 8),
-                    _summaryCard('Closing Balance', 'Rs. ${_fmt.format(closingBalance)}', accentBlue),
+                    _summaryCard('Closing Balance',
+                        'Rs. ${_fmt.format(closingBalance)}', accentBlue),
                     pw.SizedBox(width: 8),
-                    _summaryCard('Total Credits', 'Rs. ${_fmt.format(totalClearedCredits)}', greenCol),
+                    _summaryCard('Total Credits',
+                        'Rs. ${_fmt.format(totalClearedCredits)}', greenCol),
                     pw.SizedBox(width: 8),
-                    _summaryCard('Total Debits', 'Rs. ${_fmt.format(totalClearedDebits)}', redCol),
+                    _summaryCard('Total Debits',
+                        'Rs. ${_fmt.format(totalClearedDebits)}', redCol),
                     pw.SizedBox(width: 8),
                     _summaryCard(
                       'Difference',
@@ -2531,11 +2575,11 @@ class _ReportScreenState extends State<_ReportScreen> {
               pw.Table(
                 border: pw.TableBorder.all(color: borderCol, width: 0.5),
                 columnWidths: {
-                  0: const pw.FixedColumnWidth(68),   // DATE
-                  1: const pw.FlexColumnWidth(3.5),   // TRANSACTION DETAILS
-                  2: const pw.FlexColumnWidth(2),     // TYPE
-                  3: const pw.FixedColumnWidth(75),   // DEPOSITS
-                  4: const pw.FixedColumnWidth(75),   // WITHDRAWALS
+                  0: const pw.FixedColumnWidth(68), // DATE
+                  1: const pw.FlexColumnWidth(3.5), // TRANSACTION DETAILS
+                  2: const pw.FlexColumnWidth(2), // TYPE
+                  3: const pw.FixedColumnWidth(75), // DEPOSITS
+                  4: const pw.FixedColumnWidth(75), // WITHDRAWALS
                 },
                 children: [
                   // Header row
@@ -2547,26 +2591,33 @@ class _ReportScreenState extends State<_ReportScreen> {
                       'TYPE',
                       'DEPOSITS',
                       'WITHDRAWALS',
-                    ].asMap().entries.map((e) => pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      child: pw.Text(
-                        e.value,
-                        style: pw.TextStyle(
-                          fontSize: 8,
-                          fontWeight: pw.FontWeight.bold,
-                          color: headerFg,
-                        ),
-                        textAlign: e.key >= 3 ? pw.TextAlign.right : pw.TextAlign.left,
-                      ),
-                    )).toList(),
+                    ]
+                        .asMap()
+                        .entries
+                        .map((e) => pw.Padding(
+                              padding: const pw.EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 8),
+                              child: pw.Text(
+                                e.value,
+                                style: pw.TextStyle(
+                                  fontSize: 8,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: headerFg,
+                                ),
+                                textAlign: e.key >= 3
+                                    ? pw.TextAlign.right
+                                    : pw.TextAlign.left,
+                              ),
+                            ))
+                        .toList(),
                   ),
 
                   // Data rows
                   ...tableRows.asMap().entries.map((entry) {
-                    final idx      = entry.key;
-                    final row      = entry.value;
-                    final isOpen   = row[1] == 'Opening Balance';
-                    final isClose  = row[1] == 'Closing Balance';
+                    final idx = entry.key;
+                    final row = entry.value;
+                    final isOpen = row[1] == 'Opening Balance';
+                    final isClose = row[1] == 'Closing Balance';
                     final isSpecial = isOpen || isClose;
                     final bg = isSpecial
                         ? summaryBg
@@ -2576,9 +2627,9 @@ class _ReportScreenState extends State<_ReportScreen> {
                       decoration: pw.BoxDecoration(color: bg),
                       children: row.asMap().entries.map((cell) {
                         final colIdx = cell.key;
-                        final val    = cell.value;
-                        final isAmt  = colIdx >= 3;
-                        final isDeposit    = colIdx == 3;
+                        final val = cell.value;
+                        final isAmt = colIdx >= 3;
+                        final isDeposit = colIdx == 3;
                         final isWithdrawal = colIdx == 4;
 
                         final textColor = isDeposit && val.isNotEmpty
@@ -2590,15 +2641,19 @@ class _ReportScreenState extends State<_ReportScreen> {
                                     : PdfColors.black;
 
                         return pw.Padding(
-                          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 7),
                           child: pw.Text(
                             val,
                             style: pw.TextStyle(
                               fontSize: 8.5,
-                              fontWeight: isSpecial ? pw.FontWeight.bold : pw.FontWeight.normal,
+                              fontWeight: isSpecial
+                                  ? pw.FontWeight.bold
+                                  : pw.FontWeight.normal,
                               color: textColor,
                             ),
-                            textAlign: isAmt ? pw.TextAlign.right : pw.TextAlign.left,
+                            textAlign:
+                                isAmt ? pw.TextAlign.right : pw.TextAlign.left,
                           ),
                         );
                       }).toList(),
@@ -2618,12 +2673,16 @@ class _ReportScreenState extends State<_ReportScreen> {
                   if (reconciledOn != null)
                     pw.Text(
                       'Reconciled on: ${_ifmt.format(_parseDate(reconciledOn))}',
-                      style: pw.TextStyle(fontSize: 8, color: greenCol, fontWeight: pw.FontWeight.bold),
+                      style: pw.TextStyle(
+                          fontSize: 8,
+                          color: greenCol,
+                          fontWeight: pw.FontWeight.bold),
                     )
                   else
                     pw.Text(
                       'Status: In Progress',
-                      style: pw.TextStyle(fontSize: 8, color: PdfColor.fromInt(0xFFE67E22)),
+                      style: pw.TextStyle(
+                          fontSize: 8, color: PdfColor.fromInt(0xFFE67E22)),
                     ),
                   pw.Text(
                     'Difference: Rs. ${_fmt.format(difference)}',
@@ -2640,40 +2699,30 @@ class _ReportScreenState extends State<_ReportScreen> {
         ),
       );
 
-      final bytes    = await pdf.save();
+      final bytes = await pdf.save();
       final filename =
           'reconciliation_${widget.accountName.replaceAll(' ', '_')}_'
           '${DateFormat('yyyyMMdd').format(startDate)}.pdf';
 
       if (kIsWeb) {
-        final blob   = html.Blob([bytes], 'application/pdf');
-        final url    = html.Url.createObjectUrlFromBlob(blob);
+        final blob = html.Blob([bytes], 'application/pdf');
+        final url = html.Url.createObjectUrlFromBlob(blob);
         final anchor = html.AnchorElement(href: url)
           ..setAttribute('download', filename)
           ..click();
         html.Url.revokeObjectUrl(url);
       } else {
-        final dir  = await getApplicationDocumentsDirectory();
+        final dir = await getApplicationDocumentsDirectory();
         final file = File('${dir.path}/$filename');
         await file.writeAsBytes(bytes);
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         const Text('PDF exported successfully'),
-          backgroundColor: _green,
-          behavior:        SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
-        ));
+        AppSnackbar.show(context, message: 'PDF exported successfully');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         Text('PDF export failed: $e'),
-          backgroundColor: _red,
-          behavior:        SnackBarBehavior.floating,
-        ));
+        AppSnackbar.show(context, message: 'PDF export failed: $e');
       }
     }
   }
@@ -2682,57 +2731,57 @@ class _ReportScreenState extends State<_ReportScreen> {
   Future<void> _exportExcel() async {
     if (_report == null) return;
     try {
-      final data           = _buildExportData();
-      final rows           = data['rows'] as List<Map<String, dynamic>>;
+      final data = _buildExportData();
+      final rows = data['rows'] as List<Map<String, dynamic>>;
       final openingBalance = data['openingBalance'] as double;
       final closingBalance = data['closingBalance'] as double;
-      final reconciledOn   = data['reconciledOn'];
-      final period         = data['period'] as Map<String, dynamic>;
+      final reconciledOn = data['reconciledOn'];
+      final period = data['period'] as Map<String, dynamic>;
 
       final startDate = _parseDate(period['startDate']);
-      final endDate   = _parseDate(period['endDate']);
+      final endDate = _parseDate(period['endDate']);
 
-      final book  = xl.Excel.createExcel();
+      final book = xl.Excel.createExcel();
       final sheet = book['Reconciliation Details'];
       book.delete('Sheet1');
 
       // ── styles ──
       final titleStyle = xl.CellStyle(
-        bold:      true,
-        fontSize:  16,
+        bold: true,
+        fontSize: 16,
         horizontalAlign: xl.HorizontalAlign.Center,
       );
       final subStyle = xl.CellStyle(
-        bold:      true,
-        fontSize:  12,
+        bold: true,
+        fontSize: 12,
         horizontalAlign: xl.HorizontalAlign.Center,
       );
       final periodStyle = xl.CellStyle(
-        fontSize:  10,
+        fontSize: 10,
         horizontalAlign: xl.HorizontalAlign.Center,
         fontColorHex: xl.ExcelColor.fromHexString('#7F8C8D'),
       );
       final headerStyle = xl.CellStyle(
-        bold:             true,
-        fontSize:         10,
+        bold: true,
+        fontSize: 10,
         backgroundColorHex: xl.ExcelColor.fromHexString('#0D1B3E'),
-        fontColorHex:     xl.ExcelColor.fromHexString('#FFFFFF'),
-        horizontalAlign:  xl.HorizontalAlign.Left,
+        fontColorHex: xl.ExcelColor.fromHexString('#FFFFFF'),
+        horizontalAlign: xl.HorizontalAlign.Left,
       );
       final specialRowStyle = xl.CellStyle(
-        bold:             true,
-        fontSize:         9,
+        bold: true,
+        fontSize: 9,
         backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
       );
       final amtGreenStyle = xl.CellStyle(
-        fontSize:         9,
-        fontColorHex:     xl.ExcelColor.fromHexString('#27AE60'),
-        horizontalAlign:  xl.HorizontalAlign.Right,
+        fontSize: 9,
+        fontColorHex: xl.ExcelColor.fromHexString('#27AE60'),
+        horizontalAlign: xl.HorizontalAlign.Right,
       );
       final amtRedStyle = xl.CellStyle(
-        fontSize:         9,
-        fontColorHex:     xl.ExcelColor.fromHexString('#E74C3C'),
-        horizontalAlign:  xl.HorizontalAlign.Right,
+        fontSize: 9,
+        fontColorHex: xl.ExcelColor.fromHexString('#E74C3C'),
+        horizontalAlign: xl.HorizontalAlign.Right,
       );
       final normalStyle = xl.CellStyle(fontSize: 9);
 
@@ -2748,34 +2797,39 @@ class _ReportScreenState extends State<_ReportScreen> {
 
       _setCell(r, 0, widget.accountName, titleStyle);
       sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
-                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+          xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
       r++;
 
       _setCell(r, 0, 'Reconciliation Details', subStyle);
       sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
-                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+          xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
       r++;
 
       _setCell(r, 0, widget.accountName, subStyle);
       sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
-                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+          xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
       r++;
 
       _setCell(r, 0, 'Reconciliation Period', periodStyle);
       sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
-                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+          xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
       r++;
 
-      _setCell(r, 0,
-          '${_ifmt.format(startDate)} To ${_ifmt.format(endDate)}',
+      _setCell(r, 0, '${_ifmt.format(startDate)} To ${_ifmt.format(endDate)}',
           periodStyle);
       sheet.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r),
-                  xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
+          xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r));
       r++;
       r++; // blank row
 
       // ── Column headers ──
-      final headers = ['DATE', 'TRANSACTION DETAILS', 'TYPE', 'DEPOSITS', 'WITHDRAWALS'];
+      final headers = [
+        'DATE',
+        'TRANSACTION DETAILS',
+        'TYPE',
+        'DEPOSITS',
+        'WITHDRAWALS'
+      ];
       for (int c = 0; c < headers.length; c++) {
         _setCell(r, c, headers[c], headerStyle);
       }
@@ -2786,9 +2840,13 @@ class _ReportScreenState extends State<_ReportScreen> {
       _setCell(r, 1, '***Opening Balance***', specialRowStyle);
       _setCell(r, 2, '', specialRowStyle);
       _setCell(r, 3, '', specialRowStyle);
-      _setCell(r, 4, '₹${_fmt.format(openingBalance)}',
+      _setCell(
+          r,
+          4,
+          '₹${_fmt.format(openingBalance)}',
           xl.CellStyle(
-            bold: true, fontSize: 9,
+            bold: true,
+            fontSize: 9,
             backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
             fontColorHex: xl.ExcelColor.fromHexString('#E74C3C'),
             horizontalAlign: xl.HorizontalAlign.Right,
@@ -2797,25 +2855,23 @@ class _ReportScreenState extends State<_ReportScreen> {
 
       // ── Transaction rows ──
       for (final row in rows) {
-        final date       = row['date'] as DateTime;
-        final desc       = row['desc'] as String;
-        final ref        = row['ref']  as String;
-        final typeMain   = row['typeMain'] as String;
-        final typeSub    = row['typeSub']  as String;
-        final deposit    = (row['deposit']    as double);
+        final date = row['date'] as DateTime;
+        final desc = row['desc'] as String;
+        final ref = row['ref'] as String;
+        final typeMain = row['typeMain'] as String;
+        final typeSub = row['typeSub'] as String;
+        final deposit = (row['deposit'] as double);
         final withdrawal = (row['withdrawal'] as double);
 
         final detailCell = ref.isNotEmpty ? '$desc\nRef#: $ref' : desc;
-        final typeCell   = typeSub.isNotEmpty ? '$typeMain\n$typeSub' : typeMain;
+        final typeCell = typeSub.isNotEmpty ? '$typeMain\n$typeSub' : typeMain;
 
         _setCell(r, 0, _ifmt.format(date), normalStyle);
         _setCell(r, 1, detailCell, normalStyle);
         _setCell(r, 2, typeCell, normalStyle);
-        _setCell(r, 3,
-            deposit > 0 ? '₹${_fmt.format(deposit)}' : '',
+        _setCell(r, 3, deposit > 0 ? '₹${_fmt.format(deposit)}' : '',
             deposit > 0 ? amtGreenStyle : normalStyle);
-        _setCell(r, 4,
-            withdrawal > 0 ? '₹${_fmt.format(withdrawal)}' : '',
+        _setCell(r, 4, withdrawal > 0 ? '₹${_fmt.format(withdrawal)}' : '',
             withdrawal > 0 ? amtRedStyle : normalStyle);
         r++;
       }
@@ -2825,9 +2881,13 @@ class _ReportScreenState extends State<_ReportScreen> {
       _setCell(r, 1, '***Closing Balance***', specialRowStyle);
       _setCell(r, 2, '', specialRowStyle);
       _setCell(r, 3, '', specialRowStyle);
-      _setCell(r, 4, '₹${_fmt.format(closingBalance)}',
+      _setCell(
+          r,
+          4,
+          '₹${_fmt.format(closingBalance)}',
           xl.CellStyle(
-            bold: true, fontSize: 9,
+            bold: true,
+            fontSize: 9,
             backgroundColorHex: xl.ExcelColor.fromHexString('#EEF2FF'),
             fontColorHex: xl.ExcelColor.fromHexString('#E74C3C'),
             horizontalAlign: xl.HorizontalAlign.Right,
@@ -2838,7 +2898,9 @@ class _ReportScreenState extends State<_ReportScreen> {
       // ── Reconciled On ──
       if (reconciledOn != null) {
         _setCell(r, 3, 'Reconciled On:', periodStyle);
-        _setCell(r, 4,
+        _setCell(
+            r,
+            4,
             _ifmt.format(_parseDate(reconciledOn)),
             xl.CellStyle(
               fontSize: 9,
@@ -2854,42 +2916,32 @@ class _ReportScreenState extends State<_ReportScreen> {
       sheet.setColumnWidth(3, 16);
       sheet.setColumnWidth(4, 16);
 
-      final bytes    = Uint8List.fromList(book.encode()!);
+      final bytes = Uint8List.fromList(book.encode()!);
       final filename =
           'reconciliation_${widget.accountName.replaceAll(' ', '_')}_'
           '${DateFormat('yyyyMMdd').format(startDate)}.xlsx';
 
       if (kIsWeb) {
-        final blob   = html.Blob(
-            [bytes],
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        final url    = html.Url.createObjectUrlFromBlob(blob);
+        final blob = html.Blob([
+          bytes
+        ], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        final url = html.Url.createObjectUrlFromBlob(blob);
         final anchor = html.AnchorElement(href: url)
           ..setAttribute('download', filename)
           ..click();
         html.Url.revokeObjectUrl(url);
       } else {
-        final dir  = await getApplicationDocumentsDirectory();
+        final dir = await getApplicationDocumentsDirectory();
         final file = File('${dir.path}/$filename');
         await file.writeAsBytes(bytes);
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         const Text('Excel exported successfully'),
-          backgroundColor: _green,
-          behavior:        SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
-        ));
+        AppSnackbar.show(context, message: 'Excel exported successfully');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:         Text('Excel export failed: $e'),
-          backgroundColor: _red,
-          behavior:        SnackBarBehavior.floating,
-        ));
+        AppSnackbar.show(context, message: 'Excel export failed: $e');
       }
     }
   }
@@ -2915,15 +2967,15 @@ class _ReportScreenState extends State<_ReportScreen> {
         actions: [
           TextButton.icon(
             onPressed: _exportPDF,
-            icon:  const Icon(Icons.picture_as_pdf_outlined,
+            icon: const Icon(Icons.picture_as_pdf_outlined,
                 size: 14, color: _red),
             label: const Text('Export PDF',
                 style: TextStyle(fontSize: 12, color: _red)),
           ),
           TextButton.icon(
             onPressed: _exportExcel,
-            icon:  const Icon(Icons.table_chart_outlined,
-                size: 14, color: _green),
+            icon:
+                const Icon(Icons.table_chart_outlined, size: 14, color: _green),
             label: const Text('Export Excel',
                 style: TextStyle(fontSize: 12, color: _green)),
           ),
@@ -2931,19 +2983,19 @@ class _ReportScreenState extends State<_ReportScreen> {
         ],
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: _navyAccent))
+          ? const Center(child: CircularProgressIndicator(color: _navyAccent))
           : _error != null
-              ? Center(child: Text('Error: $_error',
-                  style: const TextStyle(color: _red)))
+              ? Center(
+                  child: Text('Error: $_error',
+                      style: const TextStyle(color: _red)))
               : _buildReport(),
     );
   }
 
   Widget _buildReport() {
-    final summary  = _report!['summary']  as Map<String, dynamic>;
+    final summary = _report!['summary'] as Map<String, dynamic>;
     final sections = _report!['sections'] as Map<String, dynamic>;
-    final period   = _report!['period']   as Map<String, dynamic>;
+    final period = _report!['period'] as Map<String, dynamic>;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -2956,13 +3008,11 @@ class _ReportScreenState extends State<_ReportScreen> {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Summary',
                 style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: _navy)),
+                    fontSize: 14, fontWeight: FontWeight.bold, color: _navy)),
             const SizedBox(height: 4),
             Text(
                 'Period: ${_dfmt.format(_parseDate(period['startDate']))} '
@@ -2971,16 +3021,20 @@ class _ReportScreenState extends State<_ReportScreen> {
             const SizedBox(height: 16),
             const Divider(color: Color(0xFFEEF2F7)),
             const SizedBox(height: 12),
-            _rRow('Opening Balance',
+            _rRow(
+                'Opening Balance',
                 '₹${_fmt.format((summary['openingBalance'] ?? 0).toDouble())}',
                 _blue),
-            _rRow('Closing Balance',
+            _rRow(
+                'Closing Balance',
                 '₹${_fmt.format((summary['closingBalance'] ?? 0).toDouble())}',
                 _navyAccent),
-            _rRow('Total Cleared Credits',
+            _rRow(
+                'Total Cleared Credits',
                 '₹${_fmt.format((summary['totalClearedCredits'] ?? 0).toDouble())}',
                 _green),
-            _rRow('Total Cleared Debits',
+            _rRow(
+                'Total Cleared Debits',
                 '₹${_fmt.format((summary['totalClearedDebits'] ?? 0).toDouble())}',
                 _red),
             _rRow('Uncategorized Transactions',
@@ -2988,7 +3042,8 @@ class _ReportScreenState extends State<_ReportScreen> {
             _rRow('Outstanding Transactions',
                 '${summary['totalOutstanding'] ?? 0}', _orange),
             const Divider(color: Color(0xFFEEF2F7)),
-            _rRow('Difference',
+            _rRow(
+                'Difference',
                 '₹${_fmt.format((summary['difference'] ?? 0).toDouble())}',
                 (summary['difference'] ?? 0).toDouble().abs() < 0.01
                     ? _green
@@ -3000,38 +3055,40 @@ class _ReportScreenState extends State<_ReportScreen> {
 
         // ── Section 1: Cleared ────────────────────────────────────────────────
         _buildSection(
-          sections['cleared']   as Map<String, dynamic>,
-          _green, Icons.check_circle_outline,
+          sections['cleared'] as Map<String, dynamic>,
+          _green,
+          Icons.check_circle_outline,
         ),
         const SizedBox(height: 16),
 
         // ── Section 2: Unmatched ──────────────────────────────────────────────
         _buildSection(
           sections['unmatched'] as Map<String, dynamic>,
-          _orange, Icons.warning_amber_outlined,
+          _orange,
+          Icons.warning_amber_outlined,
         ),
         const SizedBox(height: 16),
 
         // ── Section 3: Outstanding ────────────────────────────────────────────
         _buildSection(
           sections['outstanding'] as Map<String, dynamic>,
-          _blue, Icons.pending_outlined,
+          _blue,
+          Icons.pending_outlined,
         ),
       ]),
     );
   }
 
-  Widget _buildSection(
-      Map<String, dynamic> sec, Color color, IconData icon) {
+  Widget _buildSection(Map<String, dynamic> sec, Color color, IconData icon) {
     final txns = List<Map<String, dynamic>>.from(sec['transactions'] ?? []);
     final totalCredits = (sec['totalCredits'] ?? 0).toDouble();
-    final totalDebits  = (sec['totalDebits']  ?? 0).toDouble();
+    final totalDebits = (sec['totalDebits'] ?? 0).toDouble();
 
     return Container(
       decoration: BoxDecoration(
-        color:        _white,
+        color: _white,
         borderRadius: BorderRadius.circular(10),
-        border:       Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Section header
@@ -3040,19 +3097,18 @@ class _ReportScreenState extends State<_ReportScreen> {
           decoration: BoxDecoration(
             color: color.withOpacity(0.05),
             borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(10),
-                topRight: Radius.circular(10)),
-            border: Border(
-                bottom: BorderSide(color: color.withOpacity(0.15))),
+                topLeft: Radius.circular(10), topRight: Radius.circular(10)),
+            border: Border(bottom: BorderSide(color: color.withOpacity(0.15))),
           ),
           child: Row(children: [
             Icon(icon, color: color, size: 16),
             const SizedBox(width: 8),
-            Expanded(child: Text(sec['label']?.toString() ?? '',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: color))),
+            Expanded(
+                child: Text(sec['label']?.toString() ?? '',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: color))),
             Text('${txns.length} transactions',
                 style: TextStyle(fontSize: 11, color: color)),
           ]),
@@ -3063,20 +3119,18 @@ class _ReportScreenState extends State<_ReportScreen> {
             padding: const EdgeInsets.all(20),
             child: Text('No transactions',
                 style: TextStyle(
-                    fontSize: 12, color: _grey,
-                    fontStyle: FontStyle.italic)),
+                    fontSize: 12, color: _grey, fontStyle: FontStyle.italic)),
           )
         else ...[
           // Column headers
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: const Color(0xFFF8F9FB),
             child: Row(children: const [
-              SizedBox(width: 90,  child: _ColHdr('DATE')),
+              SizedBox(width: 90, child: _ColHdr('DATE')),
               SizedBox(width: 130, child: _ColHdr('TYPE')),
-              Expanded(child:      _ColHdr('DESCRIPTION')),
-              SizedBox(width: 100, child: _ColHdr('DEPOSITS',    right: true)),
+              Expanded(child: _ColHdr('DESCRIPTION')),
+              SizedBox(width: 100, child: _ColHdr('DEPOSITS', right: true)),
               SizedBox(width: 100, child: _ColHdr('WITHDRAWALS', right: true)),
             ]),
           ),
@@ -3085,50 +3139,44 @@ class _ReportScreenState extends State<_ReportScreen> {
           // Rows
           ...txns.map((t) {
             final isCredit = t['transactionType'] == 'CREDIT';
-            final amount   = (t['amount'] ?? 0).toDouble();
-            final date     = _parseDate(t['transactionDate']);
-            final desc     = t['description']?.toString()    ?? '';
-            final type     = t['categoryLabel']?.toString()   ??
-                             t['reconciliationStatus']?.toString() ?? '';
+            final amount = (t['amount'] ?? 0).toDouble();
+            final date = _parseDate(t['transactionDate']);
+            final desc = t['description']?.toString() ?? '';
+            final type = t['categoryLabel']?.toString() ??
+                t['reconciliationStatus']?.toString() ??
+                '';
             return Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: const BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(
-                          color: Color(0xFFF0F0F0)))),
+                  border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0)))),
               child: Row(children: [
-                SizedBox(width: 90,
+                SizedBox(
+                    width: 90,
                     child: Text(_dfmt.format(date),
-                        style: const TextStyle(
-                            fontSize: 11, color: _grey))),
-                SizedBox(width: 130,
+                        style: const TextStyle(fontSize: 11, color: _grey))),
+                SizedBox(
+                    width: 130,
                     child: Text(type,
-                        overflow:  TextOverflow.ellipsis,
-                        style:     const TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF2C3E50)))),
-                Expanded(child: Text(desc,
-                    maxLines:  1,
-                    overflow:  TextOverflow.ellipsis,
-                    style:     const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF5D6D7E)))),
-                SizedBox(width: 100,
-                    child: Text(
-                        isCredit
-                            ? '₹${_fmt.format(amount)}'
-                            : '',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF2C3E50)))),
+                Expanded(
+                    child: Text(desc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF5D6D7E)))),
+                SizedBox(
+                    width: 100,
+                    child: Text(isCredit ? '₹${_fmt.format(amount)}' : '',
                         textAlign: TextAlign.right,
                         style: const TextStyle(
                             fontSize: 11,
                             color: _green,
                             fontWeight: FontWeight.w600))),
-                SizedBox(width: 100,
-                    child: Text(
-                        !isCredit
-                            ? '₹${_fmt.format(amount)}'
-                            : '',
+                SizedBox(
+                    width: 100,
+                    child: Text(!isCredit ? '₹${_fmt.format(amount)}' : '',
                         textAlign: TextAlign.right,
                         style: const TextStyle(
                             fontSize: 11,
@@ -3147,14 +3195,10 @@ class _ReportScreenState extends State<_ReportScreen> {
                   bottomLeft: Radius.circular(10),
                   bottomRight: Radius.circular(10)),
             ),
-            child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
+            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               Text('Total Deposits:',
                   style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: _grey)),
+                      fontSize: 11, fontWeight: FontWeight.w600, color: _grey)),
               const SizedBox(width: 8),
               Text('₹${_fmt.format(totalCredits)}',
                   style: const TextStyle(
@@ -3164,15 +3208,11 @@ class _ReportScreenState extends State<_ReportScreen> {
               const SizedBox(width: 20),
               Text('Total Withdrawals:',
                   style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: _grey)),
+                      fontSize: 11, fontWeight: FontWeight.w600, color: _grey)),
               const SizedBox(width: 8),
               Text('₹${_fmt.format(totalDebits)}',
                   style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: _red)),
+                      fontSize: 11, fontWeight: FontWeight.bold, color: _red)),
             ]),
           ),
         ],
@@ -3180,21 +3220,17 @@ class _ReportScreenState extends State<_ReportScreen> {
     );
   }
 
-  Widget _rRow(String label, String value, Color color,
-      {bool bold = false}) =>
+  Widget _rRow(String label, String value, Color color, {bool bold = false}) =>
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+        child:
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: Color(0xFF5D6D7E))),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF5D6D7E))),
           Text(value,
               style: TextStyle(
                   fontSize: 12,
-                  fontWeight:
-                      bold ? FontWeight.bold : FontWeight.w600,
+                  fontWeight: bold ? FontWeight.bold : FontWeight.w600,
                   color: color)),
         ]),
       );

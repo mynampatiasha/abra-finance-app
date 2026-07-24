@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // rate_card_list.dart
 // Abra Fleet Management - Rate Card List Screen
@@ -15,14 +16,14 @@ import 'create_rate_card.dart' as CreateRateCardModule;
 import 'pages/rate_card_detail_screen.dart';
 
 // Colors
-const kPrimary   = Color(0xFF2C3E50);
-const kBlue      = Color(0xFF3498DB);
-const kGreen     = Color(0xFF27AE60);
-const kOrange    = Color(0xFFE67E22);
-const kRed       = Color(0xFFE74C3C);
-const kGrey      = Color(0xFF7F8C8D);
+const kPrimary = Color(0xFF2C3E50);
+const kBlue = Color(0xFF3498DB);
+const kGreen = Color(0xFF27AE60);
+const kOrange = Color(0xFFE67E22);
+const kRed = Color(0xFFE74C3C);
+const kGrey = Color(0xFF7F8C8D);
 const kLightGrey = Color(0xFFF5F6FA);
-const kBorder    = Color(0xFFDFE6E9);
+const kBorder = Color(0xFFDFE6E9);
 
 // ─── Table Column Config ─────────────────────────────────────────────────────
 class _Column {
@@ -33,25 +34,25 @@ class _Column {
 }
 
 const List<_Column> _columns = [
-  _Column('Rate Card ID',    130, 'rateCardId'),
-  _Column('Status',          110, 'status'),
-  _Column('Organization',    180, 'organization'),
-  _Column('Industry',        110, 'industry'),
-  _Column('Contract Type',   110, 'contractType'),
-  _Column('Route Code',      110, 'routeCode'),
-  _Column('Route Name',      180, 'routeName'),
-  _Column('Vehicle Type',    130, 'vehicleType'),
-  _Column('Vehicles',         80, 'vehicles'),
-  _Column('Billing Model',   150, 'billingModel'),
-  _Column('Monthly Rate (₹)',140, 'monthlyRate'),
-  _Column('Extra KM (₹)',   110, 'extraKm'),
-  _Column('GST %',            80, 'gst'),
-  _Column('Documents',        90, 'docs'),
-  _Column('Contract Start',  120, 'contractStart'),
-  _Column('Contract End',    120, 'contractEnd'),
-  _Column('Created',         120, 'created'),
-  _Column('Created By',      120, 'createdBy'),
-  _Column('Actions',         120, 'actions'),
+  _Column('Rate Card ID', 130, 'rateCardId'),
+  _Column('Status', 110, 'status'),
+  _Column('Organization', 180, 'organization'),
+  _Column('Industry', 110, 'industry'),
+  _Column('Contract Type', 110, 'contractType'),
+  _Column('Route Code', 110, 'routeCode'),
+  _Column('Route Name', 180, 'routeName'),
+  _Column('Vehicle Type', 130, 'vehicleType'),
+  _Column('Vehicles', 80, 'vehicles'),
+  _Column('Billing Model', 150, 'billingModel'),
+  _Column('Monthly Rate (₹)', 140, 'monthlyRate'),
+  _Column('Extra KM (₹)', 110, 'extraKm'),
+  _Column('GST %', 80, 'gst'),
+  _Column('Documents', 90, 'docs'),
+  _Column('Contract Start', 120, 'contractStart'),
+  _Column('Contract End', 120, 'contractEnd'),
+  _Column('Created', 120, 'created'),
+  _Column('Created By', 120, 'createdBy'),
+  _Column('Actions', 120, 'actions'),
 ];
 
 class RateCardListScreen extends StatefulWidget {
@@ -82,12 +83,12 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   String? _filterContractType;
   DateTime? _fromDate;
   DateTime? _toDate;
-  String _sortBy    = 'createdAt';
+  String _sortBy = 'createdAt';
   String _sortOrder = 'desc';
 
   // ── Scroll Controllers ───────────────────────────────────────────────────────
   final _vertScrollCtrl = ScrollController();
-  final _horizScrollCtrl= ScrollController();
+  final _horizScrollCtrl = ScrollController();
 
   // ── Import/Export ────────────────────────────────────────────────────────────
   bool _isExporting = false;
@@ -111,7 +112,10 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   // ── Debounced search ─────────────────────────────────────────────────────────
   void _onSearchChanged() {
     Future.delayed(const Duration(milliseconds: 400), () {
-      if (mounted) { _currentPage = 1; _loadRateCards(); }
+      if (mounted) {
+        _currentPage = 1;
+        _loadRateCards();
+      }
     });
   }
 
@@ -127,17 +131,18 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
         vehicleType: _filterVehicleType,
         industryType: _filterIndustry,
         contractType: _filterContractType,
-        search: _searchCtrl.text.trim().isEmpty ? null : _searchCtrl.text.trim(),
+        search:
+            _searchCtrl.text.trim().isEmpty ? null : _searchCtrl.text.trim(),
         fromDate: _fromDate?.toIso8601String().split('T')[0],
-        toDate:   _toDate?.toIso8601String().split('T')[0],
-        sortBy:    _sortBy,
+        toDate: _toDate?.toIso8601String().split('T')[0],
+        sortBy: _sortBy,
         sortOrder: _sortOrder,
       );
       setState(() {
-        _rateCards  = response.rateCards;
-        _total      = response.total;
+        _rateCards = response.rateCards;
+        _total = response.total;
         _totalPages = response.totalPages;
-        _stats      = response.stats;
+        _stats = response.stats;
       });
     } catch (e) {
       _showSnackbar('Failed to load rate cards: $e', isError: true);
@@ -163,12 +168,16 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Rate Card'),
-        content: Text('Are you sure you want to delete ${rc.rateCardId}?\nThis action cannot be undone.'),
+        content: Text(
+            'Are you sure you want to delete ${rc.rateCardId}?\nThis action cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: kRed, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: kRed, foregroundColor: Colors.white),
             child: const Text('Delete'),
           ),
         ],
@@ -195,7 +204,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
         _showSnackbar('CSV export ready (${bytes.length} bytes)');
       } else {
         final dir = Directory.systemTemp;
-        final file = File('${dir.path}/rate_cards_${DateTime.now().millisecondsSinceEpoch}.csv');
+        final file = File(
+            '${dir.path}/rate_cards_${DateTime.now().millisecondsSinceEpoch}.csv');
         await file.writeAsBytes(bytes);
         _showSnackbar('Exported to: ${file.path}');
       }
@@ -218,7 +228,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
     try {
       final file = File(result.files.first.path!);
       final response = await RateCardService.importCsv(file);
-      _showSnackbar('Import: ${response['results']['imported']} records imported');
+      _showSnackbar(
+          'Import: ${response['results']['imported']} records imported');
       _loadRateCards();
     } catch (e) {
       _showSnackbar('Import failed: $e', isError: true);
@@ -228,11 +239,7 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   }
 
   void _showSnackbar(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: isError ? kRed : kGreen,
-      behavior: SnackBarBehavior.floating,
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ============================================================================
@@ -260,8 +267,11 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
       title: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Rate Cards', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          Text('Fleet Management — Trip Pricing Core', style: TextStyle(color: Colors.white60, fontSize: 12)),
+          Text('Rate Cards',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          Text('Fleet Management — Trip Pricing Core',
+              style: TextStyle(color: Colors.white60, fontSize: 12)),
         ],
       ),
       backgroundColor: kPrimary,
@@ -277,14 +287,26 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
         // Import
         if (!kIsWeb)
           IconButton(
-            icon: _isImporting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.upload_file),
+            icon: _isImporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.upload_file),
             tooltip: 'Import CSV',
             onPressed: _isImporting ? null : _importCsv,
           ),
 
         // Export
         IconButton(
-          icon: _isExporting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.download),
+          icon: _isExporting
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2))
+              : const Icon(Icons.download),
           tooltip: 'Export CSV',
           onPressed: _isExporting ? null : _exportCsv,
         ),
@@ -301,7 +323,11 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
           padding: const EdgeInsets.only(right: 16, left: 4),
           child: ElevatedButton.icon(
             onPressed: () async {
-              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateRateCardModule.CreateRateCardScreen()));
+              final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          const CreateRateCardModule.CreateRateCardScreen()));
               if (result == true) _loadRateCards();
             },
             icon: const Icon(Icons.add, size: 18),
@@ -321,11 +347,31 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   Widget _buildStatsBar() {
     final statItems = [
       {'label': 'Total', 'value': _total.toString(), 'color': kPrimary},
-      {'label': 'Active', 'value': (_stats['Active'] ?? 0).toString(), 'color': kGreen},
-      {'label': 'Draft', 'value': (_stats['Draft'] ?? 0).toString(), 'color': kOrange},
-      {'label': 'Pending', 'value': (_stats['Pending Approval'] ?? 0).toString(), 'color': kBlue},
-      {'label': 'Inactive', 'value': (_stats['Inactive'] ?? 0).toString(), 'color': kGrey},
-      {'label': 'Expired', 'value': (_stats['Expired'] ?? 0).toString(), 'color': kRed},
+      {
+        'label': 'Active',
+        'value': (_stats['Active'] ?? 0).toString(),
+        'color': kGreen
+      },
+      {
+        'label': 'Draft',
+        'value': (_stats['Draft'] ?? 0).toString(),
+        'color': kOrange
+      },
+      {
+        'label': 'Pending',
+        'value': (_stats['Pending Approval'] ?? 0).toString(),
+        'color': kBlue
+      },
+      {
+        'label': 'Inactive',
+        'value': (_stats['Inactive'] ?? 0).toString(),
+        'color': kGrey
+      },
+      {
+        'label': 'Expired',
+        'value': (_stats['Expired'] ?? 0).toString(),
+        'color': kRed
+      },
     ];
 
     return Container(
@@ -345,8 +391,14 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
               ),
               child: Column(
                 children: [
-                  Text(s['value']!.toString(), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
-                  Text(s['label']!.toString(), style: TextStyle(fontSize: 11, color: color.withOpacity(0.8))),
+                  Text(s['value']!.toString(),
+                      style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: color)),
+                  Text(s['label']!.toString(),
+                      style: TextStyle(
+                          fontSize: 11, color: color.withOpacity(0.8))),
                 ],
               ),
             ),
@@ -376,10 +428,17 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                     hintText: 'Search by ID, organization, route...',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     suffixIcon: _searchCtrl.text.isNotEmpty
-                        ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _searchCtrl.clear(); _loadRateCards(); })
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              _loadRateCards();
+                            })
                         : null,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 10, horizontal: 12),
                     isDense: true,
                   ),
                 ),
@@ -387,27 +446,58 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
               const SizedBox(width: 10),
 
               // Status filter
-              _filterDropdown('Status', _filterStatus,
-                ['Active', 'Draft', 'Inactive', 'Expired', 'Pending Approval'],
-                (v) { setState(() => _filterStatus = v); _currentPage = 1; _loadRateCards(); }),
+              _filterDropdown('Status', _filterStatus, [
+                'Active',
+                'Draft',
+                'Inactive',
+                'Expired',
+                'Pending Approval'
+              ], (v) {
+                setState(() => _filterStatus = v);
+                _currentPage = 1;
+                _loadRateCards();
+              }),
               const SizedBox(width: 8),
 
               // Billing Model filter
               _filterDropdown('Billing Model', _filterBillingModel,
-                ['Dedicated Monthly', 'Per Trip', 'Hybrid'],
-                (v) { setState(() => _filterBillingModel = v); _currentPage = 1; _loadRateCards(); }),
+                  ['Dedicated Monthly', 'Per Trip', 'Hybrid'], (v) {
+                setState(() => _filterBillingModel = v);
+                _currentPage = 1;
+                _loadRateCards();
+              }),
               const SizedBox(width: 8),
 
               // Vehicle Type filter
-              _filterDropdown('Vehicle', _filterVehicleType,
-                ['Sedan', 'Innova', 'Crysta', 'Tempo Traveller', 'Mini Bus', 'Large Bus'],
-                (v) { setState(() => _filterVehicleType = v); _currentPage = 1; _loadRateCards(); }),
+              _filterDropdown('Vehicle', _filterVehicleType, [
+                'Sedan',
+                'Innova',
+                'Crysta',
+                'Tempo Traveller',
+                'Mini Bus',
+                'Large Bus'
+              ], (v) {
+                setState(() => _filterVehicleType = v);
+                _currentPage = 1;
+                _loadRateCards();
+              }),
               const SizedBox(width: 8),
 
               // Industry filter
-              _filterDropdown('Industry', _filterIndustry,
-                ['IT', 'BPO', 'Hospital', 'Manufacturing', 'School', 'Finance', 'Retail', 'Other'],
-                (v) { setState(() => _filterIndustry = v); _currentPage = 1; _loadRateCards(); }),
+              _filterDropdown('Industry', _filterIndustry, [
+                'IT',
+                'BPO',
+                'Hospital',
+                'Manufacturing',
+                'School',
+                'Finance',
+                'Retail',
+                'Other'
+              ], (v) {
+                setState(() => _filterIndustry = v);
+                _currentPage = 1;
+                _loadRateCards();
+              }),
               const SizedBox(width: 8),
 
               // Date range
@@ -415,12 +505,15 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                 onPressed: _showDateRangePicker,
                 icon: const Icon(Icons.date_range, size: 16),
                 label: Text(
-                  _fromDate != null ? '${DateFormat('dd/MM').format(_fromDate!)} - ${DateFormat('dd/MM').format(_toDate!)}' : 'Date Range',
+                  _fromDate != null
+                      ? '${DateFormat('dd/MM').format(_fromDate!)} - ${DateFormat('dd/MM').format(_toDate!)}'
+                      : 'Date Range',
                   style: const TextStyle(fontSize: 12),
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _fromDate != null ? kBlue : kGrey,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 ),
               ),
               const SizedBox(width: 8),
@@ -440,15 +533,24 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
     );
   }
 
-  bool get _hasFilters => _filterStatus != null || _filterBillingModel != null ||
-      _filterVehicleType != null || _filterIndustry != null || _fromDate != null ||
+  bool get _hasFilters =>
+      _filterStatus != null ||
+      _filterBillingModel != null ||
+      _filterVehicleType != null ||
+      _filterIndustry != null ||
+      _fromDate != null ||
       _searchCtrl.text.isNotEmpty;
 
   void _clearFilters() {
     setState(() {
-      _filterStatus = null; _filterBillingModel = null; _filterVehicleType = null;
-      _filterIndustry = null; _fromDate = null; _toDate = null;
-      _searchCtrl.clear(); _currentPage = 1;
+      _filterStatus = null;
+      _filterBillingModel = null;
+      _filterVehicleType = null;
+      _filterIndustry = null;
+      _fromDate = null;
+      _toDate = null;
+      _searchCtrl.clear();
+      _currentPage = 1;
     });
     _loadRateCards();
   }
@@ -484,7 +586,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                      icon: const Icon(Icons.close,
+                          color: Colors.white, size: 20),
                       onPressed: () => Navigator.of(ctx).pop(),
                     ),
                   ],
@@ -508,9 +611,11 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                       showDialog<DateTime>(
                         context: ctx,
                         builder: (ctx2) => Dialog(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+                            constraints: const BoxConstraints(
+                                maxWidth: 500, maxHeight: 600),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -518,11 +623,13 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                                   padding: const EdgeInsets.all(16),
                                   decoration: const BoxDecoration(
                                     color: kBlue,
-                                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                                    borderRadius: BorderRadius.vertical(
+                                        top: Radius.circular(16)),
                                   ),
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.date_range, color: Colors.white, size: 20),
+                                      const Icon(Icons.date_range,
+                                          color: Colors.white, size: 20),
                                       const SizedBox(width: 12),
                                       const Expanded(
                                         child: Text(
@@ -535,8 +642,10 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                                         ),
                                       ),
                                       IconButton(
-                                        icon: const Icon(Icons.close, color: Colors.white, size: 20),
-                                        onPressed: () => Navigator.of(ctx2).pop(),
+                                        icon: const Icon(Icons.close,
+                                            color: Colors.white, size: 20),
+                                        onPressed: () =>
+                                            Navigator.of(ctx2).pop(),
                                       ),
                                     ],
                                   ),
@@ -551,12 +660,14 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                                       ),
                                     ),
                                     child: CalendarDatePicker(
-                                      initialDate: date.add(const Duration(days: 1)),
+                                      initialDate:
+                                          date.add(const Duration(days: 1)),
                                       firstDate: date,
                                       lastDate: DateTime(2030),
                                       onDateChanged: (endDate) {
                                         Navigator.of(ctx2).pop(endDate);
-                                        Navigator.of(ctx).pop(DateTimeRange(start: date, end: endDate));
+                                        Navigator.of(ctx).pop(DateTimeRange(
+                                            start: date, end: endDate));
                                       },
                                     ),
                                   ),
@@ -576,25 +687,37 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
       ),
     );
     if (range != null) {
-      setState(() { _fromDate = range.start; _toDate = range.end; _currentPage = 1; });
+      setState(() {
+        _fromDate = range.start;
+        _toDate = range.end;
+        _currentPage = 1;
+      });
       _loadRateCards();
     }
   }
 
-  Widget _filterDropdown(String hint, String? value, List<String> items, ValueChanged<String?> onChange) {
+  Widget _filterDropdown(String hint, String? value, List<String> items,
+      ValueChanged<String?> onChange) {
     return SizedBox(
       width: 150,
       child: DropdownButtonFormField<String>(
         value: value,
         hint: Text(hint, style: const TextStyle(fontSize: 12)),
         items: [
-          DropdownMenuItem<String>(value: null, child: Text('All $hint', style: const TextStyle(fontSize: 12))),
-          ...items.map((i) => DropdownMenuItem<String>(value: i, child: Text(i, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis))),
+          DropdownMenuItem<String>(
+              value: null,
+              child: Text('All $hint', style: const TextStyle(fontSize: 12))),
+          ...items.map((i) => DropdownMenuItem<String>(
+              value: i,
+              child: Text(i,
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis))),
         ],
         onChanged: onChange,
         decoration: InputDecoration(
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           isDense: true,
         ),
         isExpanded: true,
@@ -615,18 +738,25 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
           children: [
             Icon(Icons.receipt_long, size: 80, color: Colors.grey[300]),
             const SizedBox(height: 16),
-            Text('No rate cards found', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
+            Text('No rate cards found',
+                style: TextStyle(fontSize: 18, color: Colors.grey[600])),
             const SizedBox(height: 8),
-            Text('Create your first rate card to get started', style: TextStyle(color: Colors.grey[400])),
+            Text('Create your first rate card to get started',
+                style: TextStyle(color: Colors.grey[400])),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () async {
-                final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateRateCardModule.CreateRateCardScreen()));
+                final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            const CreateRateCardModule.CreateRateCardScreen()));
                 if (result == true) _loadRateCards();
               },
               icon: const Icon(Icons.add),
               label: const Text('Create Rate Card'),
-              style: ElevatedButton.styleFrom(backgroundColor: kBlue, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: kBlue, foregroundColor: Colors.white),
             ),
           ],
         ),
@@ -638,7 +768,12 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
@@ -649,7 +784,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
             controller: _horizScrollCtrl,
             scrollDirection: Axis.horizontal,
             child: SizedBox(
-              width: _columns.fold<double>(0.0, (sum, col) => sum + (col.width ?? 0)),
+              width: _columns.fold<double>(
+                  0.0, (sum, col) => sum + (col.width ?? 0)),
               child: Column(
                 children: [
                   _buildTableHeader(),
@@ -660,7 +796,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
                       child: ListView.builder(
                         controller: _vertScrollCtrl,
                         itemCount: _rateCards.length,
-                        itemBuilder: (ctx, i) => _buildTableRow(_rateCards[i], i),
+                        itemBuilder: (ctx, i) =>
+                            _buildTableRow(_rateCards[i], i),
                       ),
                     ),
                   ),
@@ -686,17 +823,19 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   Widget _headerCell(_Column col) {
     final isSorted = _sortBy == col.key;
     return InkWell(
-      onTap: col.key != 'actions' && col.key != 'docs' ? () {
-        setState(() {
-          if (_sortBy == col.key) {
-            _sortOrder = _sortOrder == 'asc' ? 'desc' : 'asc';
-          } else {
-            _sortBy = col.key;
-            _sortOrder = 'asc';
-          }
-        });
-        _loadRateCards();
-      } : null,
+      onTap: col.key != 'actions' && col.key != 'docs'
+          ? () {
+              setState(() {
+                if (_sortBy == col.key) {
+                  _sortOrder = _sortOrder == 'asc' ? 'desc' : 'asc';
+                } else {
+                  _sortBy = col.key;
+                  _sortOrder = 'asc';
+                }
+              });
+              _loadRateCards();
+            }
+          : null,
       child: Container(
         width: col.width,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -705,7 +844,10 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
             Expanded(
               child: Text(
                 col.label,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -739,14 +881,21 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
             _cell(rc.routeShift.routeCode, _columns[5].width, color: kGrey),
             _cell(rc.routeShift.routeName, _columns[6].width),
             _cell(rc.vehicle.vehicleType, _columns[7].width),
-            _cell(rc.vehicle.numberOfVehicles.toString(), _columns[8].width, align: TextAlign.center),
+            _cell(rc.vehicle.numberOfVehicles.toString(), _columns[8].width,
+                align: TextAlign.center),
             _billingModelCell(rc.pricing.billingModel, _columns[9].width),
-            _cell('₹${_fmt(rc.pricing.monthlyBaseRatePerVehicle)}', _columns[10].width, align: TextAlign.right, bold: true),
-            _cell('₹${_fmt(rc.pricing.extraKmRate)}/km', _columns[11].width, align: TextAlign.right),
-            _cell('${rc.pricing.gstPercent}%', _columns[12].width, align: TextAlign.center),
+            _cell('₹${_fmt(rc.pricing.monthlyBaseRatePerVehicle)}',
+                _columns[10].width,
+                align: TextAlign.right, bold: true),
+            _cell('₹${_fmt(rc.pricing.extraKmRate)}/km', _columns[11].width,
+                align: TextAlign.right),
+            _cell('${rc.pricing.gstPercent}%', _columns[12].width,
+                align: TextAlign.center),
             _docsCell(rc, _columns[13].width),
-            _cell(_fmtDate(rc.organization.contractStartDate), _columns[14].width),
-            _cell(_fmtDate(rc.organization.contractEndDate), _columns[15].width),
+            _cell(_fmtDate(rc.organization.contractStartDate),
+                _columns[14].width),
+            _cell(
+                _fmtDate(rc.organization.contractEndDate), _columns[15].width),
             _cell(_fmtDate(rc.createdAt), _columns[16].width),
             _cell(rc.createdBy, _columns[17].width),
             _actionsCell(rc, _columns[18].width),
@@ -756,7 +905,8 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
     );
   }
 
-  Widget _cell(String text, double width, {bool bold = false, Color? color, TextAlign align = TextAlign.left}) {
+  Widget _cell(String text, double width,
+      {bool bold = false, Color? color, TextAlign align = TextAlign.left}) {
     return SizedBox(
       width: width,
       child: Padding(
@@ -777,11 +927,11 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
 
   Widget _statusCell(String status, double width) {
     final configs = {
-      'Active':           (kGreen, Icons.check_circle),
-      'Draft':            (kOrange, Icons.edit),
+      'Active': (kGreen, Icons.check_circle),
+      'Draft': (kOrange, Icons.edit),
       'Pending Approval': (kBlue, Icons.pending),
-      'Inactive':         (kGrey, Icons.pause_circle),
-      'Expired':          (kRed, Icons.cancel),
+      'Inactive': (kGrey, Icons.pause_circle),
+      'Expired': (kRed, Icons.cancel),
     };
     final config = configs[status] ?? (kGrey, Icons.help);
 
@@ -801,7 +951,13 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
             children: [
               Icon(config.$2, size: 12, color: config.$1),
               const SizedBox(width: 4),
-              Flexible(child: Text(status, style: TextStyle(fontSize: 11, color: config.$1, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+              Flexible(
+                  child: Text(status,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: config.$1,
+                          fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis)),
             ],
           ),
         ),
@@ -810,7 +966,11 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
   }
 
   Widget _billingModelCell(String model, double width) {
-    final colors = {'Dedicated Monthly': kGreen, 'Per Trip': kBlue, 'Hybrid': kOrange};
+    final colors = {
+      'Dedicated Monthly': kGreen,
+      'Per Trip': kBlue,
+      'Hybrid': kOrange
+    };
     final color = colors[model] ?? kGrey;
     return SizedBox(
       width: width,
@@ -818,8 +978,13 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-          child: Text(model, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6)),
+          child: Text(model,
+              style: TextStyle(
+                  fontSize: 11, color: color, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis),
         ),
       ),
     );
@@ -836,15 +1001,22 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: count > 0 ? kBlue.withOpacity(0.08) : Colors.grey.withOpacity(0.08),
+              color: count > 0
+                  ? kBlue.withOpacity(0.08)
+                  : Colors.grey.withOpacity(0.08),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.attach_file, size: 13, color: count > 0 ? kBlue : kGrey),
+                Icon(Icons.attach_file,
+                    size: 13, color: count > 0 ? kBlue : kGrey),
                 const SizedBox(width: 4),
-                Text('$count', style: TextStyle(fontSize: 12, color: count > 0 ? kBlue : kGrey, fontWeight: FontWeight.bold)),
+                Text('$count',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: count > 0 ? kBlue : kGrey,
+                        fontWeight: FontWeight.bold)),
               ],
             ),
           ),
@@ -874,9 +1046,12 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
               icon: const Icon(Icons.edit, size: 18, color: kOrange),
               tooltip: 'Edit',
               onPressed: () async {
-                final result = await Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => CreateRateCardModule.CreateRateCardScreen(existingCard: rc.toJson()),
-                ));
+                final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CreateRateCardModule.CreateRateCardScreen(
+                          existingCard: rc.toJson()),
+                    ));
                 if (result == true) _loadRateCards();
               },
               padding: const EdgeInsets.all(4),
@@ -888,20 +1063,52 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
               padding: const EdgeInsets.all(4),
               onSelected: (action) async {
                 switch (action) {
-                  case 'activate':   await _updateStatus(rc, 'Active'); break;
-                  case 'deactivate': await _updateStatus(rc, 'Inactive'); break;
-                  case 'draft':      await _updateStatus(rc, 'Draft'); break;
-                  case 'delete':     await _deleteRateCard(rc); break;
+                  case 'activate':
+                    await _updateStatus(rc, 'Active');
+                    break;
+                  case 'deactivate':
+                    await _updateStatus(rc, 'Inactive');
+                    break;
+                  case 'draft':
+                    await _updateStatus(rc, 'Draft');
+                    break;
+                  case 'delete':
+                    await _deleteRateCard(rc);
+                    break;
                 }
               },
               itemBuilder: (ctx) => [
                 if (rc.status != 'Active')
-                  const PopupMenuItem(value: 'activate', child: Row(children: [Icon(Icons.check_circle, color: kGreen, size: 16), SizedBox(width: 8), Text('Set Active')])),
+                  const PopupMenuItem(
+                      value: 'activate',
+                      child: Row(children: [
+                        Icon(Icons.check_circle, color: kGreen, size: 16),
+                        SizedBox(width: 8),
+                        Text('Set Active')
+                      ])),
                 if (rc.status == 'Active')
-                  const PopupMenuItem(value: 'deactivate', child: Row(children: [Icon(Icons.pause, color: kGrey, size: 16), SizedBox(width: 8), Text('Deactivate')])),
+                  const PopupMenuItem(
+                      value: 'deactivate',
+                      child: Row(children: [
+                        Icon(Icons.pause, color: kGrey, size: 16),
+                        SizedBox(width: 8),
+                        Text('Deactivate')
+                      ])),
                 if (rc.status != 'Draft')
-                  const PopupMenuItem(value: 'draft', child: Row(children: [Icon(Icons.edit, color: kOrange, size: 16), SizedBox(width: 8), Text('Move to Draft')])),
-                const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: kRed, size: 16), SizedBox(width: 8), Text('Delete', style: TextStyle(color: kRed))])),
+                  const PopupMenuItem(
+                      value: 'draft',
+                      child: Row(children: [
+                        Icon(Icons.edit, color: kOrange, size: 16),
+                        SizedBox(width: 8),
+                        Text('Move to Draft')
+                      ])),
+                const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete, color: kRed, size: 16),
+                      SizedBox(width: 8),
+                      Text('Delete', style: TextStyle(color: kRed))
+                    ])),
               ],
             ),
           ],
@@ -943,34 +1150,65 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.first_page),
-            onPressed: _currentPage > 1 ? () { setState(() => _currentPage = 1); _loadRateCards(); } : null,
+            onPressed: _currentPage > 1
+                ? () {
+                    setState(() => _currentPage = 1);
+                    _loadRateCards();
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.chevron_left),
-            onPressed: _currentPage > 1 ? () { setState(() => _currentPage--); _loadRateCards(); } : null,
+            onPressed: _currentPage > 1
+                ? () {
+                    setState(() => _currentPage--);
+                    _loadRateCards();
+                  }
+                : null,
           ),
           ...List.generate(_totalPages, (i) => i + 1)
               .where((p) => (p - _currentPage).abs() <= 2)
               .map((p) => InkWell(
-                onTap: () { setState(() => _currentPage = p); _loadRateCards(); },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: p == _currentPage ? kBlue : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: p == _currentPage ? kBlue : kBorder),
-                  ),
-                  child: Center(child: Text('$p', style: TextStyle(color: p == _currentPage ? Colors.white : kPrimary, fontWeight: FontWeight.bold))),
-                ),
-              )),
+                    onTap: () {
+                      setState(() => _currentPage = p);
+                      _loadRateCards();
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: p == _currentPage ? kBlue : Colors.transparent,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: p == _currentPage ? kBlue : kBorder),
+                      ),
+                      child: Center(
+                          child: Text('$p',
+                              style: TextStyle(
+                                  color: p == _currentPage
+                                      ? Colors.white
+                                      : kPrimary,
+                                  fontWeight: FontWeight.bold))),
+                    ),
+                  )),
           IconButton(
             icon: const Icon(Icons.chevron_right),
-            onPressed: _currentPage < _totalPages ? () { setState(() => _currentPage++); _loadRateCards(); } : null,
+            onPressed: _currentPage < _totalPages
+                ? () {
+                    setState(() => _currentPage++);
+                    _loadRateCards();
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.last_page),
-            onPressed: _currentPage < _totalPages ? () { setState(() => _currentPage = _totalPages); _loadRateCards(); } : null,
+            onPressed: _currentPage < _totalPages
+                ? () {
+                    setState(() => _currentPage = _totalPages);
+                    _loadRateCards();
+                  }
+                : null,
           ),
         ],
       ),
@@ -1011,11 +1249,15 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 5, vsync: this, initialIndex: widget.initialTab);
+    _tabCtrl =
+        TabController(length: 5, vsync: this, initialIndex: widget.initialTab);
   }
 
   @override
-  void dispose() { _tabCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1035,8 +1277,11 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
             Center(
               child: Container(
                 margin: const EdgeInsets.only(top: 12, bottom: 8),
-                width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2)),
               ),
             ),
 
@@ -1049,9 +1294,15 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(rc.rateCardId, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kPrimary)),
+                        Text(rc.rateCardId,
+                            style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: kPrimary)),
                         const SizedBox(height: 4),
-                        Text(rc.organization.organizationName, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                        Text(rc.organization.organizationName,
+                            style: TextStyle(
+                                fontSize: 14, color: Colors.grey[600])),
                       ],
                     ),
                   ),
@@ -1062,13 +1313,16 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
                     onPressed: widget.onEdit,
                     icon: const Icon(Icons.edit, size: 16),
                     label: const Text('Edit'),
-                    style: OutlinedButton.styleFrom(foregroundColor: kOrange, side: const BorderSide(color: kOrange)),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: kOrange,
+                        side: const BorderSide(color: kOrange)),
                   ),
                   const SizedBox(width: 8),
                   // Status changer
                   PopupMenuButton<String>(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
                         color: kBlue,
                         borderRadius: BorderRadius.circular(8),
@@ -1076,11 +1330,18 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
                       child: const Row(children: [
                         Icon(Icons.swap_horiz, color: Colors.white, size: 16),
                         SizedBox(width: 6),
-                        Text('Change Status', style: TextStyle(color: Colors.white, fontSize: 13)),
+                        Text('Change Status',
+                            style:
+                                TextStyle(color: Colors.white, fontSize: 13)),
                       ]),
                     ),
                     onSelected: widget.onStatusChange,
-                    itemBuilder: (ctx) => ['Active', 'Draft', 'Inactive', 'Expired']
+                    itemBuilder: (ctx) => [
+                      'Active',
+                      'Draft',
+                      'Inactive',
+                      'Expired'
+                    ]
                         .where((s) => s != rc.status)
                         .map((s) => PopupMenuItem(value: s, child: Text(s)))
                         .toList(),
@@ -1111,7 +1372,9 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
               tabs: const [
                 Tab(icon: Icon(Icons.info_outline, size: 18), text: 'Overview'),
                 Tab(icon: Icon(Icons.attach_file, size: 18), text: 'Documents'),
-                Tab(icon: Icon(Icons.currency_rupee, size: 18), text: 'Pricing'),
+                Tab(
+                    icon: Icon(Icons.currency_rupee, size: 18),
+                    text: 'Pricing'),
                 Tab(icon: Icon(Icons.verified_user, size: 18), text: 'SLA'),
                 Tab(icon: Icon(Icons.receipt_long, size: 18), text: 'Billing'),
               ],
@@ -1153,8 +1416,14 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
             _kv('Email', rc.organization.contactEmail),
             _kv('Employees', rc.organization.numberOfEmployees.toString()),
             _kv('Contract', rc.organization.contractType),
-            _kv('Start', DateFormat('dd MMM yyyy').format(rc.organization.contractStartDate)),
-            _kv('End', DateFormat('dd MMM yyyy').format(rc.organization.contractEndDate)),
+            _kv(
+                'Start',
+                DateFormat('dd MMM yyyy')
+                    .format(rc.organization.contractStartDate)),
+            _kv(
+                'End',
+                DateFormat('dd MMM yyyy')
+                    .format(rc.organization.contractEndDate)),
           ]),
           _section('Route & Shift', [
             _kv('Route Code', rc.routeShift.routeCode),
@@ -1180,18 +1449,22 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
             _kv('GPS', rc.vehicle.gpsEnabled ? '✅ Yes' : '❌ No'),
             _kv('Women Only', rc.vehicle.isWomenOnlyVehicle ? '✅ Yes' : 'No'),
             _kv('Escort', rc.vehicle.escortRequired ? '✅ Yes' : 'No'),
-            _kv('Driver BG Check', rc.vehicle.driverBgVerified ? '✅ Verified' : 'Pending'),
+            _kv('Driver BG Check',
+                rc.vehicle.driverBgVerified ? '✅ Verified' : 'Pending'),
           ]),
           _section('Monthly Estimate', [
             _kvBold('Billing Model', rc.pricing.billingModel),
-            _kvBold('Monthly Rate/Vehicle', '₹${NumberFormat('#,##0').format(rc.pricing.monthlyBaseRatePerVehicle)}'),
+            _kvBold('Monthly Rate/Vehicle',
+                '₹${NumberFormat('#,##0').format(rc.pricing.monthlyBaseRatePerVehicle)}'),
             _kvBold('Total Vehicles', rc.vehicle.numberOfVehicles.toString()),
             _kvBold('KM Included/Month', '${rc.pricing.kmIncludedPerMonth} km'),
             _kvBold('Extra KM Rate', '₹${rc.pricing.extraKmRate}/km'),
             _kvBold('GST', '${rc.pricing.gstPercent}%'),
             _kvBold('TDS', '${rc.pricing.tdsPercent}%'),
             const Divider(),
-            _kvBold('Monthly Estimate (incl. GST)', '₹${NumberFormat('#,##0').format(rc.monthlyEstimate)}', highlight: true),
+            _kvBold('Monthly Estimate (incl. GST)',
+                '₹${NumberFormat('#,##0').format(rc.monthlyEstimate)}',
+                highlight: true),
           ]),
         ]),
       ],
@@ -1216,101 +1489,134 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text('${rc.documents.length} Document${rc.documents.length != 1 ? 's' : ''} Attached',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kPrimary)),
+        Text(
+            '${rc.documents.length} Document${rc.documents.length != 1 ? 's' : ''} Attached',
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.bold, color: kPrimary)),
         const SizedBox(height: 16),
         ...rc.documents.map((doc) => Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: kBorder),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))],
-          ),
-          child: Row(
-            children: [
-              // Doc icon
-              Container(
-                width: 50, height: 50,
-                decoration: BoxDecoration(color: _docColor(doc.fileName).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Icon(_docIcon(doc.fileName), color: _docColor(doc.fileName), size: 28),
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kBorder),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.03),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2))
+                ],
               ),
-              const SizedBox(width: 14),
+              child: Row(
+                children: [
+                  // Doc icon
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                        color: _docColor(doc.fileName).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(_docIcon(doc.fileName),
+                        color: _docColor(doc.fileName), size: 28),
+                  ),
+                  const SizedBox(width: 14),
 
-              // Doc info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(doc.documentName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kPrimary)),
-                    const SizedBox(height: 4),
-                    Row(
+                  // Doc info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(color: kBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                          child: Text(doc.documentType, style: const TextStyle(fontSize: 11, color: kBlue)),
+                        Text(doc.documentName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: kPrimary)),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                  color: kBlue.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4)),
+                              child: Text(doc.documentType,
+                                  style: const TextStyle(
+                                      fontSize: 11, color: kBlue)),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(doc.fileSizeDisplay,
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600])),
+                            const SizedBox(width: 8),
+                            Text(
+                                DateFormat('dd MMM yyyy')
+                                    .format(doc.uploadedAt),
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[500])),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(doc.fileSizeDisplay, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                        const SizedBox(width: 8),
-                        Text(DateFormat('dd MMM yyyy').format(doc.uploadedAt), style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                        const SizedBox(height: 4),
+                        Text('Uploaded by: ${doc.uploadedBy}',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey[400])),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text('Uploaded by: ${doc.uploadedBy}', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
-                  ],
-                ),
-              ),
-
-              // Action buttons
-              const SizedBox(width: 12),
-              Column(
-                children: [
-                  // VIEW button
-                  OutlinedButton.icon(
-                    onPressed: () => _openDocument(rc.id, doc.id, download: false),
-                    icon: const Icon(Icons.visibility, size: 16),
-                    label: const Text('View', style: TextStyle(fontSize: 12)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: kBlue,
-                      side: const BorderSide(color: kBlue),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    ),
                   ),
-                  const SizedBox(height: 8),
-                  // DOWNLOAD button
-                  ElevatedButton.icon(
-                    onPressed: () => _openDocument(rc.id, doc.id, download: true),
-                    icon: const Icon(Icons.download, size: 16),
-                    label: const Text('Download', style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    ),
+
+                  // Action buttons
+                  const SizedBox(width: 12),
+                  Column(
+                    children: [
+                      // VIEW button
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            _openDocument(rc.id, doc.id, download: false),
+                        icon: const Icon(Icons.visibility, size: 16),
+                        label:
+                            const Text('View', style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kBlue,
+                          side: const BorderSide(color: kBlue),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // DOWNLOAD button
+                      ElevatedButton.icon(
+                        onPressed: () =>
+                            _openDocument(rc.id, doc.id, download: true),
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Download',
+                            style: TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
-          ),
-        )),
+            )),
       ],
     );
   }
 
-  Future<void> _openDocument(String rcId, String docId, {required bool download}) async {
+  Future<void> _openDocument(String rcId, String docId,
+      {required bool download}) async {
     final url = RateCardService.getDocumentUrl(rcId, docId, download: download);
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Cannot open document. Check network.'),
-          backgroundColor: kRed,
-        ));
+        AppSnackbar.show(context,
+            message: 'Cannot open document. Check network.');
       }
     }
   }
@@ -1325,7 +1631,8 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
           _section('Pricing Core', [
             _kvBold('Billing Model', p.billingModel),
             if (p.billingModel != 'Per Trip') ...[
-              _kv('Monthly Base Rate/Vehicle', '₹${NumberFormat('#,##0').format(p.monthlyBaseRatePerVehicle)}'),
+              _kv('Monthly Base Rate/Vehicle',
+                  '₹${NumberFormat('#,##0').format(p.monthlyBaseRatePerVehicle)}'),
               _kv('KM Included/Month', '${p.kmIncludedPerMonth} km'),
               _kv('Extra KM Rate', '₹${p.extraKmRate}/km'),
             ],
@@ -1338,7 +1645,8 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
             ],
           ]),
           _section('Surcharges', [
-            _kv('Night Shift Surcharge', '₹${p.nightShiftSurcharge}/trip (after ${p.nightShiftStartTime})'),
+            _kv('Night Shift Surcharge',
+                '₹${p.nightShiftSurcharge}/trip (after ${p.nightShiftStartTime})'),
             _kv('Weekend Surcharge', '${p.weekendSurchargePercent}%'),
             _kv('Festival Rate', '${p.festivalHolidayRatePercent}%'),
             _kv('Driver Bata', '₹${p.driverBataPerDay}/day'),
@@ -1350,16 +1658,20 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
         _detailRow([
           _section('Inclusions', [
             _kv('Driver Bata', p.driverBataIncluded ? '✅ Included' : '❌ Extra'),
-            _kv('Toll Charges', p.tollChargesIncluded ? '✅ Included' : '❌ Extra (Actuals)'),
+            _kv('Toll Charges',
+                p.tollChargesIncluded ? '✅ Included' : '❌ Extra (Actuals)'),
             _kv('Parking', p.parkingChargesIncluded ? '✅ Included' : '❌ Extra'),
-            _kv('State Permit', p.statePermitIncluded ? '✅ Included' : '❌ Extra'),
+            _kv('State Permit',
+                p.statePermitIncluded ? '✅ Included' : '❌ Extra'),
             _kv('Fuel', p.fuelIncluded ? '✅ Included' : '❌ Separate'),
-            _kv('Fuel Escalation', p.fuelEscalationLinked ? '✅ Linked' : 'Fixed'),
+            _kv('Fuel Escalation',
+                p.fuelEscalationLinked ? '✅ Linked' : 'Fixed'),
           ]),
           _section('Tax', [
             _kvBold('GST', '${p.gstPercent}% on transport'),
             _kvBold('TDS', '${p.tdsPercent}% (Org deducts)'),
-            _kv('No-Show Billable', p.noShowBillable ? '✅ Yes' : '❌ Not billed'),
+            _kv('No-Show Billable',
+                p.noShowBillable ? '✅ Yes' : '❌ Not billed'),
           ]),
         ]),
       ],
@@ -1373,10 +1685,12 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
       padding: const EdgeInsets.all(20),
       children: [
         _section('SLA Commitments', [
-          _kvBold('On-Time Pickup Guarantee', '${s.onTimePickupGuaranteePercent}%'),
+          _kvBold(
+              'On-Time Pickup Guarantee', '${s.onTimePickupGuaranteePercent}%'),
           _kv('Max Delay Allowed', '${s.maxDelayAllowedMinutes} minutes'),
           _kv('Breakdown Response', '${s.breakdownResponseMinutes} minutes'),
-          _kv('Escalation Contact', s.escalationContact.isEmpty ? 'Not set' : s.escalationContact),
+          _kv('Escalation Contact',
+              s.escalationContact.isEmpty ? 'Not set' : s.escalationContact),
           _kv('Monthly MIS Report', s.monthlyMISReport ? '✅ Yes' : 'No'),
         ]),
         const SizedBox(height: 16),
@@ -1416,7 +1730,11 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
           ),
           child: Column(
             children: [
-              const Text('Invoice Formula', style: TextStyle(fontWeight: FontWeight.bold, color: kPrimary, fontSize: 15)),
+              const Text('Invoice Formula',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: kPrimary,
+                      fontSize: 15)),
               const SizedBox(height: 12),
               const Text(
                 'Monthly Base Rate × Vehicles\n'
@@ -1427,7 +1745,11 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
                 '+ GST 5%\n'
                 '═══════════════════\n'
                 'FINAL MONTHLY INVOICE',
-                style: TextStyle(fontSize: 13, fontFamily: 'monospace', height: 1.8, color: kPrimary),
+                style: TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'monospace',
+                    height: 1.8,
+                    color: kPrimary),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -1449,7 +1771,9 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimary, fontSize: 14)),
+          Text(title,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: kPrimary, fontSize: 14)),
           const Divider(height: 16),
           ...children,
         ],
@@ -1458,49 +1782,71 @@ class _RateCardDetailSheetState extends State<_RateCardDetailSheet>
   }
 
   Widget _kv(String k, String v) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 150, child: Text(k, style: TextStyle(fontSize: 13, color: Colors.grey[600]))),
-        Expanded(child: Text(v, style: const TextStyle(fontSize: 13, color: kPrimary))),
-      ],
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+                width: 150,
+                child: Text(k,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]))),
+            Expanded(
+                child: Text(v,
+                    style: const TextStyle(fontSize: 13, color: kPrimary))),
+          ],
+        ),
+      );
 
   Widget _kvBold(String k, String v, {bool highlight = false}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 150, child: Text(k, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kPrimary))),
-        Expanded(child: Text(v, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: highlight ? kGreen : kPrimary))),
-      ],
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+                width: 150,
+                child: Text(k,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: kPrimary))),
+            Expanded(
+                child: Text(v,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: highlight ? kGreen : kPrimary))),
+          ],
+        ),
+      );
 
   Widget _detailRow(List<Widget> children) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: children.asMap().entries.map((e) => Expanded(
-      child: Padding(padding: EdgeInsets.only(left: e.key > 0 ? 12 : 0), child: e.value),
-    )).toList(),
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children
+            .asMap()
+            .entries
+            .map((e) => Expanded(
+                  child: Padding(
+                      padding: EdgeInsets.only(left: e.key > 0 ? 12 : 0),
+                      child: e.value),
+                ))
+            .toList(),
+      );
 
   IconData _docIcon(String fn) {
     final ext = fn.toLowerCase().split('.').last;
     if (ext == 'pdf') return Icons.picture_as_pdf;
-    if (['jpg','jpeg','png'].contains(ext)) return Icons.image;
-    if (['doc','docx'].contains(ext)) return Icons.article;
-    if (['xlsx','xls'].contains(ext)) return Icons.table_chart;
+    if (['jpg', 'jpeg', 'png'].contains(ext)) return Icons.image;
+    if (['doc', 'docx'].contains(ext)) return Icons.article;
+    if (['xlsx', 'xls'].contains(ext)) return Icons.table_chart;
     return Icons.insert_drive_file;
   }
 
   Color _docColor(String fn) {
     final ext = fn.toLowerCase().split('.').last;
     if (ext == 'pdf') return kRed;
-    if (['jpg','jpeg','png'].contains(ext)) return kGreen;
-    if (['doc','docx'].contains(ext)) return kBlue;
-    if (['xlsx','xls'].contains(ext)) return Color(0xFF1D6F42);
+    if (['jpg', 'jpeg', 'png'].contains(ext)) return kGreen;
+    if (['doc', 'docx'].contains(ext)) return kBlue;
+    if (['xlsx', 'xls'].contains(ext)) return Color(0xFF1D6F42);
     return kGrey;
   }
 }
@@ -1513,11 +1859,11 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final configs = {
-      'Active':           (kGreen, Icons.check_circle),
-      'Draft':            (kOrange, Icons.edit),
+      'Active': (kGreen, Icons.check_circle),
+      'Draft': (kOrange, Icons.edit),
       'Pending Approval': (kBlue, Icons.pending),
-      'Inactive':         (kGrey, Icons.pause_circle),
-      'Expired':          (kRed, Icons.cancel),
+      'Inactive': (kGrey, Icons.pause_circle),
+      'Expired': (kRed, Icons.cancel),
     };
     final config = configs[status] ?? (kGrey, Icons.help);
     return Container(
@@ -1532,7 +1878,9 @@ class _StatusBadge extends StatelessWidget {
         children: [
           Icon(config.$2, size: 14, color: config.$1),
           const SizedBox(width: 6),
-          Text(status, style: TextStyle(color: config.$1, fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(status,
+              style: TextStyle(
+                  color: config.$1, fontWeight: FontWeight.bold, fontSize: 13)),
         ],
       ),
     );

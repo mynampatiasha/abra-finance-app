@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // NEW ITEM BILLING — Vendor Credit UI Style Applied
 // ============================================================================
@@ -11,9 +12,9 @@ import '../../../../core/services/billing_vendors_service.dart';
 import 'new_vendor.dart';
 
 // ── Navy palette (matches new_vendor_credit.dart exactly) ─────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class NewItemBilling extends StatefulWidget {
@@ -30,30 +31,49 @@ class _NewItemBillingState extends State<NewItemBilling> {
   final ItemBillingService _service = ItemBillingService();
 
   // ── Form Controllers (unchanged) ─────────────────────────────────────────
-  final TextEditingController _nameController               = TextEditingController();
-  final TextEditingController _unitController               = TextEditingController();
-  final TextEditingController _sellingPriceController       = TextEditingController();
-  final TextEditingController _costPriceController          = TextEditingController();
-  final TextEditingController _salesDescriptionController   = TextEditingController();
-  final TextEditingController _purchaseDescriptionController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _unitController = TextEditingController();
+  final TextEditingController _sellingPriceController = TextEditingController();
+  final TextEditingController _costPriceController = TextEditingController();
+  final TextEditingController _salesDescriptionController =
+      TextEditingController();
+  final TextEditingController _purchaseDescriptionController =
+      TextEditingController();
 
   // ── Form State (unchanged) ───────────────────────────────────────────────
-  String  _itemType        = 'Goods';
-  bool    _isSellable      = true;
-  bool    _isPurchasable   = true;
-  String  _salesAccount    = 'Sales';
-  String  _purchaseAccount = 'Cost of Goods Sold';
+  String _itemType = 'Goods';
+  bool _isSellable = true;
+  bool _isPurchasable = true;
+  String _salesAccount = 'Sales';
+  String _purchaseAccount = 'Cost of Goods Sold';
   String? _selectedVendorId;
   String? _selectedVendorName;
 
   // ── Loading states (unchanged) ───────────────────────────────────────────
   bool _isLoading = false;
-  bool _isSaving  = false;
+  bool _isSaving = false;
 
   // ── Dropdown options (unchanged) ─────────────────────────────────────────
-  final List<String> _units            = ['pcs','dz','kg','ltr','box','carton','unit','hour'];
-  final List<String> _salesAccounts    = ['Sales','Service Revenue','Other Income'];
-  final List<String> _purchaseAccounts = ['Cost of Goods Sold','Purchases','Direct Expenses'];
+  final List<String> _units = [
+    'pcs',
+    'dz',
+    'kg',
+    'ltr',
+    'box',
+    'carton',
+    'unit',
+    'hour'
+  ];
+  final List<String> _salesAccounts = [
+    'Sales',
+    'Service Revenue',
+    'Other Income'
+  ];
+  final List<String> _purchaseAccounts = [
+    'Cost of Goods Sold',
+    'Purchases',
+    'Direct Expenses'
+  ];
 
   // ── initState / dispose (unchanged) ──────────────────────────────────────
 
@@ -90,11 +110,11 @@ class _NewItemBillingState extends State<NewItemBilling> {
   }
 
   void _populateFormWithData(Map<String, dynamic> data) {
-    _nameController.text               = data['name'] ?? '';
-    _unitController.text               = data['unit'] ?? '';
-    _sellingPriceController.text       = data['sellingPrice']?.toString() ?? '';
-    _costPriceController.text          = data['costPrice']?.toString() ?? '';
-    _salesDescriptionController.text   = data['salesDescription'] ?? '';
+    _nameController.text = data['name'] ?? '';
+    _unitController.text = data['unit'] ?? '';
+    _sellingPriceController.text = data['sellingPrice']?.toString() ?? '';
+    _costPriceController.text = data['costPrice']?.toString() ?? '';
+    _salesDescriptionController.text = data['salesDescription'] ?? '';
     _purchaseDescriptionController.text = data['purchaseDescription'] ?? '';
 
     String? vendorId;
@@ -103,19 +123,20 @@ class _NewItemBillingState extends State<NewItemBilling> {
       if (data['preferredVendor'] is String) {
         vendorId = data['preferredVendor'] as String;
       } else if (data['preferredVendor'] is Map) {
-        vendorId   = (data['preferredVendor'] as Map)['_id']?.toString();
-        vendorName = (data['preferredVendor'] as Map)['vendorName']?.toString()
-                  ?? (data['preferredVendor'] as Map)['name']?.toString();
+        vendorId = (data['preferredVendor'] as Map)['_id']?.toString();
+        vendorName =
+            (data['preferredVendor'] as Map)['vendorName']?.toString() ??
+                (data['preferredVendor'] as Map)['name']?.toString();
       }
     }
 
     setState(() {
-      _itemType          = data['type'] ?? 'Goods';
-      _isSellable        = data['isSellable'] ?? true;
-      _isPurchasable     = data['isPurchasable'] ?? true;
-      _salesAccount      = data['salesAccount'] ?? 'Sales';
-      _purchaseAccount   = data['purchaseAccount'] ?? 'Cost of Goods Sold';
-      _selectedVendorId  = vendorId;
+      _itemType = data['type'] ?? 'Goods';
+      _isSellable = data['isSellable'] ?? true;
+      _isPurchasable = data['isPurchasable'] ?? true;
+      _salesAccount = data['salesAccount'] ?? 'Sales';
+      _purchaseAccount = data['purchaseAccount'] ?? 'Cost of Goods Sold';
+      _selectedVendorId = vendorId;
       _selectedVendorName = vendorName;
     });
   }
@@ -125,18 +146,22 @@ class _NewItemBillingState extends State<NewItemBilling> {
     setState(() => _isSaving = true);
     try {
       final itemData = {
-        'name':                _nameController.text.trim(),
-        'type':                _itemType,
-        'unit':                _unitController.text.trim(),
-        'isSellable':          _isSellable,
-        'isPurchasable':       _isPurchasable,
-        'sellingPrice':        _isSellable    ? double.tryParse(_sellingPriceController.text) : null,
-        'salesAccount':        _isSellable    ? _salesAccount    : null,
-        'salesDescription':    _isSellable    ? _salesDescriptionController.text.trim() : null,
-        'costPrice':           _isPurchasable ? double.tryParse(_costPriceController.text) : null,
-        'purchaseAccount':     _isPurchasable ? _purchaseAccount : null,
-        'purchaseDescription': _isPurchasable ? _purchaseDescriptionController.text.trim() : null,
-        'preferredVendor':     _selectedVendorId,
+        'name': _nameController.text.trim(),
+        'type': _itemType,
+        'unit': _unitController.text.trim(),
+        'isSellable': _isSellable,
+        'isPurchasable': _isPurchasable,
+        'sellingPrice':
+            _isSellable ? double.tryParse(_sellingPriceController.text) : null,
+        'salesAccount': _isSellable ? _salesAccount : null,
+        'salesDescription':
+            _isSellable ? _salesDescriptionController.text.trim() : null,
+        'costPrice':
+            _isPurchasable ? double.tryParse(_costPriceController.text) : null,
+        'purchaseAccount': _isPurchasable ? _purchaseAccount : null,
+        'purchaseDescription':
+            _isPurchasable ? _purchaseDescriptionController.text.trim() : null,
+        'preferredVendor': _selectedVendorId,
       };
       String result;
       if (widget.itemToEdit != null) {
@@ -156,15 +181,11 @@ class _NewItemBillingState extends State<NewItemBilling> {
   }
 
   void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 3)));
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 4)));
+    AppSnackbar.show(context, message: message, isError: true);
   }
 
   // ── Vendor selector (matches new_vendor_credit.dart exactly) ────────────
@@ -190,11 +211,21 @@ class _NewItemBillingState extends State<NewItemBilling> {
                 final list = (result['data']['vendors'] as List)
                     .map((j) => BillingVendor.fromJson(j))
                     .toList();
-                setS(() { vendors = list; filtered = list; loading = false; });
+                setS(() {
+                  vendors = list;
+                  filtered = list;
+                  loading = false;
+                });
               } else {
-                setS(() { error = result['message']; loading = false; });
+                setS(() {
+                  error = result['message'];
+                  loading = false;
+                });
               }
-            }).catchError((e) => setS(() { error = e.toString(); loading = false; }));
+            }).catchError((e) => setS(() {
+                  error = e.toString();
+                  loading = false;
+                }));
           }
 
           return AlertDialog(
@@ -208,15 +239,22 @@ class _NewItemBillingState extends State<NewItemBilling> {
                   decoration: InputDecoration(
                     hintText: 'Search vendors...',
                     prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   onChanged: (v) {
                     setS(() {
                       filtered = v.isEmpty
                           ? vendors
-                          : vendors.where((vd) =>
-                              vd.vendorName.toLowerCase().contains(v.toLowerCase()) ||
-                              vd.email.toLowerCase().contains(v.toLowerCase())).toList();
+                          : vendors
+                              .where((vd) =>
+                                  vd.vendorName
+                                      .toLowerCase()
+                                      .contains(v.toLowerCase()) ||
+                                  vd.email
+                                      .toLowerCase()
+                                      .contains(v.toLowerCase()))
+                              .toList();
                     });
                   },
                 ),
@@ -225,7 +263,9 @@ class _NewItemBillingState extends State<NewItemBilling> {
                   child: loading
                       ? const Center(child: CircularProgressIndicator())
                       : error != null
-                          ? Center(child: Text('Error: $error', style: const TextStyle(color: Colors.red)))
+                          ? Center(
+                              child: Text('Error: $error',
+                                  style: const TextStyle(color: Colors.red)))
                           : filtered.isEmpty
                               ? const Center(child: Text('No vendors found'))
                               : ListView.builder(
@@ -235,14 +275,16 @@ class _NewItemBillingState extends State<NewItemBilling> {
                                     return ListTile(
                                       leading: CircleAvatar(
                                         backgroundColor: _navyAccent,
-                                        child: Text(v.vendorName[0].toUpperCase(),
-                                            style: const TextStyle(color: Colors.white)),
+                                        child: Text(
+                                            v.vendorName[0].toUpperCase(),
+                                            style: const TextStyle(
+                                                color: Colors.white)),
                                       ),
                                       title: Text(v.vendorName),
                                       subtitle: Text(v.email),
                                       onTap: () {
                                         setState(() {
-                                          _selectedVendorId   = v.id;
+                                          _selectedVendorId = v.id;
                                           _selectedVendorName = v.vendorName;
                                         });
                                         Navigator.pop(ctx);
@@ -263,8 +305,10 @@ class _NewItemBillingState extends State<NewItemBilling> {
                       );
                       if (result != null && result is Map<String, dynamic>) {
                         setState(() {
-                          _selectedVendorId   = result['_id']?.toString();
-                          _selectedVendorName = result['vendorName']?.toString() ?? result['name']?.toString();
+                          _selectedVendorId = result['_id']?.toString();
+                          _selectedVendorName =
+                              result['vendorName']?.toString() ??
+                                  result['name']?.toString();
                         });
                       }
                     },
@@ -279,7 +323,9 @@ class _NewItemBillingState extends State<NewItemBilling> {
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel')),
             ],
           );
         },
@@ -302,16 +348,18 @@ class _NewItemBillingState extends State<NewItemBilling> {
               key: _formKey,
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _buildTypeCard(),
-                  const SizedBox(height: 16),
-                  _buildNameUnitCard(),
-                  const SizedBox(height: 16),
-                  _buildSalesPurchaseCards(),
-                  const SizedBox(height: 24),
-                  _buildBottomActions(),
-                  const SizedBox(height: 24),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildTypeCard(),
+                      const SizedBox(height: 16),
+                      _buildNameUnitCard(),
+                      const SizedBox(height: 16),
+                      _buildSalesPurchaseCards(),
+                      const SizedBox(height: 24),
+                      _buildBottomActions(),
+                      const SizedBox(height: 24),
+                    ]),
               ),
             ),
     );
@@ -346,20 +394,25 @@ class _NewItemBillingState extends State<NewItemBilling> {
             TextButton.icon(
               onPressed: _isSaving ? null : () => Navigator.pop(context),
               icon: const Icon(Icons.close, color: Colors.white70, size: 18),
-              label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              label:
+                  const Text('Cancel', style: TextStyle(color: Colors.white70)),
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: _isSaving ? null : _saveItem,
               icon: _isSaving
-                  ? const SizedBox(width: 16, height: 16,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.save, size: 18),
               label: Text(_isSaving ? 'Saving...' : 'Save Item'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
             const SizedBox(width: 16),
@@ -396,7 +449,8 @@ class _NewItemBillingState extends State<NewItemBilling> {
           onChanged: (val) => setState(() => _itemType = val!),
           activeColor: _navyAccent,
         ),
-        Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+        Text(value,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
       ]),
     );
   }
@@ -413,7 +467,9 @@ class _NewItemBillingState extends State<NewItemBilling> {
         const SizedBox(height: 8),
         TextFormField(
           controller: _nameController,
-          validator: (value) => (value == null || value.trim().isEmpty) ? 'Name is required' : null,
+          validator: (value) => (value == null || value.trim().isEmpty)
+              ? 'Name is required'
+              : null,
           decoration: _inputDecoration(hintText: 'Enter item name'),
         ),
         const SizedBox(height: 16),
@@ -423,8 +479,11 @@ class _NewItemBillingState extends State<NewItemBilling> {
         DropdownButtonFormField<String>(
           value: _unitController.text.isEmpty ? null : _unitController.text,
           decoration: _inputDecoration(hintText: 'Select or type to add'),
-          items: _units.map((unit) => DropdownMenuItem(value: unit, child: Text(unit))).toList(),
-          onChanged: (value) => setState(() => _unitController.text = value ?? ''),
+          items: _units
+              .map((unit) => DropdownMenuItem(value: unit, child: Text(unit)))
+              .toList(),
+          onChanged: (value) =>
+              setState(() => _unitController.text = value ?? ''),
         ),
       ]),
     );
@@ -460,11 +519,15 @@ class _NewItemBillingState extends State<NewItemBilling> {
             onChanged: (value) => setState(() => _isSellable = value ?? true),
             activeColor: _navyAccent,
           ),
-          const Text('Sellable', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          const Text('Sellable',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ]),
         if (_isSellable) ...[
           const SizedBox(height: 16),
-          _buildPriceField(label: 'Selling Price', controller: _sellingPriceController, isRequired: true),
+          _buildPriceField(
+              label: 'Selling Price',
+              controller: _sellingPriceController,
+              isRequired: true),
           const SizedBox(height: 16),
           _buildAccountDropdown(
             label: 'Account',
@@ -494,14 +557,19 @@ class _NewItemBillingState extends State<NewItemBilling> {
           const Spacer(),
           Checkbox(
             value: _isPurchasable,
-            onChanged: (value) => setState(() => _isPurchasable = value ?? true),
+            onChanged: (value) =>
+                setState(() => _isPurchasable = value ?? true),
             activeColor: _navyAccent,
           ),
-          const Text('Purchasable', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          const Text('Purchasable',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ]),
         if (_isPurchasable) ...[
           const SizedBox(height: 16),
-          _buildPriceField(label: 'Cost Price', controller: _costPriceController, isRequired: true),
+          _buildPriceField(
+              label: 'Cost Price',
+              controller: _costPriceController,
+              isRequired: true),
           const SizedBox(height: 16),
           _buildAccountDropdown(
             label: 'Account',
@@ -541,34 +609,46 @@ class _NewItemBillingState extends State<NewItemBilling> {
           decoration: BoxDecoration(
             color: Colors.grey[100],
             border: Border.all(color: Colors.grey[300]!),
-            borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), bottomLeft: Radius.circular(8)),
+            borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8), bottomLeft: Radius.circular(8)),
           ),
-          child: const Text('INR', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+          child: const Text('INR',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
         ),
-        Expanded(child: TextFormField(
+        Expanded(
+            child: TextFormField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           validator: isRequired
               ? (value) {
-                  if (value == null || value.trim().isEmpty) return 'Price is required';
-                  if (double.tryParse(value) == null) return 'Enter valid number';
+                  if (value == null || value.trim().isEmpty)
+                    return 'Price is required';
+                  if (double.tryParse(value) == null)
+                    return 'Enter valid number';
                   return null;
                 }
               : null,
           decoration: InputDecoration(
             border: OutlineInputBorder(
-              borderRadius: const BorderRadius.only(topRight: Radius.circular(8), bottomRight: Radius.circular(8)),
+              borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(8),
+                  bottomRight: Radius.circular(8)),
               borderSide: BorderSide(color: Colors.grey[300]!),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: const BorderRadius.only(topRight: Radius.circular(8), bottomRight: Radius.circular(8)),
+              borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(8),
+                  bottomRight: Radius.circular(8)),
               borderSide: BorderSide(color: Colors.grey[300]!),
             ),
             focusedBorder: const OutlineInputBorder(
-              borderRadius: BorderRadius.only(topRight: Radius.circular(8), bottomRight: Radius.circular(8)),
+              borderRadius: BorderRadius.only(
+                  topRight: Radius.circular(8),
+                  bottomRight: Radius.circular(8)),
               borderSide: BorderSide(color: _navyAccent, width: 2),
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           ),
         )),
       ]),
@@ -590,7 +670,9 @@ class _NewItemBillingState extends State<NewItemBilling> {
       DropdownButtonFormField<String>(
         value: value,
         decoration: _inputDecoration(),
-        items: items.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+        items: items
+            .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+            .toList(),
         onChanged: onChanged,
       ),
     ]);
@@ -612,22 +694,32 @@ class _NewItemBillingState extends State<NewItemBilling> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(children: [
-            Icon(Icons.business_outlined, size: 18,
-                color: _selectedVendorName != null ? _navyAccent : Colors.grey[500]),
+            Icon(Icons.business_outlined,
+                size: 18,
+                color: _selectedVendorName != null
+                    ? _navyAccent
+                    : Colors.grey[500]),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 _selectedVendorName ?? 'Select vendor (optional)',
                 style: TextStyle(
-                  color: _selectedVendorName != null ? _navyDark : Colors.grey[600],
-                  fontWeight: _selectedVendorName != null ? FontWeight.w500 : FontWeight.normal,
+                  color: _selectedVendorName != null
+                      ? _navyDark
+                      : Colors.grey[600],
+                  fontWeight: _selectedVendorName != null
+                      ? FontWeight.w500
+                      : FontWeight.normal,
                   fontSize: 14,
                 ),
               ),
             ),
             if (_selectedVendorName != null)
               GestureDetector(
-                onTap: () => setState(() { _selectedVendorId = null; _selectedVendorName = null; }),
+                onTap: () => setState(() {
+                  _selectedVendorId = null;
+                  _selectedVendorName = null;
+                }),
                 child: Icon(Icons.close, size: 18, color: Colors.grey[500]),
               )
             else
@@ -645,7 +737,11 @@ class _NewItemBillingState extends State<NewItemBilling> {
       ElevatedButton.icon(
         onPressed: _isSaving ? null : _saveItem,
         icon: _isSaving
-            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2))
             : const Icon(Icons.save),
         label: Text(_isSaving ? 'Saving...' : 'Save Item',
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -660,7 +756,8 @@ class _NewItemBillingState extends State<NewItemBilling> {
       OutlinedButton.icon(
         onPressed: _isSaving ? null : () => Navigator.pop(context),
         icon: const Icon(Icons.close),
-        label: const Text('Cancel', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        label: const Text('Cancel',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         style: OutlinedButton.styleFrom(
           foregroundColor: _navyMid,
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
@@ -674,38 +771,57 @@ class _NewItemBillingState extends State<NewItemBilling> {
   // ── UI helpers (matching vendor credit style) ─────────────────────────────
 
   Widget _card({required Widget child}) => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(10),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
-    ),
-    child: child,
-  );
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 3))
+          ],
+        ),
+        child: child,
+      );
 
   Widget _sectionTitle(String title, IconData icon) => Row(children: [
-    Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Icon(icon, color: Colors.white, size: 18),
-    ),
-    const SizedBox(width: 10),
-    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _navyDark)),
-  ]);
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Text(title,
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.bold, color: _navyDark)),
+      ]);
 
   Widget _fieldLabel(String label, {bool required = false}) => Row(children: [
-    Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.black87)),
-    if (required) const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
-  ]);
+        Text(label,
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.black87)),
+        if (required)
+          const Text(' *', style: TextStyle(color: Colors.red, fontSize: 14)),
+      ]);
 
   InputDecoration _inputDecoration({String? hintText}) => InputDecoration(
-    hintText: hintText,
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
-    focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)), borderSide: BorderSide(color: _navyAccent, width: 2)),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-  );
+        hintText: hintText,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey[300]!)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey[300]!)),
+        focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(8)),
+            borderSide: BorderSide(color: _navyAccent, width: 2)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      );
 }

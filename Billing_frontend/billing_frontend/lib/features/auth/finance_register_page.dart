@@ -16,9 +16,9 @@ import '../../data/services/finance_auth_service.dart';
 import 'finance_login_page.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 const Color _goldAccent = Color(0xFFFBBF24);
 
@@ -31,45 +31,54 @@ class FinanceRegisterPage extends StatefulWidget {
 
 class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     with TickerProviderStateMixin {
-  final _formKey       = GlobalKey<FormState>();
-  final _nameCtrl      = TextEditingController();
-  final _emailCtrl     = TextEditingController();
-  final _phoneCtrl     = TextEditingController();
-  final _entityNameCtrl = TextEditingController();  // ✅ NEW: Entity/Group name
-  final _orgNameCtrl   = TextEditingController();
-  final _pwCtrl        = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _entityNameCtrl = TextEditingController(); // ✅ NEW: Entity/Group name
+  final _orgNameCtrl = TextEditingController();
+  final _pwCtrl = TextEditingController();
   final _confirmPwCtrl = TextEditingController();
 
-  bool _loading        = false;
-  bool _obscurePw      = true;
+  bool _loading = false;
+  bool _obscurePw = true;
   bool _obscureConfirm = true;
   String? _error;
 
   late final AnimationController _orbitCtrl;
   late final AnimationController _entranceCtrl;
-  late final Animation<double>   _entranceFade;
-  late final Animation<Offset>   _entranceSlide;
+  late final Animation<double> _entranceFade;
+  late final Animation<Offset> _entranceSlide;
 
   @override
   void initState() {
     super.initState();
-    _orbitCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 20))
-      ..repeat();
+    _orbitCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 20))
+          ..repeat();
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 850));
-    _entranceFade  = CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut);
-    _entranceSlide = Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic));
+    _entranceFade =
+        CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut);
+    _entranceSlide =
+        Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero).animate(
+            CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic));
     _entranceCtrl.forward();
   }
 
   @override
   void dispose() {
     for (final c in [
-      _nameCtrl, _emailCtrl, _phoneCtrl, _entityNameCtrl,
-      _orgNameCtrl, _pwCtrl, _confirmPwCtrl,
-    ]) { c.dispose(); }
+      _nameCtrl,
+      _emailCtrl,
+      _phoneCtrl,
+      _entityNameCtrl,
+      _orgNameCtrl,
+      _pwCtrl,
+      _confirmPwCtrl,
+    ]) {
+      c.dispose();
+    }
     _orbitCtrl.dispose();
     _entranceCtrl.dispose();
     super.dispose();
@@ -78,15 +87,18 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
   // ── Register logic ─────────────────────────────────────────────────────────
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     final res = await FinanceAuthService.register(
-      name:       _nameCtrl.text.trim(),
-      email:      _emailCtrl.text.trim(),
-      password:   _pwCtrl.text,
-      phone:      _phoneCtrl.text.trim(),
-      orgName:    _orgNameCtrl.text.trim(),
-      entityName: _entityNameCtrl.text.trim(),  // ✅ NEW: Pass entity name
+      name: _nameCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
+      password: _pwCtrl.text,
+      phone: _phoneCtrl.text.trim(),
+      orgName: _orgNameCtrl.text.trim(),
+      entityName: _entityNameCtrl.text.trim(), // ✅ NEW: Pass entity name
     );
 
     if (!mounted) return;
@@ -96,15 +108,16 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       final data = res['data'] as Map<String, dynamic>;
       final user = data['user'] as Map<String, dynamic>;
       await FinanceSecureStorage.saveSession(
-        token:      data['token'],
-        userId:     user['id'].toString(),
-        name:       user['name'] ?? '',
-        email:      user['email'] ?? '',
-        phone:      user['phone'] ?? '',
-        role:       user['role'] ?? 'owner',
-        orgId:      user['orgId'] ?? '',
-        orgName:    user['orgName'] ?? '',
-        entityName: user['entityName'] ?? _entityNameCtrl.text.trim(),  // ✅ NEW: Save entity name
+        token: data['token'],
+        userId: user['id'].toString(),
+        name: user['name'] ?? '',
+        email: user['email'] ?? '',
+        phone: user['phone'] ?? '',
+        role: user['role'] ?? 'owner',
+        orgId: user['orgId'] ?? '',
+        orgName: user['orgName'] ?? '',
+        entityName: user['entityName'] ??
+            _entityNameCtrl.text.trim(), // ✅ NEW: Save entity name
       );
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/finance/dashboard');
@@ -134,7 +147,8 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                 position: _entranceSlide,
                 child: Center(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 40),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 560),
                       child: Column(
@@ -183,16 +197,24 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 48, height: 48,
+          width: 48,
+          height: 48,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [_navyAccent, _navyLight],
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: _navyAccent.withOpacity(0.4), blurRadius: 18, spreadRadius: 2)],
+            boxShadow: [
+              BoxShadow(
+                  color: _navyAccent.withOpacity(0.4),
+                  blurRadius: 18,
+                  spreadRadius: 2)
+            ],
           ),
-          child: const Icon(Icons.account_balance_rounded, color: Colors.white, size: 26),
+          child: const Icon(Icons.account_balance_rounded,
+              color: Colors.white, size: 26),
         ),
         const SizedBox(width: 14),
         const Column(
@@ -200,10 +222,14 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('ABRA Finance Suite',
-                style: TextStyle(color: Colors.white, fontSize: 16,
-                    fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3)),
             Text('Enterprise Finance Platform',
-                style: TextStyle(color: Colors.white, fontSize: 10, letterSpacing: 0.8)),
+                style: TextStyle(
+                    color: Colors.white, fontSize: 10, letterSpacing: 0.8)),
           ],
         ),
       ],
@@ -214,9 +240,9 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
   Widget _buildHorizontalSteps() {
     final steps = [
       (Icons.person_add_alt_1_rounded, '01', 'Register'),
-      (Icons.corporate_fare_rounded,   '02', 'Org Created'),
-      (Icons.star_rounded,             '03', "You're Owner"),
-      (Icons.group_add_rounded,        '04', 'Add Team'),
+      (Icons.corporate_fare_rounded, '02', 'Org Created'),
+      (Icons.star_rounded, '03', "You're Owner"),
+      (Icons.group_add_rounded, '04', 'Add Team'),
     ];
 
     return Row(
@@ -244,7 +270,8 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 38, height: 38,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const LinearGradient(
@@ -253,7 +280,10 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
-                  BoxShadow(color: _navyAccent.withOpacity(0.4), blurRadius: 12, spreadRadius: 1),
+                  BoxShadow(
+                      color: _navyAccent.withOpacity(0.4),
+                      blurRadius: 12,
+                      spreadRadius: 1),
                 ],
               ),
               child: Icon(s.$1, color: Colors.white, size: 17),
@@ -261,13 +291,17 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
             const SizedBox(height: 6),
             Text(s.$2,
                 style: const TextStyle(
-                    color: _navyAccent, fontSize: 10,
-                    fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+                    color: _navyAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8)),
             const SizedBox(height: 3),
             Text(s.$3,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
           ],
         );
       }),
@@ -283,7 +317,10 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white.withOpacity(0.12)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 40, offset: const Offset(0, 16)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 40,
+              offset: const Offset(0, 16)),
         ],
       ),
       child: Form(
@@ -292,13 +329,15 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text('Create your account',
-                style: TextStyle(color: Colors.white, fontSize: 22,
-                    fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3)),
             const SizedBox(height: 4),
             const Text('You will become the Owner of your organisation',
                 style: TextStyle(color: Colors.white, fontSize: 12)),
             const SizedBox(height: 22),
-
             if (_error != null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -308,91 +347,143 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                   border: Border.all(color: Colors.red.withOpacity(0.3)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.error_outline, color: Color(0xFFFF6B6B), size: 16),
+                  const Icon(Icons.error_outline,
+                      color: Color(0xFFFF6B6B), size: 16),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(_error!,
-                      style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13))),
+                  Expanded(
+                      child: Text(_error!,
+                          style: const TextStyle(
+                              color: Color(0xFFFF6B6B), fontSize: 13))),
                 ]),
               ),
               const SizedBox(height: 16),
             ],
-
             LayoutBuilder(builder: (ctx, c) {
               final twoCol = c.maxWidth > 380;
               if (twoCol) {
                 return Column(children: [
                   Row(children: [
-                    Expanded(child: _field(ctrl: _nameCtrl, label: 'Full Name',
-                        icon: Icons.person_outline_rounded, required: true, validator: _req('Name'))),
+                    Expanded(
+                        child: _field(
+                            ctrl: _nameCtrl,
+                            label: 'Full Name',
+                            icon: Icons.person_outline_rounded,
+                            required: true,
+                            validator: _req('Name'))),
                     const SizedBox(width: 12),
-                    Expanded(child: _field(ctrl: _phoneCtrl, label: 'Phone',
-                        icon: Icons.phone_outlined, keyboard: TextInputType.phone,
-                        required: true, validator: _req('Phone'))),
+                    Expanded(
+                        child: _field(
+                            ctrl: _phoneCtrl,
+                            label: 'Phone',
+                            icon: Icons.phone_outlined,
+                            keyboard: TextInputType.phone,
+                            required: true,
+                            validator: _req('Phone'))),
                   ]),
                   const SizedBox(height: 14),
-                  _field(ctrl: _emailCtrl, label: 'Email Address',
-                      icon: Icons.email_outlined, keyboard: TextInputType.emailAddress,
-                      required: true, validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Email is required';
+                  _field(
+                      ctrl: _emailCtrl,
+                      label: 'Email Address',
+                      icon: Icons.email_outlined,
+                      keyboard: TextInputType.emailAddress,
+                      required: true,
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty)
+                          return 'Email is required';
                         if (!v.contains('@')) return 'Enter a valid email';
                         return null;
                       }),
                   const SizedBox(height: 14),
-                  _field(ctrl: _entityNameCtrl, label: 'Entity / Group Name (Optional)',
+                  _field(
+                      ctrl: _entityNameCtrl,
+                      label: 'Entity / Group Name (Optional)',
                       icon: Icons.business_center_rounded,
                       hint: 'e.g., ABC Group',
                       required: false),
                   const SizedBox(height: 14),
-                  _field(ctrl: _orgNameCtrl, label: 'Organisation / Company Name',
-                      icon: Icons.business_outlined, required: true,
+                  _field(
+                      ctrl: _orgNameCtrl,
+                      label: 'Organisation / Company Name',
+                      icon: Icons.business_outlined,
+                      required: true,
                       validator: _req('Organisation name')),
                   const SizedBox(height: 14),
                   Row(children: [
-                    Expanded(child: _pwField(ctrl: _pwCtrl, label: 'Password',
-                        obscure: _obscurePw,
-                        onToggle: () => setState(() => _obscurePw = !_obscurePw),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Password required';
-                          if (v.length < 6) return 'Min 6 characters';
-                          return null;
-                        })),
+                    Expanded(
+                        child: _pwField(
+                            ctrl: _pwCtrl,
+                            label: 'Password',
+                            obscure: _obscurePw,
+                            onToggle: () =>
+                                setState(() => _obscurePw = !_obscurePw),
+                            validator: (v) {
+                              if (v == null || v.isEmpty)
+                                return 'Password required';
+                              if (v.length < 6) return 'Min 6 characters';
+                              return null;
+                            })),
                     const SizedBox(width: 12),
-                    Expanded(child: _pwField(ctrl: _confirmPwCtrl, label: 'Confirm',
-                        obscure: _obscureConfirm,
-                        onToggle: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                        validator: (v) {
-                          if (v != _pwCtrl.text) return 'Passwords do not match';
-                          return null;
-                        })),
+                    Expanded(
+                        child: _pwField(
+                            ctrl: _confirmPwCtrl,
+                            label: 'Confirm',
+                            obscure: _obscureConfirm,
+                            onToggle: () => setState(
+                                () => _obscureConfirm = !_obscureConfirm),
+                            validator: (v) {
+                              if (v != _pwCtrl.text)
+                                return 'Passwords do not match';
+                              return null;
+                            })),
                   ]),
                 ]);
               }
               return Column(children: [
-                _field(ctrl: _nameCtrl, label: 'Full Name',
-                    icon: Icons.person_outline_rounded, required: true, validator: _req('Name')),
+                _field(
+                    ctrl: _nameCtrl,
+                    label: 'Full Name',
+                    icon: Icons.person_outline_rounded,
+                    required: true,
+                    validator: _req('Name')),
                 const SizedBox(height: 14),
-                _field(ctrl: _phoneCtrl, label: 'Phone',
-                    icon: Icons.phone_outlined, keyboard: TextInputType.phone,
-                    required: true, validator: _req('Phone')),
+                _field(
+                    ctrl: _phoneCtrl,
+                    label: 'Phone',
+                    icon: Icons.phone_outlined,
+                    keyboard: TextInputType.phone,
+                    required: true,
+                    validator: _req('Phone')),
                 const SizedBox(height: 14),
-                _field(ctrl: _emailCtrl, label: 'Email Address',
-                    icon: Icons.email_outlined, keyboard: TextInputType.emailAddress,
-                    required: true, validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Email is required';
+                _field(
+                    ctrl: _emailCtrl,
+                    label: 'Email Address',
+                    icon: Icons.email_outlined,
+                    keyboard: TextInputType.emailAddress,
+                    required: true,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty)
+                        return 'Email is required';
                       if (!v.contains('@')) return 'Enter a valid email';
                       return null;
                     }),
                 const SizedBox(height: 14),
-                _field(ctrl: _entityNameCtrl, label: 'Entity / Group Name (Optional)',
+                _field(
+                    ctrl: _entityNameCtrl,
+                    label: 'Entity / Group Name (Optional)',
                     icon: Icons.business_center_rounded,
                     hint: 'e.g., ABC Group',
                     required: false),
                 const SizedBox(height: 14),
-                _field(ctrl: _orgNameCtrl, label: 'Organisation / Company Name',
-                    icon: Icons.business_outlined, required: true,
+                _field(
+                    ctrl: _orgNameCtrl,
+                    label: 'Organisation / Company Name',
+                    icon: Icons.business_outlined,
+                    required: true,
                     validator: _req('Organisation name')),
                 const SizedBox(height: 14),
-                _pwField(ctrl: _pwCtrl, label: 'Password',
+                _pwField(
+                    ctrl: _pwCtrl,
+                    label: 'Password',
                     obscure: _obscurePw,
                     onToggle: () => setState(() => _obscurePw = !_obscurePw),
                     validator: (v) {
@@ -401,38 +492,42 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                       return null;
                     }),
                 const SizedBox(height: 14),
-                _pwField(ctrl: _confirmPwCtrl, label: 'Confirm Password',
+                _pwField(
+                    ctrl: _confirmPwCtrl,
+                    label: 'Confirm Password',
                     obscure: _obscureConfirm,
-                    onToggle: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                    onToggle: () =>
+                        setState(() => _obscureConfirm = !_obscureConfirm),
                     validator: (v) {
                       if (v != _pwCtrl.text) return 'Passwords do not match';
                       return null;
                     }),
               ]);
             }),
-
             const SizedBox(height: 24),
-
             ElevatedButton.icon(
               onPressed: _loading ? null : _register,
               icon: _loading
-                  ? const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.person_add_alt_1_rounded, size: 18),
               label: Text(_loading ? 'Creating Account...' : 'Create Account',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 disabledBackgroundColor: _navyAccent.withOpacity(0.5),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
             ),
-
             const SizedBox(height: 20),
-
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -442,15 +537,19 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                   onPressed: _loading
                       ? null
                       : () => Navigator.pushReplacement(
-                          context, MaterialPageRoute(builder: (_) => const FinanceLoginPage())),
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const FinanceLoginPage())),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.only(left: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: const Text('Sign In',
-                      style: TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w700, color: _goldAccent)),
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _goldAccent)),
                 ),
               ],
             ),
@@ -468,7 +567,7 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     TextInputType keyboard = TextInputType.text,
     bool required = false,
     String? Function(String?)? validator,
-    String? hint,  // ✅ NEW: Optional hint text
+    String? hint, // ✅ NEW: Optional hint text
   }) {
     return TextFormField(
       controller: ctrl,
@@ -478,12 +577,14 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       decoration: InputDecoration(
         labelText: required ? '$label *' : label,
         labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
-        hintText: hint,  // ✅ NEW: Add hint text
-        hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),  // ✅ Hint style
+        hintText: hint, // ✅ NEW: Add hint text
+        hintStyle: TextStyle(
+            color: Colors.white.withOpacity(0.4), fontSize: 12), // ✅ Hint style
         prefixIcon: Icon(icon, color: Colors.white, size: 17),
         filled: true,
         fillColor: Colors.white.withOpacity(0.07),
-        contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
@@ -520,17 +621,20 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
       decoration: InputDecoration(
         labelText: label,
         labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
-        prefixIcon: const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 17),
+        prefixIcon: const Icon(Icons.lock_outline_rounded,
+            color: Colors.white, size: 17),
         suffixIcon: IconButton(
           icon: Icon(
             obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-            color: Colors.white, size: 17,
+            color: Colors.white,
+            size: 17,
           ),
           onPressed: onToggle,
         ),
         filled: true,
         fillColor: Colors.white.withOpacity(0.07),
-        contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
@@ -566,11 +670,14 @@ class _FinanceRegBgPainter extends CustomPainter {
     final bg = Paint()
       ..shader = const LinearGradient(
         colors: [Color(0xFF0D1B3E), Color(0xFF0F2350), Color(0xFF1A3A6B)],
-        begin: Alignment.topLeft, end: Alignment.bottomRight,
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Offset.zero & size, bg);
 
-    final grid = Paint()..color = Colors.white.withOpacity(0.025)..strokeWidth = 1;
+    final grid = Paint()
+      ..color = Colors.white.withOpacity(0.025)
+      ..strokeWidth = 1;
     for (double x = 0; x < size.width; x += 55) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
     }
@@ -587,13 +694,18 @@ class _FinanceRegBgPainter extends CustomPainter {
       canvas.drawCircle(
         Offset(size.width * 0.5 + r * math.cos(angle),
             size.height * 0.3 + r * math.sin(angle)),
-        75, glow,
+        75,
+        glow,
       );
     }
 
     final line = Paint()
       ..shader = LinearGradient(
-        colors: [Colors.transparent, const Color(0xFF3D8EFF).withOpacity(0.55), Colors.transparent],
+        colors: [
+          Colors.transparent,
+          const Color(0xFF3D8EFF).withOpacity(0.55),
+          Colors.transparent
+        ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, 2))
       ..strokeWidth = 2;
     canvas.drawLine(const Offset(0, 0), Offset(size.width, 0), line);

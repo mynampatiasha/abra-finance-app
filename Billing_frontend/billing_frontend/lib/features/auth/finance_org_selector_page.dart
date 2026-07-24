@@ -16,15 +16,16 @@ import 'finance_branch_selector_page.dart';
 import '../billing/billing_main_shell.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class FinanceOrgSelectorPage extends StatefulWidget {
   final List<Map<String, dynamic>> organizations;
   final Map<String, dynamic> user;
-  final String? tempToken; // passed directly from login to avoid storage read issues on web
+  final String?
+      tempToken; // passed directly from login to avoid storage read issues on web
 
   const FinanceOrgSelectorPage({
     super.key,
@@ -39,9 +40,9 @@ class FinanceOrgSelectorPage extends StatefulWidget {
 
 class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
     with SingleTickerProviderStateMixin {
-  String? _selectedOrgId;  // Keep for single-select backward compatibility
-  Set<String> _selectedOrgIds = {};  // NEW: Multi-select support
-  bool _selectAll = false;  // NEW: All organizations checkbox
+  String? _selectedOrgId; // Keep for single-select backward compatibility
+  Set<String> _selectedOrgIds = {}; // NEW: Multi-select support
+  bool _selectAll = false; // NEW: All organizations checkbox
   bool _loading = false;
   String? _error;
 
@@ -51,9 +52,9 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
   @override
   void initState() {
     super.initState();
-    _orbitCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 16))
-      ..repeat();
+    _orbitCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 16))
+          ..repeat();
   }
 
   @override
@@ -70,7 +71,8 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
       _selectedOrgId = orgId;
     });
 
-    final res = await FinanceAuthService.selectOrg(orgId, directToken: widget.tempToken);
+    final res = await FinanceAuthService.selectOrg(orgId,
+        directToken: widget.tempToken);
     if (!mounted) return;
     setState(() => _loading = false);
 
@@ -80,13 +82,13 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
 
       await FinanceSecureStorage.clearTempToken();
       await FinanceSecureStorage.saveSession(
-        token:   data['token'],
-        userId:  user['id'].toString(),
-        name:    user['name'] ?? '',
-        email:   user['email'] ?? '',
-        phone:   user['phone'] ?? '',
-        role:    user['role'] ?? '',
-        orgId:   user['orgId'] ?? '',
+        token: data['token'],
+        userId: user['id'].toString(),
+        name: user['name'] ?? '',
+        email: user['email'] ?? '',
+        phone: user['phone'] ?? '',
+        role: user['role'] ?? '',
+        orgId: user['orgId'] ?? '',
         orgName: user['orgName'] ?? '',
       );
 
@@ -97,9 +99,9 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
         context,
         PageRouteBuilder(
           pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
-            orgId:        user['orgId'] ?? orgId,
-            orgName:      user['orgName'] ?? orgName,
-            userName:     user['name'] ?? widget.user['name'] ?? 'User',
+            orgId: user['orgId'] ?? orgId,
+            orgName: user['orgName'] ?? orgName,
+            userName: user['name'] ?? widget.user['name'] ?? 'User',
             isInitialLogin: true,
           ),
           transitionsBuilder: (_, anim, __, child) =>
@@ -120,7 +122,7 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
     setState(() {
       if (_selectedOrgIds.contains(orgId)) {
         _selectedOrgIds.remove(orgId);
-        _selectAll = false;  // Uncheck "All" if user deselects an org
+        _selectAll = false; // Uncheck "All" if user deselects an org
       } else {
         _selectedOrgIds.add(orgId);
         // Check if all orgs are now selected
@@ -136,9 +138,8 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
       _selectAll = !_selectAll;
       if (_selectAll) {
         // Select all organizations
-        _selectedOrgIds = widget.organizations
-            .map((org) => org['orgId'] as String)
-            .toSet();
+        _selectedOrgIds =
+            widget.organizations.map((org) => org['orgId'] as String).toSet();
       } else {
         // Deselect all
         _selectedOrgIds.clear();
@@ -165,7 +166,8 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
     }
 
     // For multi-org, automatically select ALL branches (no branch selector needed)
-    await FinanceSecureStorage.saveSelectedBranchIds([]);  // Empty = ALL branches
+    await FinanceSecureStorage.saveSelectedBranchIds(
+        []); // Empty = ALL branches
 
     // For multi-org, we still need to select one org for the token
     // Use the first selected org
@@ -174,7 +176,8 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
       (org) => org['orgId'] == firstOrgId,
     );
 
-    final res = await FinanceAuthService.selectOrg(firstOrgId, directToken: widget.tempToken);
+    final res = await FinanceAuthService.selectOrg(firstOrgId,
+        directToken: widget.tempToken);
     if (!mounted) return;
     setState(() => _loading = false);
 
@@ -184,13 +187,13 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
 
       await FinanceSecureStorage.clearTempToken();
       await FinanceSecureStorage.saveSession(
-        token:   data['token'],
-        userId:  user['id'].toString(),
-        name:    user['name'] ?? '',
-        email:   user['email'] ?? '',
-        phone:   user['phone'] ?? '',
-        role:    user['role'] ?? '',
-        orgId:   user['orgId'] ?? '',
+        token: data['token'],
+        userId: user['id'].toString(),
+        name: user['name'] ?? '',
+        email: user['email'] ?? '',
+        phone: user['phone'] ?? '',
+        role: user['role'] ?? '',
+        orgId: user['orgId'] ?? '',
         orgName: user['orgName'] ?? '',
       );
 
@@ -204,8 +207,8 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
           PageRouteBuilder(
             pageBuilder: (_, __, ___) => FinancePostLoginSplash(
               userName: user['name'] ?? widget.user['name'] ?? 'User',
-              orgName: _selectAll 
-                  ? 'All Organizations' 
+              orgName: _selectAll
+                  ? 'All Organizations'
                   : '${_selectedOrgIds.length} Organizations',
               destination: const BillingMainShell(),
             ),
@@ -220,9 +223,9 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
           context,
           PageRouteBuilder(
             pageBuilder: (_, __, ___) => FinanceBranchSelectorPage(
-              orgId:        user['orgId'] ?? firstOrgId,
-              orgName:      user['orgName'] ?? firstOrg['orgName'],
-              userName:     user['name'] ?? widget.user['name'] ?? 'User',
+              orgId: user['orgId'] ?? firstOrgId,
+              orgName: user['orgName'] ?? firstOrg['orgName'],
+              userName: user['name'] ?? widget.user['name'] ?? 'User',
               isInitialLogin: true,
             ),
             transitionsBuilder: (_, anim, __, child) =>
@@ -241,19 +244,27 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
   // ── Role helpers ───────────────────────────────────────────────────────────
   Color _roleColor(String role) {
     switch (role) {
-      case 'owner':      return const Color(0xFFFBBF24);
-      case 'admin':      return _navyAccent;
-      case 'accountant': return const Color(0xFF00C896);
-      default:           return Colors.white54;
+      case 'owner':
+        return const Color(0xFFFBBF24);
+      case 'admin':
+        return _navyAccent;
+      case 'accountant':
+        return const Color(0xFF00C896);
+      default:
+        return Colors.white54;
     }
   }
 
   IconData _roleIcon(String role) {
     switch (role) {
-      case 'owner':      return Icons.star_rounded;
-      case 'admin':      return Icons.admin_panel_settings_rounded;
-      case 'accountant': return Icons.calculate_outlined;
-      default:           return Icons.person_outline_rounded;
+      case 'owner':
+        return Icons.star_rounded;
+      case 'admin':
+        return Icons.admin_panel_settings_rounded;
+      case 'accountant':
+        return Icons.calculate_outlined;
+      default:
+        return Icons.person_outline_rounded;
     }
   }
 
@@ -310,8 +321,9 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                         const SizedBox(height: 20),
 
                         // ── Entity Name (if set) ──────────────────────────
-                        if (widget.user['entityName'] != null && 
-                            (widget.user['entityName'] as String).isNotEmpty) ...[
+                        if (widget.user['entityName'] != null &&
+                            (widget.user['entityName'] as String)
+                                .isNotEmpty) ...[
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 20, vertical: 12),
@@ -492,9 +504,9 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
 
                         // ── Org cards with checkboxes ─────────────────────────────────────
                         ...widget.organizations.map((org) {
-                          final orgId   = org['orgId']   as String? ?? '';
+                          final orgId = org['orgId'] as String? ?? '';
                           final orgName = org['orgName'] as String? ?? '';
-                          final role    = org['role']    as String? ?? 'staff';
+                          final role = org['role'] as String? ?? 'staff';
                           final isSelected = _selectedOrgIds.contains(orgId);
 
                           return Padding(
@@ -520,16 +532,16 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                                   boxShadow: isSelected
                                       ? [
                                           BoxShadow(
-                                            color: _navyAccent
-                                                .withOpacity(0.25),
+                                            color:
+                                                _navyAccent.withOpacity(0.25),
                                             blurRadius: 20,
                                             offset: const Offset(0, 4),
                                           )
                                         ]
                                       : [
                                           BoxShadow(
-                                            color: Colors.black
-                                                .withOpacity(0.15),
+                                            color:
+                                                Colors.black.withOpacity(0.15),
                                             blurRadius: 10,
                                             offset: const Offset(0, 3),
                                           )
@@ -572,8 +584,7 @@ class _FinanceOrgSelectorPageState extends State<FinanceOrgSelectorPage>
                                           begin: Alignment.topLeft,
                                           end: Alignment.bottomRight,
                                         ),
-                                        borderRadius:
-                                            BorderRadius.circular(13),
+                                        borderRadius: BorderRadius.circular(13),
                                       ),
                                       child: Center(
                                         child: Text(
@@ -760,8 +771,7 @@ class _OrgSelectorBgPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 60)
         ..color = const Color(0xFF3D8EFF).withOpacity(0.09);
       canvas.drawCircle(
-          Offset(cx + r * math.cos(angle), cy + r * math.sin(angle)),
-          70, glow);
+          Offset(cx + r * math.cos(angle), cy + r * math.sin(angle)), 70, glow);
     }
 
     final line = Paint()

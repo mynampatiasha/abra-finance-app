@@ -54,34 +54,34 @@ class ChartOfAccount {
   });
 
   factory ChartOfAccount.fromJson(Map<String, dynamic> j) => ChartOfAccount(
-    id: j['_id'] ?? j['id'] ?? '',
-    accountCode: j['accountCode'] ?? '',
-    accountName: j['accountName'] ?? '',
-    accountType: j['accountType'] ?? '',
-    accountSubType: j['accountSubType'] ?? '',
-    parentAccountId: j['parentAccountId'],
-    parentAccountName: j['parentAccountName'],
-    description: j['description'],
-    currency: j['currency'] ?? 'INR',
-    isActive: j['isActive'] ?? true,
-    isSystemAccount: j['isSystemAccount'] ?? false,
-    closingBalance: (j['closingBalance'] ?? 0).toDouble(),
-    balanceType: j['balanceType'] ?? 'Dr',
-    transactionCount: j['transactionCount'] ?? 0,
-    createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
-    updatedAt: DateTime.tryParse(j['updatedAt'] ?? '') ?? DateTime.now(),
-  );
+        id: j['_id'] ?? j['id'] ?? '',
+        accountCode: j['accountCode'] ?? '',
+        accountName: j['accountName'] ?? '',
+        accountType: j['accountType'] ?? '',
+        accountSubType: j['accountSubType'] ?? '',
+        parentAccountId: j['parentAccountId'],
+        parentAccountName: j['parentAccountName'],
+        description: j['description'],
+        currency: j['currency'] ?? 'INR',
+        isActive: j['isActive'] ?? true,
+        isSystemAccount: j['isSystemAccount'] ?? false,
+        closingBalance: (j['closingBalance'] ?? 0).toDouble(),
+        balanceType: j['balanceType'] ?? 'Dr',
+        transactionCount: j['transactionCount'] ?? 0,
+        createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+        updatedAt: DateTime.tryParse(j['updatedAt'] ?? '') ?? DateTime.now(),
+      );
 
   Map<String, dynamic> toJson() => {
-    'accountCode': accountCode,
-    'accountName': accountName,
-    'accountType': accountType,
-    'accountSubType': accountSubType,
-    'parentAccountId': parentAccountId,
-    'description': description,
-    'currency': currency,
-    'isActive': isActive,
-  };
+        'accountCode': accountCode,
+        'accountName': accountName,
+        'accountType': accountType,
+        'accountSubType': accountSubType,
+        'parentAccountId': parentAccountId,
+        'description': description,
+        'currency': currency,
+        'isActive': isActive,
+      };
 }
 
 class AccountTransaction {
@@ -105,16 +105,17 @@ class AccountTransaction {
     required this.balance,
   });
 
-  factory AccountTransaction.fromJson(Map<String, dynamic> j) => AccountTransaction(
-    id: j['_id'] ?? j['id'] ?? '',
-    date: DateTime.tryParse(j['date'] ?? '') ?? DateTime.now(),
-    description: j['description'] ?? '',
-    referenceType: j['referenceType'] ?? '',
-    referenceNumber: j['referenceNumber'] ?? '',
-    debit: (j['debit'] ?? 0).toDouble(),
-    credit: (j['credit'] ?? 0).toDouble(),
-    balance: (j['balance'] ?? 0).toDouble(),
-  );
+  factory AccountTransaction.fromJson(Map<String, dynamic> j) =>
+      AccountTransaction(
+        id: j['_id'] ?? j['id'] ?? '',
+        date: DateTime.tryParse(j['date'] ?? '') ?? DateTime.now(),
+        description: j['description'] ?? '',
+        referenceType: j['referenceType'] ?? '',
+        referenceNumber: j['referenceNumber'] ?? '',
+        debit: (j['debit'] ?? 0).toDouble(),
+        credit: (j['credit'] ?? 0).toDouble(),
+        balance: (j['balance'] ?? 0).toDouble(),
+      );
 }
 
 class CoaStats {
@@ -131,11 +132,11 @@ class CoaStats {
   });
 
   factory CoaStats.fromJson(Map<String, dynamic> j) => CoaStats(
-    totalAccounts: j['totalAccounts'] ?? 0,
-    activeAccounts: j['activeAccounts'] ?? 0,
-    inactiveAccounts: j['inactiveAccounts'] ?? 0,
-    byType: Map<String, int>.from(j['byType'] ?? {}),
-  );
+        totalAccounts: j['totalAccounts'] ?? 0,
+        activeAccounts: j['activeAccounts'] ?? 0,
+        inactiveAccounts: j['inactiveAccounts'] ?? 0,
+        byType: Map<String, int>.from(j['byType'] ?? {}),
+      );
 }
 
 class CoaListResult {
@@ -169,7 +170,8 @@ class ChartOfAccountService {
     };
   }
 
-  static String get _base => '${ApiConfig.baseUrl}/api/finance/chart-of-accounts';
+  static String get _base =>
+      '${ApiConfig.baseUrl}/api/finance/chart-of-accounts';
 
   // ── List ──────────────────────────────────────────────────────────────────
 
@@ -192,11 +194,14 @@ class ChartOfAccountService {
     final uri = Uri.parse(_base).replace(queryParameters: params);
     final res = await http.get(uri, headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load accounts');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load accounts');
 
     final data = body['data'];
     return CoaListResult(
-      accounts: (data['accounts'] as List).map((j) => ChartOfAccount.fromJson(j)).toList(),
+      accounts: (data['accounts'] as List)
+          .map((j) => ChartOfAccount.fromJson(j))
+          .toList(),
       total: data['pagination']?['total'] ?? 0,
       page: data['pagination']?['page'] ?? 1,
       pages: data['pagination']?['pages'] ?? 1,
@@ -216,7 +221,8 @@ class ChartOfAccountService {
     final headers = await _getHeaders();
     final res = await http.get(Uri.parse('$_base/$id'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load account');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load account');
     return ChartOfAccount.fromJson(body['data']);
   }
 
@@ -232,11 +238,15 @@ class ChartOfAccountService {
     if (fromDate != null) params['fromDate'] = fromDate.toIso8601String();
     if (toDate != null) params['toDate'] = toDate.toIso8601String();
 
-    final uri = Uri.parse('$_base/$id/transactions').replace(queryParameters: params);
+    final uri =
+        Uri.parse('$_base/$id/transactions').replace(queryParameters: params);
     final res = await http.get(uri, headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load transactions');
-    return (body['data'] as List).map((j) => AccountTransaction.fromJson(j)).toList();
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load transactions');
+    return (body['data'] as List)
+        .map((j) => AccountTransaction.fromJson(j))
+        .toList();
   }
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -245,7 +255,8 @@ class ChartOfAccountService {
     final headers = await _getHeaders();
     final res = await http.get(Uri.parse('$_base/stats'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load stats');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load stats');
     return CoaStats.fromJson(body['data']);
   }
 
@@ -259,13 +270,15 @@ class ChartOfAccountService {
       body: jsonEncode(data),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 201) throw Exception(body['message'] ?? 'Failed to create account');
+    if (res.statusCode != 201)
+      throw Exception(body['message'] ?? 'Failed to create account');
     return ChartOfAccount.fromJson(body['data']);
   }
 
   // ── Update ────────────────────────────────────────────────────────────────
 
-  static Future<ChartOfAccount> updateAccount(String id, Map<String, dynamic> data) async {
+  static Future<ChartOfAccount> updateAccount(
+      String id, Map<String, dynamic> data) async {
     final headers = await _getHeaders();
     final res = await http.put(
       Uri.parse('$_base/$id'),
@@ -273,7 +286,8 @@ class ChartOfAccountService {
       body: jsonEncode(data),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to update account');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to update account');
     return ChartOfAccount.fromJson(body['data']);
   }
 
@@ -287,7 +301,8 @@ class ChartOfAccountService {
       body: jsonEncode({'isActive': isActive}),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to update account');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to update account');
     return ChartOfAccount.fromJson(body['data']);
   }
 
@@ -297,7 +312,8 @@ class ChartOfAccountService {
     final headers = await _getHeaders();
     final res = await http.delete(Uri.parse('$_base/$id'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to delete account');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to delete account');
   }
 
   // ── Bulk Import ───────────────────────────────────────────────────────────
@@ -315,13 +331,15 @@ class ChartOfAccountService {
       Uri.parse('$_base/import'),
     );
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+    request.files.add(
+        http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
     request.fields['accounts'] = jsonEncode(accounts);
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Import failed');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Import failed');
     return body;
   }
 
@@ -345,12 +363,13 @@ class ChartOfAccountService {
       Uri.parse('$_base/$id/opening-balance'),
       headers: headers,
       body: jsonEncode({
-        'amount'     : amount,
+        'amount': amount,
         'balanceType': balanceType,
-        'date'       : date.toIso8601String(),
+        'date': date.toIso8601String(),
       }),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to save opening balance');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to save opening balance');
   }
 }

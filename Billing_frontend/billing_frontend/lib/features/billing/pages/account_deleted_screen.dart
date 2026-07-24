@@ -53,14 +53,16 @@ class AccountDeletedScreen extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () => Navigator.pushAndRemoveUntil(
                     context,
-                    MaterialPageRoute(builder: (_) => const FinanceWelcomeScreen()),
+                    MaterialPageRoute(
+                        builder: (_) => const FinanceWelcomeScreen()),
                     (_) => false,
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1E3A5F),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   child: const Text(
                     'Back to Home',

@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // lib/screens/tms/raise_ticket_screen.dart
 // ============================================================================
 // 🎫 RAISE TICKET SCREEN - Simple Modern UI with Animations
@@ -9,14 +10,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/tms_service.dart';
 
-
-
 class RaiseTicketScreen extends StatefulWidget {
   /// Optional pre-fill data for re-raising a ticket back to the original creator.
   final String? prefillSubject;
   final String? prefillMessage;
   final String? prefillPriority;
-  final int?    prefillTimeline;
+  final int? prefillTimeline;
   final String? prefillAssignedToId;
   final String? prefillAssignedToName;
 
@@ -34,7 +33,8 @@ class RaiseTicketScreen extends StatefulWidget {
   State<RaiseTicketScreen> createState() => _RaiseTicketScreenState();
 }
 
-class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProviderStateMixin {
+class _RaiseTicketScreenState extends State<RaiseTicketScreen>
+    with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _subjectController = TextEditingController();
   final _messageController = TextEditingController();
@@ -74,10 +74,10 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
   late Animation<double> _scaleAnimation;
 
   // Custom color scheme
-  static const Color darkBlue = Color(0xFF042E45);    // Header gradient dark
-  static const Color mediumBlue = Color(0xFF186285);  // Header gradient medium
-  static const Color lightBlue = Color(0xFFEBF2F5);   // Background color
-  static const Color accentBlue = Color(0xFF186285);  // Accent color
+  static const Color darkBlue = Color(0xFF042E45); // Header gradient dark
+  static const Color mediumBlue = Color(0xFF186285); // Header gradient medium
+  static const Color lightBlue = Color(0xFFEBF2F5); // Background color
+  static const Color accentBlue = Color(0xFF186285); // Accent color
 
   @override
   void initState() {
@@ -99,7 +99,7 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
       _calculateDeadline(_timeline);
     }
     if (widget.prefillAssignedToId != null) {
-      _assignedTo     = widget.prefillAssignedToId;
+      _assignedTo = widget.prefillAssignedToId;
       _assignedToName = widget.prefillAssignedToName;
     }
   }
@@ -171,8 +171,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
     );
     if (match.isNotEmpty && match['_id'] != null) {
       setState(() {
-        _assignedTo     = match['_id'].toString();
-        _assignedToName = match['name_parson'] ?? match['username'] ?? nameOrEmail;
+        _assignedTo = match['_id'].toString();
+        _assignedToName =
+            match['name_parson'] ?? match['username'] ?? nameOrEmail;
       });
     }
   }
@@ -189,7 +190,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
         final email = (emp['email'] ?? '').toString().toLowerCase();
         final username = (emp['username'] ?? '').toString().toLowerCase();
         final searchQuery = query.toLowerCase();
-        return name.contains(searchQuery) || email.contains(searchQuery) || username.contains(searchQuery);
+        return name.contains(searchQuery) ||
+            email.contains(searchQuery) ||
+            username.contains(searchQuery);
       }).toList();
     });
   }
@@ -199,7 +202,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
       setState(() => _calculatedDeadline = null);
       return;
     }
-    setState(() => _calculatedDeadline = DateTime.now().add(Duration(minutes: minutes)));
+    setState(() =>
+        _calculatedDeadline = DateTime.now().add(Duration(minutes: minutes)));
   }
 
   Future<void> _pickFile() async {
@@ -262,12 +266,12 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
       setState(() {
         _subjectController.clear();
         _messageController.clear();
-        _priority        = 'Medium';
-        _timeline        = null;
-        _assignedTo      = null;
-        _assignedToName  = null;
-        _attachment      = null;
-        _attachmentName  = null;
+        _priority = 'Medium';
+        _timeline = null;
+        _assignedTo = null;
+        _assignedToName = null;
+        _attachment = null;
+        _attachmentName = null;
         _calculatedDeadline = null;
       });
     } else {
@@ -276,39 +280,11 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: mediumBlue,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error_outline, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: const Color(0xFFEF4444),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   @override
@@ -325,12 +301,15 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
               color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+            child: const Icon(Icons.arrow_back_ios_new,
+                color: Colors.white, size: 18),
           ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          widget.prefillAssignedToId != null ? 'Re-raise Ticket' : 'Create New Ticket',
+          widget.prefillAssignedToId != null
+              ? 'Re-raise Ticket'
+              : 'Create New Ticket',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -418,19 +397,24 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.confirmation_number_rounded, size: 40, color: Colors.white),
+            child: const Icon(Icons.confirmation_number_rounded,
+                size: 40, color: Colors.white),
           ),
           const SizedBox(height: 16),
           Text(
-            widget.prefillAssignedToId != null ? 'Re-raise Ticket' : 'Raise a New Ticket',
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+            widget.prefillAssignedToId != null
+                ? 'Re-raise Ticket'
+                : 'Raise a New Ticket',
+            style: const TextStyle(
+                fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
           Text(
             widget.prefillAssignedToId != null
                 ? 'Pre-filled from original ticket — review and submit'
                 : 'Fill in the details below to create your ticket',
-            style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.9)),
+            style:
+                TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.9)),
             textAlign: TextAlign.center,
           ),
         ],
@@ -452,11 +436,13 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
         const SizedBox(width: 10),
         Text(
           label,
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: darkBlue),
+          style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w600, color: darkBlue),
         ),
         if (required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Color(0xFFEF4444), fontSize: 16)),
+          const Text('*',
+              style: TextStyle(color: Color(0xFFEF4444), fontSize: 16)),
         ],
       ],
     );
@@ -483,10 +469,13 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
           hintStyle: TextStyle(color: const Color(0xFF64748B).withOpacity(0.6)),
           filled: true,
           fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: accentBlue.withOpacity(0.3), width: 1),
+            borderSide:
+                BorderSide(color: accentBlue.withOpacity(0.3), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
@@ -500,9 +489,11 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
             borderRadius: BorderRadius.circular(16),
             borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        validator: (value) => value == null || value.isEmpty ? 'Please enter a subject' : null,
+        validator: (value) =>
+            value == null || value.isEmpty ? 'Please enter a subject' : null,
       ),
     );
   }
@@ -529,10 +520,13 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
           hintStyle: TextStyle(color: const Color(0xFF64748B).withOpacity(0.6)),
           filled: true,
           fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: accentBlue.withOpacity(0.3), width: 1),
+            borderSide:
+                BorderSide(color: accentBlue.withOpacity(0.3), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
@@ -546,9 +540,11 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
             borderRadius: BorderRadius.circular(16),
             borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        validator: (value) => value == null || value.isEmpty ? 'Please enter a message' : null,
+        validator: (value) =>
+            value == null || value.isEmpty ? 'Please enter a message' : null,
       ),
     );
   }
@@ -579,7 +575,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                   color: isSelected ? null : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isSelected ? _getPriorityColor(priority) : accentBlue.withOpacity(0.3),
+                    color: isSelected
+                        ? _getPriorityColor(priority)
+                        : accentBlue.withOpacity(0.3),
                     width: isSelected ? 2 : 1,
                   ),
                   boxShadow: isSelected
@@ -604,7 +602,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                     Icon(
                       _getPriorityIcon(priority),
                       size: 18,
-                      color: isSelected ? Colors.white : _getPriorityColor(priority),
+                      color: isSelected
+                          ? Colors.white
+                          : _getPriorityColor(priority),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -613,7 +613,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : const Color(0xFF475569),
+                        color:
+                            isSelected ? Colors.white : const Color(0xFF475569),
                       ),
                     ),
                   ],
@@ -676,8 +677,11 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
           prefixIcon: Icon(Icons.timer, color: mediumBlue),
           filled: true,
           fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
         items: _timelineOptions.map((option) {
           return DropdownMenuItem<int>(
@@ -724,12 +728,19 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
               children: [
                 const Text(
                   'Deadline',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF64748B)),
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF64748B)),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  DateFormat('MMM dd, yyyy \'at\' hh:mm a').format(_calculatedDeadline!),
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: darkBlue),
+                  DateFormat('MMM dd, yyyy \'at\' hh:mm a')
+                      .format(_calculatedDeadline!),
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: darkBlue),
                 ),
               ],
             ),
@@ -796,7 +807,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                     ),
                     child: Icon(
                       _assignedTo == null ? Icons.person_add : Icons.person,
-                      color: _assignedTo == null ? const Color(0xFFEF4444) : mediumBlue,
+                      color: _assignedTo == null
+                          ? const Color(0xFFEF4444)
+                          : mediumBlue,
                       size: 20,
                     ),
                   ),
@@ -806,7 +819,9 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _assignedTo == null ? 'Select Employee' : 'Assigned To',
+                          _assignedTo == null
+                              ? 'Select Employee'
+                              : 'Assigned To',
                           style: TextStyle(
                             fontSize: 12,
                             color: const Color(0xFF64748B).withOpacity(0.8),
@@ -818,14 +833,19 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                           _assignedToName ?? 'Tap to select',
                           style: TextStyle(
                             fontSize: 15,
-                            color: _assignedTo == null ? const Color(0xFF94A3B8) : darkBlue,
-                            fontWeight: _assignedTo == null ? FontWeight.normal : FontWeight.w600,
+                            color: _assignedTo == null
+                                ? const Color(0xFF94A3B8)
+                                : darkBlue,
+                            fontWeight: _assignedTo == null
+                                ? FontWeight.normal
+                                : FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const Icon(Icons.arrow_forward_ios, color: Color(0xFF94A3B8), size: 16),
+                  const Icon(Icons.arrow_forward_ios,
+                      color: Color(0xFF94A3B8), size: 16),
                 ],
               ),
             ),
@@ -844,7 +864,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
         builder: (context, setDialogState) {
           return Dialog(
             backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
             child: Container(
               constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
               decoration: BoxDecoration(
@@ -883,7 +904,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                             color: Colors.white.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.people, color: Colors.white, size: 20),
+                          child: const Icon(Icons.people,
+                              color: Colors.white, size: 20),
                         ),
                         const SizedBox(width: 14),
                         const Expanded(
@@ -901,13 +923,15 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                               SizedBox(height: 2),
                               Text(
                                 'Select an employee to assign this ticket',
-                                style: TextStyle(color: Colors.white60, fontSize: 12),
+                                style: TextStyle(
+                                    color: Colors.white60, fontSize: 12),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                          icon: const Icon(Icons.close_rounded,
+                              color: Colors.white, size: 20),
                           onPressed: () => Navigator.pop(context),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
@@ -922,18 +946,22 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                       decoration: BoxDecoration(
                         color: const Color(0xFFEBF2F5).withOpacity(0.5),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF186285).withOpacity(0.3)),
+                        border: Border.all(
+                            color: const Color(0xFF186285).withOpacity(0.3)),
                       ),
                       child: TextField(
                         controller: _employeeSearchController,
                         style: TextStyle(color: darkBlue, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: 'Search employees...',
-                          hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-                          prefixIcon: Icon(Icons.search, color: mediumBlue, size: 20),
+                          hintStyle: const TextStyle(
+                              color: Color(0xFF94A3B8), fontSize: 14),
+                          prefixIcon:
+                              Icon(Icons.search, color: mediumBlue, size: 20),
                           suffixIcon: _employeeSearchController.text.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear, color: Color(0xFF64748B), size: 18),
+                                  icon: const Icon(Icons.clear,
+                                      color: Color(0xFF64748B), size: 18),
                                   onPressed: () {
                                     setDialogState(() {
                                       _employeeSearchController.clear();
@@ -943,7 +971,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                                 )
                               : null,
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
                         ),
                         onChanged: (value) {
                           setDialogState(() => _filterEmployees(value));
@@ -959,11 +988,17 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.search_off, size: 48, color: const Color(0xFF186285).withOpacity(0.4)),
+                                Icon(Icons.search_off,
+                                    size: 48,
+                                    color: const Color(0xFF186285)
+                                        .withOpacity(0.4)),
                                 const SizedBox(height: 12),
                                 const Text(
                                   'No employees found',
-                                  style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500),
+                                  style: TextStyle(
+                                      color: Color(0xFF64748B),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500),
                                 ),
                               ],
                             ),
@@ -972,12 +1007,14 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                             child: Column(
                               children: _filteredEmployees.map((employee) {
-                                final isSelected = _assignedTo == employee['_id'].toString();
+                                final isSelected =
+                                    _assignedTo == employee['_id'].toString();
                                 return GestureDetector(
                                   onTap: () {
                                     setState(() {
-                                      _assignedTo     = employee['_id'].toString();
-                                      _assignedToName = employee['name_parson'] ?? 'Unknown';
+                                      _assignedTo = employee['_id'].toString();
+                                      _assignedToName =
+                                          employee['name_parson'] ?? 'Unknown';
                                     });
                                     Navigator.pop(context);
                                   },
@@ -987,11 +1024,14 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
                                       color: isSelected
-                                          ? const Color(0xFF186285).withOpacity(0.08)
+                                          ? const Color(0xFF186285)
+                                              .withOpacity(0.08)
                                           : const Color(0xFFF8FAFC),
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
-                                        color: isSelected ? const Color(0xFF186285) : const Color(0xFFE2E8F0),
+                                        color: isSelected
+                                            ? const Color(0xFF186285)
+                                            : const Color(0xFFE2E8F0),
                                         width: isSelected ? 2 : 1,
                                       ),
                                     ),
@@ -1001,11 +1041,15 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                                           radius: 20,
                                           backgroundColor: isSelected
                                               ? const Color(0xFF186285)
-                                              : const Color(0xFF186285).withOpacity(0.15),
+                                              : const Color(0xFF186285)
+                                                  .withOpacity(0.15),
                                           child: Text(
-                                            (employee['name_parson'] ?? 'U')[0].toUpperCase(),
+                                            (employee['name_parson'] ?? 'U')[0]
+                                                .toUpperCase(),
                                             style: TextStyle(
-                                              color: isSelected ? Colors.white : const Color(0xFF186285),
+                                              color: isSelected
+                                                  ? Colors.white
+                                                  : const Color(0xFF186285),
                                               fontWeight: FontWeight.bold,
                                               fontSize: 14,
                                             ),
@@ -1014,31 +1058,42 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                employee['name_parson'] ?? 'Unknown',
+                                                employee['name_parson'] ??
+                                                    'Unknown',
                                                 style: TextStyle(
                                                   color: darkBlue,
                                                   fontWeight: FontWeight.w600,
                                                   fontSize: 14,
                                                 ),
                                               ),
-                                              if (employee['email'] != null) ...[
+                                              if (employee['email'] !=
+                                                  null) ...[
                                                 const SizedBox(height: 2),
                                                 Text(
                                                   employee['email'],
-                                                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                      color: Color(0xFF64748B),
+                                                      fontSize: 12),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                               ],
                                             ],
                                           ),
                                         ),
                                         if (isSelected)
-                                          const Icon(Icons.check_circle_rounded, color: Color(0xFF186285), size: 18)
+                                          const Icon(Icons.check_circle_rounded,
+                                              color: Color(0xFF186285),
+                                              size: 18)
                                         else
-                                          const Icon(Icons.chevron_right_rounded, color: Color(0xFFCBD5E1), size: 18),
+                                          const Icon(
+                                              Icons.chevron_right_rounded,
+                                              color: Color(0xFFCBD5E1),
+                                              size: 18),
                                       ],
                                     ),
                                   ),
@@ -1067,7 +1122,10 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: accentBlue.withOpacity(0.3)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4)),
           ],
         ),
         child: Row(
@@ -1081,8 +1139,11 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(
-                _attachment == null ? Icons.cloud_upload : Icons.insert_drive_file,
-                color: _attachment == null ? mediumBlue : const Color(0xFF10B981),
+                _attachment == null
+                    ? Icons.cloud_upload
+                    : Icons.insert_drive_file,
+                color:
+                    _attachment == null ? mediumBlue : const Color(0xFF10B981),
                 size: 20,
               ),
             ),
@@ -1104,8 +1165,12 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                     _attachmentName ?? 'JPG, PNG, PDF, DOC (Max 5MB)',
                     style: TextStyle(
                       fontSize: 14,
-                      color: _attachment == null ? const Color(0xFF94A3B8) : darkBlue,
-                      fontWeight: _attachment == null ? FontWeight.normal : FontWeight.w500,
+                      color: _attachment == null
+                          ? const Color(0xFF94A3B8)
+                          : darkBlue,
+                      fontWeight: _attachment == null
+                          ? FontWeight.normal
+                          : FontWeight.w500,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1121,7 +1186,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
                 }),
               )
             else
-              const Icon(Icons.arrow_forward_ios, color: Color(0xFF94A3B8), size: 16),
+              const Icon(Icons.arrow_forward_ios,
+                  color: Color(0xFF94A3B8), size: 16),
           ],
         ),
       ),
@@ -1148,7 +1214,8 @@ class _RaiseTicketScreenState extends State<RaiseTicketScreen> with TickerProvid
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
         child: _isSubmitting
             ? const SizedBox(

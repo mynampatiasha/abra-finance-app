@@ -17,7 +17,8 @@ class ProjectService {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('finance_jwt_token') ??
         prefs.getString('jwt_token') ??
-        prefs.getString('token') ?? '';
+        prefs.getString('token') ??
+        '';
     final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
@@ -50,15 +51,17 @@ class ProjectService {
     int limit = 20,
   }) async {
     final q = <String, String>{
-      'page': '$page', 'limit': '$limit',
-      if (status != null)        'status':        status,
+      'page': '$page',
+      'limit': '$limit',
+      if (status != null) 'status': status,
       if (billingMethod != null) 'billingMethod': billingMethod,
-      if (customerId != null)    'customerId':    customerId,
-      if (search != null)        'search':        search,
-      if (fromDate != null)      'fromDate':      fromDate,
-      if (toDate != null)        'toDate':        toDate,
+      if (customerId != null) 'customerId': customerId,
+      if (search != null) 'search': search,
+      if (fromDate != null) 'fromDate': fromDate,
+      if (toDate != null) 'toDate': toDate,
     };
-    final uri = Uri.parse('${ApiConfig.baseUrl}$_base').replace(queryParameters: q);
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}$_base').replace(queryParameters: q);
     final res = await http.get(uri, headers: await _headers());
     return ProjectListResponse.fromJson(_decode(res));
   }
@@ -80,19 +83,22 @@ class ProjectService {
       body: json.encode(data),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to create project');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to create project');
     return Project.fromJson(decoded['data'] ?? {});
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
-  static Future<Project> updateProject(String id, Map<String, dynamic> data) async {
+  static Future<Project> updateProject(
+      String id, Map<String, dynamic> data) async {
     final res = await http.put(
       Uri.parse('${ApiConfig.baseUrl}$_base/$id'),
       headers: await _headers(),
       body: json.encode(data),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to update project');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to update project');
     return Project.fromJson(decoded['data'] ?? {});
   }
 
@@ -104,7 +110,8 @@ class ProjectService {
       body: json.encode({'status': status}),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to update status');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to update status');
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
@@ -114,7 +121,8 @@ class ProjectService {
       headers: await _headers(),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to delete project');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to delete project');
   }
 
   // ── Unbilled Hours ─────────────────────────────────────────────────────────
@@ -124,31 +132,36 @@ class ProjectService {
       headers: await _headers(),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to fetch unbilled hours');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to fetch unbilled hours');
     return decoded['data'] ?? {};
   }
 
   // ── Generate Invoice ───────────────────────────────────────────────────────
-  static Future<GenerateInvoiceResult> generateInvoice(String id, {double gstRate = 18}) async {
+  static Future<GenerateInvoiceResult> generateInvoice(String id,
+      {double gstRate = 18}) async {
     final res = await http.post(
       Uri.parse('${ApiConfig.baseUrl}$_base/$id/generate-invoice'),
       headers: await _headers(),
       body: json.encode({'gstRate': gstRate}),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to generate invoice');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to generate invoice');
     return GenerateInvoiceResult.fromJson(decoded['data'] ?? {});
   }
 
   // ── Bulk Import ────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> bulkImport(List<Map<String, dynamic>> projects) async {
+  static Future<Map<String, dynamic>> bulkImport(
+      List<Map<String, dynamic>> projects) async {
     final res = await http.post(
       Uri.parse('${ApiConfig.baseUrl}$_base/import'),
       headers: await _headers(),
       body: json.encode({'projects': projects}),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Import failed');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Import failed');
     return decoded;
   }
 
@@ -159,7 +172,8 @@ class ProjectService {
       headers: await _headers(),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to load dashboard');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to load dashboard');
     return decoded['data'] as Map<String, dynamic>;
   }
 
@@ -170,21 +184,26 @@ class ProjectService {
       headers: await _headers(),
     );
     final decoded = _decode(res);
-    if (decoded['success'] != true) throw Exception(decoded['message'] ?? 'Failed to clone project');
+    if (decoded['success'] != true)
+      throw Exception(decoded['message'] ?? 'Failed to clone project');
     return Project.fromJson(decoded['data'] ?? {});
   }
 
   // ── Export All ─────────────────────────────────────────────────────────────
-  static Future<List<Project>> getAllForExport({String? status, String? billingMethod}) async {
+  static Future<List<Project>> getAllForExport(
+      {String? status, String? billingMethod}) async {
     final q = <String, String>{
-      if (status != null)        'status':        status,
+      if (status != null) 'status': status,
       if (billingMethod != null) 'billingMethod': billingMethod,
     };
-    final uri = Uri.parse('${ApiConfig.baseUrl}$_base/export/all').replace(queryParameters: q);
+    final uri = Uri.parse('${ApiConfig.baseUrl}$_base/export/all')
+        .replace(queryParameters: q);
     final res = await http.get(uri, headers: await _headers());
     final decoded = _decode(res);
     final data = decoded['data'] as List? ?? [];
-    return data.map((e) => Project.fromJson(e as Map<String, dynamic>)).toList();
+    return data
+        .map((e) => Project.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }
 
@@ -221,47 +240,68 @@ class Project {
   final DateTime updatedAt;
 
   Project({
-    required this.id, required this.projectNumber, required this.projectName,
-    required this.customerId, required this.customerName,
-    required this.customerEmail, required this.customerPhone,
-    required this.description, required this.billingMethod,
-    required this.fixedAmount, required this.hourlyRate,
-    required this.budgetType, required this.budgetAmount,
-    required this.currency, required this.startDate, this.endDate,
-    required this.status, required this.tasks, required this.staff,
-    required this.notes, required this.totalLoggedHours,
-    required this.totalBilledAmount, required this.unbilledHours,
-    required this.invoicesGenerated, required this.createdAt, required this.updatedAt,
+    required this.id,
+    required this.projectNumber,
+    required this.projectName,
+    required this.customerId,
+    required this.customerName,
+    required this.customerEmail,
+    required this.customerPhone,
+    required this.description,
+    required this.billingMethod,
+    required this.fixedAmount,
+    required this.hourlyRate,
+    required this.budgetType,
+    required this.budgetAmount,
+    required this.currency,
+    required this.startDate,
+    this.endDate,
+    required this.status,
+    required this.tasks,
+    required this.staff,
+    required this.notes,
+    required this.totalLoggedHours,
+    required this.totalBilledAmount,
+    required this.unbilledHours,
+    required this.invoicesGenerated,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   factory Project.fromJson(Map<String, dynamic> j) => Project(
-    id:               j['_id']?.toString()          ?? j['id']?.toString() ?? '',
-    projectNumber:    j['projectNumber']?.toString() ?? '',
-    projectName:      j['projectName']?.toString()   ?? '',
-    customerId:       j['customerId']?.toString()    ?? '',
-    customerName:     j['customerName']?.toString()  ?? '',
-    customerEmail:    j['customerEmail']?.toString() ?? '',
-    customerPhone:    j['customerPhone']?.toString() ?? '',
-    description:      j['description']?.toString()  ?? '',
-    billingMethod:    j['billingMethod']?.toString() ?? 'Fixed Cost',
-    fixedAmount:      (j['fixedAmount']  ?? 0).toDouble(),
-    hourlyRate:       (j['hourlyRate']   ?? 0).toDouble(),
-    budgetType:       j['budgetType']?.toString()    ?? 'Cost',
-    budgetAmount:     (j['budgetAmount'] ?? 0).toDouble(),
-    currency:         j['currency']?.toString()      ?? 'INR',
-    startDate:        DateTime.tryParse(j['startDate'] ?? '') ?? DateTime.now(),
-    endDate:          j['endDate'] != null ? DateTime.tryParse(j['endDate'].toString()) : null,
-    status:           j['status']?.toString()        ?? 'Active',
-    tasks:            (j['tasks'] as List? ?? []).map((t) => ProjectTask.fromJson(t as Map<String, dynamic>)).toList(),
-    staff:            (j['staff'] as List? ?? []).map((s) => ProjectStaff.fromJson(s as Map<String, dynamic>)).toList(),
-    notes:            j['notes']?.toString()         ?? '',
-    totalLoggedHours: (j['totalLoggedHours'] ?? 0).toDouble(),
-    totalBilledAmount:(j['totalBilledAmount'] ?? 0).toDouble(),
-    unbilledHours:    (j['unbilledHours'] ?? 0).toDouble(),
-    invoicesGenerated: List<String>.from(j['invoicesGenerated'] ?? []),
-    createdAt:        DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
-    updatedAt:        DateTime.tryParse(j['updatedAt'] ?? '') ?? DateTime.now(),
-  );
+        id: j['_id']?.toString() ?? j['id']?.toString() ?? '',
+        projectNumber: j['projectNumber']?.toString() ?? '',
+        projectName: j['projectName']?.toString() ?? '',
+        customerId: j['customerId']?.toString() ?? '',
+        customerName: j['customerName']?.toString() ?? '',
+        customerEmail: j['customerEmail']?.toString() ?? '',
+        customerPhone: j['customerPhone']?.toString() ?? '',
+        description: j['description']?.toString() ?? '',
+        billingMethod: j['billingMethod']?.toString() ?? 'Fixed Cost',
+        fixedAmount: (j['fixedAmount'] ?? 0).toDouble(),
+        hourlyRate: (j['hourlyRate'] ?? 0).toDouble(),
+        budgetType: j['budgetType']?.toString() ?? 'Cost',
+        budgetAmount: (j['budgetAmount'] ?? 0).toDouble(),
+        currency: j['currency']?.toString() ?? 'INR',
+        startDate: DateTime.tryParse(j['startDate'] ?? '') ?? DateTime.now(),
+        endDate: j['endDate'] != null
+            ? DateTime.tryParse(j['endDate'].toString())
+            : null,
+        status: j['status']?.toString() ?? 'Active',
+        tasks: (j['tasks'] as List? ?? [])
+            .map((t) => ProjectTask.fromJson(t as Map<String, dynamic>))
+            .toList(),
+        staff: (j['staff'] as List? ?? [])
+            .map((s) => ProjectStaff.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        notes: j['notes']?.toString() ?? '',
+        totalLoggedHours: (j['totalLoggedHours'] ?? 0).toDouble(),
+        totalBilledAmount: (j['totalBilledAmount'] ?? 0).toDouble(),
+        unbilledHours: (j['unbilledHours'] ?? 0).toDouble(),
+        invoicesGenerated: List<String>.from(j['invoicesGenerated'] ?? []),
+        createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+        updatedAt: DateTime.tryParse(j['updatedAt'] ?? '') ?? DateTime.now(),
+      );
 }
 
 class ProjectTask {
@@ -277,9 +317,12 @@ class ProjectTask {
   final String assignedStaffName;
 
   ProjectTask({
-    required this.taskId, required this.taskName,
-    required this.hourlyRate, required this.estimatedHours,
-    required this.description, required this.status,
+    required this.taskId,
+    required this.taskName,
+    required this.hourlyRate,
+    required this.estimatedHours,
+    required this.description,
+    required this.status,
     this.completionPercent = 0,
     this.deadline,
     this.assignedStaffId = '',
@@ -287,27 +330,32 @@ class ProjectTask {
   });
 
   factory ProjectTask.fromJson(Map<String, dynamic> j) => ProjectTask(
-    taskId:            j['taskId']?.toString()         ?? '',
-    taskName:          j['taskName']?.toString()       ?? '',
-    hourlyRate:        (j['hourlyRate']     ?? 0).toDouble(),
-    estimatedHours:    (j['estimatedHours'] ?? 0).toDouble(),
-    description:       j['description']?.toString()   ?? '',
-    status:            j['status']?.toString()         ?? 'Active',
-    completionPercent: (j['completionPercent'] ?? 0).toDouble(),
-    deadline:          j['deadline'] != null ? DateTime.tryParse(j['deadline'].toString()) : null,
-    assignedStaffId:   j['assignedStaffId']?.toString()   ?? '',
-    assignedStaffName: j['assignedStaffName']?.toString() ?? '',
-  );
+        taskId: j['taskId']?.toString() ?? '',
+        taskName: j['taskName']?.toString() ?? '',
+        hourlyRate: (j['hourlyRate'] ?? 0).toDouble(),
+        estimatedHours: (j['estimatedHours'] ?? 0).toDouble(),
+        description: j['description']?.toString() ?? '',
+        status: j['status']?.toString() ?? 'Active',
+        completionPercent: (j['completionPercent'] ?? 0).toDouble(),
+        deadline: j['deadline'] != null
+            ? DateTime.tryParse(j['deadline'].toString())
+            : null,
+        assignedStaffId: j['assignedStaffId']?.toString() ?? '',
+        assignedStaffName: j['assignedStaffName']?.toString() ?? '',
+      );
 
   Map<String, dynamic> toJson() => {
-    'taskId': taskId, 'taskName': taskName,
-    'hourlyRate': hourlyRate, 'estimatedHours': estimatedHours,
-    'description': description, 'status': status,
-    'completionPercent': completionPercent,
-    'deadline': deadline?.toIso8601String(),
-    'assignedStaffId': assignedStaffId,
-    'assignedStaffName': assignedStaffName,
-  };
+        'taskId': taskId,
+        'taskName': taskName,
+        'hourlyRate': hourlyRate,
+        'estimatedHours': estimatedHours,
+        'description': description,
+        'status': status,
+        'completionPercent': completionPercent,
+        'deadline': deadline?.toIso8601String(),
+        'assignedStaffId': assignedStaffId,
+        'assignedStaffName': assignedStaffName,
+      };
 }
 
 class ProjectStaff {
@@ -318,22 +366,28 @@ class ProjectStaff {
   final double hourlyRate;
 
   ProjectStaff({
-    required this.userId, required this.name,
-    required this.email, required this.role, required this.hourlyRate,
+    required this.userId,
+    required this.name,
+    required this.email,
+    required this.role,
+    required this.hourlyRate,
   });
 
   factory ProjectStaff.fromJson(Map<String, dynamic> j) => ProjectStaff(
-    userId:     j['userId']?.toString() ?? '',
-    name:       j['name']?.toString()   ?? '',
-    email:      j['email']?.toString()  ?? '',
-    role:       j['role']?.toString()   ?? 'staff',
-    hourlyRate: (j['hourlyRate'] ?? 0).toDouble(),
-  );
+        userId: j['userId']?.toString() ?? '',
+        name: j['name']?.toString() ?? '',
+        email: j['email']?.toString() ?? '',
+        role: j['role']?.toString() ?? 'staff',
+        hourlyRate: (j['hourlyRate'] ?? 0).toDouble(),
+      );
 
   Map<String, dynamic> toJson() => {
-    'userId': userId, 'name': name,
-    'email': email, 'role': role, 'hourlyRate': hourlyRate,
-  };
+        'userId': userId,
+        'name': name,
+        'email': email,
+        'role': role,
+        'hourlyRate': hourlyRate,
+      };
 }
 
 class ProjectStats {
@@ -341,20 +395,24 @@ class ProjectStats {
   final double totalBillableHours, unbilledHours;
 
   ProjectStats({
-    required this.total, required this.active, required this.completed,
-    required this.inactive, required this.onHold,
-    required this.totalBillableHours, required this.unbilledHours,
+    required this.total,
+    required this.active,
+    required this.completed,
+    required this.inactive,
+    required this.onHold,
+    required this.totalBillableHours,
+    required this.unbilledHours,
   });
 
   factory ProjectStats.fromJson(Map<String, dynamic> j) => ProjectStats(
-    total:               j['total']     ?? 0,
-    active:              j['active']    ?? 0,
-    completed:           j['completed'] ?? 0,
-    inactive:            j['inactive']  ?? 0,
-    onHold:              j['onHold']    ?? 0,
-    totalBillableHours: (j['totalBillableHours'] ?? 0).toDouble(),
-    unbilledHours:      (j['unbilledHours']      ?? 0).toDouble(),
-  );
+        total: j['total'] ?? 0,
+        active: j['active'] ?? 0,
+        completed: j['completed'] ?? 0,
+        inactive: j['inactive'] ?? 0,
+        onHold: j['onHold'] ?? 0,
+        totalBillableHours: (j['totalBillableHours'] ?? 0).toDouble(),
+        unbilledHours: (j['unbilledHours'] ?? 0).toDouble(),
+      );
 }
 
 class ProjectListResponse {
@@ -363,19 +421,30 @@ class ProjectListResponse {
 
   ProjectListResponse({required this.projects, required this.pagination});
 
-  factory ProjectListResponse.fromJson(Map<String, dynamic> j) => ProjectListResponse(
-    projects:   (j['data'] as List? ?? []).map((e) => Project.fromJson(e as Map<String, dynamic>)).toList(),
-    pagination: ProjectPagination.fromJson(j['pagination'] as Map<String, dynamic>? ?? {}),
-  );
+  factory ProjectListResponse.fromJson(Map<String, dynamic> j) =>
+      ProjectListResponse(
+        projects: (j['data'] as List? ?? [])
+            .map((e) => Project.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        pagination: ProjectPagination.fromJson(
+            j['pagination'] as Map<String, dynamic>? ?? {}),
+      );
 }
 
 class ProjectPagination {
   final int total, page, limit, pages;
-  ProjectPagination({required this.total, required this.page, required this.limit, required this.pages});
-  factory ProjectPagination.fromJson(Map<String, dynamic> j) => ProjectPagination(
-    total: j['total'] ?? 0, page: j['page'] ?? 1,
-    limit: j['limit'] ?? 20, pages: j['pages'] ?? 1,
-  );
+  ProjectPagination(
+      {required this.total,
+      required this.page,
+      required this.limit,
+      required this.pages});
+  factory ProjectPagination.fromJson(Map<String, dynamic> j) =>
+      ProjectPagination(
+        total: j['total'] ?? 0,
+        page: j['page'] ?? 1,
+        limit: j['limit'] ?? 20,
+        pages: j['pages'] ?? 1,
+      );
 }
 
 class GenerateInvoiceResult {
@@ -385,14 +454,17 @@ class GenerateInvoiceResult {
   final int entriesBilled;
 
   GenerateInvoiceResult({
-    required this.invoiceId, required this.invoiceNumber,
-    required this.totalAmount, required this.entriesBilled,
+    required this.invoiceId,
+    required this.invoiceNumber,
+    required this.totalAmount,
+    required this.entriesBilled,
   });
 
-  factory GenerateInvoiceResult.fromJson(Map<String, dynamic> j) => GenerateInvoiceResult(
-    invoiceId:     j['invoiceId']?.toString()     ?? '',
-    invoiceNumber: j['invoiceNumber']?.toString() ?? '',
-    totalAmount:   (j['totalAmount']  ?? 0).toDouble(),
-    entriesBilled: j['entriesBilled'] ?? 0,
-  );
+  factory GenerateInvoiceResult.fromJson(Map<String, dynamic> j) =>
+      GenerateInvoiceResult(
+        invoiceId: j['invoiceId']?.toString() ?? '',
+        invoiceNumber: j['invoiceNumber']?.toString() ?? '',
+        totalAmount: (j['totalAmount'] ?? 0).toDouble(),
+        entriesBilled: j['entriesBilled'] ?? 0,
+      );
 }

@@ -13,9 +13,9 @@ import 'package:flutter/material.dart';
 import 'auth/finance_login_page.dart';
 
 // ── Navy color system (matches new_vendor_credit.dart) ──────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 // ── Tour step model ──────────────────────────────────────────────────────────
@@ -162,19 +162,24 @@ class _FinanceWelcomeScreenState extends State<FinanceWelcomeScreen>
   void initState() {
     super.initState();
 
-    _heroCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _heroCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
     _heroFade = CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOut);
     _heroSlide = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOutCubic));
+        .animate(
+            CurvedAnimation(parent: _heroCtrl, curve: Curves.easeOutCubic));
 
-    _stepCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _stepCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 500));
     _stepFade = CurvedAnimation(parent: _stepCtrl, curve: Curves.easeOut);
     _stepSlide = Tween<Offset>(begin: const Offset(0.04, 0), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _stepCtrl, curve: Curves.easeOutCubic));
+        .animate(
+            CurvedAnimation(parent: _stepCtrl, curve: Curves.easeOutCubic));
     _iconScale = Tween<double>(begin: 0.6, end: 1.0)
         .animate(CurvedAnimation(parent: _stepCtrl, curve: Curves.elasticOut));
 
-    _iconPulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))
+    _iconPulse = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1800))
       ..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 0.92, end: 1.0)
         .animate(CurvedAnimation(parent: _iconPulse, curve: Curves.easeInOut));
@@ -396,16 +401,15 @@ class _FinanceWelcomeScreenState extends State<FinanceWelcomeScreen>
             child: TextButton.icon(
               onPressed: _navigateToLogin,
               icon: const Icon(Icons.close, size: 16, color: Colors.white54),
-              label: const Text('Skip', style: TextStyle(color: Colors.white54, fontSize: 13)),
+              label: const Text('Skip',
+                  style: TextStyle(color: Colors.white54, fontSize: 13)),
             ),
           ),
         ),
 
         // Main content
         Center(
-          child: isWide
-              ? _buildTourWide(step)
-              : _buildTourMobile(step),
+          child: isWide ? _buildTourWide(step) : _buildTourMobile(step),
         ),
       ],
     );
@@ -478,7 +482,8 @@ class _FinanceWelcomeScreenState extends State<FinanceWelcomeScreen>
             opacity: _stepFade,
             child: ScaleTransition(
               scale: _iconScale,
-              child: _IconPanel(step: step, pulseAnim: _pulseAnim, compact: true),
+              child:
+                  _IconPanel(step: step, pulseAnim: _pulseAnim, compact: true),
             ),
           ),
           const SizedBox(height: 28),
@@ -524,7 +529,8 @@ class _LogoBadge extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(Icons.account_balance_rounded, color: Colors.white, size: 24),
+          child: const Icon(Icons.account_balance_rounded,
+              color: Colors.white, size: 24),
         ),
         const SizedBox(width: 12),
         Column(
@@ -582,8 +588,10 @@ class _MeshPainter extends CustomPainter {
     final circlePaint = Paint()
       ..color = _navyAccent.withOpacity(0.06)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(size.width * 0.85, size.height * 0.15), size.width * 0.35, circlePaint);
-    canvas.drawCircle(Offset(size.width * 0.1, size.height * 0.85), size.width * 0.25, circlePaint);
+    canvas.drawCircle(Offset(size.width * 0.85, size.height * 0.15),
+        size.width * 0.35, circlePaint);
+    canvas.drawCircle(Offset(size.width * 0.1, size.height * 0.85),
+        size.width * 0.25, circlePaint);
 
     // Grid lines
     final gridPaint = Paint()
@@ -600,7 +608,11 @@ class _MeshPainter extends CustomPainter {
     // Top accent line
     final accentLine = Paint()
       ..shader = LinearGradient(
-        colors: [Colors.transparent, _navyAccent.withOpacity(0.6), Colors.transparent],
+        colors: [
+          Colors.transparent,
+          _navyAccent.withOpacity(0.6),
+          Colors.transparent
+        ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, 2))
       ..strokeWidth = 2;
     canvas.drawLine(const Offset(0, 0), Offset(size.width, 0), accentLine);
@@ -616,10 +628,26 @@ class _FeatureCardStack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cards = [
-      _MiniCard(icon: Icons.receipt_long_rounded,    label: 'Invoices',        value: '₹2.4Cr',     color: const Color(0xFF00C896)),
-      _MiniCard(icon: Icons.store_rounded,            label: 'Payables',        value: '₹88.2L',     color: const Color(0xFFFF8C42)),
-      _MiniCard(icon: Icons.corporate_fare_rounded,   label: 'Organisations',   value: '12 Entities', color: _navyAccent),
-      _MiniCard(icon: Icons.analytics_rounded,        label: 'Net Revenue',     value: '+18.4%',     color: const Color(0xFFA78BFA)),
+      _MiniCard(
+          icon: Icons.receipt_long_rounded,
+          label: 'Invoices',
+          value: '₹2.4Cr',
+          color: const Color(0xFF00C896)),
+      _MiniCard(
+          icon: Icons.store_rounded,
+          label: 'Payables',
+          value: '₹88.2L',
+          color: const Color(0xFFFF8C42)),
+      _MiniCard(
+          icon: Icons.corporate_fare_rounded,
+          label: 'Organisations',
+          value: '12 Entities',
+          color: _navyAccent),
+      _MiniCard(
+          icon: Icons.analytics_rounded,
+          label: 'Net Revenue',
+          value: '+18.4%',
+          color: const Color(0xFFA78BFA)),
     ];
 
     return Column(
@@ -648,11 +676,13 @@ class _FeatureCardStack extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.verified_rounded, color: const Color(0xFF00C896), size: 16),
+              Icon(Icons.verified_rounded,
+                  color: const Color(0xFF00C896), size: 16),
               const SizedBox(width: 8),
               Text(
                 'GST · TDS · TCS Compliant',
-                style: TextStyle(color: Colors.white, fontSize: 12, letterSpacing: 0.5),
+                style: TextStyle(
+                    color: Colors.white, fontSize: 12, letterSpacing: 0.5),
               ),
             ],
           ),
@@ -668,7 +698,11 @@ class _MiniCard extends StatelessWidget {
   final String value;
   final Color color;
 
-  const _MiniCard({required this.icon, required this.label, required this.value, required this.color});
+  const _MiniCard(
+      {required this.icon,
+      required this.label,
+      required this.value,
+      required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -691,7 +725,11 @@ class _MiniCard extends StatelessWidget {
             child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(height: 12),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700)),
           const SizedBox(height: 2),
           Text(label, style: TextStyle(color: Colors.white, fontSize: 12)),
         ],
@@ -704,10 +742,10 @@ class _MiniCard extends StatelessWidget {
 
 class _MobileFeaturePills extends StatelessWidget {
   final _pills = const [
-    (Icons.receipt_long_rounded,     'Invoices',         Color(0xFF00C896)),
-    (Icons.store_rounded,            'Procurement',      Color(0xFFFF8C42)),
-    (Icons.account_balance_rounded,  'Accounting',       Color(0xFFA78BFA)),
-    (Icons.verified_user_rounded,    'Access Control',   Color(0xFFFF5C8A)),
+    (Icons.receipt_long_rounded, 'Invoices', Color(0xFF00C896)),
+    (Icons.store_rounded, 'Procurement', Color(0xFFFF8C42)),
+    (Icons.account_balance_rounded, 'Accounting', Color(0xFFA78BFA)),
+    (Icons.verified_user_rounded, 'Access Control', Color(0xFFFF5C8A)),
   ];
 
   @override
@@ -716,22 +754,29 @@ class _MobileFeaturePills extends StatelessWidget {
       spacing: 10,
       runSpacing: 10,
       alignment: WrapAlignment.center,
-      children: _pills.map((p) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: p.$3.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(50),
-          border: Border.all(color: p.$3.withOpacity(0.3)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(p.$1, color: p.$3, size: 14),
-            const SizedBox(width: 6),
-            Text(p.$2, style: TextStyle(color: p.$3, fontSize: 12, fontWeight: FontWeight.w600)),
-          ],
-        ),
-      )).toList(),
+      children: _pills
+          .map((p) => Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: p.$3.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(50),
+                  border: Border.all(color: p.$3.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(p.$1, color: p.$3, size: 14),
+                    const SizedBox(width: 6),
+                    Text(p.$2,
+                        style: TextStyle(
+                            color: p.$3,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ))
+          .toList(),
     );
   }
 }
@@ -762,13 +807,15 @@ class _ProgressStepper extends StatelessWidget {
                 height: 2,
                 margin: const EdgeInsets.symmetric(horizontal: 2),
                 decoration: BoxDecoration(
-                  color: isCompleted ? _navyAccent : Colors.white.withOpacity(0.15),
+                  color: isCompleted
+                      ? _navyAccent
+                      : Colors.white.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(1),
                 ),
               );
             }
             final stepIdx = i ~/ 2;
-            final isActive    = stepIdx == current;
+            final isActive = stepIdx == current;
             final isCompleted = stepIdx < current;
 
             return AnimatedContainer(
@@ -784,7 +831,9 @@ class _ProgressStepper extends StatelessWidget {
                         end: Alignment.bottomRight,
                       )
                     : null,
-                color: isActive || isCompleted ? null : Colors.white.withOpacity(0.08),
+                color: isActive || isCompleted
+                    ? null
+                    : Colors.white.withOpacity(0.08),
                 border: Border.all(
                   color: isActive
                       ? _navyAccent
@@ -794,12 +843,18 @@ class _ProgressStepper extends StatelessWidget {
                   width: 1.5,
                 ),
                 boxShadow: isActive
-                    ? [BoxShadow(color: _navyAccent.withOpacity(0.5), blurRadius: 12, spreadRadius: 1)]
+                    ? [
+                        BoxShadow(
+                            color: _navyAccent.withOpacity(0.5),
+                            blurRadius: 12,
+                            spreadRadius: 1)
+                      ]
                     : null,
               ),
               child: Center(
                 child: isCompleted
-                    ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
+                    ? const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 14)
                     : Text(
                         '${stepIdx + 1}',
                         style: TextStyle(
@@ -815,7 +870,8 @@ class _ProgressStepper extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           '${current + 1} of $total',
-          style: TextStyle(color: Colors.white, fontSize: 11, letterSpacing: 0.5),
+          style:
+              TextStyle(color: Colors.white, fontSize: 11, letterSpacing: 0.5),
         ),
       ],
     );
@@ -829,7 +885,8 @@ class _IconPanel extends StatelessWidget {
   final Animation<double> pulseAnim;
   final bool compact;
 
-  const _IconPanel({required this.step, required this.pulseAnim, this.compact = false});
+  const _IconPanel(
+      {required this.step, required this.pulseAnim, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -874,7 +931,8 @@ class _IconPanel extends StatelessWidget {
                       _navyMid.withOpacity(0.6),
                     ],
                   ),
-                  border: Border.all(color: step.accentColor.withOpacity(0.4), width: 1.5),
+                  border: Border.all(
+                      color: step.accentColor.withOpacity(0.4), width: 1.5),
                 ),
                 child: Icon(step.icon, color: step.accentColor, size: iconSize),
               ),
@@ -888,9 +946,11 @@ class _IconPanel extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: _navyDark,
-                    border: Border.all(color: step.accentColor.withOpacity(0.5), width: 1.5),
+                    border: Border.all(
+                        color: step.accentColor.withOpacity(0.5), width: 1.5),
                   ),
-                  child: Icon(step.secondaryIcon, color: step.accentColor, size: compact ? 14 : 18),
+                  child: Icon(step.secondaryIcon,
+                      color: step.accentColor, size: compact ? 14 : 18),
                 ),
               ),
             ],
@@ -930,7 +990,8 @@ class _StepContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final align = centerAlign ? TextAlign.center : TextAlign.left;
-    final crossAxis = centerAlign ? CrossAxisAlignment.center : CrossAxisAlignment.start;
+    final crossAxis =
+        centerAlign ? CrossAxisAlignment.center : CrossAxisAlignment.start;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -970,31 +1031,32 @@ class _StepContent extends StatelessWidget {
         const SizedBox(height: 24),
         // Highlights
         ...step.highlights.map((h) => Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            mainAxisSize: centerAlign ? MainAxisSize.min : MainAxisSize.max,
-            children: [
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: step.accentColor.withOpacity(0.15),
-                ),
-                child: Icon(Icons.check_rounded, color: step.accentColor, size: 12),
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                mainAxisSize: centerAlign ? MainAxisSize.min : MainAxisSize.max,
+                children: [
+                  Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: step.accentColor.withOpacity(0.15),
+                    ),
+                    child: Icon(Icons.check_rounded,
+                        color: step.accentColor, size: 12),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    h,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Text(
-                h,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        )),
+            )),
       ],
     );
   }
@@ -1033,7 +1095,8 @@ class _TourNavRow extends StatelessWidget {
               foregroundColor: Colors.white,
               side: BorderSide(color: Colors.white.withOpacity(0.2)),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(50)),
             ),
           ),
           const SizedBox(width: 16),
@@ -1050,7 +1113,8 @@ class _TourNavRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
             elevation: 0,
             shadowColor: step.accentColor.withOpacity(0.4),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
           ),
         ),
       ],
@@ -1065,7 +1129,8 @@ class _PrimaryButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  const _PrimaryButton({required this.label, required this.icon, required this.onTap});
+  const _PrimaryButton(
+      {required this.label, required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {

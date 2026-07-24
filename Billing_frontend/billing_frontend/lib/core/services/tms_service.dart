@@ -25,14 +25,16 @@ class TMSService {
     };
   }
 
-  Future<Map<String, dynamic>> _get(String path, {Map<String, String>? params}) async {
+  Future<Map<String, dynamic>> _get(String path,
+      {Map<String, String>? params}) async {
     try {
       var uri = Uri.parse('$_base$path');
       if (params != null && params.isNotEmpty) {
         uri = uri.replace(queryParameters: params);
       }
       debugPrint('📤 TMS GET: $uri');
-      final response = await http.get(uri, headers: await _headers())
+      final response = await http
+          .get(uri, headers: await _headers())
           .timeout(const Duration(seconds: 30));
       return _parse(response);
     } catch (e) {
@@ -41,11 +43,13 @@ class TMSService {
     }
   }
 
-  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> _post(
+      String path, Map<String, dynamic> body) async {
     try {
       final uri = Uri.parse('$_base$path');
       debugPrint('📤 TMS POST: $uri');
-      final response = await http.post(uri, headers: await _headers(), body: jsonEncode(body))
+      final response = await http
+          .post(uri, headers: await _headers(), body: jsonEncode(body))
           .timeout(const Duration(seconds: 30));
       return _parse(response);
     } catch (e) {
@@ -54,10 +58,12 @@ class TMSService {
     }
   }
 
-  Future<Map<String, dynamic>> _put(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> _put(
+      String path, Map<String, dynamic> body) async {
     try {
       final uri = Uri.parse('$_base$path');
-      final response = await http.put(uri, headers: await _headers(), body: jsonEncode(body))
+      final response = await http
+          .put(uri, headers: await _headers(), body: jsonEncode(body))
           .timeout(const Duration(seconds: 30));
       return _parse(response);
     } catch (e) {
@@ -68,7 +74,8 @@ class TMSService {
   Future<Map<String, dynamic>> _delete(String path) async {
     try {
       final uri = Uri.parse('$_base$path');
-      final response = await http.delete(uri, headers: await _headers())
+      final response = await http
+          .delete(uri, headers: await _headers())
           .timeout(const Duration(seconds: 30));
       return _parse(response);
     } catch (e) {
@@ -80,7 +87,10 @@ class TMSService {
     try {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode >= 200 && response.statusCode < 300) return data;
-      return {'success': false, 'message': data['message'] ?? data['error'] ?? 'Request failed'};
+      return {
+        'success': false,
+        'message': data['message'] ?? data['error'] ?? 'Request failed'
+      };
     } catch (_) {
       return {'success': false, 'message': 'Invalid response'};
     }
@@ -107,25 +117,38 @@ class TMSService {
   }) async {
     if (attachment != null) {
       return await _uploadTicketWithAttachment(
-        subject: subject, message: message, priority: priority,
-        timeline: timeline, assignedTo: assignedTo, status: status,
+        subject: subject,
+        message: message,
+        priority: priority,
+        timeline: timeline,
+        assignedTo: assignedTo,
+        status: status,
         attachment: attachment,
       );
     }
     return await _post(_prefix, {
-      'subject': subject, 'message': message, 'priority': priority,
-      'timeline': timeline, 'assigned_to': assignedTo, 'status': status,
+      'subject': subject,
+      'message': message,
+      'priority': priority,
+      'timeline': timeline,
+      'assigned_to': assignedTo,
+      'status': status,
     });
   }
 
   Future<Map<String, dynamic>> _uploadTicketWithAttachment({
-    required String subject, required String message, required String priority,
-    required int timeline, required String assignedTo, required String status,
+    required String subject,
+    required String message,
+    required String priority,
+    required int timeline,
+    required String assignedTo,
+    required String status,
     required File attachment,
   }) async {
     try {
       final token = await FinanceSecureStorage.getToken();
-      if (token == null) return {'success': false, 'message': 'Not authenticated'};
+      if (token == null)
+        return {'success': false, 'message': 'Not authenticated'};
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
 
       final uri = Uri.parse('$_base$_prefix');
@@ -138,13 +161,17 @@ class TMSService {
         ..fields['timeline'] = timeline.toString()
         ..fields['assigned_to'] = assignedTo
         ..fields['status'] = status
-        ..files.add(await http.MultipartFile.fromPath('attachment', attachment.path));
+        ..files.add(
+            await http.MultipartFile.fromPath('attachment', attachment.path));
 
       final response = await request.send();
       if (response.statusCode == 200 || response.statusCode == 201) {
         return {'success': true, 'message': 'Ticket created successfully'};
       }
-      return {'success': false, 'message': 'Upload failed: ${response.statusCode}'};
+      return {
+        'success': false,
+        'message': 'Upload failed: ${response.statusCode}'
+      };
     } catch (e) {
       return {'success': false, 'message': 'Upload failed: $e'};
     }
@@ -154,7 +181,10 @@ class TMSService {
   // 📋 FETCH MY TICKETS
   // ========================================================================
   Future<Map<String, dynamic>> fetchMyTickets({
-    String? status, String? priority, String? dateFrom, String? dateTo,
+    String? status,
+    String? priority,
+    String? dateFrom,
+    String? dateTo,
   }) async {
     final params = <String, String>{};
     if (status != null) params['status'] = status;
@@ -168,7 +198,10 @@ class TMSService {
   // 📋 FETCH TICKETS RAISED BY ME
   // ========================================================================
   Future<Map<String, dynamic>> fetchRaisedByMe({
-    String? status, String? priority, String? dateFrom, String? dateTo,
+    String? status,
+    String? priority,
+    String? dateFrom,
+    String? dateTo,
   }) async {
     final params = <String, String>{'raisedByMe': 'true'};
     if (status != null) params['status'] = status;
@@ -182,7 +215,11 @@ class TMSService {
   // 📋 FETCH ALL TICKETS (admin)
   // ========================================================================
   Future<Map<String, dynamic>> fetchAllTicketsAdmin({
-    String? status, String? priority, String? dateFrom, String? dateTo, String? assignedTo,
+    String? status,
+    String? priority,
+    String? dateFrom,
+    String? dateTo,
+    String? assignedTo,
   }) async {
     final params = <String, String>{'admin': 'true'};
     if (status != null) params['status'] = status;
@@ -197,7 +234,9 @@ class TMSService {
   // 📋 FETCH CLOSED TICKETS
   // ========================================================================
   Future<Map<String, dynamic>> fetchClosedTickets({
-    String? dateFrom, String? dateTo, String? assignedTo,
+    String? dateFrom,
+    String? dateTo,
+    String? assignedTo,
   }) async {
     final params = <String, String>{};
     if (dateFrom != null) params['dateFrom'] = dateFrom;
@@ -228,15 +267,18 @@ class TMSService {
     return await _put('$_prefix/$ticketId', body);
   }
 
-  Future<Map<String, dynamic>> updateTicket(String ticketId, Map<String, dynamic> updates) async {
+  Future<Map<String, dynamic>> updateTicket(
+      String ticketId, Map<String, dynamic> updates) async {
     return await _put('$_prefix/$ticketId', updates);
   }
 
   // ========================================================================
   // 🔄 REASSIGN / REOPEN / DELETE
   // ========================================================================
-  Future<Map<String, dynamic>> reassignTicket(String ticketId, String newEmployeeId) async {
-    return await _post('$_prefix/$ticketId/reassign', {'new_employee_id': newEmployeeId});
+  Future<Map<String, dynamic>> reassignTicket(
+      String ticketId, String newEmployeeId) async {
+    return await _post(
+        '$_prefix/$ticketId/reassign', {'new_employee_id': newEmployeeId});
   }
 
   Future<Map<String, dynamic>> reopenTicket(String ticketId) async {

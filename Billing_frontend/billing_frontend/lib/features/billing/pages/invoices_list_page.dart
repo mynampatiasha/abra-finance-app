@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // INVOICES LIST PAGE - COMPLETE REDESIGN
 // ============================================================================
@@ -35,12 +36,12 @@ import 'reminder_settings_page.dart';
 import 'invoice_automation_list_page.dart';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
-const Color _navy   = Color(0xFF1e3a8a);
+const Color _navy = Color(0xFF1e3a8a);
 const Color _purple = Color(0xFF9B59B6);
-const Color _green  = Color(0xFF27AE60);
-const Color _blue   = Color(0xFF2980B9);
+const Color _green = Color(0xFF27AE60);
+const Color _blue = Color(0xFF2980B9);
 const Color _orange = Color(0xFFE67E22);
-const Color _red    = Color(0xFFE74C3C);
+const Color _red = Color(0xFFE74C3C);
 
 // ── Stat card data ────────────────────────────────────────────────────────────
 class _StatCardData {
@@ -76,15 +77,21 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ── Filters ────────────────────────────────────────────────────────────────
   String _selectedStatus = 'All';
   final List<String> _statusFilters = [
-    'All', 'DRAFT', 'SENT', 'UNPAID', 'PARTIALLY_PAID',
-    'PAID', 'OVERDUE', 'CANCELLED',
+    'All',
+    'DRAFT',
+    'SENT',
+    'UNPAID',
+    'PARTIALLY_PAID',
+    'PAID',
+    'OVERDUE',
+    'CANCELLED',
   ];
   DateTime? _fromDate;
   DateTime? _toDate;
 
   // ── Pagination ─────────────────────────────────────────────────────────────
-  int _currentPage   = 1;
-  int _totalPages    = 1;
+  int _currentPage = 1;
+  int _totalPages = 1;
   int _totalInvoices = 0;
   final int _itemsPerPage = 20;
 
@@ -124,29 +131,36 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ==========================================================================
 
   Future<void> _loadInvoices() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final response = await InvoiceService.getInvoices(
-        status:   _selectedStatus == 'All' ? null : _selectedStatus,
-        page:     _currentPage,
-        limit:    _itemsPerPage,
+        status: _selectedStatus == 'All' ? null : _selectedStatus,
+        page: _currentPage,
+        limit: _itemsPerPage,
         fromDate: _fromDate,
-        toDate:   _toDate,
+        toDate: _toDate,
+        search: _searchQuery,
       );
       setState(() {
-        _invoices      = response.invoices;
-        _totalPages    = response.pagination.pages;
+        _invoices = response.invoices;
+        _totalPages = response.pagination.pages;
         _totalInvoices = response.pagination.total;
-        _isLoading     = false;
+        _isLoading = false;
       });
     } catch (e) {
-      setState(() { _errorMessage = e.toString(); _isLoading = false; });
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _loadStats() async {
     try {
-      final stats = await InvoiceService.getStats();
+      final stats = await InvoiceService.getStats(search: _searchQuery);
       setState(() => _stats = stats);
     } catch (e) {
       debugPrint('Stats error: $e');
@@ -154,13 +168,15 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   }
 
   Future<void> _refreshData() async {
-    _currentPage = 1;
     await Future.wait([_loadInvoices(), _loadStats()]);
     _snackSuccess('Data refreshed successfully');
   }
 
   void _filterByStatus(String status) {
-    setState(() { _selectedStatus = status; _currentPage = 1; });
+    setState(() {
+      _selectedStatus = status;
+      _currentPage = 1;
+    });
     _loadInvoices();
   }
 
@@ -191,14 +207,16 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ==========================================================================
 
   void _openNewInvoice() async {
-    final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => const NewInvoiceScreen()));
+    final result = await Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const NewInvoiceScreen()));
     if (result == true) _refreshData();
   }
 
   void _openEditInvoice(String invoiceId) async {
-    final result = await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => NewInvoiceScreen(invoiceId: invoiceId)));
+    final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => NewInvoiceScreen(invoiceId: invoiceId)));
     if (result == true) _refreshData();
   }
 
@@ -215,8 +233,11 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   void _viewInvoiceDetails(Invoice invoice) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => InvoiceDetailPage(invoiceId: invoice.id)),
-    ).then((result) { if (result == true) _refreshData(); });
+      MaterialPageRoute(
+          builder: (_) => InvoiceDetailPage(invoiceId: invoice.id)),
+    ).then((result) {
+      if (result == true) _refreshData();
+    });
   }
 
   Future<void> _deleteInvoice(Invoice invoice) async {
@@ -271,7 +292,8 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Mark as Sent?',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text(
           'The email will NOT be sent to the customer.\n\nDo you want to mark this invoice as Sent anyway?',
         ),
@@ -282,7 +304,8 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navy, foregroundColor: Colors.white),
             child: const Text('Mark as Sent'),
           ),
         ],
@@ -344,7 +367,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ── WhatsApp ───────────────────────────────────────────────────────────────
 
   Future<void> _whatsApp(Invoice invoice) async {
-    final raw   = (invoice.customerPhone ?? '').trim();
+    final raw = (invoice.customerPhone ?? '').trim();
     if (raw.isEmpty) {
       _snackError('Customer phone not available on this invoice.');
       return;
@@ -352,7 +375,9 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     // Handle scientific notation and clean
     String phone = raw;
     if (phone.toUpperCase().contains('E')) {
-      try { phone = double.parse(phone).round().toString(); } catch (_) {}
+      try {
+        phone = double.parse(phone).round().toString();
+      } catch (_) {}
     }
     phone = phone.replaceAll(RegExp(r'[^\d+]'), '');
     if (phone.isEmpty) {
@@ -432,11 +457,13 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     final reminderType = isOverdue ? 'overdue' : 'predue';
 
     // Validate contact info
-    if (channel == 'email' && (invoice.customerEmail == null || invoice.customerEmail!.isEmpty)) {
+    if (channel == 'email' &&
+        (invoice.customerEmail == null || invoice.customerEmail!.isEmpty)) {
       _snackError('Customer email not available for this invoice');
       return;
     }
-    if (channel == 'whatsapp' && (invoice.customerPhone == null || invoice.customerPhone!.isEmpty)) {
+    if (channel == 'whatsapp' &&
+        (invoice.customerPhone == null || invoice.customerPhone!.isEmpty)) {
       _snackError('Customer phone not available for this invoice');
       return;
     }
@@ -445,7 +472,9 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       // Fetch preview
       _snackSuccess('Loading reminder preview...');
       final preview = await InvoiceService.previewManualReminder(
-        invoice.id, channel, reminderType,
+        invoice.id,
+        channel,
+        reminderType,
       );
 
       if (!mounted) return;
@@ -463,9 +492,12 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
 
       if (confirmed == true) {
         // Send reminder
-        _snackSuccess('Sending ${channel == 'email' ? 'email' : 'WhatsApp'} reminder...');
-        await InvoiceService.sendManualReminder(invoice.id, channel, reminderType);
-        _snackSuccess('✅ ${channel == 'email' ? 'Email' : 'WhatsApp'} reminder sent successfully!');
+        _snackSuccess(
+            'Sending ${channel == 'email' ? 'email' : 'WhatsApp'} reminder...');
+        await InvoiceService.sendManualReminder(
+            invoice.id, channel, reminderType);
+        _snackSuccess(
+            '✅ ${channel == 'email' ? 'Email' : 'WhatsApp'} reminder sent successfully!');
         _refreshData();
       }
     } catch (e) {
@@ -476,13 +508,29 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   // ── Export ─────────────────────────────────────────────────────────────────
 
   Future<void> _exportToExcel() async {
-    if (_invoices.isEmpty) { _snackError('No invoices to export'); return; }
+    if (_invoices.isEmpty) {
+      _snackError('No invoices to export');
+      return;
+    }
     try {
       _snackSuccess('Preparing Excel export...');
       List<List<dynamic>> csvData = [
-        ['Date', 'Invoice #', 'Order Number', 'Customer Name', 'Customer Email',
-         'Status', 'Due Date', 'Sub Total', 'CGST', 'SGST', 'IGST',
-         'Total Amount', 'Amount Paid', 'Balance Due'],
+        [
+          'Date',
+          'Invoice #',
+          'Order Number',
+          'Customer Name',
+          'Customer Email',
+          'Status',
+          'Due Date',
+          'Sub Total',
+          'CGST',
+          'SGST',
+          'IGST',
+          'Total Amount',
+          'Amount Paid',
+          'Balance Due'
+        ],
       ];
       for (var inv in _invoices) {
         csvData.add([
@@ -509,12 +557,12 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     }
   }
 
-void _showImportDialog() {
-  showDialog(
-    context: context,
-    builder: (_) => BulkImportInvoicesDialog(onImportComplete: _refreshData),
-  );
-}
+  void _showImportDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => BulkImportInvoicesDialog(onImportComplete: _refreshData),
+    );
+  }
 
   void _showInvoiceLifecycleDialog() {
     showDialog(
@@ -526,56 +574,92 @@ void _showImportDialog() {
             Center(
               child: Container(
                 constraints: BoxConstraints(
-                  maxWidth:  MediaQuery.of(context).size.width  * 0.85,
+                  maxWidth: MediaQuery.of(context).size.width * 0.85,
                   maxHeight: MediaQuery.of(context).size.height * 0.85,
                 ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10))
+                  ],
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Container(
-                      width: double.infinity, padding: const EdgeInsets.all(20),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
                       decoration: const BoxDecoration(
                         color: Color(0xFF3498DB),
-                        borderRadius: BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                        borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            topRight: Radius.circular(12)),
                       ),
                       child: const Text('Invoice Lifecycle Process',
-                          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center),
                     ),
-                    Expanded(child: Container(
-                      width: double.infinity, padding: const EdgeInsets.all(20),
+                    Expanded(
+                        child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
                       child: InteractiveViewer(
-                        panEnabled: true, minScale: 0.5, maxScale: 4.0,
-                        child: Center(child: Image.asset('assets/invoice.png', fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            Icon(Icons.broken_image_outlined, size: 80, color: Colors.grey[400]),
-                            const SizedBox(height: 16),
-                            Text('Image not found', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
-                            const SizedBox(height: 8),
-                            Text('Please ensure "assets/invoice.png" exists', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-                          ]),
+                        panEnabled: true,
+                        minScale: 0.5,
+                        maxScale: 4.0,
+                        child: Center(
+                            child: Image.asset(
+                          'assets/invoice.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.broken_image_outlined,
+                                    size: 80, color: Colors.grey[400]),
+                                const SizedBox(height: 16),
+                                Text('Image not found',
+                                    style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey[700])),
+                                const SizedBox(height: 8),
+                                Text(
+                                    'Please ensure "assets/invoice.png" exists',
+                                    style: TextStyle(
+                                        fontSize: 14, color: Colors.grey[600])),
+                              ]),
                         )),
                       ),
                     )),
                     Container(
-                      width: double.infinity, padding: const EdgeInsets.all(14), color: Colors.grey[100],
-                      child: Text('Tip: Pinch to zoom, drag to pan', style: TextStyle(color: Colors.grey[600], fontSize: 13), textAlign: TextAlign.center),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      color: Colors.grey[100],
+                      child: Text('Tip: Pinch to zoom, drag to pan',
+                          style:
+                              TextStyle(color: Colors.grey[600], fontSize: 13),
+                          textAlign: TextAlign.center),
                     ),
                   ]),
                 ),
               ),
             ),
             Positioned(
-              top: 40, right: 40,
+              top: 40,
+              right: 40,
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white, size: 32),
                 onPressed: () => Navigator.pop(context),
-                style: IconButton.styleFrom(backgroundColor: Colors.black.withOpacity(0.6), padding: const EdgeInsets.all(14)),
+                style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withOpacity(0.6),
+                    padding: const EdgeInsets.all(14)),
               ),
             ),
           ],
@@ -594,7 +678,9 @@ void _showImportDialog() {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() { _fromDate = picked; });
+      setState(() {
+        _fromDate = picked;
+      });
       _loadInvoices();
     }
   }
@@ -607,13 +693,18 @@ void _showImportDialog() {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() { _toDate = picked; });
+      setState(() {
+        _toDate = picked;
+      });
       _loadInvoices();
     }
   }
 
   void _clearDateFilters() {
-    setState(() { _fromDate = null; _toDate = null; });
+    setState(() {
+      _fromDate = null;
+      _toDate = null;
+    });
     _loadInvoices();
   }
 
@@ -623,30 +714,12 @@ void _showImportDialog() {
 
   void _snackSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.check_circle, color: Colors.white, size: 18),
-        const SizedBox(width: 8), Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: _green,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration: const Duration(seconds: 2),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   void _snackError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        const Icon(Icons.error_outline, color: Colors.white, size: 18),
-        const SizedBox(width: 8), Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: _red,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration: const Duration(seconds: 4),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ==========================================================================
@@ -664,7 +737,10 @@ void _showImportDialog() {
             _buildTopBar(),
             if (_stats != null) _buildStatsCards(),
             _isLoading
-                ? const SizedBox(height: 400, child: Center(child: CircularProgressIndicator(color: _navy)))
+                ? const SizedBox(
+                    height: 400,
+                    child:
+                        Center(child: CircularProgressIndicator(color: _navy)))
                 : _errorMessage != null
                     ? SizedBox(height: 400, child: _buildErrorState())
                     : _invoices.isEmpty
@@ -690,117 +766,181 @@ void _showImportDialog() {
       decoration: BoxDecoration(
         color: Colors.white,
         border: const Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: LayoutBuilder(builder: (_, constraints) {
         final w = constraints.maxWidth;
         if (w >= 1100) return _topBarDesktop();
-        if (w >= 700)  return _topBarTablet();
+        if (w >= 700) return _topBarTablet();
         return _topBarMobile();
       }),
     );
   }
 
   Widget _topBarDesktop() => Row(children: [
-    _statusDropdown(),
-    const SizedBox(width: 12),
-    _searchField(width: 240),
-    const SizedBox(width: 10),
-    _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _selectFromDate),
-    const SizedBox(width: 8),
-    _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _selectToDate),
-    if (_hasDateFilters) ...[
-      const SizedBox(width: 6),
-      _iconBtn(Icons.close, _clearDateFilters, tooltip: 'Clear Dates', color: Colors.red[600]!, bg: Colors.red[50]!),
-    ],
-    const SizedBox(width: 6),
-    _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData, tooltip: 'Refresh'),
-    const SizedBox(width: 6),
-    _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog, tooltip: 'View Invoice Process', color: _blue, bg: _blue.withOpacity(0.10)),
-    const Spacer(),
-    _buildViewToggle(),
-    const SizedBox(width: 12),
-    _newInvoiceButton(),
-    const SizedBox(width: 8),
-    _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
-    const SizedBox(width: 8),
-    _actionBtn('Automate', Icons.auto_awesome, Colors.indigo, _openAutomationPage),
-    const SizedBox(width: 8),
-    _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
-    const SizedBox(width: 8),
-    _actionBtn('Reminders', Icons.notifications_active_outlined, _orange, _openReminderSettings),
-  ]);
-
-  Widget _topBarTablet() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [
-      _statusDropdown(),
-      const SizedBox(width: 10),
-      _searchField(width: 200),
-      const SizedBox(width: 8),
-      _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _selectFromDate),
-      const SizedBox(width: 6),
-      _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _selectToDate),
-      if (_hasDateFilters) ...[
-        const SizedBox(width: 6),
-        _iconBtn(Icons.close, _clearDateFilters, tooltip: 'Clear', color: Colors.red[600]!, bg: Colors.red[50]!),
-      ],
-      const SizedBox(width: 6),
-      _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData, tooltip: 'Refresh'),
-      const SizedBox(width: 6),
-      _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog, tooltip: 'View Process', color: _blue, bg: _blue.withOpacity(0.10)),
-    ]),
-    const SizedBox(height: 10),
-    Row(children: [
-      _buildViewToggle(),
-      const SizedBox(width: 10),
-      _newInvoiceButton(),
-      const SizedBox(width: 8),
-      _actionBtn('Import', Icons.upload_file_rounded, _purple, _showImportDialog),
-      const SizedBox(width: 8),
-      _actionBtn('Automate', Icons.auto_awesome, Colors.indigo, _openAutomationPage),
-      const SizedBox(width: 8),
-      _actionBtn('Export Excel', Icons.download_rounded, _green, _isLoading ? null : _exportToExcel),
-      const SizedBox(width: 8),
-      _actionBtn('Reminders', Icons.notifications_active_outlined, _orange, _openReminderSettings),
-    ]),
-  ]);
-
-  Widget _topBarMobile() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Row(children: [
-      _statusDropdown(),
-      const SizedBox(width: 8),
-      Expanded(child: _searchField(width: double.infinity)),
-      const SizedBox(width: 8),
-      _newInvoiceButton(compact: true),
-    ]),
-    const SizedBox(height: 10),
-    SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(children: [
-        _buildViewToggle(),
+        _statusDropdown(),
+        const SizedBox(width: 12),
+        _searchField(width: 240),
+        const SizedBox(width: 10),
+        _dateChip(
+            label: _fromDate != null
+                ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                : 'From Date',
+            isActive: _fromDate != null,
+            onTap: _selectFromDate),
         const SizedBox(width: 8),
-        _dateChip(label: _fromDate != null ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}' : 'From Date', isActive: _fromDate != null, onTap: _selectFromDate),
-        const SizedBox(width: 6),
-        _dateChip(label: _toDate != null ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}' : 'To Date', isActive: _toDate != null, onTap: _selectToDate),
+        _dateChip(
+            label: _toDate != null
+                ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                : 'To Date',
+            isActive: _toDate != null,
+            onTap: _selectToDate),
         if (_hasDateFilters) ...[
           const SizedBox(width: 6),
-          _iconBtn(Icons.close, _clearDateFilters, tooltip: 'Clear', color: Colors.red[600]!, bg: Colors.red[50]!),
+          _iconBtn(Icons.close, _clearDateFilters,
+              tooltip: 'Clear Dates',
+              color: Colors.red[600]!,
+              bg: Colors.red[50]!),
         ],
         const SizedBox(width: 6),
-        _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData, tooltip: 'Refresh'),
+        _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
+            tooltip: 'Refresh'),
         const SizedBox(width: 6),
-        _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog, tooltip: 'View Process', color: _blue, bg: _blue.withOpacity(0.10)),
-        const SizedBox(width: 6),
-        _compactBtn('Automate', Colors.indigo, _openAutomationPage),
-        const SizedBox(width: 6),
-        _compactBtn('Import', _purple, _showImportDialog),
-        const SizedBox(width: 6),
-        _compactBtn('Export', _green, _isLoading ? null : _exportToExcel),
-        const SizedBox(width: 6),
-        _compactBtn('Reminders', _orange, _openReminderSettings),
-      ]),
-    ),
-  ]);
+        _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog,
+            tooltip: 'View Invoice Process',
+            color: _blue,
+            bg: _blue.withOpacity(0.10)),
+        const Spacer(),
+        _buildViewToggle(),
+        const SizedBox(width: 12),
+        _newInvoiceButton(),
+        const SizedBox(width: 8),
+        _actionBtn(
+            'Import', Icons.upload_file_rounded, _purple, _showImportDialog),
+        const SizedBox(width: 8),
+        _actionBtn(
+            'Automate', Icons.auto_awesome, Colors.indigo, _openAutomationPage),
+        const SizedBox(width: 8),
+        _actionBtn('Export Excel', Icons.download_rounded, _green,
+            _isLoading ? null : _exportToExcel),
+        const SizedBox(width: 8),
+        _actionBtn('Reminders', Icons.notifications_active_outlined, _orange,
+            _openReminderSettings),
+      ]);
+
+  Widget _topBarTablet() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _statusDropdown(),
+          const SizedBox(width: 10),
+          _searchField(width: 200),
+          const SizedBox(width: 8),
+          _dateChip(
+              label: _fromDate != null
+                  ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                  : 'From Date',
+              isActive: _fromDate != null,
+              onTap: _selectFromDate),
+          const SizedBox(width: 6),
+          _dateChip(
+              label: _toDate != null
+                  ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                  : 'To Date',
+              isActive: _toDate != null,
+              onTap: _selectToDate),
+          if (_hasDateFilters) ...[
+            const SizedBox(width: 6),
+            _iconBtn(Icons.close, _clearDateFilters,
+                tooltip: 'Clear', color: Colors.red[600]!, bg: Colors.red[50]!),
+          ],
+          const SizedBox(width: 6),
+          _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
+              tooltip: 'Refresh'),
+          const SizedBox(width: 6),
+          _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog,
+              tooltip: 'View Process',
+              color: _blue,
+              bg: _blue.withOpacity(0.10)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          _buildViewToggle(),
+          const SizedBox(width: 10),
+          _newInvoiceButton(),
+          const SizedBox(width: 8),
+          _actionBtn(
+              'Import', Icons.upload_file_rounded, _purple, _showImportDialog),
+          const SizedBox(width: 8),
+          _actionBtn('Automate', Icons.auto_awesome, Colors.indigo,
+              _openAutomationPage),
+          const SizedBox(width: 8),
+          _actionBtn('Export Excel', Icons.download_rounded, _green,
+              _isLoading ? null : _exportToExcel),
+          const SizedBox(width: 8),
+          _actionBtn('Reminders', Icons.notifications_active_outlined, _orange,
+              _openReminderSettings),
+        ]),
+      ]);
+
+  Widget _topBarMobile() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _statusDropdown(),
+          const SizedBox(width: 8),
+          Expanded(child: _searchField(width: double.infinity)),
+          const SizedBox(width: 8),
+          _newInvoiceButton(compact: true),
+        ]),
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            _buildViewToggle(),
+            const SizedBox(width: 8),
+            _dateChip(
+                label: _fromDate != null
+                    ? 'From: ${DateFormat('dd/MM/yy').format(_fromDate!)}'
+                    : 'From Date',
+                isActive: _fromDate != null,
+                onTap: _selectFromDate),
+            const SizedBox(width: 6),
+            _dateChip(
+                label: _toDate != null
+                    ? 'To: ${DateFormat('dd/MM/yy').format(_toDate!)}'
+                    : 'To Date',
+                isActive: _toDate != null,
+                onTap: _selectToDate),
+            if (_hasDateFilters) ...[
+              const SizedBox(width: 6),
+              _iconBtn(Icons.close, _clearDateFilters,
+                  tooltip: 'Clear',
+                  color: Colors.red[600]!,
+                  bg: Colors.red[50]!),
+            ],
+            const SizedBox(width: 6),
+            _iconBtn(Icons.refresh_rounded, _isLoading ? null : _refreshData,
+                tooltip: 'Refresh'),
+            const SizedBox(width: 6),
+            _iconBtn(Icons.account_tree_rounded, _showInvoiceLifecycleDialog,
+                tooltip: 'View Process',
+                color: _blue,
+                bg: _blue.withOpacity(0.10)),
+            const SizedBox(width: 6),
+            _compactBtn('Automate', Colors.indigo, _openAutomationPage),
+            const SizedBox(width: 6),
+            _compactBtn('Import', _purple, _showImportDialog),
+            const SizedBox(width: 6),
+            _compactBtn('Export', _green, _isLoading ? null : _exportToExcel),
+            const SizedBox(width: 6),
+            _compactBtn('Reminders', _orange, _openReminderSettings),
+          ]),
+        ),
+      ]);
 
   // ── New Invoice button ────────────────────────────────────────────────────
   Widget _newInvoiceButton({bool compact = false}) {
@@ -808,13 +948,18 @@ void _showImportDialog() {
       onTap: _openNewInvoice,
       child: Container(
         height: 42,
-        padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: 11),
-        decoration: BoxDecoration(color: _navy, borderRadius: BorderRadius.circular(10)),
+        padding:
+            EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: 11),
+        decoration: BoxDecoration(
+            color: _navy, borderRadius: BorderRadius.circular(10)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           const Icon(Icons.add, color: Colors.white, size: 16),
           const SizedBox(width: 6),
           Text(compact ? 'New' : 'New Invoice',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
         ]),
       ),
     );
@@ -823,25 +968,31 @@ void _showImportDialog() {
   // ── Shared top-bar widgets ─────────────────────────────────────────────────
 
   Widget _statusDropdown() => Container(
-    height: 44,
-    padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF7F9FC),
-      border: Border.all(color: const Color(0xFFDDE3EE)),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: _selectedStatus,
-        icon: const Icon(Icons.expand_more, size: 18, color: _navy),
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
-        items: _statusFilters.map((s) => DropdownMenuItem(
-            value: s,
-            child: Text(s == 'All' ? 'All Invoices' : s.replaceAll('_', ' ')))).toList(),
-        onChanged: (v) { if (v != null) _filterByStatus(v); },
-      ),
-    ),
-  );
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF7F9FC),
+          border: Border.all(color: const Color(0xFFDDE3EE)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedStatus,
+            icon: const Icon(Icons.expand_more, size: 18, color: _navy),
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: _navy),
+            items: _statusFilters
+                .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(
+                        s == 'All' ? 'All Invoices' : s.replaceAll('_', ' '))))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) _filterByStatus(v);
+            },
+          ),
+        ),
+      );
 
   Widget _searchField({required double width}) {
     final field = TextField(
@@ -856,18 +1007,32 @@ void _showImportDialog() {
                 icon: const Icon(Icons.clear, size: 16),
                 onPressed: () {
                   _searchController.clear();
-                  setState(() { _searchQuery = ''; _currentPage = 1; });
+                  setState(() {
+                    _searchQuery = '';
+                    _currentPage = 1;
+                  });
                   _loadInvoices();
                 })
             : null,
-        filled: true, fillColor: const Color(0xFFF7F9FC),
-        contentPadding: const EdgeInsets.symmetric(vertical: 0), isDense: true,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _navy, width: 1.5)),
+        filled: true,
+        fillColor: const Color(0xFFF7F9FC),
+        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+        isDense: true,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: _navy, width: 1.5)),
       ),
       onChanged: (v) {
-        setState(() { _searchQuery = v.toLowerCase(); _currentPage = 1; });
+        setState(() {
+          _searchQuery = v.toLowerCase();
+          _currentPage = 1;
+        });
         Future.delayed(const Duration(milliseconds: 400), () {
           if (_searchQuery == v.toLowerCase()) _loadInvoices();
         });
@@ -877,7 +1042,10 @@ void _showImportDialog() {
     return SizedBox(width: width, height: 44, child: field);
   }
 
-  Widget _dateChip({required String label, required bool isActive, required VoidCallback onTap}) {
+  Widget _dateChip(
+      {required String label,
+      required bool isActive,
+      required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
@@ -890,38 +1058,55 @@ void _showImportDialog() {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.calendar_today, size: 15, color: isActive ? _navy : Colors.grey[500]),
+          Icon(Icons.calendar_today,
+              size: 15, color: isActive ? _navy : Colors.grey[500]),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.normal, color: isActive ? _navy : Colors.grey[600])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                  color: isActive ? _navy : Colors.grey[600])),
         ]),
       ),
     );
   }
 
-  Widget _iconBtn(IconData icon, VoidCallback? onTap, {String tooltip = '', Color color = const Color(0xFF7F8C8D), Color bg = const Color(0xFFF1F1F1)}) {
+  Widget _iconBtn(IconData icon, VoidCallback? onTap,
+      {String tooltip = '',
+      Color color = const Color(0xFF7F8C8D),
+      Color bg = const Color(0xFFF1F1F1)}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          width: 42, height: 42,
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withOpacity(0.25))),
-          child: Icon(icon, size: 20, color: onTap == null ? Colors.grey[300] : color),
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withOpacity(0.25))),
+          child: Icon(icon,
+              size: 20, color: onTap == null ? Colors.grey[300] : color),
         ),
       ),
     );
   }
 
-  Widget _actionBtn(String label, IconData icon, Color bg, VoidCallback? onTap) {
+  Widget _actionBtn(
+      String label, IconData icon, Color bg, VoidCallback? onTap) {
     return ElevatedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      label: Text(label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -932,13 +1117,16 @@ void _showImportDialog() {
     return ElevatedButton(
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
-        backgroundColor: bg, foregroundColor: Colors.white,
+        backgroundColor: bg,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: bg.withOpacity(0.5),
-        elevation: 0, minimumSize: const Size(0, 42),
+        elevation: 0,
+        minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      child: Text(label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -990,21 +1178,31 @@ void _showImportDialog() {
             controller: _statsHScrollCtrl,
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: cards.asMap().entries.map((e) => Container(
-                width: 160,
-                margin: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
-                child: _buildStatCard(e.value, compact: true),
-              )).toList(),
+              children: cards
+                  .asMap()
+                  .entries
+                  .map((e) => Container(
+                        width: 160,
+                        margin: EdgeInsets.only(
+                            right: e.key < cards.length - 1 ? 10 : 0),
+                        child: _buildStatCard(e.value, compact: true),
+                      ))
+                  .toList(),
             ),
           );
         }
         return Row(
-          children: cards.asMap().entries.map((e) => Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(right: e.key < cards.length - 1 ? 10 : 0),
-              child: _buildStatCard(e.value, compact: false),
-            ),
-          )).toList(),
+          children: cards
+              .asMap()
+              .entries
+              .map((e) => Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                          right: e.key < cards.length - 1 ? 10 : 0),
+                      child: _buildStatCard(e.value, compact: false),
+                    ),
+                  ))
+              .toList(),
         );
       }),
     );
@@ -1012,47 +1210,99 @@ void _showImportDialog() {
 
   Widget _buildStatCard(_StatCardData data, {required bool compact}) {
     return Container(
-      padding: compact ? const EdgeInsets.all(12) : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: compact
+          ? const EdgeInsets.all(12)
+          : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [data.gradientColors[0].withOpacity(0.15), data.gradientColors[1].withOpacity(0.08)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [
+            data.gradientColors[0].withOpacity(0.15),
+            data.gradientColors[1].withOpacity(0.08)
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: data.color.withOpacity(0.22)),
-        boxShadow: [BoxShadow(color: data.color.withOpacity(0.10), blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: data.color.withOpacity(0.10),
+              blurRadius: 12,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: compact
-          ? Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: data.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(data.icon, color: Colors.white, size: 20),
-              ),
-              const SizedBox(height: 10),
-              Text(data.label, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 4),
-              Text(data.value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: data.color), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ])
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                          colors: data.gradientColors,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(data.icon, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(data.label,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text(data.value,
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: data.color),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ])
           : Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: data.gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  gradient: LinearGradient(
+                      colors: data.gradientColors,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight),
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: data.color.withOpacity(0.30), blurRadius: 8, offset: const Offset(0, 3))],
+                  boxShadow: [
+                    BoxShadow(
+                        color: data.color.withOpacity(0.30),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3))
+                  ],
                 ),
                 child: Icon(data.icon, color: Colors.white, size: 24),
               ),
               const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(data.label, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 5),
-                Text(data.value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: data.color), maxLines: 1, overflow: TextOverflow.ellipsis),
-              ])),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(data.label,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 5),
+                    Text(data.value,
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: data.color),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ])),
             ]),
     );
   }
@@ -1062,28 +1312,34 @@ void _showImportDialog() {
   // ==========================================================================
 
   Widget _buildInvoiceTable() {
-    final filtered = _searchQuery.isEmpty
-        ? _invoices
-        : _invoices.where((inv) {
-            return inv.invoiceNumber.toLowerCase().contains(_searchQuery) ||
-                   inv.customerName.toLowerCase().contains(_searchQuery) ||
-                   (inv.orderNumber?.toLowerCase().contains(_searchQuery) ?? false);
-          }).toList();
+    final filtered = _invoices;
 
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         return Scrollbar(
           controller: _tableHScrollCtrl,
-          thumbVisibility: true, trackVisibility: true, thickness: 8, radius: const Radius.circular(4),
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8,
+          radius: const Radius.circular(4),
           child: ScrollConfiguration(
             behavior: ScrollConfiguration.of(context).copyWith(
-              dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad},
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.trackpad
+              },
             ),
             child: SingleChildScrollView(
               controller: _tableHScrollCtrl,
@@ -1091,23 +1347,35 @@ void _showImportDialog() {
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFF0D1B3E)),
-                  headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.4),
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFF0D1B3E)),
+                  headingTextStyle: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 0.4),
                   headingRowHeight: 52,
-                  dataRowMinHeight: 58, dataRowMaxHeight: 72,
+                  dataRowMinHeight: 58,
+                  dataRowMaxHeight: 72,
                   dataTextStyle: const TextStyle(fontSize: 14),
                   dataRowColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.hovered)) return _navy.withOpacity(0.04);
+                    if (states.contains(WidgetState.hovered))
+                      return _navy.withOpacity(0.04);
                     return null;
                   }),
-                  dividerThickness: 1, columnSpacing: 18, horizontalMargin: 16,
+                  dividerThickness: 1,
+                  columnSpacing: 18,
+                  horizontalMargin: 16,
                   columns: [
-                    DataColumn(label: SizedBox(width: 36, child: Checkbox(
-                      value: _selectAll,
-                      fillColor: WidgetStateProperty.all(Colors.white),
-                      checkColor: const Color(0xFF0D1B3E),
-                      onChanged: _toggleSelectAll,
-                    ))),
+                    DataColumn(
+                        label: SizedBox(
+                            width: 36,
+                            child: Checkbox(
+                              value: _selectAll,
+                              fillColor: WidgetStateProperty.all(Colors.white),
+                              checkColor: const Color(0xFF0D1B3E),
+                              onChanged: _toggleSelectAll,
+                            ))),
                     const DataColumn(label: Text('DATE')),
                     const DataColumn(label: Text('INVOICE #')),
                     const DataColumn(label: Text('ORDER #')),
@@ -1134,124 +1402,245 @@ void _showImportDialog() {
       selected: isSelected,
       color: WidgetStateProperty.resolveWith((states) {
         if (isSelected) return _navy.withOpacity(0.06);
-        if (states.contains(WidgetState.hovered)) return _navy.withOpacity(0.04);
+        if (states.contains(WidgetState.hovered))
+          return _navy.withOpacity(0.04);
         return null;
       }),
       cells: [
         // Checkbox
-        DataCell(Checkbox(value: isSelected, onChanged: (_) => _toggleSelection(invoice.id))),
+        DataCell(Checkbox(
+            value: isSelected, onChanged: (_) => _toggleSelection(invoice.id))),
 
         // Date
-        DataCell(SizedBox(width: 110, child: Text(DateFormat('dd MMM yyyy').format(invoice.invoiceDate)))),
+        DataCell(SizedBox(
+            width: 110,
+            child:
+                Text(DateFormat('dd MMM yyyy').format(invoice.invoiceDate)))),
 
         // Invoice # (clickable)
-        DataCell(SizedBox(width: 140, child: InkWell(
-          onTap: () => _openEditInvoice(invoice.id),
-          child: Text(invoice.invoiceNumber,
-              style: const TextStyle(color: _navy, fontWeight: FontWeight.w600, decoration: TextDecoration.underline),
-              overflow: TextOverflow.ellipsis),
-        ))),
+        DataCell(SizedBox(
+            width: 140,
+            child: InkWell(
+              onTap: () => _openEditInvoice(invoice.id),
+              child: Text(invoice.invoiceNumber,
+                  style: const TextStyle(
+                      color: _navy,
+                      fontWeight: FontWeight.w600,
+                      decoration: TextDecoration.underline),
+                  overflow: TextOverflow.ellipsis),
+            ))),
 
         // Order #
-        DataCell(SizedBox(width: 130, child: Text(invoice.orderNumber ?? '-',
-            style: TextStyle(color: Colors.grey[600]), overflow: TextOverflow.ellipsis))),
+        DataCell(SizedBox(
+            width: 130,
+            child: Text(invoice.orderNumber ?? '-',
+                style: TextStyle(color: Colors.grey[600]),
+                overflow: TextOverflow.ellipsis))),
 
         // Customer with avatar
-        DataCell(SizedBox(width: 170, child: Row(children: [
-          Container(
-            width: 30, height: 30,
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(color: _navy.withOpacity(0.10), shape: BoxShape.circle),
-            child: Center(child: Text(
-              invoice.customerName.isNotEmpty ? invoice.customerName[0].toUpperCase() : '?',
-              style: const TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 13),
-            )),
-          ),
-          Expanded(child: Text(invoice.customerName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500))),
-        ]))),
+        DataCell(SizedBox(
+            width: 170,
+            child: Row(children: [
+              Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                    color: _navy.withOpacity(0.10), shape: BoxShape.circle),
+                child: Center(
+                    child: Text(
+                  invoice.customerName.isNotEmpty
+                      ? invoice.customerName[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                      color: _navy, fontWeight: FontWeight.bold, fontSize: 13),
+                )),
+              ),
+              Expanded(
+                  child: Text(invoice.customerName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w500))),
+            ]))),
 
         // Status
-        DataCell(SizedBox(width: 120, child: _buildStatusBadge(invoice.status))),
+        DataCell(
+            SizedBox(width: 120, child: _buildStatusBadge(invoice.status))),
 
         // Due Date
-        DataCell(SizedBox(width: 110, child: Text(DateFormat('dd MMM yyyy').format(invoice.dueDate)))),
+        DataCell(SizedBox(
+            width: 110,
+            child: Text(DateFormat('dd MMM yyyy').format(invoice.dueDate)))),
 
         // Amount
-        DataCell(SizedBox(width: 120, child: Text(
-          '₹${invoice.totalAmount.toStringAsFixed(2)}',
-          style: const TextStyle(fontWeight: FontWeight.w600), textAlign: TextAlign.right,
-        ))),
+        DataCell(SizedBox(
+            width: 120,
+            child: Text(
+              '₹${invoice.totalAmount.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.right,
+            ))),
 
         // Balance
-        DataCell(SizedBox(width: 120, child: Text(
-          '₹${invoice.amountDue.toStringAsFixed(2)}',
-          style: TextStyle(fontWeight: FontWeight.w600, color: invoice.amountDue > 0 ? _red : _green),
-          textAlign: TextAlign.right,
-        ))),
+        DataCell(SizedBox(
+            width: 120,
+            child: Text(
+              '₹${invoice.amountDue.toStringAsFixed(2)}',
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: invoice.amountDue > 0 ? _red : _green),
+              textAlign: TextAlign.right,
+            ))),
 
         // Actions — Share + WhatsApp + PopupMenu
-        DataCell(SizedBox(width: 150, child: Row(children: [
-          // Share
-          Tooltip(message: 'Share', child: InkWell(
-            onTap: () => _shareInvoice(invoice),
-            child: Container(width: 32, height: 32,
-                decoration: BoxDecoration(color: _blue.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.share, size: 16, color: _blue)),
-          )),
-          const SizedBox(width: 4),
-          // WhatsApp
-          // Tooltip(message: 'WhatsApp', child: InkWell(
-          //   onTap: () => _whatsApp(invoice),
-          //   child: Container(width: 32, height: 32,
-          //       decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-          //       child: const Icon(Icons.chat, size: 16, color: Color(0xFF25D366))),
-          // )),
-          // const SizedBox(width: 4),
-          // More
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            onSelected: (value) async {
-              switch (value) {
-                case 'view':         _viewInvoiceDetails(invoice); break;
-                case 'edit':         _openEditInvoice(invoice.id); break;
-                case 'mark_as_sent': await _markInvoiceAsSent(invoice); break;
-                case 'send':         await _sendInvoice(invoice); break;
-                case 'send_email_reminder':    await _sendManualReminder(invoice, 'email'); break;
-                case 'send_whatsapp_reminder': await _sendManualReminder(invoice, 'whatsapp'); break;
-                case 'download':     await _downloadInvoicePDF(invoice); break;
-                case 'ticket':       _raiseTicket(invoice); break;
-                case 'pause_reminder':  await _pauseReminder(invoice);  break;
-                case 'resume_reminder': await _resumeReminder(invoice); break;
-                case 'delete':       await _deleteInvoice(invoice); break;
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'view',
-                child: ListTile(leading: Icon(Icons.visibility_outlined, size: 17, color: _blue), title: Text('View Details'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'edit',
-                child: ListTile(leading: Icon(Icons.edit_outlined, size: 17, color: _navy), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'mark_as_sent',
-                child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange), title: Text('Mark as Sent'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'send',
-                child: ListTile(leading: Icon(Icons.send_outlined, size: 17, color: _green), title: Text('Send Email'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'send_email_reminder',
-                child: ListTile(leading: Icon(Icons.email_outlined, size: 17, color: _blue), title: Text('Send Email Reminder'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'send_whatsapp_reminder',
-                child: ListTile(leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)), title: Text('Send WhatsApp Reminder'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'download',
-                child: ListTile(leading: Icon(Icons.download_outlined, size: 17, color: _purple), title: Text('Download PDF'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'ticket',
-                child: ListTile(leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange), title: Text('Raise Ticket'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'pause_reminder',
-                child: ListTile(leading: Icon(Icons.pause_circle_outline, size: 17, color: Color(0xFFE67E22)), title: Text('Pause Reminders'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'resume_reminder',
-                child: ListTile(leading: Icon(Icons.play_circle_outline, size: 17, color: Color(0xFF27AE60)), title: Text('Resume Reminders'), contentPadding: EdgeInsets.zero)),
-              const PopupMenuItem(value: 'delete',
-                child: ListTile(leading: Icon(Icons.delete_outline, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
-            ],
-          ),
-        ]))),
+        DataCell(SizedBox(
+            width: 150,
+            child: Row(children: [
+              // Share
+              Tooltip(
+                  message: 'Share',
+                  child: InkWell(
+                    onTap: () => _shareInvoice(invoice),
+                    child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                            color: _blue.withOpacity(0.10),
+                            borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.share, size: 16, color: _blue)),
+                  )),
+              const SizedBox(width: 4),
+              // WhatsApp
+              // Tooltip(message: 'WhatsApp', child: InkWell(
+              //   onTap: () => _whatsApp(invoice),
+              //   child: Container(width: 32, height: 32,
+              //       decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+              //       child: const Icon(Icons.chat, size: 16, color: Color(0xFF25D366))),
+              // )),
+              // const SizedBox(width: 4),
+              // More
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'view':
+                      _viewInvoiceDetails(invoice);
+                      break;
+                    case 'edit':
+                      _openEditInvoice(invoice.id);
+                      break;
+                    case 'mark_as_sent':
+                      await _markInvoiceAsSent(invoice);
+                      break;
+                    case 'send':
+                      await _sendInvoice(invoice);
+                      break;
+                    case 'send_email_reminder':
+                      await _sendManualReminder(invoice, 'email');
+                      break;
+                    case 'send_whatsapp_reminder':
+                      await _sendManualReminder(invoice, 'whatsapp');
+                      break;
+                    case 'download':
+                      await _downloadInvoicePDF(invoice);
+                      break;
+                    case 'ticket':
+                      _raiseTicket(invoice);
+                      break;
+                    case 'pause_reminder':
+                      await _pauseReminder(invoice);
+                      break;
+                    case 'resume_reminder':
+                      await _resumeReminder(invoice);
+                      break;
+                    case 'delete':
+                      await _deleteInvoice(invoice);
+                      break;
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                      value: 'view',
+                      child: ListTile(
+                          leading: Icon(Icons.visibility_outlined,
+                              size: 17, color: _blue),
+                          title: Text('View Details'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'edit',
+                      child: ListTile(
+                          leading:
+                              Icon(Icons.edit_outlined, size: 17, color: _navy),
+                          title: Text('Edit'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'mark_as_sent',
+                      child: ListTile(
+                          leading: Icon(Icons.mark_email_read_outlined,
+                              size: 17, color: _orange),
+                          title: Text('Mark as Sent'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'send',
+                      child: ListTile(
+                          leading: Icon(Icons.send_outlined,
+                              size: 17, color: _green),
+                          title: Text('Send Email'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'send_email_reminder',
+                      child: ListTile(
+                          leading: Icon(Icons.email_outlined,
+                              size: 17, color: _blue),
+                          title: Text('Send Email Reminder'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'send_whatsapp_reminder',
+                      child: ListTile(
+                          leading: Icon(Icons.chat,
+                              size: 17, color: Color(0xFF25D366)),
+                          title: Text('Send WhatsApp Reminder'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'download',
+                      child: ListTile(
+                          leading: Icon(Icons.download_outlined,
+                              size: 17, color: _purple),
+                          title: Text('Download PDF'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'ticket',
+                      child: ListTile(
+                          leading: Icon(Icons.confirmation_number_outlined,
+                              size: 17, color: _orange),
+                          title: Text('Raise Ticket'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'pause_reminder',
+                      child: ListTile(
+                          leading: Icon(Icons.pause_circle_outline,
+                              size: 17, color: Color(0xFFE67E22)),
+                          title: Text('Pause Reminders'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'resume_reminder',
+                      child: ListTile(
+                          leading: Icon(Icons.play_circle_outline,
+                              size: 17, color: Color(0xFF27AE60)),
+                          title: Text('Resume Reminders'),
+                          contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                          leading: Icon(Icons.delete_outline,
+                              size: 17, color: Colors.red),
+                          title: Text('Delete',
+                              style: TextStyle(color: Colors.red)),
+                          contentPadding: EdgeInsets.zero)),
+                ],
+              ),
+            ]))),
       ],
     );
   }
@@ -1259,29 +1648,29 @@ void _showImportDialog() {
   // ── View toggle ───────────────────────────────────────────────────────────
 
   Widget _buildViewToggle() => Container(
-    decoration: BoxDecoration(
-      border: Border.all(color: Colors.grey.shade300),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _toggleButton(
-          icon: Icons.view_list_rounded,
-          label: 'List',
-          isSelected: !_isTableView,
-          onTap: () => setState(() => _isTableView = false),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
         ),
-        Container(width: 1, height: 24, color: Colors.grey.shade300),
-        _toggleButton(
-          icon: Icons.table_chart_rounded,
-          label: 'Table',
-          isSelected: _isTableView,
-          onTap: () => setState(() => _isTableView = true),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _toggleButton(
+              icon: Icons.view_list_rounded,
+              label: 'List',
+              isSelected: !_isTableView,
+              onTap: () => setState(() => _isTableView = false),
+            ),
+            Container(width: 1, height: 24, color: Colors.grey.shade300),
+            _toggleButton(
+              icon: Icons.table_chart_rounded,
+              label: 'Table',
+              isSelected: _isTableView,
+              onTap: () => setState(() => _isTableView = true),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Widget _toggleButton({
     required IconData icon,
@@ -1301,7 +1690,9 @@ void _showImportDialog() {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
+              Icon(icon,
+                  size: 16,
+                  color: isSelected ? Colors.white : Colors.grey.shade600),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -1319,13 +1710,7 @@ void _showImportDialog() {
   // ── List View ─────────────────────────────────────────────────────────────
 
   Widget _buildInvoiceListView() {
-    final filtered = _searchQuery.isEmpty
-        ? _invoices
-        : _invoices.where((inv) {
-            return inv.invoiceNumber.toLowerCase().contains(_searchQuery) ||
-                inv.customerName.toLowerCase().contains(_searchQuery) ||
-                (inv.orderNumber?.toLowerCase().contains(_searchQuery) ?? false);
-          }).toList();
+    final filtered = _invoices;
 
     if (filtered.isEmpty) {
       return SizedBox(height: 400, child: _buildEmptyState());
@@ -1434,7 +1819,8 @@ void _showImportDialog() {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (invoice.orderNumber != null && invoice.orderNumber!.isNotEmpty)
+                  if (invoice.orderNumber != null &&
+                      invoice.orderNumber!.isNotEmpty)
                     Text(
                       'Order: ${invoice.orderNumber}',
                       style: TextStyle(fontSize: 12, color: Colors.grey[500]),
@@ -1453,16 +1839,24 @@ void _showImportDialog() {
                       children: [
                         Text(
                           'Invoice Date',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                            Icon(Icons.calendar_today_outlined,
+                                size: 12, color: Colors.grey[500]),
                             const SizedBox(width: 4),
                             Text(
-                              DateFormat('dd MMM yyyy').format(invoice.invoiceDate),
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+                              DateFormat('dd MMM yyyy')
+                                  .format(invoice.invoiceDate),
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF374151)),
                             ),
                           ],
                         ),
@@ -1475,7 +1869,10 @@ void _showImportDialog() {
                       children: [
                         Text(
                           'Due Date',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 3),
                         Row(
@@ -1517,7 +1914,10 @@ void _showImportDialog() {
                       children: [
                         Text(
                           'Total Amount',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -1537,7 +1937,10 @@ void _showImportDialog() {
                       children: [
                         Text(
                           'Balance Due',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -1568,7 +1971,8 @@ void _showImportDialog() {
                               color: _blue.withOpacity(0.10),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Icon(Icons.share, size: 16, color: _blue),
+                            child:
+                                const Icon(Icons.share, size: 16, color: _blue),
                           ),
                         ),
                       ),
@@ -1576,7 +1980,8 @@ void _showImportDialog() {
                       // More actions
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert, size: 20),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
                         onSelected: (value) async {
                           switch (value) {
                             case 'view':
@@ -1618,7 +2023,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'view',
                             child: ListTile(
-                              leading: Icon(Icons.visibility_outlined, size: 17, color: _blue),
+                              leading: Icon(Icons.visibility_outlined,
+                                  size: 17, color: _blue),
                               title: Text('View Details'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1626,7 +2032,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'edit',
                             child: ListTile(
-                              leading: Icon(Icons.edit_outlined, size: 17, color: _navy),
+                              leading: Icon(Icons.edit_outlined,
+                                  size: 17, color: _navy),
                               title: Text('Edit'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1634,7 +2041,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'mark_as_sent',
                             child: ListTile(
-                              leading: Icon(Icons.mark_email_read_outlined, size: 17, color: _orange),
+                              leading: Icon(Icons.mark_email_read_outlined,
+                                  size: 17, color: _orange),
                               title: Text('Mark as Sent'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1642,7 +2050,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'send',
                             child: ListTile(
-                              leading: Icon(Icons.send_outlined, size: 17, color: _green),
+                              leading: Icon(Icons.send_outlined,
+                                  size: 17, color: _green),
                               title: Text('Send Email'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1650,7 +2059,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'send_email_reminder',
                             child: ListTile(
-                              leading: Icon(Icons.email_outlined, size: 17, color: _blue),
+                              leading: Icon(Icons.email_outlined,
+                                  size: 17, color: _blue),
                               title: Text('Send Email Reminder'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1658,7 +2068,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'send_whatsapp_reminder',
                             child: ListTile(
-                              leading: Icon(Icons.chat, size: 17, color: Color(0xFF25D366)),
+                              leading: Icon(Icons.chat,
+                                  size: 17, color: Color(0xFF25D366)),
                               title: Text('Send WhatsApp Reminder'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1666,7 +2077,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'download',
                             child: ListTile(
-                              leading: Icon(Icons.download_outlined, size: 17, color: _purple),
+                              leading: Icon(Icons.download_outlined,
+                                  size: 17, color: _purple),
                               title: Text('Download PDF'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1674,7 +2086,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'ticket',
                             child: ListTile(
-                              leading: Icon(Icons.confirmation_number_outlined, size: 17, color: _orange),
+                              leading: Icon(Icons.confirmation_number_outlined,
+                                  size: 17, color: _orange),
                               title: Text('Raise Ticket'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1682,7 +2095,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'pause_reminder',
                             child: ListTile(
-                              leading: Icon(Icons.pause_circle_outline, size: 17, color: Color(0xFFE67E22)),
+                              leading: Icon(Icons.pause_circle_outline,
+                                  size: 17, color: Color(0xFFE67E22)),
                               title: Text('Pause Reminders'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1690,7 +2104,8 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'resume_reminder',
                             child: ListTile(
-                              leading: Icon(Icons.play_circle_outline, size: 17, color: Color(0xFF27AE60)),
+                              leading: Icon(Icons.play_circle_outline,
+                                  size: 17, color: Color(0xFF27AE60)),
                               title: Text('Resume Reminders'),
                               contentPadding: EdgeInsets.zero,
                             ),
@@ -1698,8 +2113,10 @@ void _showImportDialog() {
                           const PopupMenuItem(
                             value: 'delete',
                             child: ListTile(
-                              leading: Icon(Icons.delete_outline, size: 17, color: Colors.red),
-                              title: Text('Delete', style: TextStyle(color: Colors.red)),
+                              leading: Icon(Icons.delete_outline,
+                                  size: 17, color: Colors.red),
+                              title: Text('Delete',
+                                  style: TextStyle(color: Colors.red)),
                               contentPadding: EdgeInsets.zero,
                             ),
                           ),
@@ -1720,22 +2137,34 @@ void _showImportDialog() {
 
   Widget _buildStatusBadge(String status) {
     final Map<String, List<Color>> statusColors = {
-      'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
-      'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
-      'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
-      'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+      'PAID': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+      'DRAFT': [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+      'SENT': [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+      'UNPAID': [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
       'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
-      'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
-      'CANCELLED':      [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+      'OVERDUE': [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+      'CANCELLED': [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
     };
-    final c = statusColors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+    final c = statusColors[status] ??
+        [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20), border: Border.all(color: c[1].withOpacity(0.3))),
+      decoration: BoxDecoration(
+          color: c[0],
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: c[1].withOpacity(0.3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 6, height: 6, decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
+        Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: c[1], shape: BoxShape.circle)),
         const SizedBox(width: 5),
-        Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 0.3)),
+        Text(status.replaceAll('_', ' '),
+            style: TextStyle(
+                color: c[1],
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                letterSpacing: 0.3)),
       ]),
     );
   }
@@ -1756,7 +2185,9 @@ void _showImportDialog() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFEEF2F7)))),
+      decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Color(0xFFEEF2F7)))),
       child: LayoutBuilder(builder: (_, constraints) {
         return Wrap(
           alignment: WrapAlignment.spaceBetween,
@@ -1766,24 +2197,45 @@ void _showImportDialog() {
             Text(
               'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–'
               '${(_currentPage * _itemsPerPage).clamp(0, _totalInvoices)} of $_totalInvoices',
-              style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500),
             ),
             Row(mainAxisSize: MainAxisSize.min, children: [
-              _pageNavBtn(icon: Icons.chevron_left, enabled: _currentPage > 1,
-                  onTap: () { setState(() => _currentPage--); _loadInvoices(); }),
+              _pageNavBtn(
+                  icon: Icons.chevron_left,
+                  enabled: _currentPage > 1,
+                  onTap: () {
+                    setState(() => _currentPage--);
+                    _loadInvoices();
+                  }),
               const SizedBox(width: 4),
               if (pages.first > 1) ...[
                 _pageNumBtn(1),
-                if (pages.first > 2) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                if (pages.first > 2)
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
               ],
               ...pages.map((p) => _pageNumBtn(p)),
               if (pages.last < _totalPages) ...[
-                if (pages.last < _totalPages - 1) Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Text('…', style: TextStyle(color: Colors.grey[400]))),
+                if (pages.last < _totalPages - 1)
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child:
+                          Text('…', style: TextStyle(color: Colors.grey[400]))),
                 _pageNumBtn(_totalPages),
               ],
               const SizedBox(width: 4),
-              _pageNavBtn(icon: Icons.chevron_right, enabled: _currentPage < _totalPages,
-                  onTap: () { setState(() => _currentPage++); _loadInvoices(); }),
+              _pageNavBtn(
+                  icon: Icons.chevron_right,
+                  enabled: _currentPage < _totalPages,
+                  onTap: () {
+                    setState(() => _currentPage++);
+                    _loadInvoices();
+                  }),
             ]),
           ],
         );
@@ -1794,27 +2246,41 @@ void _showImportDialog() {
   Widget _pageNumBtn(int page) {
     final bool isActive = _currentPage == page;
     return GestureDetector(
-      onTap: () { if (!isActive) { setState(() => _currentPage = page); _loadInvoices(); } },
+      onTap: () {
+        if (!isActive) {
+          setState(() => _currentPage = page);
+          _loadInvoices();
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        margin: const EdgeInsets.symmetric(horizontal: 2), width: 34, height: 34,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color: isActive ? _navy : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: isActive ? _navy : Colors.grey[300]!),
         ),
-        child: Center(child: Text('$page', style: TextStyle(fontSize: 13,
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-            color: isActive ? Colors.white : Colors.grey[700]))),
+        child: Center(
+            child: Text('$page',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                    color: isActive ? Colors.white : Colors.grey[700]))),
       ),
     );
   }
 
-  Widget _pageNavBtn({required IconData icon, required bool enabled, required VoidCallback onTap}) {
+  Widget _pageNavBtn(
+      {required IconData icon,
+      required bool enabled,
+      required VoidCallback onTap}) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
-        width: 34, height: 34,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color: enabled ? Colors.white : Colors.grey[50],
           borderRadius: BorderRadius.circular(8),
@@ -1830,43 +2296,88 @@ void _showImportDialog() {
   // ==========================================================================
 
   Widget _buildEmptyState() {
-    return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(padding: const EdgeInsets.all(28), decoration: BoxDecoration(color: _navy.withOpacity(0.06), shape: BoxShape.circle),
-          child: Icon(Icons.description_outlined, size: 64, color: _navy.withOpacity(0.4))),
-      const SizedBox(height: 20),
-      const Text('No invoices found', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-      const SizedBox(height: 8),
-      Text(
-        _searchQuery.isNotEmpty || _selectedStatus != 'All' ? 'Try adjusting your filters' : 'Create your first invoice to get started',
-        style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-      ),
-      const SizedBox(height: 28),
-      ElevatedButton.icon(
-        onPressed: _openNewInvoice,
-        icon: const Icon(Icons.add),
-        label: const Text('Create Invoice', style: TextStyle(fontWeight: FontWeight.w600)),
-        style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      ),
-    ])));
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                      color: _navy.withOpacity(0.06), shape: BoxShape.circle),
+                  child: Icon(Icons.description_outlined,
+                      size: 64, color: _navy.withOpacity(0.4))),
+              const SizedBox(height: 20),
+              const Text('No invoices found',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A202C))),
+              const SizedBox(height: 8),
+              Text(
+                _searchQuery.isNotEmpty || _selectedStatus != 'All'
+                    ? 'Try adjusting your filters'
+                    : 'Create your first invoice to get started',
+                style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              ),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: _openNewInvoice,
+                icon: const Icon(Icons.add),
+                label: const Text('Create Invoice',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+              ),
+            ])));
   }
 
   Widget _buildErrorState() {
-    return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
-          child: Icon(Icons.error_outline, size: 56, color: Colors.red[400])),
-      const SizedBox(height: 20),
-      const Text('Failed to Load Invoices', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-      const SizedBox(height: 8),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Text(_errorMessage ?? 'An unknown error occurred', style: TextStyle(fontSize: 14, color: Colors.grey[500]), textAlign: TextAlign.center)),
-      const SizedBox(height: 28),
-      ElevatedButton.icon(
-        onPressed: _refreshData,
-        icon: const Icon(Icons.refresh),
-        label: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.w600)),
-        style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      ),
-    ])));
+    return Center(
+        child: Padding(
+            padding: const EdgeInsets.all(24),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                      color: Colors.red[50], shape: BoxShape.circle),
+                  child: Icon(Icons.error_outline,
+                      size: 56, color: Colors.red[400])),
+              const SizedBox(height: 20),
+              const Text('Failed to Load Invoices',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A202C))),
+              const SizedBox(height: 8),
+              Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(_errorMessage ?? 'An unknown error occurred',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      textAlign: TextAlign.center)),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: _refreshData,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+              ),
+            ])));
   }
 }
 
@@ -1878,7 +2389,10 @@ class _RaiseTicketOverlay extends StatefulWidget {
   final Invoice invoice;
   final void Function(String) onTicketRaised;
   final void Function(String) onError;
-  const _RaiseTicketOverlay({required this.invoice, required this.onTicketRaised, required this.onError});
+  const _RaiseTicketOverlay(
+      {required this.invoice,
+      required this.onTicketRaised,
+      required this.onError});
 
   @override
   State<_RaiseTicketOverlay> createState() => _RaiseTicketOverlayState();
@@ -1889,9 +2403,9 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
   final _searchCtrl = TextEditingController();
 
   List<Map<String, dynamic>> _employees = [];
-  List<Map<String, dynamic>> _filtered  = [];
-  Map<String, dynamic>?       _selectedEmp;
-  bool _loading   = true;
+  List<Map<String, dynamic>> _filtered = [];
+  Map<String, dynamic>? _selectedEmp;
+  bool _loading = true;
   bool _assigning = false;
   String _priority = 'Medium';
 
@@ -1913,8 +2427,8 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
     if (resp['success'] == true && resp['data'] != null) {
       setState(() {
         _employees = List<Map<String, dynamic>>.from(resp['data']);
-        _filtered  = _employees;
-        _loading   = false;
+        _filtered = _employees;
+        _loading = false;
       });
     } else {
       setState(() => _loading = false);
@@ -1925,24 +2439,28 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
   void _filter() {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
-      _filtered = q.isEmpty ? _employees : _employees.where((e) =>
-        (e['name_parson'] ?? '').toLowerCase().contains(q) ||
-        (e['email'] ?? '').toLowerCase().contains(q) ||
-        (e['role'] ?? '').toLowerCase().contains(q)).toList();
+      _filtered = q.isEmpty
+          ? _employees
+          : _employees
+              .where((e) =>
+                  (e['name_parson'] ?? '').toLowerCase().contains(q) ||
+                  (e['email'] ?? '').toLowerCase().contains(q) ||
+                  (e['role'] ?? '').toLowerCase().contains(q))
+              .toList();
     });
   }
 
   String _buildMessage() {
     final inv = widget.invoice;
     return 'Invoice "${inv.invoiceNumber}" for customer "${inv.customerName}" '
-           '(${inv.customerEmail ?? 'N/A'}) requires attention.\n\n'
-           'Invoice Details:\n'
-           '• Total Amount: ₹${inv.totalAmount.toStringAsFixed(2)}\n'
-           '• Balance Due: ₹${inv.amountDue.toStringAsFixed(2)}\n'
-           '• Status: ${inv.status}\n'
-           '• Invoice Date: ${DateFormat('dd MMM yyyy').format(inv.invoiceDate)}\n'
-           '• Due Date: ${DateFormat('dd MMM yyyy').format(inv.dueDate)}\n\n'
-           'Please review and take necessary action.';
+        '(${inv.customerEmail ?? 'N/A'}) requires attention.\n\n'
+        'Invoice Details:\n'
+        '• Total Amount: ₹${inv.totalAmount.toStringAsFixed(2)}\n'
+        '• Balance Due: ₹${inv.amountDue.toStringAsFixed(2)}\n'
+        '• Status: ${inv.status}\n'
+        '• Invoice Date: ${DateFormat('dd MMM yyyy').format(inv.invoiceDate)}\n'
+        '• Due Date: ${DateFormat('dd MMM yyyy').format(inv.dueDate)}\n\n'
+        'Please review and take necessary action.';
   }
 
   Future<void> _assign() async {
@@ -1950,15 +2468,16 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
     setState(() => _assigning = true);
     try {
       final resp = await _tmsService.createTicket(
-        subject:    'Invoice: ${widget.invoice.invoiceNumber}',
-        message:    _buildMessage(),
-        priority:   _priority,
-        timeline:   1440,
+        subject: 'Invoice: ${widget.invoice.invoiceNumber}',
+        message: _buildMessage(),
+        priority: _priority,
+        timeline: 1440,
         assignedTo: _selectedEmp!['_id'].toString(),
       );
       setState(() => _assigning = false);
       if (resp['success'] == true) {
-        widget.onTicketRaised('Ticket assigned to ${_selectedEmp!['name_parson']}');
+        widget.onTicketRaised(
+            'Ticket assigned to ${_selectedEmp!['name_parson']}');
         if (mounted) Navigator.pop(context);
       } else {
         widget.onError(resp['message'] ?? 'Failed to create ticket');
@@ -1976,48 +2495,84 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Container(
         width: 520,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.80),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.80),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           // Header
           Container(
             padding: const EdgeInsets.all(20),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF1e3a8a), Color(0xFF2463AE)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+              gradient: LinearGradient(
+                  colors: [Color(0xFF1e3a8a), Color(0xFF2463AE)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight),
+              borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(20), topRight: Radius.circular(20)),
             ),
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 22),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.confirmation_number_rounded,
+                    color: Colors.white, size: 22),
               ),
               const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Raise a Ticket', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                Text('Invoice: ${widget.invoice.invoiceNumber}',
-                    style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12), overflow: TextOverflow.ellipsis),
-              ])),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white)),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    const Text('Raise a Ticket',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                    Text('Invoice: ${widget.invoice.invoiceNumber}',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.8), fontSize: 12),
+                        overflow: TextOverflow.ellipsis),
+                  ])),
+              IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: Colors.white)),
             ]),
           ),
           // Body
-          Flexible(child: SingleChildScrollView(
+          Flexible(
+              child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Auto-generated message', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Auto-generated message',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: const Color(0xFFF0F4F8), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFDDE3EE))),
-                child: Text(_buildMessage(), style: TextStyle(fontSize: 12, color: Colors.grey[700], height: 1.5)),
+                decoration: BoxDecoration(
+                    color: const Color(0xFFF0F4F8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFDDE3EE))),
+                child: Text(_buildMessage(),
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey[700], height: 1.5)),
               ),
               const SizedBox(height: 20),
-              const Text('Priority', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+              const Text('Priority',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
               const SizedBox(height: 8),
-              Row(children: ['Low', 'Medium', 'High'].map((pr) {
+              Row(
+                  children: ['Low', 'Medium', 'High'].map((pr) {
                 final isSel = _priority == pr;
-                final color = pr == 'High' ? _red : pr == 'Medium' ? _orange : _green;
-                return Expanded(child: Padding(
+                final color = pr == 'High'
+                    ? _red
+                    : pr == 'Medium'
+                        ? _orange
+                        : _green;
+                return Expanded(
+                    child: Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: InkWell(
                     onTap: () => setState(() => _priority = pr),
@@ -2028,70 +2583,148 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
                       decoration: BoxDecoration(
                         color: isSel ? color : Colors.white,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isSel ? color : Colors.grey[300]!),
-                        boxShadow: isSel ? [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3))] : [],
+                        border: Border.all(
+                            color: isSel ? color : Colors.grey[300]!),
+                        boxShadow: isSel
+                            ? [
+                                BoxShadow(
+                                    color: color.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3))
+                              ]
+                            : [],
                       ),
-                      child: Center(child: Text(pr, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSel ? Colors.white : Colors.grey[700]))),
+                      child: Center(
+                          child: Text(pr,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSel
+                                      ? Colors.white
+                                      : Colors.grey[700]))),
                     ),
                   ),
                 ));
               }).toList()),
               const SizedBox(height: 20),
-              const Text('Assign To', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
+              const Text('Assign To',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
               const SizedBox(height: 8),
               TextField(
                 controller: _searchCtrl,
                 decoration: InputDecoration(
                   hintText: 'Search employees…',
-                  prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey[400]),
-                  filled: true, fillColor: const Color(0xFFF7F9FC),
+                  prefixIcon:
+                      Icon(Icons.search, size: 18, color: Colors.grey[400]),
+                  filled: true,
+                  fillColor: const Color(0xFFF7F9FC),
                   contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _navy, width: 1.5)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFDDE3EE))),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _navy, width: 1.5)),
                 ),
               ),
               const SizedBox(height: 8),
               _loading
-                  ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator(color: _navy)))
+                  ? const SizedBox(
+                      height: 120,
+                      child: Center(
+                          child: CircularProgressIndicator(color: _navy)))
                   : _filtered.isEmpty
-                      ? Container(height: 80, alignment: Alignment.center, child: Text('No employees found', style: TextStyle(color: Colors.grey[500])))
+                      ? Container(
+                          height: 80,
+                          alignment: Alignment.center,
+                          child: Text('No employees found',
+                              style: TextStyle(color: Colors.grey[500])))
                       : Container(
                           constraints: const BoxConstraints(maxHeight: 240),
-                          decoration: BoxDecoration(border: Border.all(color: const Color(0xFFDDE3EE)), borderRadius: BorderRadius.circular(10)),
+                          decoration: BoxDecoration(
+                              border:
+                                  Border.all(color: const Color(0xFFDDE3EE)),
+                              borderRadius: BorderRadius.circular(10)),
                           child: ListView.separated(
                             shrinkWrap: true,
                             itemCount: _filtered.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEF2F7)),
+                            separatorBuilder: (_, __) => const Divider(
+                                height: 1, color: Color(0xFFEEF2F7)),
                             itemBuilder: (_, i) {
-                              final emp   = _filtered[i];
+                              final emp = _filtered[i];
                               final isSel = _selectedEmp?['_id'] == emp['_id'];
                               return InkWell(
-                                onTap: () => setState(() => _selectedEmp = isSel ? null : emp),
+                                onTap: () => setState(
+                                    () => _selectedEmp = isSel ? null : emp),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  color: isSel ? _navy.withOpacity(0.06) : Colors.transparent,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  color: isSel
+                                      ? _navy.withOpacity(0.06)
+                                      : Colors.transparent,
                                   child: Row(children: [
                                     CircleAvatar(
                                       radius: 18,
-                                      backgroundColor: isSel ? _navy : _navy.withOpacity(0.10),
-                                      child: Text((emp['name_parson'] ?? 'U')[0].toUpperCase(),
-                                          style: TextStyle(color: isSel ? Colors.white : _navy, fontWeight: FontWeight.bold, fontSize: 13)),
+                                      backgroundColor: isSel
+                                          ? _navy
+                                          : _navy.withOpacity(0.10),
+                                      child: Text(
+                                          (emp['name_parson'] ?? 'U')[0]
+                                              .toUpperCase(),
+                                          style: TextStyle(
+                                              color:
+                                                  isSel ? Colors.white : _navy,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13)),
                                     ),
                                     const SizedBox(width: 12),
-                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(emp['name_parson'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                                      if (emp['email'] != null)
-                                        Text(emp['email'], style: TextStyle(fontSize: 11, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
-                                      if (emp['role'] != null)
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 3),
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(color: _navy.withOpacity(0.08), borderRadius: BorderRadius.circular(4)),
-                                          child: Text(emp['role'].toString().toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _navy)),
-                                        ),
-                                    ])),
-                                    if (isSel) const Icon(Icons.check_circle, color: _navy, size: 20),
+                                    Expanded(
+                                        child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                          Text(emp['name_parson'] ?? 'Unknown',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 13)),
+                                          if (emp['email'] != null)
+                                            Text(emp['email'],
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey[600]),
+                                                overflow:
+                                                    TextOverflow.ellipsis),
+                                          if (emp['role'] != null)
+                                            Container(
+                                              margin:
+                                                  const EdgeInsets.only(top: 3),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                  color:
+                                                      _navy.withOpacity(0.08),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4)),
+                                              child: Text(
+                                                  emp['role']
+                                                      .toString()
+                                                      .toUpperCase(),
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: _navy)),
+                                            ),
+                                        ])),
+                                    if (isSel)
+                                      const Icon(Icons.check_circle,
+                                          color: _navy, size: 20),
                                   ]),
                                 ),
                               );
@@ -2106,28 +2739,49 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
             decoration: const BoxDecoration(
               color: Color(0xFFF7F9FC),
               border: Border(top: BorderSide(color: Color(0xFFEEF2F7))),
-              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+              borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20)),
             ),
             child: Row(children: [
-              Expanded(child: OutlinedButton(
+              Expanded(
+                  child: OutlinedButton(
                 onPressed: () => Navigator.pop(context),
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.grey[700], side: BorderSide(color: Colors.grey[300]!), padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                    side: BorderSide(color: Colors.grey[300]!),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                child: const Text('Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
               )),
               const SizedBox(width: 12),
-              Expanded(child: ElevatedButton(
-                onPressed: (_selectedEmp == null || _assigning) ? null : _assign,
+              Expanded(
+                  child: ElevatedButton(
+                onPressed:
+                    (_selectedEmp == null || _assigning) ? null : _assign,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _navy, foregroundColor: Colors.white,
+                  backgroundColor: _navy,
+                  foregroundColor: Colors.white,
                   disabledBackgroundColor: _navy.withOpacity(0.4),
-                  elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
                 child: _assigning
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : Text(
-                        _selectedEmp != null ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}' : 'Select Employee',
-                        style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis,
+                        _selectedEmp != null
+                            ? 'Assign to ${_selectedEmp!['name_parson'] ?? ''}'
+                            : 'Select Employee',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
                       ),
               )),
             ]),
@@ -2144,7 +2798,8 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
 
 class InvoiceDetailsDialog extends StatelessWidget {
   final Map<String, dynamic> invoiceData;
-  const InvoiceDetailsDialog({Key? key, required this.invoiceData}) : super(key: key);
+  const InvoiceDetailsDialog({Key? key, required this.invoiceData})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -2153,43 +2808,64 @@ class InvoiceDetailsDialog extends StatelessWidget {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        width:  MediaQuery.of(context).size.width  * 0.9,
+        width: MediaQuery.of(context).size.width * 0.9,
         height: MediaQuery.of(context).size.height * 0.9,
         padding: const EdgeInsets.all(24),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Icon(Icons.description, color: Color(0xFF3498DB), size: 28),
             const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(invoiceData['invoiceNumber'] ?? 'Unknown',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
-              Text('Invoice Details', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(invoiceData['invoiceNumber'] ?? 'Unknown',
+                      style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2C3E50))),
+                  Text('Invoice Details',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                ])),
             _statusBadge(invoiceData['status'] ?? 'DRAFT'),
             const SizedBox(width: 12),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context)),
           ]),
           const SizedBox(height: 24),
-          Expanded(child: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+              child: SingleChildScrollView(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _detailRow('Customer', invoiceData['customerName'] ?? 'N/A'),
               _detailRow('Email', invoiceData['customerEmail'] ?? 'N/A'),
               _detailRow('Invoice Date', invoiceData['invoiceDate'] ?? 'N/A'),
               _detailRow('Due Date', invoiceData['dueDate'] ?? 'N/A'),
               _detailRow('Terms', invoiceData['terms'] ?? 'N/A'),
               const SizedBox(height: 20),
-              const Text('Line Items', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text('Line Items',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               ...lineItems.map((item) => _lineItemCard(item)),
               const SizedBox(height: 20),
-              _detailRow('Sub Total', '₹${invoiceData['subTotal']?.toStringAsFixed(2) ?? '0.00'}'),
-              _detailRow('CGST', '₹${invoiceData['cgst']?.toStringAsFixed(2) ?? '0.00'}'),
-              _detailRow('SGST', '₹${invoiceData['sgst']?.toStringAsFixed(2) ?? '0.00'}'),
-              _detailRow('IGST', '₹${invoiceData['igst']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('Sub Total',
+                  '₹${invoiceData['subTotal']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('CGST',
+                  '₹${invoiceData['cgst']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('SGST',
+                  '₹${invoiceData['sgst']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('IGST',
+                  '₹${invoiceData['igst']?.toStringAsFixed(2) ?? '0.00'}'),
               const Divider(),
-              _detailRow('Total Amount', '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}', isBold: true),
-              _detailRow('Amount Paid', '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
-              _detailRow('Balance Due', '₹${invoiceData['amountDue']?.toStringAsFixed(2) ?? '0.00'}', isBold: true),
+              _detailRow('Total Amount',
+                  '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}',
+                  isBold: true),
+              _detailRow('Amount Paid',
+                  '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
+              _detailRow('Balance Due',
+                  '₹${invoiceData['amountDue']?.toStringAsFixed(2) ?? '0.00'}',
+                  isBold: true),
             ]),
           )),
         ]),
@@ -2201,8 +2877,16 @@ class InvoiceDetailsDialog extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
-        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14))),
-        Expanded(flex: 3, child: Text(value, style: TextStyle(fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
+        Expanded(
+            flex: 2,
+            child: Text(label,
+                style: TextStyle(color: Colors.grey[600], fontSize: 14))),
+        Expanded(
+            flex: 3,
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
       ]),
     );
   }
@@ -2211,13 +2895,18 @@ class InvoiceDetailsDialog extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(
+          color: Colors.grey[50], borderRadius: BorderRadius.circular(8)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(item['itemDetails'] ?? 'Item', style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(item['itemDetails'] ?? 'Item',
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('Qty: ${item['quantity']} × ₹${item['rate']?.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-          Text('₹${item['amount']?.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          Text(
+              'Qty: ${item['quantity']} × ₹${item['rate']?.toStringAsFixed(2)}',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          Text('₹${item['amount']?.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
         ]),
       ]),
     );
@@ -2225,19 +2914,23 @@ class InvoiceDetailsDialog extends StatelessWidget {
 
   static Widget _statusBadge(String status) {
     final Map<String, List<Color>> statusColors = {
-      'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
-      'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
-      'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
-      'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+      'PAID': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+      'DRAFT': [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+      'SENT': [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+      'UNPAID': [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
       'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
-      'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
-      'CANCELLED':      [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+      'OVERDUE': [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+      'CANCELLED': [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
     };
-    final c = statusColors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+    final c = statusColors[status] ??
+        [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
-      child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
+      decoration:
+          BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
+      child: Text(status.replaceAll('_', ' '),
+          style: TextStyle(
+              color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
     );
   }
 }
@@ -2268,7 +2961,8 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         width: 600,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2353,7 +3047,8 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.description_outlined, size: 18, color: _navy),
+                              const Icon(Icons.description_outlined,
+                                  size: 18, color: _navy),
                               const SizedBox(width: 8),
                               const Text(
                                 'Invoice Details',
@@ -2368,8 +3063,12 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                           const SizedBox(height: 10),
                           _infoRow('Invoice #', invoice.invoiceNumber),
                           _infoRow('Customer', invoice.customerName),
-                          _infoRow('Amount Due', '₹${invoice.amountDue.toStringAsFixed(2)}'),
-                          _infoRow('Due Date', DateFormat('dd MMM yyyy').format(invoice.dueDate)),
+                          _infoRow('Amount Due',
+                              '₹${invoice.amountDue.toStringAsFixed(2)}'),
+                          _infoRow(
+                              'Due Date',
+                              DateFormat('dd MMM yyyy')
+                                  .format(invoice.dueDate)),
                           _infoRow(
                             'Reminder Type',
                             isOverdue ? 'Overdue Reminder' : 'Pre-Due Reminder',
@@ -2388,7 +3087,9 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                     Row(
                       children: [
                         Icon(
-                          isEmail ? Icons.preview_outlined : Icons.message_outlined,
+                          isEmail
+                              ? Icons.preview_outlined
+                              : Icons.message_outlined,
                           size: 18,
                           color: _navy,
                         ),
@@ -2469,7 +3170,8 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                             bottomLeft: Radius.circular(2),
                             bottomRight: Radius.circular(12),
                           ),
-                          border: Border.all(color: const Color(0xFF25D366).withOpacity(0.3)),
+                          border: Border.all(
+                              color: const Color(0xFF25D366).withOpacity(0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2486,7 +3188,8 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                const Icon(Icons.attach_file, size: 14, color: Color(0xFF25D366)),
+                                const Icon(Icons.attach_file,
+                                    size: 14, color: Color(0xFF25D366)),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Invoice PDF will be attached',
@@ -2511,11 +3214,13 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: const Color(0xFFFFF4E6),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFFB84D).withOpacity(0.3)),
+                        border: Border.all(
+                            color: const Color(0xFFFFB84D).withOpacity(0.3)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.info_outline, size: 18, color: Color(0xFFE67E22)),
+                          const Icon(Icons.info_outline,
+                              size: 18, color: Color(0xFFE67E22)),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -2575,7 +3280,9 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isEmail ? const Color(0xFF2980B9) : const Color(0xFF25D366),
+                        backgroundColor: isEmail
+                            ? const Color(0xFF2980B9)
+                            : const Color(0xFF25D366),
                         foregroundColor: Colors.white,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -2645,19 +3352,23 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
 // Helper function for status badge (used by InvoiceDetailsDialog)
 Widget _statusBadge(String status) {
   final Map<String, List<Color>> statusColors = {
-    'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
-    'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
-    'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
-    'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+    'PAID': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+    'DRAFT': [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+    'SENT': [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+    'UNPAID': [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
     'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
-    'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
-    'CANCELLED':      [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
+    'OVERDUE': [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+    'CANCELLED': [const Color(0xFFF1F5F9), const Color(0xFF64748B)],
   };
-  final c = statusColors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+  final c = statusColors[status] ??
+      [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-    decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
-    child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
+    decoration:
+        BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(20)),
+    child: Text(status.replaceAll('_', ' '),
+        style:
+            TextStyle(color: c[1], fontWeight: FontWeight.bold, fontSize: 12)),
   );
 }
 
@@ -2667,7 +3378,8 @@ Widget _statusBadge(String status) {
 
 class InvoiceDetailsDialogV2 extends StatelessWidget {
   final Map<String, dynamic> invoiceData;
-  const InvoiceDetailsDialogV2({Key? key, required this.invoiceData}) : super(key: key);
+  const InvoiceDetailsDialogV2({Key? key, required this.invoiceData})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -2683,62 +3395,88 @@ class InvoiceDetailsDialogV2 extends StatelessWidget {
           Row(children: [
             const Icon(Icons.receipt_long, color: Color(0xFF3498DB), size: 32),
             const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(invoiceData['invoiceNumber'] ?? 'Unknown',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
-              Text('Invoice Details', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(invoiceData['invoiceNumber'] ?? 'Unknown',
+                      style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2C3E50))),
+                  Text('Invoice Details',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                ])),
             _statusBadge(invoiceData['status'] ?? 'DRAFT'),
             const SizedBox(width: 12),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context)),
           ]),
           const Divider(height: 32),
-          Expanded(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _section('Customer Information', [
-              _row('Customer Name', invoiceData['customerName']),
-              _row('Email', invoiceData['customerEmail']),
-              _row('Phone', invoiceData['customerPhone']),
-              _row('Address', invoiceData['customerAddress']),
-            ]),
-            const SizedBox(height: 24),
-            _section('Invoice Information', [
-              _row('Invoice Number', invoiceData['invoiceNumber']),
-              _row('Invoice Date', _fmtDate(invoiceData['invoiceDate'])),
-              _row('Due Date', _fmtDate(invoiceData['dueDate'])),
-              _row('Payment Terms', invoiceData['paymentTerms']),
-              _row('Reference Number', invoiceData['referenceNumber']),
-            ]),
-            if (lineItems.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              _lineItemsSection(lineItems),
-            ],
-            const SizedBox(height: 24),
-            _section('Amount Details', [
-              _row('Subtotal',     '₹${invoiceData['subtotal']?.toStringAsFixed(2) ?? '0.00'}'),
-              _row('Tax Amount',   '₹${invoiceData['taxAmount']?.toStringAsFixed(2) ?? '0.00'}'),
-              _row('Total Amount', '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}', bold: true),
-              if (invoiceData['amountPaid'] != null)
-                _row('Amount Paid', '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
-              if (invoiceData['balanceDue'] != null)
-                _row('Balance Due', '₹${invoiceData['balanceDue']?.toStringAsFixed(2) ?? '0.00'}', bold: true),
-            ]),
-            if (invoiceData['notes'] != null && invoiceData['notes'].toString().isNotEmpty) ...[
-              const SizedBox(height: 24),
-              _section('Notes', [
-                Padding(padding: const EdgeInsets.all(8),
-                    child: Text(invoiceData['notes'].toString(), style: TextStyle(fontSize: 14, color: Colors.grey[800]))),
-              ]),
-            ],
-            const SizedBox(height: 24),
-            _section('Audit Information', [
-              _row('Created By', invoiceData['createdBy']),
-              _row('Created Date', _fmtDate(invoiceData['createdAt'])),
-              _row('Last Modified', _fmtDate(invoiceData['updatedAt'])),
-            ]),
-          ]))),
+          Expanded(
+              child: SingleChildScrollView(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                _section('Customer Information', [
+                  _row('Customer Name', invoiceData['customerName']),
+                  _row('Email', invoiceData['customerEmail']),
+                  _row('Phone', invoiceData['customerPhone']),
+                  _row('Address', invoiceData['customerAddress']),
+                ]),
+                const SizedBox(height: 24),
+                _section('Invoice Information', [
+                  _row('Invoice Number', invoiceData['invoiceNumber']),
+                  _row('Invoice Date', _fmtDate(invoiceData['invoiceDate'])),
+                  _row('Due Date', _fmtDate(invoiceData['dueDate'])),
+                  _row('Payment Terms', invoiceData['paymentTerms']),
+                  _row('Reference Number', invoiceData['referenceNumber']),
+                ]),
+                if (lineItems.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  _lineItemsSection(lineItems),
+                ],
+                const SizedBox(height: 24),
+                _section('Amount Details', [
+                  _row('Subtotal',
+                      '₹${invoiceData['subtotal']?.toStringAsFixed(2) ?? '0.00'}'),
+                  _row('Tax Amount',
+                      '₹${invoiceData['taxAmount']?.toStringAsFixed(2) ?? '0.00'}'),
+                  _row('Total Amount',
+                      '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}',
+                      bold: true),
+                  if (invoiceData['amountPaid'] != null)
+                    _row('Amount Paid',
+                        '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
+                  if (invoiceData['balanceDue'] != null)
+                    _row('Balance Due',
+                        '₹${invoiceData['balanceDue']?.toStringAsFixed(2) ?? '0.00'}',
+                        bold: true),
+                ]),
+                if (invoiceData['notes'] != null &&
+                    invoiceData['notes'].toString().isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  _section('Notes', [
+                    Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(invoiceData['notes'].toString(),
+                            style: TextStyle(
+                                fontSize: 14, color: Colors.grey[800]))),
+                  ]),
+                ],
+                const SizedBox(height: 24),
+                _section('Audit Information', [
+                  _row('Created By', invoiceData['createdBy']),
+                  _row('Created Date', _fmtDate(invoiceData['createdAt'])),
+                  _row('Last Modified', _fmtDate(invoiceData['updatedAt'])),
+                ]),
+              ]))),
           const Divider(height: 32),
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close')),
           ]),
         ]),
       ),
@@ -2747,68 +3485,125 @@ class InvoiceDetailsDialogV2 extends StatelessWidget {
 
   static Widget _statusBadge(String status) {
     final Map<String, List<Color>> colors = {
-      'PAID':           [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
-      'DRAFT':          [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
-      'SENT':           [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
-      'UNPAID':         [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
+      'PAID': [const Color(0xFFDCFCE7), const Color(0xFF15803D)],
+      'DRAFT': [const Color(0xFFFEF3C7), const Color(0xFFB45309)],
+      'SENT': [const Color(0xFFDBEAFE), const Color(0xFF1D4ED8)],
+      'UNPAID': [const Color(0xFFFFEDD5), const Color(0xFFEA580C)],
       'PARTIALLY_PAID': [const Color(0xFFE0E7FF), const Color(0xFF4338CA)],
-      'OVERDUE':        [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
+      'OVERDUE': [const Color(0xFFFEE2E2), const Color(0xFFDC2626)],
     };
-    final c = colors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
+    final c =
+        colors[status] ?? [const Color(0xFFF1F5F9), const Color(0xFF64748B)];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(12)),
-      child: Text(status.replaceAll('_', ' '), style: TextStyle(color: c[1], fontSize: 12, fontWeight: FontWeight.w600)),
+      decoration:
+          BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(12)),
+      child: Text(status.replaceAll('_', ' '),
+          style: TextStyle(
+              color: c[1], fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 
   static Widget _section(String title, List<Widget> children) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
+      Text(title,
+          style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2C3E50))),
       const SizedBox(height: 12),
       Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+        decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[200]!)),
         child: Column(children: children),
       ),
     ]);
   }
 
   static Widget _row(String label, dynamic value, {bool bold = false}) {
-    if (value == null || value.toString().isEmpty) return const SizedBox.shrink();
+    if (value == null || value.toString().isEmpty)
+      return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 180, child: Text(label,
-            style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.w600, color: const Color(0xFF2C3E50), fontSize: 14))),
-        Expanded(child: Text(value.toString(),
-            style: TextStyle(color: Colors.grey[800], fontSize: 14, fontWeight: bold ? FontWeight.bold : FontWeight.normal))),
+        SizedBox(
+            width: 180,
+            child: Text(label,
+                style: TextStyle(
+                    fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+                    color: const Color(0xFF2C3E50),
+                    fontSize: 14))),
+        Expanded(
+            child: Text(value.toString(),
+                style: TextStyle(
+                    color: Colors.grey[800],
+                    fontSize: 14,
+                    fontWeight: bold ? FontWeight.bold : FontWeight.normal))),
       ]),
     );
   }
 
   static Widget _lineItemsSection(List lineItems) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Line Items', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2C3E50))),
+      const Text('Line Items',
+          style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2C3E50))),
       const SizedBox(height: 12),
       Container(
-        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey[200]!)),
+        decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[200]!)),
         child: Table(
           border: TableBorder.all(color: Colors.grey[300]!, width: 1),
-          columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(1), 2: FlexColumnWidth(1), 3: FlexColumnWidth(1)},
+          columnWidths: const {
+            0: FlexColumnWidth(3),
+            1: FlexColumnWidth(1),
+            2: FlexColumnWidth(1),
+            3: FlexColumnWidth(1)
+          },
           children: [
-            TableRow(decoration: BoxDecoration(color: Colors.grey[200]), children: const [
-              Padding(padding: EdgeInsets.all(12), child: Text('Item',   style: TextStyle(fontWeight: FontWeight.bold))),
-              Padding(padding: EdgeInsets.all(12), child: Text('Qty',    style: TextStyle(fontWeight: FontWeight.bold))),
-              Padding(padding: EdgeInsets.all(12), child: Text('Rate',   style: TextStyle(fontWeight: FontWeight.bold))),
-              Padding(padding: EdgeInsets.all(12), child: Text('Amount', style: TextStyle(fontWeight: FontWeight.bold))),
-            ]),
+            TableRow(
+                decoration: BoxDecoration(color: Colors.grey[200]),
+                children: const [
+                  Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('Item',
+                          style: TextStyle(fontWeight: FontWeight.bold))),
+                  Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('Qty',
+                          style: TextStyle(fontWeight: FontWeight.bold))),
+                  Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('Rate',
+                          style: TextStyle(fontWeight: FontWeight.bold))),
+                  Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text('Amount',
+                          style: TextStyle(fontWeight: FontWeight.bold))),
+                ]),
             ...lineItems.map<TableRow>((item) => TableRow(children: [
-              Padding(padding: const EdgeInsets.all(12), child: Text(item['itemName'] ?? '')),
-              Padding(padding: const EdgeInsets.all(12), child: Text(item['quantity']?.toString() ?? '0')),
-              Padding(padding: const EdgeInsets.all(12), child: Text('₹${item['rate']?.toStringAsFixed(2) ?? '0.00'}')),
-              Padding(padding: const EdgeInsets.all(12), child: Text('₹${item['amount']?.toStringAsFixed(2) ?? '0.00'}')),
-            ])),
+                  Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(item['itemName'] ?? '')),
+                  Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(item['quantity']?.toString() ?? '0')),
+                  Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                          '₹${item['rate']?.toStringAsFixed(2) ?? '0.00'}')),
+                  Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                          '₹${item['amount']?.toStringAsFixed(2) ?? '0.00'}')),
+                ])),
           ],
         ),
       ),
@@ -2818,7 +3613,8 @@ class InvoiceDetailsDialogV2 extends StatelessWidget {
   static String _fmtDate(dynamic date) {
     if (date == null) return '';
     try {
-      final DateTime dt = date is DateTime ? date : DateTime.parse(date.toString());
+      final DateTime dt =
+          date is DateTime ? date : DateTime.parse(date.toString());
       return DateFormat('dd MMM yyyy').format(dt);
     } catch (_) {
       return date.toString();

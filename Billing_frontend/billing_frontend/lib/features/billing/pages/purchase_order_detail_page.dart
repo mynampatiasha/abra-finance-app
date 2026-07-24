@@ -7,17 +7,19 @@ import '../../../../core/services/purchase_order_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_purchase_order.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class PurchaseOrderDetailPage extends StatefulWidget {
   final String purchaseOrderId;
-  const PurchaseOrderDetailPage({Key? key, required this.purchaseOrderId}) : super(key: key);
+  const PurchaseOrderDetailPage({Key? key, required this.purchaseOrderId})
+      : super(key: key);
 
   @override
-  State<PurchaseOrderDetailPage> createState() => _PurchaseOrderDetailPageState();
+  State<PurchaseOrderDetailPage> createState() =>
+      _PurchaseOrderDetailPageState();
 }
 
 class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
@@ -33,25 +35,40 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
-      final po = await PurchaseOrderService.getPurchaseOrder(widget.purchaseOrderId);
-      setState(() { _po = po; _isLoading = false; });
+      final po =
+          await PurchaseOrderService.getPurchaseOrder(widget.purchaseOrderId);
+      setState(() {
+        _po = po;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -79,8 +96,12 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
                 icon: const Icon(Icons.download, color: Colors.white),
                 tooltip: 'Download PDF',
                 onPressed: () async {
-                  final url = await PurchaseOrderService.downloadPDF(widget.purchaseOrderId);
-                  if (mounted) await fetchAndHandleFile(context, url, '${_po!.purchaseOrderNumber}.pdf', download: true);
+                  final url = await PurchaseOrderService.downloadPDF(
+                      widget.purchaseOrderId);
+                  if (mounted)
+                    await fetchAndHandleFile(
+                        context, url, '${_po!.purchaseOrderNumber}.pdf',
+                        download: true);
                 },
               ),
               IconButton(
@@ -97,18 +118,29 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
                 },
               ),
             ],
-            if (_po != null && _po!.status != 'CLOSED' && _po!.status != 'CANCELLED')
+            if (_po != null &&
+                _po!.status != 'CLOSED' &&
+                _po!.status != 'CANCELLED')
               TextButton.icon(
                 onPressed: () async {
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewPurchaseOrderScreen(purchaseOrderId: widget.purchaseOrderId)));
-                  if (r == true) { setState(() => _changed = true); _load(); }
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => NewPurchaseOrderScreen(
+                              purchaseOrderId: widget.purchaseOrderId)));
+                  if (r == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white70)),
               ),
             const SizedBox(width: 8),
-            IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
+            IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _load),
             const SizedBox(width: 8),
           ],
         ),
@@ -142,7 +174,10 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
           child: Column(
             children: [
               _buildMainScroll(po, isScrollable: false),
-              Container(color: Colors.white, padding: const EdgeInsets.all(20), child: _buildSidebar(po)),
+              Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(20),
+                  child: _buildSidebar(po)),
             ],
           ),
         );
@@ -159,10 +194,17 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [_navyDark, _navyMid],
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: const LinearGradient(
+                colors: [_navyDark, _navyMid],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: _navyDark.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4))
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,11 +216,18 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(po.purchaseOrderNumber,
-                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text(po.vendorName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                        Text(po.vendorName,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 15)),
                         if ((po.vendorEmail ?? '').isNotEmpty)
-                          Text(po.vendorEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                          Text(po.vendorEmail!,
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 13)),
                       ],
                     ),
                   ),
@@ -192,7 +241,8 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
                 children: [
                   _headerInfo('PO Date', fmt.format(po.purchaseOrderDate)),
                   if (po.expectedDeliveryDate != null)
-                    _headerInfo('Expected Delivery', fmt.format(po.expectedDeliveryDate!)),
+                    _headerInfo('Expected Delivery',
+                        fmt.format(po.expectedDeliveryDate!)),
                   _headerInfo('Payment Terms', po.paymentTerms),
                 ],
               ),
@@ -209,8 +259,12 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-              headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+              headingRowColor:
+                  WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+              headingTextStyle: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12),
               columns: const [
                 DataColumn(label: Text('ITEM')),
                 DataColumn(label: Text('QTY')),
@@ -218,16 +272,22 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
                 DataColumn(label: Text('DISCOUNT')),
                 DataColumn(label: Text('AMOUNT')),
               ],
-              rows: po.items.map((item) => DataRow(cells: [
-                DataCell(SizedBox(width: 200, child: Text(item.itemDetails, overflow: TextOverflow.ellipsis))),
-                DataCell(Text(item.quantity.toStringAsFixed(0))),
-                DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
-                DataCell(Text(item.discount > 0
-                    ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
-                    : '—')),
-                DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600))),
-              ])).toList(),
+              rows: po.items
+                  .map((item) => DataRow(cells: [
+                        DataCell(SizedBox(
+                            width: 200,
+                            child: Text(item.itemDetails,
+                                overflow: TextOverflow.ellipsis))),
+                        DataCell(Text(item.quantity.toStringAsFixed(0))),
+                        DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
+                        DataCell(Text(item.discount > 0
+                            ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
+                            : '—')),
+                        DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600))),
+                      ]))
+                  .toList(),
             ),
           ),
         ),
@@ -241,15 +301,20 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: po.receives.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey[200]),
               itemBuilder: (_, i) {
                 final r = po.receives[i];
                 return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.local_shipping, color: _navyAccent, size: 20),
+                    decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.local_shipping,
+                        color: _navyAccent, size: 20),
                   ),
                   title: Text('Received on ${fmt.format(r.receiveDate)}',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -268,7 +333,8 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
             icon: Icons.note,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(po.vendorNotes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+              child: Text(po.vendorNotes!,
+                  style: TextStyle(color: Colors.grey[800], fontSize: 14)),
             ),
           ),
         ],
@@ -293,11 +359,14 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
             child: const Icon(Icons.summarize, color: Colors.white, size: 16),
           ),
           const SizedBox(width: 8),
-          const Text('PO Summary', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('PO Summary',
+              style: TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
         ]),
         const SizedBox(height: 16),
         _amtRow('Sub Total', po.subTotal),
-        if (po.tdsAmount > 0) _amtRow('TDS', -po.tdsAmount, color: Colors.red[700]),
+        if (po.tdsAmount > 0)
+          _amtRow('TDS', -po.tdsAmount, color: Colors.red[700]),
         if (po.tcsAmount > 0) _amtRow('TCS', po.tcsAmount),
         if (po.totalCGST > 0) _amtRow('CGST', po.totalCGST),
         if (po.totalSGST > 0) _amtRow('SGST', po.totalSGST),
@@ -308,7 +377,10 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [_navyDark.withOpacity(0.06), _navyLight.withOpacity(0.08)]),
+            gradient: LinearGradient(colors: [
+              _navyDark.withOpacity(0.06),
+              _navyLight.withOpacity(0.08)
+            ]),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: _navyAccent.withOpacity(0.2)),
           ),
@@ -337,7 +409,8 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
               foregroundColor: _navyMid,
               side: BorderSide(color: _navyMid),
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -345,13 +418,19 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
     );
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,13 +441,18 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(icon, color: Colors.white, size: 16),
               ),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: _navyDark)),
             ]),
           ),
           const Divider(height: 1),
@@ -382,42 +466,57 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11)),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13)),
       ],
     );
   }
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(
-            fontSize: isTotal ? 14 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-          )),
-          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}', style: TextStyle(
-            fontSize: isTotal ? 16 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            color: color ?? (isTotal ? _navyAccent : _navyDark),
-          )),
+          Text(label,
+              style: TextStyle(
+                fontSize: isTotal ? 14 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+              )),
+          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: isTotal ? 16 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color ?? (isTotal ? _navyAccent : _navyDark),
+              )),
         ],
       ),
     );
   }
 
-  Widget _balanceRow(String label, String value, Color color, {bool isBold = false}) {
+  Widget _balanceRow(String label, String value, Color color,
+      {bool isBold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.w600 : FontWeight.normal, color: Colors.grey[700])),
-        Text(value, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500, color: color)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+                color: Colors.grey[700])),
+        Text(value,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color)),
       ],
     );
   }
@@ -425,12 +524,26 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
   Widget _glowBadge(String status) {
     Color bg;
     switch (status.toUpperCase()) {
-      case 'OPEN': case 'ISSUED': bg = Colors.orange; break;
-      case 'CLOSED': case 'RECEIVED': bg = Colors.green; break;
-      case 'VOID': case 'CANCELLED': bg = Colors.grey; break;
-      case 'DRAFT': bg = Colors.grey; break;
-      case 'OVERDUE': bg = Colors.red; break;
-      default: bg = _navyAccent;
+      case 'OPEN':
+      case 'ISSUED':
+        bg = Colors.orange;
+        break;
+      case 'CLOSED':
+      case 'RECEIVED':
+        bg = Colors.green;
+        break;
+      case 'VOID':
+      case 'CANCELLED':
+        bg = Colors.grey;
+        break;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'OVERDUE':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -439,7 +552,9 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style:
+              TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
@@ -451,7 +566,10 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
           Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
           const SizedBox(height: 16),
           Text('Error Loading Purchase Order',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700])),
           const SizedBox(height: 8),
           Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
           const SizedBox(height: 24),
@@ -459,7 +577,8 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
             onPressed: _load,
             icon: const Icon(Icons.refresh),
             label: const Text('Retry'),
-            style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navyAccent, foregroundColor: Colors.white),
           ),
         ],
       ),

@@ -93,7 +93,8 @@ class AppliedCredit {
         referenceId: j['referenceId']?.toString() ?? '',
         referenceNumber: j['referenceNumber'] ?? '',
         amount: (j['amount'] ?? 0).toDouble(),
-        appliedDate: DateTime.tryParse(j['appliedDate'] ?? '') ?? DateTime.now(),
+        appliedDate:
+            DateTime.tryParse(j['appliedDate'] ?? '') ?? DateTime.now(),
       );
 }
 
@@ -112,7 +113,8 @@ class JournalAttachment {
     required this.uploadedAt,
   });
 
-  factory JournalAttachment.fromJson(Map<String, dynamic> j) => JournalAttachment(
+  factory JournalAttachment.fromJson(Map<String, dynamic> j) =>
+      JournalAttachment(
         id: j['_id']?.toString() ?? '',
         filename: j['filename'] ?? '',
         filepath: j['filepath'] ?? '',
@@ -282,7 +284,8 @@ class ManualJournalService {
     };
   }
 
-  static String get _base => '${FinanceApiConfig.baseUrl}/api/finance/manual-journals';
+  static String get _base =>
+      '${FinanceApiConfig.baseUrl}/api/finance/manual-journals';
 
   // ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -321,7 +324,9 @@ class ManualJournalService {
 
     final data = body['data'];
     return JournalListResult(
-      journals: (data['journals'] as List).map((j) => ManualJournal.fromJson(j)).toList(),
+      journals: (data['journals'] as List)
+          .map((j) => ManualJournal.fromJson(j))
+          .toList(),
       total: data['pagination']?['total'] ?? 0,
       page: data['pagination']?['page'] ?? 1,
       pages: data['pagination']?['pages'] ?? 1,
@@ -342,19 +347,24 @@ class ManualJournalService {
 
   static Future<ManualJournal> createJournal(Map<String, dynamic> data) async {
     final headers = await _getHeaders();
-    final res = await http.post(Uri.parse(_base), headers: headers, body: jsonEncode(data));
+    final res = await http.post(Uri.parse(_base),
+        headers: headers, body: jsonEncode(data));
     final body = jsonDecode(res.body);
-    if (res.statusCode != 201) throw Exception(body['message'] ?? 'Failed to create');
+    if (res.statusCode != 201)
+      throw Exception(body['message'] ?? 'Failed to create');
     return ManualJournal.fromJson(body['data']);
   }
 
   // ── Update ────────────────────────────────────────────────────────────────
 
-  static Future<ManualJournal> updateJournal(String id, Map<String, dynamic> data) async {
+  static Future<ManualJournal> updateJournal(
+      String id, Map<String, dynamic> data) async {
     final headers = await _getHeaders();
-    final res = await http.put(Uri.parse('$_base/$id'), headers: headers, body: jsonEncode(data));
+    final res = await http.put(Uri.parse('$_base/$id'),
+        headers: headers, body: jsonEncode(data));
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to update');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to update');
     return ManualJournal.fromJson(body['data']);
   }
 
@@ -362,15 +372,18 @@ class ManualJournalService {
 
   static Future<ManualJournal> publishJournal(String id) async {
     final headers = await _getHeaders();
-    final res = await http.post(Uri.parse('$_base/$id/publish'), headers: headers, body: '{}');
+    final res = await http.post(Uri.parse('$_base/$id/publish'),
+        headers: headers, body: '{}');
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to publish');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to publish');
     return ManualJournal.fromJson(body['data']);
   }
 
   // ── Void ──────────────────────────────────────────────────────────────────
 
-  static Future<ManualJournal> voidJournal(String id, {String reason = ''}) async {
+  static Future<ManualJournal> voidJournal(String id,
+      {String reason = ''}) async {
     final headers = await _getHeaders();
     final res = await http.post(
       Uri.parse('$_base/$id/void'),
@@ -378,7 +391,8 @@ class ManualJournalService {
       body: jsonEncode({'reason': reason}),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to void');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to void');
     return ManualJournal.fromJson(body['data']);
   }
 
@@ -386,9 +400,11 @@ class ManualJournalService {
 
   static Future<ManualJournal> cloneJournal(String id) async {
     final headers = await _getHeaders();
-    final res = await http.post(Uri.parse('$_base/$id/clone'), headers: headers, body: '{}');
+    final res = await http.post(Uri.parse('$_base/$id/clone'),
+        headers: headers, body: '{}');
     final body = jsonDecode(res.body);
-    if (res.statusCode != 201) throw Exception(body['message'] ?? 'Failed to clone');
+    if (res.statusCode != 201)
+      throw Exception(body['message'] ?? 'Failed to clone');
     return ManualJournal.fromJson(body['data']);
   }
 
@@ -413,7 +429,8 @@ class ManualJournalService {
       }),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to apply credits');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to apply credits');
     return ManualJournal.fromJson(body['data']);
   }
 
@@ -423,17 +440,21 @@ class ManualJournalService {
     final headers = await _getHeaders();
     final res = await http.delete(Uri.parse('$_base/$id'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to delete');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to delete');
   }
 
   // ── Templates ─────────────────────────────────────────────────────────────
 
   static Future<List<JournalTemplate>> getTemplates() async {
     final headers = await _getHeaders();
-    final res = await http.get(Uri.parse('$_base/templates/list'), headers: headers);
+    final res =
+        await http.get(Uri.parse('$_base/templates/list'), headers: headers);
     final body = jsonDecode(res.body);
     if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed');
-    return (body['data'] as List).map((t) => JournalTemplate.fromJson(t)).toList();
+    return (body['data'] as List)
+        .map((t) => JournalTemplate.fromJson(t))
+        .toList();
   }
 
   static Future<JournalTemplate> saveTemplate(Map<String, dynamic> data) async {
@@ -450,7 +471,8 @@ class ManualJournalService {
 
   static Future<void> deleteTemplate(String id) async {
     final headers = await _getHeaders();
-    final res = await http.delete(Uri.parse('$_base/templates/$id'), headers: headers);
+    final res =
+        await http.delete(Uri.parse('$_base/templates/$id'), headers: headers);
     final body = jsonDecode(res.body);
     if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed');
   }
@@ -464,7 +486,8 @@ class ManualJournalService {
   ) async {
     final token = await FinanceSecureStorage.getToken() ?? '';
 
-    final request = http.MultipartRequest('POST', Uri.parse('$_base/$id/attachments'));
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$_base/$id/attachments'));
     request.headers['Authorization'] = 'Bearer $token';
 
     for (int i = 0; i < fileBytes.length; i++) {
@@ -478,8 +501,11 @@ class ManualJournalService {
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Upload failed');
-    return (body['data'] as List).map((a) => JournalAttachment.fromJson(a)).toList();
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Upload failed');
+    return (body['data'] as List)
+        .map((a) => JournalAttachment.fromJson(a))
+        .toList();
   }
 
   // ── Import ────────────────────────────────────────────────────────────────
@@ -493,13 +519,15 @@ class ManualJournalService {
 
     final request = http.MultipartRequest('POST', Uri.parse('$_base/import'));
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+    request.files.add(
+        http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
     request.fields['journals'] = jsonEncode(journals);
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Import failed');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Import failed');
     return body;
   }
 
@@ -509,7 +537,7 @@ class ManualJournalService {
   /// so the backend's verifyFinanceJWT can authenticate the download.
   static Future<String> getPdfUrl(String id) async {
     final token = await FinanceSecureStorage.getToken() ?? '';
-    final base  = FinanceApiConfig.baseUrl;
+    final base = FinanceApiConfig.baseUrl;
     return '$base/api/finance/manual-journals/$id/pdf?token=$token';
   }
 }

@@ -18,14 +18,16 @@
 import 'dart:convert';
 import '../../core/services/api_service.dart';
 // Import the CustomerAddress model from billing_customers_service
-import 'billing_customers_service.dart' show CustomerAddress, BillingCustomer, kIndianStates;
+import 'billing_customers_service.dart'
+    show CustomerAddress, BillingCustomer, kIndianStates;
 
-export 'billing_customers_service.dart' show CustomerAddress, BillingCustomer, kIndianStates;
+export 'billing_customers_service.dart'
+    show CustomerAddress, BillingCustomer, kIndianStates;
 
 class InvoiceService {
   static final ApiService _api = ApiService();
 
-  static const String _baseEndpoint    = '/api/finance/invoices';
+  static const String _baseEndpoint = '/api/finance/invoices';
   static const String _accountsEndpoint = '/api/finance/banking';
 
   // ==========================================================================
@@ -51,7 +53,8 @@ class InvoiceService {
 
   static Future<List<PaymentAccount>> getPaymentAccounts() async {
     try {
-      final data = await _api.get(_accountsEndpoint, queryParams: {'isActive': 'true'});
+      final data =
+          await _api.get(_accountsEndpoint, queryParams: {'isActive': 'true'});
       final List<dynamic> accountsList = (data['data'] is List)
           ? data['data'] as List<dynamic>
           : (data['data'] as Map<String, dynamic>?)?['accounts'] ?? [];
@@ -71,10 +74,14 @@ class InvoiceService {
   // BILLABLE EXPENSES
   // ==========================================================================
 
-  static Future<List<BillableExpense>> getBillableExpenses(String customerName) async {
+  static Future<List<BillableExpense>> getBillableExpenses(
+      String customerName) async {
     try {
-      final data = await _api.get('/api/finance/expenses/billable/$customerName');
-      return (data['data'] as List).map((e) => BillableExpense.fromJson(e)).toList();
+      final data =
+          await _api.get('/api/finance/expenses/billable/$customerName');
+      return (data['data'] as List)
+          .map((e) => BillableExpense.fromJson(e))
+          .toList();
     } catch (e) {
       print('❌ Error fetching billable expenses: $e');
       return [];
@@ -86,25 +93,31 @@ class InvoiceService {
   // ==========================================================================
 
   static Future<InvoiceListResponse> getInvoices({
-    String? status, String? customerId,
-    DateTime? fromDate, DateTime? toDate,
-    int page = 1, int limit = 20,
+    String? status,
+    String? customerId,
+    String? search,
+    DateTime? fromDate,
+    DateTime? toDate,
+    int page = 1,
+    int limit = 20,
   }) async {
     final queryParams = <String, String>{
-      'page': page.toString(), 'limit': limit.toString(),
+      'page': page.toString(),
+      'limit': limit.toString(),
     };
-    if (status     != null) queryParams['status']     = status;
+    if (status != null) queryParams['status'] = status;
     if (customerId != null) queryParams['customerId'] = customerId;
-    if (fromDate   != null) queryParams['fromDate']   = fromDate.toIso8601String();
-    if (toDate     != null) queryParams['toDate']     = toDate.toIso8601String();
+    if (search != null && search.isNotEmpty) queryParams['search'] = search;
+    if (fromDate != null) queryParams['fromDate'] = fromDate.toIso8601String();
+    if (toDate != null) queryParams['toDate'] = toDate.toIso8601String();
     final data = await _api.get(_baseEndpoint, queryParams: queryParams);
     return InvoiceListResponse.fromJson(data);
   }
 
-
-
-  static Future<InvoiceStats> getStats() async {
-    final data = await _api.get('$_baseEndpoint/stats');
+  static Future<InvoiceStats> getStats({String? search}) async {
+    final queryParams = <String, String>{};
+    if (search != null && search.isNotEmpty) queryParams['search'] = search;
+    final data = await _api.get('$_baseEndpoint/stats', queryParams: queryParams);
     return InvoiceStats.fromJson(data['data']);
   }
 
@@ -118,7 +131,8 @@ class InvoiceService {
     return Invoice.fromJson(data['data']);
   }
 
-  static Future<Invoice> updateInvoice(String invoiceId, Map<String, dynamic> invoiceData) async {
+  static Future<Invoice> updateInvoice(
+      String invoiceId, Map<String, dynamic> invoiceData) async {
     final data = await _api.put('$_baseEndpoint/$invoiceId', body: invoiceData);
     return Invoice.fromJson(data['data']);
   }
@@ -133,15 +147,17 @@ class InvoiceService {
   }
 
   static Future<PaymentResponse> recordPayment(
-    String invoiceId, Map<String, dynamic> paymentData,
+    String invoiceId,
+    Map<String, dynamic> paymentData,
   ) async {
-    final data = await _api.post('$_baseEndpoint/$invoiceId/payment', body: paymentData);
+    final data =
+        await _api.post('$_baseEndpoint/$invoiceId/payment', body: paymentData);
     return PaymentResponse.fromJson(data['data']);
   }
 
   static Future<String> downloadPDF(String invoiceId) async {
-    final headers   = await _api.getHeaders();
-    final token     = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
+    final headers = await _api.getHeaders();
+    final token = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
     final branchHdr = headers['x-branch-ids'] ?? 'ALL';
     return '${_api.baseUrl}$_baseEndpoint/$invoiceId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
   }
@@ -165,8 +181,8 @@ class InvoiceService {
   static Future<Map<String, dynamic>> getReminderLog(String invoiceId) async {
     final data = await _api.get('$_baseEndpoint/$invoiceId/reminder-log');
     return {
-      'log':            List<Map<String, dynamic>>.from(data['data'] ?? []),
-      'reminderCount':  data['meta']?['reminderCount']  ?? 0,
+      'log': List<Map<String, dynamic>>.from(data['data'] ?? []),
+      'reminderCount': data['meta']?['reminderCount'] ?? 0,
       'reminderPaused': data['meta']?['reminderPaused'] ?? false,
     };
   }
@@ -176,7 +192,8 @@ class InvoiceService {
     return Map<String, dynamic>.from(data['data'] ?? {});
   }
 
-  static Future<void> saveReminderSettings(Map<String, dynamic> settings) async {
+  static Future<void> saveReminderSettings(
+      Map<String, dynamic> settings) async {
     await _api.put('/api/finance/reminder-settings', body: settings);
   }
 
@@ -186,7 +203,9 @@ class InvoiceService {
 
   /// Preview manual reminder message before sending
   static Future<Map<String, dynamic>> previewManualReminder(
-    String invoiceId, String channel, String type,
+    String invoiceId,
+    String channel,
+    String type,
   ) async {
     final data = await _api.post(
       '$_baseEndpoint/$invoiceId/preview-manual-reminder',
@@ -197,7 +216,9 @@ class InvoiceService {
 
   /// Send manual reminder (email or WhatsApp)
   static Future<void> sendManualReminder(
-    String invoiceId, String channel, String type,
+    String invoiceId,
+    String channel,
+    String type,
   ) async {
     await _api.post(
       '$_baseEndpoint/$invoiceId/send-manual-reminder',
@@ -210,14 +231,19 @@ class InvoiceService {
   // ==========================================================================
 
   static Future<BillingCustomerListResponse> getBillingCustomers({
-    String? search, int page = 1, int limit = 1000,
+    String? search,
+    int page = 1,
+    int limit = 1000,
   }) async {
     final queryParams = <String, String>{
-      'page': page.toString(), 'limit': limit.toString(),
-      'sortBy': 'createdDate', 'sortOrder': 'desc',
+      'page': page.toString(),
+      'limit': limit.toString(),
+      'sortBy': 'createdDate',
+      'sortOrder': 'desc',
     };
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
-    final data = await _api.get('/api/finance/customers', queryParams: queryParams);
+    final data =
+        await _api.get('/api/finance/customers', queryParams: queryParams);
     return BillingCustomerListResponse.fromJson(data);
   }
 
@@ -226,13 +252,16 @@ class InvoiceService {
     return BillingCustomer.fromJson(data['data']);
   }
 
-  static Future<BillingCustomer> createBillingCustomer(Map<String, dynamic> customerData) async {
+  static Future<BillingCustomer> createBillingCustomer(
+      Map<String, dynamic> customerData) async {
     final data = await _api.post('/api/finance/customers', body: customerData);
     return BillingCustomer.fromJson(data['data']);
   }
 
-  static Future<BillingCustomer> updateBillingCustomer(String customerId, Map<String, dynamic> customerData) async {
-    final data = await _api.put('/api/finance/customers/$customerId', body: customerData);
+  static Future<BillingCustomer> updateBillingCustomer(
+      String customerId, Map<String, dynamic> customerData) async {
+    final data = await _api.put('/api/finance/customers/$customerId',
+        body: customerData);
     return BillingCustomer.fromJson(data['data']);
   }
 
@@ -258,8 +287,8 @@ class OrgStateResponse {
 
   factory OrgStateResponse.fromJson(Map<String, dynamic> json) {
     return OrgStateResponse(
-      state:     json['state']     ?? '',
-      orgName:   json['orgName']   ?? '',
+      state: json['state'] ?? '',
+      orgName: json['orgName'] ?? '',
       gstNumber: json['gstNumber'] ?? '',
     );
   }
@@ -271,43 +300,43 @@ class OrgStateResponse {
 
 class InvoiceItem {
   String itemDetails;
-  String hsnCode;       // HSN code for goods
-  String sacCode;       // SAC code for services
-  String unit;          // Nos/Hrs/Kg/Pcs/Box/Mtr/Ltr
+  String hsnCode; // HSN code for goods
+  String sacCode; // SAC code for services
+  String unit; // Nos/Hrs/Kg/Pcs/Box/Mtr/Ltr
   double quantity;
   double rate;
   double discount;
-  String discountType;  // percentage / amount
+  String discountType; // percentage / amount
   double taxableAmount; // qty × rate − discount (auto-calculated)
-  double itemGstRate;   // 0/5/12/18/28
-  double cgstRate;      // itemGstRate/2
-  double sgstRate;      // itemGstRate/2
-  double igstRate;      // itemGstRate (inter-state)
+  double itemGstRate; // 0/5/12/18/28
+  double cgstRate; // itemGstRate/2
+  double sgstRate; // itemGstRate/2
+  double igstRate; // itemGstRate (inter-state)
   double cgstAmount;
   double sgstAmount;
   double igstAmount;
-  double amount;        // taxableAmount + tax
+  double amount; // taxableAmount + tax
   String? expenseId;
   String? unbilledShipmentTrackingNumber;
 
   InvoiceItem({
-    this.itemDetails  = '',
-    this.hsnCode      = '',
-    this.sacCode      = '',
-    this.unit         = 'Nos',
-    this.quantity     = 0,
-    this.rate         = 0,
-    this.discount     = 0,
+    this.itemDetails = '',
+    this.hsnCode = '',
+    this.sacCode = '',
+    this.unit = 'Nos',
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
     this.discountType = 'percentage',
-    this.taxableAmount= 0,
-    this.itemGstRate  = 0,
-    this.cgstRate     = 0,
-    this.sgstRate     = 0,
-    this.igstRate     = 0,
-    this.cgstAmount   = 0,
-    this.sgstAmount   = 0,
-    this.igstAmount   = 0,
-    this.amount       = 0,
+    this.taxableAmount = 0,
+    this.itemGstRate = 0,
+    this.cgstRate = 0,
+    this.sgstRate = 0,
+    this.igstRate = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
+    this.amount = 0,
     this.expenseId,
     this.unbilledShipmentTrackingNumber,
   });
@@ -327,66 +356,72 @@ class InvoiceItem {
   void recalculateTax({required bool isInterState}) {
     taxableAmount = calculatedTaxableAmount;
     if (isInterState) {
-      igstRate   = itemGstRate;
-      cgstRate   = 0;
-      sgstRate   = 0;
-      igstAmount = double.parse((taxableAmount * itemGstRate / 100).toStringAsFixed(2));
+      igstRate = itemGstRate;
+      cgstRate = 0;
+      sgstRate = 0;
+      igstAmount =
+          double.parse((taxableAmount * itemGstRate / 100).toStringAsFixed(2));
       cgstAmount = 0;
       sgstAmount = 0;
     } else {
-      cgstRate   = itemGstRate / 2;
-      sgstRate   = itemGstRate / 2;
-      igstRate   = 0;
-      cgstAmount = double.parse((taxableAmount * (itemGstRate / 2) / 100).toStringAsFixed(2));
-      sgstAmount = double.parse((taxableAmount * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      cgstRate = itemGstRate / 2;
+      sgstRate = itemGstRate / 2;
+      igstRate = 0;
+      cgstAmount = double.parse(
+          (taxableAmount * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      sgstAmount = double.parse(
+          (taxableAmount * (itemGstRate / 2) / 100).toStringAsFixed(2));
       igstAmount = 0;
     }
-    amount = double.parse((taxableAmount + cgstAmount + sgstAmount + igstAmount).toStringAsFixed(2));
+    amount = double.parse((taxableAmount + cgstAmount + sgstAmount + igstAmount)
+        .toStringAsFixed(2));
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':   itemDetails,
-    'hsnCode':       hsnCode,
-    'sacCode':       sacCode,
-    'unit':          unit,
-    'quantity':      quantity,
-    'rate':          rate,
-    'discount':      discount,
-    'discountType':  discountType,
-    'taxableAmount': taxableAmount,
-    'itemGstRate':   itemGstRate,
-    'cgstRate':      cgstRate,
-    'sgstRate':      sgstRate,
-    'igstRate':      igstRate,
-    'cgstAmount':    cgstAmount,
-    'sgstAmount':    sgstAmount,
-    'igstAmount':    igstAmount,
-    'amount':        amount,
-    if (expenseId != null) 'expenseId': expenseId,
-    if (unbilledShipmentTrackingNumber != null) 'shipmentTrackingNumber': unbilledShipmentTrackingNumber,
-  };
+        'itemDetails': itemDetails,
+        'hsnCode': hsnCode,
+        'sacCode': sacCode,
+        'unit': unit,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'taxableAmount': taxableAmount,
+        'itemGstRate': itemGstRate,
+        'cgstRate': cgstRate,
+        'sgstRate': sgstRate,
+        'igstRate': igstRate,
+        'cgstAmount': cgstAmount,
+        'sgstAmount': sgstAmount,
+        'igstAmount': igstAmount,
+        'amount': amount,
+        if (expenseId != null) 'expenseId': expenseId,
+        if (unbilledShipmentTrackingNumber != null)
+          'shipmentTrackingNumber': unbilledShipmentTrackingNumber,
+      };
 
   factory InvoiceItem.fromJson(Map<String, dynamic> json) {
     return InvoiceItem(
-      itemDetails:   json['itemDetails']   ?? '',
-      hsnCode:       json['hsnCode']       ?? '',
-      sacCode:       json['sacCode']       ?? '',
-      unit:          json['unit']          ?? 'Nos',
-      quantity:      (json['quantity']     ?? 0).toDouble(),
-      rate:          (json['rate']         ?? 0).toDouble(),
-      discount:      (json['discount']     ?? 0).toDouble(),
-      discountType:  json['discountType']  ?? 'percentage',
-      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
-      itemGstRate:   (json['itemGstRate']  ?? 0).toDouble(),
-      cgstRate:      (json['cgstRate']     ?? 0).toDouble(),
-      sgstRate:      (json['sgstRate']     ?? 0).toDouble(),
-      igstRate:      (json['igstRate']     ?? 0).toDouble(),
-      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
-      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
-      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
-      amount:        (json['amount']       ?? 0).toDouble(),
-      expenseId:     json['expenseId']?.toString(),
-      unbilledShipmentTrackingNumber: json['shipmentTrackingNumber']?.toString(),
+      itemDetails: json['itemDetails'] ?? '',
+      hsnCode: json['hsnCode'] ?? '',
+      sacCode: json['sacCode'] ?? '',
+      unit: json['unit'] ?? 'Nos',
+      quantity: (json['quantity'] ?? 0).toDouble(),
+      rate: (json['rate'] ?? 0).toDouble(),
+      discount: (json['discount'] ?? 0).toDouble(),
+      discountType: json['discountType'] ?? 'percentage',
+      taxableAmount: (json['taxableAmount'] ?? 0).toDouble(),
+      itemGstRate: (json['itemGstRate'] ?? 0).toDouble(),
+      cgstRate: (json['cgstRate'] ?? 0).toDouble(),
+      sgstRate: (json['sgstRate'] ?? 0).toDouble(),
+      igstRate: (json['igstRate'] ?? 0).toDouble(),
+      cgstAmount: (json['cgstAmount'] ?? 0).toDouble(),
+      sgstAmount: (json['sgstAmount'] ?? 0).toDouble(),
+      igstAmount: (json['igstAmount'] ?? 0).toDouble(),
+      amount: (json['amount'] ?? 0).toDouble(),
+      expenseId: json['expenseId']?.toString(),
+      unbilledShipmentTrackingNumber:
+          json['shipmentTrackingNumber']?.toString(),
     );
   }
 }
@@ -414,11 +449,13 @@ class TaxSlab {
 }
 
 // Build tax slabs from items — mirrors backend buildTaxSummaryBySlabs()
-List<TaxSlab> buildTaxSlabs(List<InvoiceItem> items, {required bool isInterState}) {
+List<TaxSlab> buildTaxSlabs(List<InvoiceItem> items,
+    {required bool isInterState}) {
   final Map<double, Map<String, double>> slabs = {};
   for (final item in items) {
     final rate = item.itemGstRate;
-    slabs.putIfAbsent(rate, () => {'taxable': 0, 'cgst': 0, 'sgst': 0, 'igst': 0});
+    slabs.putIfAbsent(
+        rate, () => {'taxable': 0, 'cgst': 0, 'sgst': 0, 'igst': 0});
     slabs[rate]!['taxable'] = slabs[rate]!['taxable']! + item.taxableAmount;
     if (isInterState) {
       slabs[rate]!['igst'] = slabs[rate]!['igst']! + item.igstAmount;
@@ -430,14 +467,16 @@ List<TaxSlab> buildTaxSlabs(List<InvoiceItem> items, {required bool isInterState
   return slabs.entries.map((e) {
     final m = e.value;
     return TaxSlab(
-      gstRate:      e.key,
+      gstRate: e.key,
       taxableAmount: double.parse((m['taxable']!).toStringAsFixed(2)),
-      cgst:          double.parse((m['cgst']!).toStringAsFixed(2)),
-      sgst:          double.parse((m['sgst']!).toStringAsFixed(2)),
-      igst:          double.parse((m['igst']!).toStringAsFixed(2)),
-      totalTax:      double.parse(((m['cgst']! + m['sgst']! + m['igst']!)).toStringAsFixed(2)),
+      cgst: double.parse((m['cgst']!).toStringAsFixed(2)),
+      sgst: double.parse((m['sgst']!).toStringAsFixed(2)),
+      igst: double.parse((m['igst']!).toStringAsFixed(2)),
+      totalTax: double.parse(
+          ((m['cgst']! + m['sgst']! + m['igst']!)).toStringAsFixed(2)),
     );
-  }).toList()..sort((a, b) => a.gstRate.compareTo(b.gstRate));
+  }).toList()
+    ..sort((a, b) => a.gstRate.compareTo(b.gstRate));
 }
 
 // ============================================================================
@@ -464,17 +503,17 @@ class Invoice {
   // ── Place of Supply ──────────────────────────────────────────────────────
   final String placeOfSupply;
   final String sourceState;
-  final bool   isInterState;
+  final bool isInterState;
 
   // ── Header ───────────────────────────────────────────────────────────────
-  final String?   orderNumber;
-  final String    referenceNumber;
-  final String    currency;
-  final DateTime  invoiceDate;
-  final String    terms;
-  final DateTime  dueDate;
-  final String?   salesperson;
-  final String?   subject;
+  final String? orderNumber;
+  final String referenceNumber;
+  final String currency;
+  final DateTime invoiceDate;
+  final String terms;
+  final DateTime dueDate;
+  final String? salesperson;
+  final String? subject;
 
   // ── Items ─────────────────────────────────────────────────────────────────
   final List<InvoiceItem> items;
@@ -523,8 +562,8 @@ class Invoice {
   final List<EmailSent> emailsSent;
 
   // ── Reminder Automation ───────────────────────────────────────────────────
-  final bool    reminderPaused;
-  final int     reminderCount;
+  final bool reminderPaused;
+  final int reminderCount;
   final String? reminderPausedBy;
 
   final DateTime createdAt;
@@ -537,17 +576,17 @@ class Invoice {
     required this.customerName,
     this.customerEmail,
     this.customerPhone,
-    this.customerGSTIN          = '',
-    this.customerPAN            = '',
-    this.gstRegistrationType    = '',
-    this.billingAddress         = const CustomerAddress(),
-    this.shippingAddress        = const CustomerAddress(),
-    this.placeOfSupply          = '',
-    this.sourceState            = '',
-    this.isInterState           = false,
+    this.customerGSTIN = '',
+    this.customerPAN = '',
+    this.gstRegistrationType = '',
+    this.billingAddress = const CustomerAddress(),
+    this.shippingAddress = const CustomerAddress(),
+    this.placeOfSupply = '',
+    this.sourceState = '',
+    this.isInterState = false,
     this.orderNumber,
-    this.referenceNumber        = '',
-    this.currency               = 'INR',
+    this.referenceNumber = '',
+    this.currency = 'INR',
     required this.invoiceDate,
     required this.terms,
     required this.dueDate,
@@ -558,106 +597,110 @@ class Invoice {
     this.termsAndConditions,
     this.selectedPaymentAccount,
     required this.subTotal,
-    this.invoiceLevelDiscount     = 0,
+    this.invoiceLevelDiscount = 0,
     this.invoiceLevelDiscountType = 'percentage',
-    this.invoiceDiscountAmount    = 0,
-    this.taxableTotal             = 0,
-    this.totalCGST                = 0,
-    this.totalSGST                = 0,
-    this.totalIGST                = 0,
-    this.totalTax                 = 0,
-    this.gstRate                  = 0,
-    this.cgst                     = 0,
-    this.sgst                     = 0,
-    this.igst                     = 0,
-    this.tdsRate                  = 0,
-    this.tdsAmount                = 0,
-    this.tcsRate                  = 0,
-    this.tcsAmount                = 0,
-    this.shippingCharges          = 0,
-    this.adjustment               = 0,
+    this.invoiceDiscountAmount = 0,
+    this.taxableTotal = 0,
+    this.totalCGST = 0,
+    this.totalSGST = 0,
+    this.totalIGST = 0,
+    this.totalTax = 0,
+    this.gstRate = 0,
+    this.cgst = 0,
+    this.sgst = 0,
+    this.igst = 0,
+    this.tdsRate = 0,
+    this.tdsAmount = 0,
+    this.tcsRate = 0,
+    this.tcsAmount = 0,
+    this.shippingCharges = 0,
+    this.adjustment = 0,
     required this.totalAmount,
     required this.status,
     required this.amountPaid,
     required this.amountDue,
     required this.payments,
-    this.emailsSent               = const [],
-    this.reminderPaused           = false,
-    this.reminderCount            = 0,
+    this.emailsSent = const [],
+    this.reminderPaused = false,
+    this.reminderCount = 0,
     this.reminderPausedBy,
     required this.createdAt,
     required this.updatedAt,
   });
 
   /// Build tax slabs from items for display
-  List<TaxSlab> get taxSlabs => buildTaxSlabs(items, isInterState: isInterState);
+  List<TaxSlab> get taxSlabs =>
+      buildTaxSlabs(items, isInterState: isInterState);
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
     return Invoice(
-      id:                       json['_id'] ?? json['id'] ?? '',
-      invoiceNumber:            json['invoiceNumber'] ?? '',
-      customerId:               json['customerId'] ?? '',
-      customerName:             json['customerName'] ?? '',
-      customerEmail:            json['customerEmail'],
-      customerPhone:            json['customerPhone'],
-      customerGSTIN:            json['customerGSTIN']          ?? '',
-      customerPAN:              json['customerPAN']            ?? '',
-      gstRegistrationType:      json['gstRegistrationType']    ?? '',
-      billingAddress:           CustomerAddress.fromJson(json['billingAddress']),
-      shippingAddress:          CustomerAddress.fromJson(json['shippingAddress']),
-      placeOfSupply:            json['placeOfSupply']          ?? '',
-      sourceState:              json['sourceState']            ?? '',
-      isInterState:             json['isInterState']           ?? false,
-      orderNumber:              json['orderNumber'],
-      referenceNumber:          json['referenceNumber']        ?? '',
-      currency:                 json['currency']               ?? 'INR',
-      invoiceDate:              DateTime.parse(json['invoiceDate']),
-      terms:                    json['terms'] ?? 'Net 30',
-      dueDate:                  DateTime.parse(json['dueDate']),
-      salesperson:              json['salesperson'],
-      subject:                  json['subject'],
+      id: json['_id'] ?? json['id'] ?? '',
+      invoiceNumber: json['invoiceNumber'] ?? '',
+      customerId: json['customerId'] ?? '',
+      customerName: json['customerName'] ?? '',
+      customerEmail: json['customerEmail'],
+      customerPhone: json['customerPhone'],
+      customerGSTIN: json['customerGSTIN'] ?? '',
+      customerPAN: json['customerPAN'] ?? '',
+      gstRegistrationType: json['gstRegistrationType'] ?? '',
+      billingAddress: CustomerAddress.fromJson(json['billingAddress']),
+      shippingAddress: CustomerAddress.fromJson(json['shippingAddress']),
+      placeOfSupply: json['placeOfSupply'] ?? '',
+      sourceState: json['sourceState'] ?? '',
+      isInterState: json['isInterState'] ?? false,
+      orderNumber: json['orderNumber'],
+      referenceNumber: json['referenceNumber'] ?? '',
+      currency: json['currency'] ?? 'INR',
+      invoiceDate: DateTime.parse(json['invoiceDate']),
+      terms: json['terms'] ?? 'Net 30',
+      dueDate: DateTime.parse(json['dueDate']),
+      salesperson: json['salesperson'],
+      subject: json['subject'],
       items: (json['items'] as List? ?? [])
           .map((item) => InvoiceItem.fromJson(item))
           .toList(),
-      customerNotes:            json['customerNotes'],
-      termsAndConditions:       json['termsAndConditions'],
-      selectedPaymentAccount:   json['selectedPaymentAccount'] != null
+      customerNotes: json['customerNotes'],
+      termsAndConditions: json['termsAndConditions'],
+      selectedPaymentAccount: json['selectedPaymentAccount'] != null
           ? SelectedPaymentAccount.fromJson(json['selectedPaymentAccount'])
           : null,
-      subTotal:                 (json['subTotal']              ?? 0).toDouble(),
-      invoiceLevelDiscount:     (json['invoiceLevelDiscount']  ?? 0).toDouble(),
-      invoiceLevelDiscountType: json['invoiceLevelDiscountType'] ?? 'percentage',
-      invoiceDiscountAmount:    (json['invoiceDiscountAmount'] ?? 0).toDouble(),
-      taxableTotal:             (json['taxableTotal']          ?? 0).toDouble(),
-      totalCGST:                (json['totalCGST']             ?? json['cgst'] ?? 0).toDouble(),
-      totalSGST:                (json['totalSGST']             ?? json['sgst'] ?? 0).toDouble(),
-      totalIGST:                (json['totalIGST']             ?? json['igst'] ?? 0).toDouble(),
-      totalTax:                 (json['totalTax']              ?? 0).toDouble(),
-      gstRate:                  (json['gstRate']               ?? 0).toDouble(),
-      cgst:                     (json['cgst']                  ?? 0).toDouble(),
-      sgst:                     (json['sgst']                  ?? 0).toDouble(),
-      igst:                     (json['igst']                  ?? 0).toDouble(),
-      tdsRate:                  (json['tdsRate']               ?? 0).toDouble(),
-      tdsAmount:                (json['tdsAmount']             ?? 0).toDouble(),
-      tcsRate:                  (json['tcsRate']               ?? 0).toDouble(),
-      tcsAmount:                (json['tcsAmount']             ?? 0).toDouble(),
-      shippingCharges:          (json['shippingCharges']       ?? 0).toDouble(),
-      adjustment:               (json['adjustment']            ?? 0).toDouble(),
-      totalAmount:              (json['totalAmount']           ?? 0).toDouble(),
-      status:                   json['status'] ?? 'DRAFT',
-      amountPaid:               (json['amountPaid']            ?? 0).toDouble(),
-      amountDue:                (json['amountDue']             ?? 0).toDouble(),
+      subTotal: (json['subTotal'] ?? 0).toDouble(),
+      invoiceLevelDiscount: (json['invoiceLevelDiscount'] ?? 0).toDouble(),
+      invoiceLevelDiscountType:
+          json['invoiceLevelDiscountType'] ?? 'percentage',
+      invoiceDiscountAmount: (json['invoiceDiscountAmount'] ?? 0).toDouble(),
+      taxableTotal: (json['taxableTotal'] ?? 0).toDouble(),
+      totalCGST: (json['totalCGST'] ?? json['cgst'] ?? 0).toDouble(),
+      totalSGST: (json['totalSGST'] ?? json['sgst'] ?? 0).toDouble(),
+      totalIGST: (json['totalIGST'] ?? json['igst'] ?? 0).toDouble(),
+      totalTax: (json['totalTax'] ?? 0).toDouble(),
+      gstRate: (json['gstRate'] ?? 0).toDouble(),
+      cgst: (json['cgst'] ?? 0).toDouble(),
+      sgst: (json['sgst'] ?? 0).toDouble(),
+      igst: (json['igst'] ?? 0).toDouble(),
+      tdsRate: (json['tdsRate'] ?? 0).toDouble(),
+      tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
+      tcsRate: (json['tcsRate'] ?? 0).toDouble(),
+      tcsAmount: (json['tcsAmount'] ?? 0).toDouble(),
+      shippingCharges: (json['shippingCharges'] ?? 0).toDouble(),
+      adjustment: (json['adjustment'] ?? 0).toDouble(),
+      totalAmount: (json['totalAmount'] ?? 0).toDouble(),
+      status: json['status'] ?? 'DRAFT',
+      amountPaid: (json['amountPaid'] ?? 0).toDouble(),
+      amountDue: (json['amountDue'] ?? 0).toDouble(),
       payments: (json['payments'] as List? ?? [])
           .map((p) => Payment.fromJson(p))
           .toList(),
       emailsSent: (json['emailsSent'] as List? ?? [])
           .map((e) => EmailSent.fromJson(e))
           .toList(),
-      reminderPaused:   json['reminderPaused']   ?? false,
-      reminderCount:    (json['reminderCount']   ?? 0) as int,
+      reminderPaused: json['reminderPaused'] ?? false,
+      reminderCount: (json['reminderCount'] ?? 0) as int,
       reminderPausedBy: json['reminderPausedBy'],
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
+      createdAt:
+          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      updatedAt:
+          DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -679,13 +722,21 @@ class Address {
   final String? fax;
 
   const Address({
-    this.attention, this.street, this.city,
-    this.state, this.zip, this.pincode,
-    this.country, this.phone, this.fax,
+    this.attention,
+    this.street,
+    this.city,
+    this.state,
+    this.zip,
+    this.pincode,
+    this.country,
+    this.phone,
+    this.fax,
   });
 
   String get formatted {
-    final parts = [attention, street, city, state, zip ?? pincode, country].where((s) => s != null && s.isNotEmpty).toList();
+    final parts = [attention, street, city, state, zip ?? pincode, country]
+        .where((s) => s != null && s.isNotEmpty)
+        .toList();
     return parts.join(', ');
   }
 
@@ -693,27 +744,27 @@ class Address {
     if (json == null) return const Address();
     return Address(
       attention: json['attention'],
-      street:    json['street'],
-      city:      json['city'],
-      state:     json['state'],
-      zip:       json['zip'],
-      pincode:   json['pincode'],
-      country:   json['country'],
-      phone:     json['phone'],
-      fax:       json['fax'],
+      street: json['street'],
+      city: json['city'],
+      state: json['state'],
+      zip: json['zip'],
+      pincode: json['pincode'],
+      country: json['country'],
+      phone: json['phone'],
+      fax: json['fax'],
     );
   }
 
   Map<String, dynamic> toJson() => {
-    if (attention != null) 'attention': attention,
-    if (street    != null) 'street':    street,
-    if (city      != null) 'city':      city,
-    if (state     != null) 'state':     state,
-    if (zip       != null) 'zip':       zip,
-    if (country   != null) 'country':   country,
-    if (phone     != null) 'phone':     phone,
-    if (fax       != null) 'fax':       fax,
-  };
+        if (attention != null) 'attention': attention,
+        if (street != null) 'street': street,
+        if (city != null) 'city': city,
+        if (state != null) 'state': state,
+        if (zip != null) 'zip': zip,
+        if (country != null) 'country': country,
+        if (phone != null) 'phone': phone,
+        if (fax != null) 'fax': fax,
+      };
 }
 
 // ============================================================================
@@ -721,13 +772,13 @@ class Address {
 // ============================================================================
 
 class Payment {
-  final String   paymentId;
-  final double   amount;
+  final String paymentId;
+  final double amount;
   final DateTime paymentDate;
-  final String   paymentMethod;
-  final String?  referenceNumber;
-  final String?  notes;
-  final String?  recordedBy;
+  final String paymentMethod;
+  final String? referenceNumber;
+  final String? notes;
+  final String? recordedBy;
   final DateTime recordedAt;
 
   const Payment({
@@ -743,14 +794,16 @@ class Payment {
 
   factory Payment.fromJson(Map<String, dynamic> json) {
     return Payment(
-      paymentId:       json['paymentId']?.toString() ?? '',
-      amount:          (json['amount']       ?? 0).toDouble(),
-      paymentDate:     DateTime.parse(json['paymentDate'] ?? DateTime.now().toIso8601String()),
-      paymentMethod:   json['paymentMethod'] ?? 'Bank Transfer',
+      paymentId: json['paymentId']?.toString() ?? '',
+      amount: (json['amount'] ?? 0).toDouble(),
+      paymentDate: DateTime.parse(
+          json['paymentDate'] ?? DateTime.now().toIso8601String()),
+      paymentMethod: json['paymentMethod'] ?? 'Bank Transfer',
       referenceNumber: json['referenceNumber'],
-      notes:           json['notes'],
-      recordedBy:      json['recordedBy'],
-      recordedAt:      DateTime.parse(json['recordedAt'] ?? DateTime.now().toIso8601String()),
+      notes: json['notes'],
+      recordedBy: json['recordedBy'],
+      recordedAt: DateTime.parse(
+          json['recordedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -760,9 +813,9 @@ class Payment {
 // ============================================================================
 
 class EmailSent {
-  final String   sentTo;
+  final String sentTo;
   final DateTime sentAt;
-  final String   emailType;
+  final String emailType;
 
   const EmailSent({
     required this.sentTo,
@@ -772,8 +825,11 @@ class EmailSent {
 
   factory EmailSent.fromJson(Map<String, dynamic> json) {
     return EmailSent(
-      sentTo:    json['sentTo']    ?? '',
-      sentAt:    (DateTime.tryParse(json['sentAt'] ?? DateTime.now().toIso8601String()) ?? DateTime.now()).toLocal(),
+      sentTo: json['sentTo'] ?? '',
+      sentAt: (DateTime.tryParse(
+                  json['sentAt'] ?? DateTime.now().toIso8601String()) ??
+              DateTime.now())
+          .toLocal(),
       emailType: json['emailType'] ?? 'invoice',
     );
   }
@@ -784,13 +840,13 @@ class EmailSent {
 // ============================================================================
 
 class PaymentAccount {
-  final String  id;
-  final String  accountType;
-  final String  accountName;
+  final String id;
+  final String accountType;
+  final String accountName;
   final String? holderName;
-  final double  openingBalance;
-  final double  currentBalance;
-  final bool    isActive;
+  final double openingBalance;
+  final double currentBalance;
+  final bool isActive;
   final String? bankName;
   final String? accountNumber;
   final String? ifscCode;
@@ -812,9 +868,15 @@ class PaymentAccount {
     required this.openingBalance,
     required this.currentBalance,
     required this.isActive,
-    this.bankName, this.accountNumber, this.ifscCode,
-    this.upiId, this.providerName, this.cardNumber,
-    this.fastagNumber, this.vehicleNumber, this.customTypeName,
+    this.bankName,
+    this.accountNumber,
+    this.ifscCode,
+    this.upiId,
+    this.providerName,
+    this.cardNumber,
+    this.fastagNumber,
+    this.vehicleNumber,
+    this.customTypeName,
     this.customFields,
     required this.createdAt,
     required this.updatedAt,
@@ -822,75 +884,88 @@ class PaymentAccount {
 
   factory PaymentAccount.fromJson(Map<String, dynamic> json) {
     return PaymentAccount(
-      id:              json['_id'] ?? json['id'] ?? '',
-      accountType:     json['accountType']    ?? 'BANK_ACCOUNT',
-      accountName:     json['accountName']    ?? '',
-      holderName:      json['holderName'],
-      openingBalance:  (json['openingBalance'] ?? 0).toDouble(),
-      currentBalance:  (json['currentBalance'] ?? 0).toDouble(),
-      isActive:        json['isActive'] ?? true,
-      bankName:        json['bankName'],
-      accountNumber:   json['accountNumber'],
-      ifscCode:        json['ifscCode'],
-      upiId:           json['upiId'],
-      providerName:    json['providerName'],
-      cardNumber:      json['cardNumber'],
-      fastagNumber:    json['fastagNumber'],
-      vehicleNumber:   json['vehicleNumber'],
-      customTypeName:  json['customTypeName'],
-      customFields:    json['customFields'] != null
-          ? (json['customFields'] as List).map((f) => CustomField.fromJson(f)).toList()
+      id: json['_id'] ?? json['id'] ?? '',
+      accountType: json['accountType'] ?? 'BANK_ACCOUNT',
+      accountName: json['accountName'] ?? '',
+      holderName: json['holderName'],
+      openingBalance: (json['openingBalance'] ?? 0).toDouble(),
+      currentBalance: (json['currentBalance'] ?? 0).toDouble(),
+      isActive: json['isActive'] ?? true,
+      bankName: json['bankName'],
+      accountNumber: json['accountNumber'],
+      ifscCode: json['ifscCode'],
+      upiId: json['upiId'],
+      providerName: json['providerName'],
+      cardNumber: json['cardNumber'],
+      fastagNumber: json['fastagNumber'],
+      vehicleNumber: json['vehicleNumber'],
+      customTypeName: json['customTypeName'],
+      customFields: json['customFields'] != null
+          ? (json['customFields'] as List)
+              .map((f) => CustomField.fromJson(f))
+              .toList()
           : null,
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
+      createdAt:
+          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      updatedAt:
+          DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'accountId':    id,
-    'accountType':  accountType,
-    'accountName':  accountName,
-    'holderName':   holderName,
-    'bankName':     bankName,
-    'accountNumber':accountNumber,
-    'ifscCode':     ifscCode,
-    'upiId':        upiId,
-    'providerName': providerName,
-    'cardNumber':   cardNumber,
-    'fastagNumber': fastagNumber,
-    'vehicleNumber':vehicleNumber,
-    'customFields': customFields?.map((f) => f.toJson()).toList(),
-  };
+        'accountId': id,
+        'accountType': accountType,
+        'accountName': accountName,
+        'holderName': holderName,
+        'bankName': bankName,
+        'accountNumber': accountNumber,
+        'ifscCode': ifscCode,
+        'upiId': upiId,
+        'providerName': providerName,
+        'cardNumber': cardNumber,
+        'fastagNumber': fastagNumber,
+        'vehicleNumber': vehicleNumber,
+        'customFields': customFields?.map((f) => f.toJson()).toList(),
+      };
 
   String getDisplayText() {
     switch (accountType) {
-      case 'BANK': return '$accountName - ${bankName ?? "Bank"} (****${accountNumber?.substring((accountNumber?.length ?? 4) - 4) ?? "****"})';
-      case 'FUEL_CARD': return '$accountName - ${providerName ?? "Fuel Card"}';
-      case 'FASTAG': return '$accountName - FASTag ($vehicleNumber)';
-      default: return accountName;
+      case 'BANK':
+        return '$accountName - ${bankName ?? "Bank"} (****${accountNumber?.substring((accountNumber?.length ?? 4) - 4) ?? "****"})';
+      case 'FUEL_CARD':
+        return '$accountName - ${providerName ?? "Fuel Card"}';
+      case 'FASTAG':
+        return '$accountName - FASTag ($vehicleNumber)';
+      default:
+        return accountName;
     }
   }
 
   String getIconName() {
     switch (accountType) {
-      case 'BANK': return 'account_balance';
-      case 'FUEL_CARD': return 'local_gas_station';
-      case 'FASTAG': return 'toll';
-      default: return 'payment';
+      case 'BANK':
+        return 'account_balance';
+      case 'FUEL_CARD':
+        return 'local_gas_station';
+      case 'FASTAG':
+        return 'toll';
+      default:
+        return 'payment';
     }
   }
 }
 
 class CustomField {
-  final String  fieldName;
+  final String fieldName;
   final String? fieldValue;
 
-  const CustomField({ required this.fieldName, this.fieldValue });
+  const CustomField({required this.fieldName, this.fieldValue});
 
-  factory CustomField.fromJson(Map<String, dynamic> json) =>
-      CustomField(fieldName: json['fieldName'] ?? '', fieldValue: json['fieldValue']);
+  factory CustomField.fromJson(Map<String, dynamic> json) => CustomField(
+      fieldName: json['fieldName'] ?? '', fieldValue: json['fieldValue']);
 
-  Map<String, dynamic> toJson() => {'fieldName': fieldName, 'fieldValue': fieldValue};
+  Map<String, dynamic> toJson() =>
+      {'fieldName': fieldName, 'fieldValue': fieldValue};
 }
 
 class SelectedPaymentAccount {
@@ -909,29 +984,39 @@ class SelectedPaymentAccount {
   final List<CustomField>? customFields;
 
   const SelectedPaymentAccount({
-    this.accountId, this.accountType, this.accountName,
-    this.bankName, this.accountNumber, this.ifscCode,
-    this.accountHolder, this.upiId, this.providerName,
-    this.cardNumber, this.fastagNumber, this.vehicleNumber,
+    this.accountId,
+    this.accountType,
+    this.accountName,
+    this.bankName,
+    this.accountNumber,
+    this.ifscCode,
+    this.accountHolder,
+    this.upiId,
+    this.providerName,
+    this.cardNumber,
+    this.fastagNumber,
+    this.vehicleNumber,
     this.customFields,
   });
 
   factory SelectedPaymentAccount.fromJson(Map<String, dynamic> json) {
     return SelectedPaymentAccount(
-      accountId:     json['accountId'],
-      accountType:   json['accountType'],
-      accountName:   json['accountName'],
-      bankName:      json['bankName'],
+      accountId: json['accountId'],
+      accountType: json['accountType'],
+      accountName: json['accountName'],
+      bankName: json['bankName'],
       accountNumber: json['accountNumber'],
-      ifscCode:      json['ifscCode'],
+      ifscCode: json['ifscCode'],
       accountHolder: json['accountHolder'],
-      upiId:         json['upiId'],
-      providerName:  json['providerName'],
-      cardNumber:    json['cardNumber'],
-      fastagNumber:  json['fastagNumber'],
+      upiId: json['upiId'],
+      providerName: json['providerName'],
+      cardNumber: json['cardNumber'],
+      fastagNumber: json['fastagNumber'],
       vehicleNumber: json['vehicleNumber'],
-      customFields:  json['customFields'] != null
-          ? (json['customFields'] as List).map((f) => CustomField.fromJson(f)).toList()
+      customFields: json['customFields'] != null
+          ? (json['customFields'] as List)
+              .map((f) => CustomField.fromJson(f))
+              .toList()
           : null,
     );
   }
@@ -943,13 +1028,14 @@ class SelectedPaymentAccount {
 
 class InvoiceListResponse {
   final List<Invoice> invoices;
-  final Pagination    pagination;
+  final Pagination pagination;
 
-  const InvoiceListResponse({ required this.invoices, required this.pagination });
+  const InvoiceListResponse({required this.invoices, required this.pagination});
 
   factory InvoiceListResponse.fromJson(Map<String, dynamic> json) {
     return InvoiceListResponse(
-      invoices:   (json['data'] as List).map((inv) => Invoice.fromJson(inv)).toList(),
+      invoices:
+          (json['data'] as List).map((inv) => Invoice.fromJson(inv)).toList(),
       pagination: Pagination.fromJson(json['pagination']),
     );
   }
@@ -957,19 +1043,31 @@ class InvoiceListResponse {
 
 class Pagination {
   final int total, page, limit, pages;
-  const Pagination({ required this.total, required this.page, required this.limit, required this.pages });
-  factory Pagination.fromJson(Map<String, dynamic> json) =>
-      Pagination(total: json['total'] ?? 0, page: json['page'] ?? 1, limit: json['limit'] ?? 20, pages: json['pages'] ?? 1);
+  const Pagination(
+      {required this.total,
+      required this.page,
+      required this.limit,
+      required this.pages});
+  factory Pagination.fromJson(Map<String, dynamic> json) => Pagination(
+      total: json['total'] ?? 0,
+      page: json['page'] ?? 1,
+      limit: json['limit'] ?? 20,
+      pages: json['pages'] ?? 1);
 }
 
 class InvoiceStats {
-  final int    totalInvoices;
+  final int totalInvoices;
   final double totalRevenue;
   final double totalPaid;
   final double totalDue;
   final Map<String, StatusStats> byStatus;
 
-  const InvoiceStats({ required this.totalInvoices, required this.totalRevenue, required this.totalPaid, required this.totalDue, required this.byStatus });
+  const InvoiceStats(
+      {required this.totalInvoices,
+      required this.totalRevenue,
+      required this.totalPaid,
+      required this.totalDue,
+      required this.byStatus});
 
   factory InvoiceStats.fromJson(Map<String, dynamic> json) {
     final byStatusMap = <String, StatusStats>{};
@@ -980,28 +1078,30 @@ class InvoiceStats {
     }
     return InvoiceStats(
       totalInvoices: json['totalInvoices'] ?? 0,
-      totalRevenue:  (json['totalRevenue']  ?? 0).toDouble(),
-      totalPaid:     (json['totalPaid']     ?? 0).toDouble(),
-      totalDue:      (json['totalDue']      ?? 0).toDouble(),
-      byStatus:      byStatusMap,
+      totalRevenue: (json['totalRevenue'] ?? 0).toDouble(),
+      totalPaid: (json['totalPaid'] ?? 0).toDouble(),
+      totalDue: (json['totalDue'] ?? 0).toDouble(),
+      byStatus: byStatusMap,
     );
   }
 }
 
 class StatusStats {
-  final int    count;
+  final int count;
   final double amount;
-  const StatusStats({ required this.count, required this.amount });
-  factory StatusStats.fromJson(Map<String, dynamic> json) =>
-      StatusStats(count: json['count'] ?? 0, amount: (json['amount'] ?? 0).toDouble());
+  const StatusStats({required this.count, required this.amount});
+  factory StatusStats.fromJson(Map<String, dynamic> json) => StatusStats(
+      count: json['count'] ?? 0, amount: (json['amount'] ?? 0).toDouble());
 }
 
 class PaymentResponse {
   final Invoice invoice;
   final Payment payment;
-  const PaymentResponse({ required this.invoice, required this.payment });
+  const PaymentResponse({required this.invoice, required this.payment});
   factory PaymentResponse.fromJson(Map<String, dynamic> json) =>
-      PaymentResponse(invoice: Invoice.fromJson(json['invoice']), payment: Payment.fromJson(json['payment']));
+      PaymentResponse(
+          invoice: Invoice.fromJson(json['invoice']),
+          payment: Payment.fromJson(json['payment']));
 }
 
 // ============================================================================
@@ -1012,19 +1112,25 @@ class BillingCustomerListResponse {
   final List<BillingCustomer> customers;
   final Pagination pagination;
 
-  const BillingCustomerListResponse({ required this.customers, required this.pagination });
+  const BillingCustomerListResponse(
+      {required this.customers, required this.pagination});
 
   factory BillingCustomerListResponse.fromJson(Map<String, dynamic> json) {
-    final customersData  = json['data']?['customers'] ?? json['data'] ?? [];
-    final rawPagination  = json['data']?['pagination'] ?? json['pagination'] ?? {};
+    final customersData = json['data']?['customers'] ?? json['data'] ?? [];
+    final rawPagination =
+        json['data']?['pagination'] ?? json['pagination'] ?? {};
     final normPagination = {
-      'total': rawPagination['totalCount']  ?? rawPagination['total']  ?? (customersData as List).length,
-      'page':  rawPagination['currentPage'] ?? rawPagination['page']   ?? 1,
-      'limit': rawPagination['pageSize']    ?? rawPagination['limit']  ?? 50,
-      'pages': rawPagination['totalPages']  ?? rawPagination['pages']  ?? 1,
+      'total': rawPagination['totalCount'] ??
+          rawPagination['total'] ??
+          (customersData as List).length,
+      'page': rawPagination['currentPage'] ?? rawPagination['page'] ?? 1,
+      'limit': rawPagination['pageSize'] ?? rawPagination['limit'] ?? 50,
+      'pages': rawPagination['totalPages'] ?? rawPagination['pages'] ?? 1,
     };
     return BillingCustomerListResponse(
-      customers:  (customersData as List).map((c) => BillingCustomer.fromJson(c)).toList(),
+      customers: (customersData as List)
+          .map((c) => BillingCustomer.fromJson(c))
+          .toList(),
       pagination: Pagination.fromJson(normPagination),
     );
   }
@@ -1051,38 +1157,54 @@ class BillableExpense {
   bool isSelected;
 
   BillableExpense({
-    required this.id, required this.date,
-    required this.expenseAccount, required this.amount,
-    required this.tax, required this.total,
-    required this.billableAmount, required this.markupPercentage,
-    required this.paidThrough, this.vendor, this.customerName,
-    this.project, this.notes, this.isSelected = false,
+    required this.id,
+    required this.date,
+    required this.expenseAccount,
+    required this.amount,
+    required this.tax,
+    required this.total,
+    required this.billableAmount,
+    required this.markupPercentage,
+    required this.paidThrough,
+    this.vendor,
+    this.customerName,
+    this.project,
+    this.notes,
+    this.isSelected = false,
   });
 
   factory BillableExpense.fromJson(Map<String, dynamic> json) {
     return BillableExpense(
-      id:               json['_id']               ?? json['id'] ?? '',
-      date:             json['date']              ?? '',
-      expenseAccount:   json['expenseAccount']    ?? '',
-      amount:           (json['amount']           ?? 0).toDouble(),
-      tax:              (json['tax']              ?? 0).toDouble(),
-      total:            (json['total']            ?? 0).toDouble(),
-      billableAmount:   (json['billableAmount']   ?? 0).toDouble(),
+      id: json['_id'] ?? json['id'] ?? '',
+      date: json['date'] ?? '',
+      expenseAccount: json['expenseAccount'] ?? '',
+      amount: (json['amount'] ?? 0).toDouble(),
+      tax: (json['tax'] ?? 0).toDouble(),
+      total: (json['total'] ?? 0).toDouble(),
+      billableAmount: (json['billableAmount'] ?? 0).toDouble(),
       markupPercentage: (json['markupPercentage'] ?? 0).toDouble(),
-      paidThrough:      json['paidThrough']       ?? '',
-      vendor:           json['vendor'],
-      customerName:     json['customerName'],
-      project:          json['project'],
-      notes:            json['notes'],
-      isSelected:       false,
+      paidThrough: json['paidThrough'] ?? '',
+      vendor: json['vendor'],
+      customerName: json['customerName'],
+      project: json['project'],
+      notes: json['notes'],
+      isSelected: false,
     );
   }
 
   Map<String, dynamic> toJson() => {
-    '_id': id, 'date': date, 'expenseAccount': expenseAccount,
-    'amount': amount, 'tax': tax, 'total': total,
-    'billableAmount': billableAmount, 'markupPercentage': markupPercentage,
-    'paidThrough': paidThrough, 'vendor': vendor,
-    'customerName': customerName, 'project': project, 'notes': notes,
-  };
+        '_id': id,
+        'date': date,
+        'expenseAccount': expenseAccount,
+        'amount': amount,
+        'tax': tax,
+        'total': total,
+        'billableAmount': billableAmount,
+        'markupPercentage': markupPercentage,
+        'paidThrough': paidThrough,
+        'vendor': vendor,
+        'customerName': customerName,
+        'project': project,
+        'notes': notes,
+      };
 }

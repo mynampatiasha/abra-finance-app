@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // IMPORT TRANSACTIONS DIALOG
 // ============================================================================
@@ -366,7 +367,8 @@ class _ImportTransactionsDialogState extends State<ImportTransactionsDialog> {
                 color: isSelected ? Colors.blue[50] : Colors.grey[50],
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: isSelected ? const Color(0xFF3498DB) : Colors.grey[300]!,
+                  color:
+                      isSelected ? const Color(0xFF3498DB) : Colors.grey[300]!,
                   width: 2,
                 ),
               ),
@@ -656,11 +658,39 @@ class _ImportTransactionsDialogState extends State<ImportTransactionsDialog> {
       'Description'
     ];
     _previewData = [
-      ['22/01/2026', '5678', '800.00', 'Shell Marathahalli', 'KA-01-AB-1234', 'Fuel'],
-      ['23/01/2026', '5678', '1200.00', 'HP Whitefield', 'KA-05-CD-5678', 'Fuel'],
+      [
+        '22/01/2026',
+        '5678',
+        '800.00',
+        'Shell Marathahalli',
+        'KA-01-AB-1234',
+        'Fuel'
+      ],
+      [
+        '23/01/2026',
+        '5678',
+        '1200.00',
+        'HP Whitefield',
+        'KA-05-CD-5678',
+        'Fuel'
+      ],
       ['23/01/2026', '5678', '600.00', 'Reliance HSR', '', 'Fuel'],
-      ['24/01/2026', '5678', '950.00', 'Shell Koramangala', 'KA-01-AB-1234', 'Fuel'],
-      ['24/01/2026', '5678', '1100.00', 'HP Electronic City', 'KA-05-CD-5678', 'Fuel'],
+      [
+        '24/01/2026',
+        '5678',
+        '950.00',
+        'Shell Koramangala',
+        'KA-01-AB-1234',
+        'Fuel'
+      ],
+      [
+        '24/01/2026',
+        '5678',
+        '1100.00',
+        'HP Electronic City',
+        'KA-05-CD-5678',
+        'Fuel'
+      ],
     ];
   }
 
@@ -704,14 +734,9 @@ class _ImportTransactionsDialogState extends State<ImportTransactionsDialog> {
 
       if (mounted) {
         Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${_transactionsToImport.length} transactions imported successfully',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
+        AppSnackbar.show(context,
+            message:
+                '${_transactionsToImport.length} transactions imported successfully');
       }
     } catch (e) {
       _showErrorSnackbar('Import failed: $e');
@@ -777,11 +802,6 @@ class _ImportTransactionsDialogState extends State<ImportTransactionsDialog> {
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    AppSnackbar.show(context, message: message, isError: true);
   }
 }

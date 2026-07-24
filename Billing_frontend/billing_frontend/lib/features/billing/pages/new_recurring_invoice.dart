@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // NEW RECURRING INVOICE SCREEN - Restyled to match new_vendor_credit.dart
 // ============================================================================
@@ -12,74 +13,85 @@ import '../../../../core/services/recurring_invoice_service.dart';
 import '../../../../core/services/invoice_service.dart';
 
 // Navy blue color scheme
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class NewRecurringInvoiceScreen extends StatefulWidget {
   final String? recurringInvoiceId;
-  const NewRecurringInvoiceScreen({Key? key, this.recurringInvoiceId}) : super(key: key);
+  const NewRecurringInvoiceScreen({Key? key, this.recurringInvoiceId})
+      : super(key: key);
 
   @override
-  State<NewRecurringInvoiceScreen> createState() => _NewRecurringInvoiceScreenState();
+  State<NewRecurringInvoiceScreen> createState() =>
+      _NewRecurringInvoiceScreenState();
 }
 
 class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  bool _isSaving  = false;
+  bool _isSaving = false;
 
   // Controllers
-  final _profileNameController     = TextEditingController();
-  final _orderNumberController     = TextEditingController();
-  final _subjectController         = TextEditingController();
-  final _customerNotesController   = TextEditingController();
+  final _profileNameController = TextEditingController();
+  final _orderNumberController = TextEditingController();
+  final _subjectController = TextEditingController();
+  final _customerNotesController = TextEditingController();
   final _termsConditionsController = TextEditingController();
-  final _repeatEveryController     = TextEditingController(text: '1');
+  final _repeatEveryController = TextEditingController(text: '1');
 
   // Customer
   String? _selectedCustomerId;
   String? _selectedCustomerName;
   String? _selectedCustomerEmail;
-  String? _selectedCustomerPhone;   
+  String? _selectedCustomerPhone;
 
   // Recurrence
-  String   _repeatUnit     = 'month';
-  DateTime _startDate      = DateTime.now();
+  String _repeatUnit = 'month';
+  DateTime _startDate = DateTime.now();
   DateTime? _endDate;
-  bool     _hasEndDate     = false;
-  String   _endCondition   = 'never';
-  int      _maxOccurrences = 12;
+  bool _hasEndDate = false;
+  String _endCondition = 'never';
+  int _maxOccurrences = 12;
   DateTime? _nextInvoiceDate;
 
   // Invoice settings
-  String  _selectedTerms      = 'Net 30';
+  String _selectedTerms = 'Net 30';
   String? _salesperson;
-  String  _invoiceCreationMode = 'draft';
+  String _invoiceCreationMode = 'draft';
 
   // Tax
-  double _tdsRate   = 0;
-  double _tcsRate   = 0;
-  double _gstRate   = 18;
-  bool   _enableTDS = false;
-  bool   _enableTCS = false;
-  bool   _enableGST = true;
+  double _tdsRate = 0;
+  double _tcsRate = 0;
+  double _gstRate = 18;
+  bool _enableTDS = false;
+  bool _enableTCS = false;
+  bool _enableGST = true;
 
   // Items & calculations
   List<RecurringInvoiceItem> _items = [];
-  double _subTotal      = 0;
-  double _tdsAmount     = 0;
-  double _tcsAmount     = 0;
-  double _gstAmount     = 0;
-  double _totalAmount   = 0;
-  int    _totalQuantity = 0;
+  double _subTotal = 0;
+  double _tdsAmount = 0;
+  double _tcsAmount = 0;
+  double _gstAmount = 0;
+  double _totalAmount = 0;
+  int _totalQuantity = 0;
 
   // Options
-  final List<String> _termsOptions      = ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
+  final List<String> _termsOptions = [
+    'Due on Receipt',
+    'Net 15',
+    'Net 30',
+    'Net 45',
+    'Net 60'
+  ];
   final List<String> _repeatUnitOptions = ['day', 'week', 'month', 'year'];
   final Map<String, String> _repeatUnitLabels = {
-    'day': 'Day(s)', 'week': 'Week(s)', 'month': 'Month(s)', 'year': 'Year(s)',
+    'day': 'Day(s)',
+    'week': 'Week(s)',
+    'month': 'Month(s)',
+    'year': 'Year(s)',
   };
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
@@ -109,17 +121,28 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
     final repeatEvery = int.tryParse(_repeatEveryController.text) ?? 1;
     DateTime next = _startDate;
     switch (_repeatUnit) {
-      case 'day':   next = _startDate.add(Duration(days: repeatEvery)); break;
-      case 'week':  next = _startDate.add(Duration(days: repeatEvery * 7)); break;
-      case 'month': next = DateTime(_startDate.year, _startDate.month + repeatEvery, _startDate.day); break;
-      case 'year':  next = DateTime(_startDate.year + repeatEvery, _startDate.month, _startDate.day); break;
+      case 'day':
+        next = _startDate.add(Duration(days: repeatEvery));
+        break;
+      case 'week':
+        next = _startDate.add(Duration(days: repeatEvery * 7));
+        break;
+      case 'month':
+        next = DateTime(
+            _startDate.year, _startDate.month + repeatEvery, _startDate.day);
+        break;
+      case 'year':
+        next = DateTime(
+            _startDate.year + repeatEvery, _startDate.month, _startDate.day);
+        break;
     }
     setState(() => _nextInvoiceDate = next);
   }
 
   void _calculateAmounts() {
     setState(() {
-      _subTotal = 0; _totalQuantity = 0;
+      _subTotal = 0;
+      _totalQuantity = 0;
       for (var item in _items) {
         if (item.quantity > 0 && item.rate > 0) {
           double amt = item.quantity * item.rate;
@@ -128,15 +151,15 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 ? amt - (amt * item.discount / 100)
                 : amt - item.discount;
           }
-          item.amount     = amt;
-          _subTotal      += amt;
+          item.amount = amt;
+          _subTotal += amt;
           _totalQuantity += item.quantity.toInt();
         }
       }
-      _tdsAmount  = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
-      _tcsAmount  = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
-      final base  = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount  = _enableGST ? (base * _gstRate / 100) : 0;
+      _tdsAmount = _enableTDS ? (_subTotal * _tdsRate / 100) : 0;
+      _tcsAmount = _enableTCS ? (_subTotal * _tcsRate / 100) : 0;
+      final base = _subTotal - _tdsAmount + _tcsAmount;
+      _gstAmount = _enableGST ? (base * _gstRate / 100) : 0;
       _totalAmount = _subTotal - _tdsAmount + _tcsAmount + _gstAmount;
     });
   }
@@ -144,44 +167,59 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
   void _addNewItem() => setState(() => _items.add(RecurringInvoiceItem()));
 
   void _removeItem(int index) {
-    setState(() { _items.removeAt(index); _calculateAmounts(); });
+    setState(() {
+      _items.removeAt(index);
+      _calculateAmounts();
+    });
   }
 
   Future<void> _loadRecurringInvoiceData() async {
     setState(() => _isLoading = true);
     try {
-      final ri = await RecurringInvoiceService.getRecurringInvoice(widget.recurringInvoiceId!);
+      final ri = await RecurringInvoiceService.getRecurringInvoice(
+          widget.recurringInvoiceId!);
       setState(() {
-        _profileNameController.text     = ri.profileName;
-        _selectedCustomerId             = ri.customerId;
-        _selectedCustomerName           = ri.customerName;
-        _selectedCustomerEmail          = ri.customerEmail;
-        _selectedCustomerPhone          = ri.customerPhone; 
-        _repeatEveryController.text     = ri.repeatEvery.toString();
-        _repeatUnit                     = ri.repeatUnit;
-        _startDate                      = ri.startDate;
-        _endDate                        = ri.endDate;
-        _maxOccurrences                 = ri.maxOccurrences ?? 12;
+        _profileNameController.text = ri.profileName;
+        _selectedCustomerId = ri.customerId;
+        _selectedCustomerName = ri.customerName;
+        _selectedCustomerEmail = ri.customerEmail;
+        _selectedCustomerPhone = ri.customerPhone;
+        _repeatEveryController.text = ri.repeatEvery.toString();
+        _repeatUnit = ri.repeatUnit;
+        _startDate = ri.startDate;
+        _endDate = ri.endDate;
+        _maxOccurrences = ri.maxOccurrences ?? 12;
         if (_endDate != null) {
-          _endCondition = 'on_date'; _hasEndDate = true;
+          _endCondition = 'on_date';
+          _hasEndDate = true;
         } else if (ri.maxOccurrences != null) {
           _endCondition = 'after';
         } else {
           _endCondition = 'never';
         }
-        _orderNumberController.text     = ri.orderNumber ?? '';
-        _selectedTerms                  = ri.terms;
-        _salesperson                    = ri.salesperson;
-        _subjectController.text         = ri.subject ?? '';
-        _customerNotesController.text   = ri.customerNotes ?? '';
+        _orderNumberController.text = ri.orderNumber ?? '';
+        _selectedTerms = ri.terms;
+        _salesperson = ri.salesperson;
+        _subjectController.text = ri.subject ?? '';
+        _customerNotesController.text = ri.customerNotes ?? '';
         _termsConditionsController.text = ri.termsAndConditions ?? '';
-        _tdsRate = ri.tdsRate; _tcsRate = ri.tcsRate; _gstRate = ri.gstRate;
-        _enableTDS = ri.tdsRate > 0; _enableTCS = ri.tcsRate > 0; _enableGST = ri.gstRate > 0;
+        _tdsRate = ri.tdsRate;
+        _tcsRate = ri.tcsRate;
+        _gstRate = ri.gstRate;
+        _enableTDS = ri.tdsRate > 0;
+        _enableTCS = ri.tcsRate > 0;
+        _enableGST = ri.gstRate > 0;
         _invoiceCreationMode = ri.invoiceCreationMode;
-        _items = ri.items.map((i) => RecurringInvoiceItem(
-          itemDetails: i.itemDetails, quantity: i.quantity, rate: i.rate,
-          discount: i.discount, discountType: i.discountType, amount: i.amount,
-        )).toList();
+        _items = ri.items
+            .map((i) => RecurringInvoiceItem(
+                  itemDetails: i.itemDetails,
+                  quantity: i.quantity,
+                  rate: i.rate,
+                  discount: i.discount,
+                  discountType: i.discountType,
+                  amount: i.amount,
+                ))
+            .toList();
         _calculateAmounts();
         _calculateNextInvoiceDate();
       });
@@ -194,15 +232,22 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
 
   Future<void> _saveRecurringInvoice() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedCustomerId == null) { _showError('Please select a customer'); return; }
-    if (_profileNameController.text.trim().isEmpty) { _showError('Please enter a profile name'); return; }
+    if (_selectedCustomerId == null) {
+      _showError('Please select a customer');
+      return;
+    }
+    if (_profileNameController.text.trim().isEmpty) {
+      _showError('Please enter a profile name');
+      return;
+    }
     if (!_validateItems()) return;
 
     setState(() => _isSaving = true);
     try {
       final data = _buildRecurringInvoiceData();
       if (widget.recurringInvoiceId != null) {
-        await RecurringInvoiceService.updateRecurringInvoice(widget.recurringInvoiceId!, data);
+        await RecurringInvoiceService.updateRecurringInvoice(
+            widget.recurringInvoiceId!, data);
         _showSuccess('Recurring invoice profile updated successfully');
       } else {
         await RecurringInvoiceService.createRecurringInvoice(data);
@@ -213,8 +258,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
       String msg = 'Failed to save recurring invoice';
       if (e.toString().contains('validation failed')) {
         final m = RegExp(r'Path `(\w+)` is required').firstMatch(e.toString());
-        msg = m != null ? 'Please fill in required field: ${m.group(1)}' : 'Please check all required fields';
-      } else { msg = e.toString(); }
+        msg = m != null
+            ? 'Please fill in required field: ${m.group(1)}'
+            : 'Please check all required fields';
+      } else {
+        msg = e.toString();
+      }
       _showError(msg);
     } finally {
       setState(() => _isSaving = false);
@@ -223,15 +272,19 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
 
   Map<String, dynamic> _buildRecurringInvoiceData() {
     final valid = _items.where((i) => i.itemDetails.trim().isNotEmpty).toList();
-    if (valid.isEmpty) throw Exception('Please add at least one item with details');
-    DateTime? finalEndDate; int? maxOcc;
-    if (_endCondition == 'on_date' && _endDate != null) finalEndDate = _endDate;
+    if (valid.isEmpty)
+      throw Exception('Please add at least one item with details');
+    DateTime? finalEndDate;
+    int? maxOcc;
+    if (_endCondition == 'on_date' && _endDate != null)
+      finalEndDate = _endDate;
     else if (_endCondition == 'after') maxOcc = _maxOccurrences;
     return {
       'profileName': _profileNameController.text.trim(),
-      'customerId': _selectedCustomerId, 'customerName': _selectedCustomerName,
+      'customerId': _selectedCustomerId,
+      'customerName': _selectedCustomerName,
       'customerEmail': _selectedCustomerEmail,
-      'customerPhone': _selectedCustomerPhone ?? '',  
+      'customerPhone': _selectedCustomerPhone ?? '',
       'repeatEvery': int.tryParse(_repeatEveryController.text) ?? 1,
       'repeatUnit': _repeatUnit,
       'startDate': _startDate.toIso8601String(),
@@ -239,7 +292,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
       'maxOccurrences': maxOcc,
       'nextInvoiceDate': _nextInvoiceDate?.toIso8601String(),
       'orderNumber': _orderNumberController.text.trim(),
-      'terms': _selectedTerms, 'salesperson': _salesperson,
+      'terms': _selectedTerms,
+      'salesperson': _salesperson,
       'subject': _subjectController.text.trim(),
       'items': valid.map((i) => i.toJson()).toList(),
       'customerNotes': _customerNotesController.text.trim(),
@@ -254,19 +308,27 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
 
   bool _validateItems() {
     final ne = _items.where((i) => i.itemDetails.trim().isNotEmpty).toList();
-    if (ne.isEmpty) { _showError('Please add at least one item with details'); return false; }
+    if (ne.isEmpty) {
+      _showError('Please add at least one item with details');
+      return false;
+    }
     for (var i in ne) {
-      if (i.quantity <= 0) { _showError('All items must have quantity greater than 0'); return false; }
-      if (i.rate <= 0)     { _showError('All items must have rate greater than 0'); return false; }
+      if (i.quantity <= 0) {
+        _showError('All items must have quantity greater than 0');
+        return false;
+      }
+      if (i.rate <= 0) {
+        _showError('All items must have rate greater than 0');
+        return false;
+      }
     }
     return true;
   }
 
-  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating));
+  void _showError(String msg) =>
+      AppSnackbar.show(context, message: msg, isError: true);
 
-  void _showSuccess(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating));
+  void _showSuccess(String msg) => AppSnackbar.show(context, message: msg);
 
   // ── UI helpers (vendor-credit style) ──────────────────────────────────────
 
@@ -276,8 +338,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(
-          color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: child,
     );
@@ -294,7 +360,9 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
         child: Icon(icon, color: Colors.white, size: 18),
       ),
       const SizedBox(width: 10),
-      Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+      Text(title,
+          style: const TextStyle(
+              fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
     ]);
   }
 
@@ -303,11 +371,13 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(
-          fontSize: isTotal ? 15 : 13,
-          fontWeight: isBold || isTotal ? FontWeight.bold : FontWeight.normal,
-          color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-        )),
+        Text(label,
+            style: TextStyle(
+              fontSize: isTotal ? 15 : 13,
+              fontWeight:
+                  isBold || isTotal ? FontWeight.bold : FontWeight.normal,
+              color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+            )),
         Text(
           '${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
           style: TextStyle(
@@ -323,7 +393,9 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
   Widget _infoRow(String label, String value) {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[700])),
-      Text(value,  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navyDark)),
+      Text(value,
+          style: const TextStyle(
+              fontSize: 13, fontWeight: FontWeight.bold, color: _navyDark)),
     ]);
   }
 
@@ -402,27 +474,34 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           elevation: 0,
           foregroundColor: Colors.white,
           title: Text(
-            widget.recurringInvoiceId != null ? 'Edit Recurring Invoice' : 'New Recurring Invoice',
+            widget.recurringInvoiceId != null
+                ? 'Edit Recurring Invoice'
+                : 'New Recurring Invoice',
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
           actions: [
             TextButton.icon(
               onPressed: _isSaving ? null : () => Navigator.pop(context),
               icon: const Icon(Icons.close, color: Colors.white70, size: 18),
-              label: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              label:
+                  const Text('Cancel', style: TextStyle(color: Colors.white70)),
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: _isSaving ? null : _saveRecurringInvoice,
               icon: _isSaving
-                  ? const SizedBox(width: 16, height: 16,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.save, size: 18),
               label: Text(_isSaving ? 'Saving...' : 'Save Profile'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
             const SizedBox(width: 16),
@@ -470,16 +549,21 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Profile Name *', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+              const Text('Profile Name *',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _navyDark)),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _profileNameController,
                 decoration: InputDecoration(
                   hintText: 'e.g., Monthly Subscription - Customer Name',
                   hintStyle: TextStyle(color: Colors.grey[400]),
-                  helperText: 'A unique name to identify this recurring invoice profile',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  helperText:
+                      'A unique name to identify this recurring invoice profile',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(color: Colors.grey[300]!),
@@ -488,9 +572,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: _navyAccent, width: 2),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Profile name is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Profile name is required'
+                    : null,
               ),
             ],
           ),
@@ -525,8 +612,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                       _selectedCustomerName ?? 'Select Customer *',
                       style: TextStyle(
                         fontSize: 15,
-                        color: _selectedCustomerName != null ? _navyDark : Colors.grey[600],
-                        fontWeight: _selectedCustomerName != null ? FontWeight.w600 : FontWeight.normal,
+                        color: _selectedCustomerName != null
+                            ? _navyDark
+                            : Colors.grey[600],
+                        fontWeight: _selectedCustomerName != null
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   ),
@@ -565,23 +656,29 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             final repeatEveryField = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Repeat Every *', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+                const Text('Repeat Every *',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _navyDark)),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _repeatEveryController,
                   decoration: InputDecoration(
                     hintText: '1',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                   ),
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -599,27 +696,39 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             final periodField = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Time Period *', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+                const Text('Time Period *',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _navyDark)),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   value: _repeatUnit,
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                   ),
-                  items: _repeatUnitOptions.map((u) => DropdownMenuItem(
-                    value: u, child: Text(_repeatUnitLabels[u]!),
-                  )).toList(),
-                  onChanged: (v) => setState(() { _repeatUnit = v!; _calculateNextInvoiceDate(); }),
+                  items: _repeatUnitOptions
+                      .map((u) => DropdownMenuItem(
+                            value: u,
+                            child: Text(_repeatUnitLabels[u]!),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setState(() {
+                    _repeatUnit = v!;
+                    _calculateNextInvoiceDate();
+                  }),
                 ),
               ],
             );
@@ -645,8 +754,11 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Start Date *', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+              const Text('Start Date *',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _navyDark)),
               const SizedBox(height: 8),
               InkWell(
                 onTap: () async {
@@ -656,15 +768,22 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                     firstDate: DateTime.now(),
                     lastDate: DateTime(2030),
                   );
-                  if (d != null) setState(() { _startDate = d; _calculateNextInvoiceDate(); });
+                  if (d != null)
+                    setState(() {
+                      _startDate = d;
+                      _calculateNextInvoiceDate();
+                    });
                 },
                 child: InputDecorator(
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Colors.grey[300]!)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Colors.grey[300]!)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                     prefixIcon: const Icon(Icons.event, color: _navyAccent),
                   ),
                   child: Text(DateFormat('dd MMM yyyy').format(_startDate),
@@ -677,8 +796,9 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           const SizedBox(height: 20),
 
           // End Condition label
-          const Text('End Condition', style: TextStyle(
-            fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+          const Text('End Condition',
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
           const SizedBox(height: 8),
 
           // Radio: Never
@@ -688,7 +808,10 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             groupValue: _endCondition,
             activeColor: _navyAccent,
             contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() { _endCondition = v!; _hasEndDate = false; }),
+            onChanged: (v) => setState(() {
+              _endCondition = v!;
+              _hasEndDate = false;
+            }),
           ),
 
           // Radio: After X occurrences
@@ -702,11 +825,14 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                   initialValue: _maxOccurrences.toString(),
                   decoration: InputDecoration(
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6)),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2),
                     ),
                   ),
                   keyboardType: TextInputType.number,
@@ -722,7 +848,10 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             groupValue: _endCondition,
             activeColor: _navyAccent,
             contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() { _endCondition = v!; _hasEndDate = false; }),
+            onChanged: (v) => setState(() {
+              _endCondition = v!;
+              _hasEndDate = false;
+            }),
           ),
 
           // Radio: On specific date
@@ -732,7 +861,10 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             groupValue: _endCondition,
             activeColor: _navyAccent,
             contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() { _endCondition = v!; _hasEndDate = true; }),
+            onChanged: (v) => setState(() {
+              _endCondition = v!;
+              _hasEndDate = true;
+            }),
           ),
 
           if (_endCondition == 'on_date') ...[
@@ -743,7 +875,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 onTap: () async {
                   final d = await showDatePicker(
                     context: context,
-                    initialDate: _endDate ?? _startDate.add(const Duration(days: 365)),
+                    initialDate:
+                        _endDate ?? _startDate.add(const Duration(days: 365)),
                     firstDate: _startDate,
                     lastDate: DateTime(2030),
                   );
@@ -752,15 +885,22 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 child: InputDecorator(
                   decoration: InputDecoration(
                     labelText: 'End Date',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    prefixIcon: const Icon(Icons.event_busy, color: _navyAccent),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    prefixIcon:
+                        const Icon(Icons.event_busy, color: _navyAccent),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                   ),
                   child: Text(
-                    _endDate != null ? DateFormat('dd MMM yyyy').format(_endDate!) : 'Select end date',
+                    _endDate != null
+                        ? DateFormat('dd MMM yyyy').format(_endDate!)
+                        : 'Select end date',
                     style: TextStyle(
                       color: _endDate != null ? _navyDark : Colors.grey,
-                      fontWeight: _endDate != null ? FontWeight.w500 : FontWeight.normal,
+                      fontWeight: _endDate != null
+                          ? FontWeight.w500
+                          : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -775,7 +915,10 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [_navyDark.withOpacity(0.08), _navyLight.withOpacity(0.08)],
+                colors: [
+                  _navyDark.withOpacity(0.08),
+                  _navyLight.withOpacity(0.08)
+                ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -785,18 +928,25 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             child: Row(children: [
               const Icon(Icons.event_available, color: _navyAccent),
               const SizedBox(width: 12),
-              Expanded(child: Column(
+              Expanded(
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Next Invoice Date', style: TextStyle(
-                    fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.bold)),
+                  Text('Next Invoice Date',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   Text(
                     _nextInvoiceDate != null
-                        ? DateFormat('EEEE, dd MMMM yyyy').format(_nextInvoiceDate!)
+                        ? DateFormat('EEEE, dd MMMM yyyy')
+                            .format(_nextInvoiceDate!)
                         : 'Not calculated',
                     style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark),
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navyDark),
                   ),
                 ],
               )),
@@ -821,20 +971,28 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             final orderField = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Order Number', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+                const Text('Order Number',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _navyDark)),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _orderNumberController,
                   decoration: InputDecoration(
                     hintText: 'Optional',
                     hintStyle: TextStyle(color: Colors.grey[400]),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Colors.grey[300]!)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: _navyAccent, width: 2)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                   ),
                 ),
               ],
@@ -842,20 +1000,30 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             final termsField = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Payment Terms *', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+                const Text('Payment Terms *',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _navyDark)),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   value: _selectedTerms,
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Colors.grey[300]!)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: _navyAccent, width: 2)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                   ),
-                  items: _termsOptions.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                  items: _termsOptions
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                      .toList(),
                   onChanged: (v) => setState(() => _selectedTerms = v!),
                 ),
               ],
@@ -867,7 +1035,11 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 Expanded(child: termsField),
               ]);
             } else {
-              return Column(children: [orderField, const SizedBox(height: 16), termsField]);
+              return Column(children: [
+                orderField,
+                const SizedBox(height: 16),
+                termsField
+              ]);
             }
           }),
           const SizedBox(height: 16),
@@ -875,20 +1047,28 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Subject', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+              const Text('Subject',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _navyDark)),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _subjectController,
                 decoration: InputDecoration(
                   hintText: 'Optional — appears on each invoice',
                   hintStyle: TextStyle(color: Colors.grey[400]),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 maxLines: 2,
               ),
@@ -938,27 +1118,53 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               final isMobile = cs.maxWidth < 600;
               if (isMobile) {
                 return const Text('ITEMS',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold));
               }
               return const Row(children: [
-                Expanded(flex: 3, child: Text('ITEM DETAILS',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                Expanded(
+                    flex: 3,
+                    child: Text('ITEM DETAILS',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12))),
                 SizedBox(width: 8),
-                SizedBox(width: 80, child: Text('QTY',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    textAlign: TextAlign.center)),
+                SizedBox(
+                    width: 80,
+                    child: Text('QTY',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12),
+                        textAlign: TextAlign.center)),
                 SizedBox(width: 8),
-                SizedBox(width: 100, child: Text('RATE (₹)',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    textAlign: TextAlign.right)),
+                SizedBox(
+                    width: 100,
+                    child: Text('RATE (₹)',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12),
+                        textAlign: TextAlign.right)),
                 SizedBox(width: 8),
-                SizedBox(width: 100, child: Text('DISCOUNT',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    textAlign: TextAlign.right)),
+                SizedBox(
+                    width: 100,
+                    child: Text('DISCOUNT',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12),
+                        textAlign: TextAlign.right)),
                 SizedBox(width: 8),
-                SizedBox(width: 120, child: Text('AMOUNT (₹)',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    textAlign: TextAlign.right)),
+                SizedBox(
+                    width: 120,
+                    child: Text('AMOUNT (₹)',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12),
+                        textAlign: TextAlign.right)),
                 SizedBox(width: 48),
               ]);
             }),
@@ -973,7 +1179,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 child: Column(children: [
                   Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
                   const SizedBox(height: 12),
-                  Text('No items added yet', style: TextStyle(color: Colors.grey[600])),
+                  Text('No items added yet',
+                      style: TextStyle(color: Colors.grey[600])),
                 ]),
               ),
             )
@@ -1012,14 +1219,16 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                       initialValue: item.itemDetails,
                       decoration: InputDecoration(
                         labelText: 'Item Description',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
                         isDense: true,
                       ),
                       onChanged: (v) => item.itemDetails = v,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.red, size: 20),
                     onPressed: () => _removeItem(index),
                   ),
                 ],
@@ -1028,10 +1237,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               Row(children: [
                 Expanded(
                   child: TextFormField(
-                    initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+                    initialValue:
+                        item.quantity > 0 ? item.quantity.toString() : '',
                     decoration: InputDecoration(
                       labelText: 'Qty',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6)),
                       isDense: true,
                     ),
                     keyboardType: TextInputType.number,
@@ -1045,13 +1256,16 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextFormField(
-                    initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+                    initialValue:
+                        item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
                     decoration: InputDecoration(
                       labelText: 'Rate (₹)',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6)),
                       isDense: true,
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) {
                       item.rate = double.tryParse(v) ?? 0;
                       _calculateAmounts();
@@ -1082,80 +1296,124 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(flex: 3, child: TextFormField(
-            initialValue: item.itemDetails,
-            decoration: InputDecoration(
-              hintText: 'Enter item description',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _navyAccent, width: 2)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-            maxLines: 2,
-            onChanged: (v) => item.itemDetails = v,
-          )),
+          Expanded(
+              flex: 3,
+              child: TextFormField(
+                initialValue: item.itemDetails,
+                decoration: InputDecoration(
+                  hintText: 'Enter item description',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
+                maxLines: 2,
+                onChanged: (v) => item.itemDetails = v,
+              )),
           const SizedBox(width: 8),
-          SizedBox(width: 80, child: TextFormField(
-            initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-            decoration: InputDecoration(
-              hintText: '0',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _navyAccent, width: 2)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); },
-          )),
+          SizedBox(
+              width: 80,
+              child: TextFormField(
+                initialValue: item.quantity > 0 ? item.quantity.toString() : '',
+                decoration: InputDecoration(
+                  hintText: '0',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                ),
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (v) {
+                  item.quantity = double.tryParse(v) ?? 0;
+                  _calculateAmounts();
+                },
+              )),
           const SizedBox(width: 8),
-          SizedBox(width: 100, child: TextFormField(
-            initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-            decoration: InputDecoration(
-              hintText: '0.00',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _navyAccent, width: 2)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            textAlign: TextAlign.right,
-            onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); },
-          )),
+          SizedBox(
+              width: 100,
+              child: TextFormField(
+                initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+                decoration: InputDecoration(
+                  hintText: '0.00',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                ),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.right,
+                onChanged: (v) {
+                  item.rate = double.tryParse(v) ?? 0;
+                  _calculateAmounts();
+                },
+              )),
           const SizedBox(width: 8),
-          SizedBox(width: 100, child: Row(children: [
-            Expanded(child: TextFormField(
-              initialValue: item.discount > 0 ? item.discount.toString() : '',
-              decoration: InputDecoration(
-                hintText: '0',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.grey[300]!)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              textAlign: TextAlign.right,
-              onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); },
-            )),
-            PopupMenuButton<String>(
-              initialValue: item.discountType,
-              icon: const Icon(Icons.arrow_drop_down, size: 16),
-              onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: 'percentage', child: Text('%')),
-                const PopupMenuItem(value: 'amount',     child: Text('₹')),
-              ],
-            ),
-          ])),
+          SizedBox(
+              width: 100,
+              child: Row(children: [
+                Expanded(
+                    child: TextFormField(
+                  initialValue:
+                      item.discount > 0 ? item.discount.toString() : '',
+                  decoration: InputDecoration(
+                    hintText: '0',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey[300]!)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: _navyAccent, width: 2)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.right,
+                  onChanged: (v) {
+                    item.discount = double.tryParse(v) ?? 0;
+                    _calculateAmounts();
+                  },
+                )),
+                PopupMenuButton<String>(
+                  initialValue: item.discountType,
+                  icon: const Icon(Icons.arrow_drop_down, size: 16),
+                  onSelected: (v) => setState(() {
+                    item.discountType = v;
+                    _calculateAmounts();
+                  }),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'percentage', child: Text('%')),
+                    const PopupMenuItem(value: 'amount', child: Text('₹')),
+                  ],
+                ),
+              ])),
           const SizedBox(width: 8),
           Container(
             width: 120,
@@ -1166,7 +1424,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               border: Border.all(color: Colors.grey[300]!),
             ),
             child: Text(item.amount.toStringAsFixed(2),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 textAlign: TextAlign.right),
           ),
           const SizedBox(width: 8),
@@ -1193,20 +1452,28 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Customer Notes', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+              const Text('Customer Notes',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _navyDark)),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _customerNotesController,
                 decoration: InputDecoration(
                   hintText: 'Notes visible on every invoice',
                   hintStyle: TextStyle(color: Colors.grey[400]),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 maxLines: 3,
               ),
@@ -1217,20 +1484,28 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Terms & Conditions', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: _navyDark)),
+              const Text('Terms & Conditions',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _navyDark)),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _termsConditionsController,
                 decoration: InputDecoration(
                   hintText: 'Payment terms, policies, etc.',
                   hintStyle: TextStyle(color: Colors.grey[400]),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: _navyAccent, width: 2)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 maxLines: 3,
               ),
@@ -1256,8 +1531,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [_navyDark.withOpacity(0.06), _navyLight.withOpacity(0.06)],
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [
+                _navyDark.withOpacity(0.06),
+                _navyLight.withOpacity(0.06)
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: _navyAccent.withOpacity(0.25)),
@@ -1265,12 +1544,16 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('When invoice is generated:', style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+              Text('When invoice is generated:',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[600])),
               const SizedBox(height: 10),
               RadioListTile<String>(
                 title: const Text('Save as Draft',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                 subtitle: const Text('Requires manual review before sending',
                     style: TextStyle(fontSize: 11)),
                 value: 'draft',
@@ -1282,7 +1565,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               ),
               RadioListTile<String>(
                 title: const Text('Auto-Send to Customer',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                 subtitle: const Text('Automatically emails invoice to customer',
                     style: TextStyle(fontSize: 11)),
                 value: 'auto_send',
@@ -1314,7 +1598,10 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           value: _enableGST,
           activeColor: _navyAccent,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableGST = v; _calculateAmounts(); }),
+          onChanged: (v) => setState(() {
+            _enableGST = v;
+            _calculateAmounts();
+          }),
         ),
         if (_enableGST) ...[
           const SizedBox(height: 8),
@@ -1322,16 +1609,23 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             initialValue: _gstRate.toString(),
             decoration: InputDecoration(
               labelText: 'GST Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _navyAccent, width: 2)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _gstRate = double.tryParse(v) ?? 18; _calculateAmounts(); }),
+            onChanged: (v) => setState(() {
+              _gstRate = double.tryParse(v) ?? 18;
+              _calculateAmounts();
+            }),
           ),
         ],
 
@@ -1340,11 +1634,15 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
         // TDS
         SwitchListTile(
           title: const Text('Enable TDS'),
-          subtitle: const Text('Tax Deducted at Source', style: TextStyle(fontSize: 11)),
+          subtitle: const Text('Tax Deducted at Source',
+              style: TextStyle(fontSize: 11)),
           value: _enableTDS,
           activeColor: _navyAccent,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableTDS = v; _calculateAmounts(); }),
+          onChanged: (v) => setState(() {
+            _enableTDS = v;
+            _calculateAmounts();
+          }),
         ),
         if (_enableTDS) ...[
           const SizedBox(height: 8),
@@ -1352,16 +1650,23 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             initialValue: _tdsRate.toString(),
             decoration: InputDecoration(
               labelText: 'TDS Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _navyAccent, width: 2)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _tdsRate = double.tryParse(v) ?? 0; _calculateAmounts(); }),
+            onChanged: (v) => setState(() {
+              _tdsRate = double.tryParse(v) ?? 0;
+              _calculateAmounts();
+            }),
           ),
         ],
 
@@ -1370,11 +1675,15 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
         // TCS
         SwitchListTile(
           title: const Text('Enable TCS'),
-          subtitle: const Text('Tax Collected at Source', style: TextStyle(fontSize: 11)),
+          subtitle: const Text('Tax Collected at Source',
+              style: TextStyle(fontSize: 11)),
           value: _enableTCS,
           activeColor: _navyAccent,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) => setState(() { _enableTCS = v; _calculateAmounts(); }),
+          onChanged: (v) => setState(() {
+            _enableTCS = v;
+            _calculateAmounts();
+          }),
         ),
         if (_enableTCS) ...[
           const SizedBox(height: 8),
@@ -1382,16 +1691,23 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             initialValue: _tcsRate.toString(),
             decoration: InputDecoration(
               labelText: 'TCS Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _navyAccent, width: 2)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() { _tcsRate = double.tryParse(v) ?? 0; _calculateAmounts(); }),
+            onChanged: (v) => setState(() {
+              _tcsRate = double.tryParse(v) ?? 0;
+              _calculateAmounts();
+            }),
           ),
         ],
       ],
@@ -1414,7 +1730,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
 
         if (_enableTDS && _tdsAmount > 0) ...[
           const SizedBox(height: 6),
-          _summaryRow('TDS (${_tdsRate.toStringAsFixed(1)}%)', -_tdsAmount, color: Colors.red[700]),
+          _summaryRow('TDS (${_tdsRate.toStringAsFixed(1)}%)', -_tdsAmount,
+              color: Colors.red[700]),
         ],
         if (_enableTCS && _tcsAmount > 0) ...[
           const SizedBox(height: 6),
@@ -1422,9 +1739,11 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
         ],
         if (_enableGST && _gstAmount > 0) ...[
           const SizedBox(height: 6),
-          _summaryRow('CGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
+          _summaryRow(
+              'CGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
           const SizedBox(height: 6),
-          _summaryRow('SGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
+          _summaryRow(
+              'SGST (${(_gstRate / 2).toStringAsFixed(1)}%)', _gstAmount / 2),
         ],
 
         const Divider(thickness: 2),
@@ -1437,8 +1756,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [_navyDark.withOpacity(0.08), _navyLight.withOpacity(0.08)],
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [
+                _navyDark.withOpacity(0.08),
+                _navyLight.withOpacity(0.08)
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: _navyAccent.withOpacity(0.3)),
@@ -1446,8 +1769,12 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           child: Column(children: [
             _infoRow('Total Quantity:', _totalQuantity.toString()),
             const SizedBox(height: 4),
-            _infoRow('Total Items:',
-                _items.where((i) => i.itemDetails.isNotEmpty).length.toString()),
+            _infoRow(
+                'Total Items:',
+                _items
+                    .where((i) => i.itemDetails.isNotEmpty)
+                    .length
+                    .toString()),
           ]),
         ),
 
@@ -1459,15 +1786,19 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
           child: ElevatedButton.icon(
             onPressed: _isSaving ? null : _saveRecurringInvoice,
             icon: _isSaving
-                ? const SizedBox(width: 16, height: 16,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.save),
             label: Text(_isSaving ? 'Saving...' : 'Save Recurring Profile'),
             style: ElevatedButton.styleFrom(
               backgroundColor: _navyAccent,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -1485,7 +1816,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               foregroundColor: _navyMid,
               padding: const EdgeInsets.symmetric(vertical: 16),
               side: const BorderSide(color: _navyMid),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -1505,7 +1837,8 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
             children: [
               Icon(Icons.info_outline, color: Colors.amber[800], size: 18),
               const SizedBox(width: 8),
-              Expanded(child: Text(
+              Expanded(
+                  child: Text(
                 'This profile will automatically generate invoices based on your recurrence settings.',
                 style: TextStyle(fontSize: 11, color: Colors.amber[900]),
               )),
@@ -1537,30 +1870,43 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                 isLoading = false;
               });
             }).catchError((error) {
-              setDialogState(() { errorMessage = error.toString(); isLoading = false; });
+              setDialogState(() {
+                errorMessage = error.toString();
+                isLoading = false;
+              });
             });
           }
 
           return AlertDialog(
             title: const Text('Select Customer'),
             content: SizedBox(
-              width: 500, height: 400,
+              width: 500,
+              height: 400,
               child: Column(children: [
                 TextField(
                   controller: searchController,
                   decoration: InputDecoration(
                     hintText: 'Search customers...',
                     prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   onChanged: (v) {
                     setDialogState(() {
                       filteredCustomers = v.isEmpty
                           ? customers
-                          : customers.where((c) =>
-                              c.customerName.toLowerCase().contains(v.toLowerCase()) ||
-                              c.customerEmail.toLowerCase().contains(v.toLowerCase()) ||
-                              (c.companyName?.toLowerCase().contains(v.toLowerCase()) ?? false))
+                          : customers
+                              .where((c) =>
+                                  c.customerName
+                                      .toLowerCase()
+                                      .contains(v.toLowerCase()) ||
+                                  c.customerEmail
+                                      .toLowerCase()
+                                      .contains(v.toLowerCase()) ||
+                                  (c.companyName
+                                          ?.toLowerCase()
+                                          .contains(v.toLowerCase()) ??
+                                      false))
                               .toList();
                     });
                   },
@@ -1570,24 +1916,36 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                   child: isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : errorMessage != null
-                          ? Center(child: Column(
+                          ? Center(
+                              child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.error_outline, size: 48, color: Colors.red[400]),
+                                Icon(Icons.error_outline,
+                                    size: 48, color: Colors.red[400]),
                                 const SizedBox(height: 16),
                                 Text('Error loading customers',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red[700])),
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.red[700])),
                                 const SizedBox(height: 8),
-                                Text(errorMessage!, style: TextStyle(color: Colors.grey[600]), textAlign: TextAlign.center),
+                                Text(errorMessage!,
+                                    style: TextStyle(color: Colors.grey[600]),
+                                    textAlign: TextAlign.center),
                                 const SizedBox(height: 16),
                                 ElevatedButton(
-                                  onPressed: () => setDialogState(() { isLoading = true; errorMessage = null; }),
+                                  onPressed: () => setDialogState(() {
+                                    isLoading = true;
+                                    errorMessage = null;
+                                  }),
                                   child: const Text('Retry'),
                                 ),
                               ],
                             ))
                           : filteredCustomers.isEmpty
-                              ? const Center(child: Text('No customers found', style: TextStyle(color: Colors.grey)))
+                              ? const Center(
+                                  child: Text('No customers found',
+                                      style: TextStyle(color: Colors.grey)))
                               : ListView.builder(
                                   itemCount: filteredCustomers.length,
                                   itemBuilder: (context, index) {
@@ -1595,27 +1953,39 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
                                     return ListTile(
                                       leading: CircleAvatar(
                                         backgroundColor: _navyAccent,
-                                        child: Text(c.customerName[0].toUpperCase(),
-                                            style: const TextStyle(color: Colors.white)),
+                                        child: Text(
+                                            c.customerName[0].toUpperCase(),
+                                            style: const TextStyle(
+                                                color: Colors.white)),
                                       ),
                                       title: Text(c.customerName),
                                       subtitle: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(c.customerEmail),
                                           if (c.companyName != null)
                                             Text(c.companyName!,
-                                                style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[600],
+                                                    fontStyle:
+                                                        FontStyle.italic)),
                                           Text(c.customerPhone,
-                                              style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey[600])),
                                         ],
                                       ),
                                       onTap: () {
                                         setState(() {
-                                          _selectedCustomerId    = c.id;
-                                          _selectedCustomerName  = c.customerName;
-                                          _selectedCustomerEmail = c.customerEmail;
-                                          _selectedCustomerPhone = c.customerPhone;
+                                          _selectedCustomerId = c.id;
+                                          _selectedCustomerName =
+                                              c.customerName;
+                                          _selectedCustomerEmail =
+                                              c.customerEmail;
+                                          _selectedCustomerPhone =
+                                              c.customerPhone;
                                         });
 
                                         Navigator.pop(context);
@@ -1627,7 +1997,9 @@ class _NewRecurringInvoiceScreenState extends State<NewRecurringInvoiceScreen> {
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel')),
             ],
           );
         },
@@ -1649,30 +2021,30 @@ class RecurringInvoiceItem {
   double amount;
 
   RecurringInvoiceItem({
-    this.itemDetails  = '',
-    this.quantity     = 0,
-    this.rate         = 0,
-    this.discount     = 0,
+    this.itemDetails = '',
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
     this.discountType = 'percentage',
-    this.amount       = 0,
+    this.amount = 0,
   });
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':  itemDetails,
-    'quantity':     quantity,
-    'rate':         rate,
-    'discount':     discount,
-    'discountType': discountType,
-    'amount':       amount,
-  };
+        'itemDetails': itemDetails,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'amount': amount,
+      };
 
-  factory RecurringInvoiceItem.fromJson(Map<String, dynamic> json) => RecurringInvoiceItem(
-    itemDetails:  json['itemDetails']  ?? '',
-    quantity:     (json['quantity']    ?? 0).toDouble(),
-    rate:         (json['rate']        ?? 0).toDouble(),
-    discount:     (json['discount']    ?? 0).toDouble(),
-    discountType: json['discountType'] ?? 'percentage',
-    amount:       (json['amount']      ?? 0).toDouble(),
-  );
+  factory RecurringInvoiceItem.fromJson(Map<String, dynamic> json) =>
+      RecurringInvoiceItem(
+        itemDetails: json['itemDetails'] ?? '',
+        quantity: (json['quantity'] ?? 0).toDouble(),
+        rate: (json['rate'] ?? 0).toDouble(),
+        discount: (json['discount'] ?? 0).toDouble(),
+        discountType: json['discountType'] ?? 'percentage',
+        amount: (json['amount'] ?? 0).toDouble(),
+      );
 }
-

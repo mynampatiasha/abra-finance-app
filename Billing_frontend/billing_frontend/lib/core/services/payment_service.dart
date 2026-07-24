@@ -27,52 +27,52 @@ class PaymentService {
     String? filter,
     String? sortBy,
     String? sortOrder,
+    String? search,
   }) async {
     try {
       final queryParams = <String, String>{};
-      
+
       if (filter != null) queryParams['filter'] = filter;
       if (sortBy != null) queryParams['sortBy'] = sortBy;
       if (sortOrder != null) queryParams['sortOrder'] = sortOrder;
-      
+      if (search != null && search.isNotEmpty) queryParams['search'] = search;
+
       print('📤 GET: $_baseEndpoint');
-      
+
       final data = await _api.get(_baseEndpoint, queryParams: queryParams);
-      
+
       print('✅ Response received: $data');
-      
+
       // Handle different response structures
       if (data == null) {
         print('⚠️ Null response received');
         return [];
       }
-      
+
       // Check if data has a 'data' field
       if (data.containsKey('data')) {
         final paymentsData = data['data'];
-        
+
         // Ensure it's a list
         if (paymentsData is List) {
           print('✅ Payments fetched: ${paymentsData.length}');
           final List<dynamic> paymentsList = paymentsData as List;
-          return List<Map<String, dynamic>>.from(
-            paymentsList.map((item) => Map<String, dynamic>.from(item as Map))
-          );
+          return List<Map<String, dynamic>>.from(paymentsList
+              .map((item) => Map<String, dynamic>.from(item as Map)));
         } else {
           print('⚠️ data field is not a List: ${paymentsData.runtimeType}');
           return [];
         }
       }
-      
+
       // If response is directly a list
       if (data is List) {
         print('✅ Payments fetched (direct list): ${data.length}');
         final List<dynamic> dataList = data as List;
         return List<Map<String, dynamic>>.from(
-          dataList.map((item) => Map<String, dynamic>.from(item as Map))
-        );
+            dataList.map((item) => Map<String, dynamic>.from(item as Map)));
       }
-      
+
       print('⚠️ Unexpected response structure: ${data.runtimeType}');
       return [];
     } catch (e) {
@@ -86,11 +86,11 @@ class PaymentService {
   static Future<Map<String, dynamic>> getPayment(String paymentId) async {
     try {
       print('📤 GET: $_baseEndpoint/$paymentId');
-      
+
       final data = await _api.get('$_baseEndpoint/$paymentId');
-      
+
       print('✅ Payment fetched');
-      
+
       return data['data'];
     } catch (e) {
       print('❌ Error fetching payment: $e');
@@ -114,29 +114,29 @@ class PaymentService {
       print('📤 POST: $_baseEndpoint (with file upload)');
       print('📦 Payment data: ${json.encode(paymentData)}');
       print('📎 Proof files: ${proofFiles.length}');
-      
+
       // Create multipart request
       final uri = Uri.parse('${_api.baseUrl}$_baseEndpoint');
       final request = http.MultipartRequest('POST', uri);
-      
+
       // Add auth headers - ApiService will handle token automatically
       final headers = await _api.getHeaders();
       request.headers.addAll(headers);
-      
+
       // Add payment data as JSON field
       request.fields['paymentData'] = json.encode(paymentData);
-      
+
       // Add proof files - Handle web vs mobile/desktop differently
       for (var file in proofFiles) {
         http.MultipartFile multipartFile;
-        
+
         if (kIsWeb) {
           // Web: Use bytes instead of path
           if (file.bytes != null) {
             // Determine content type from file extension
             String contentType = 'application/octet-stream';
             final extension = file.name.toLowerCase().split('.').last;
-            
+
             if (extension == 'pdf') {
               contentType = 'application/pdf';
             } else if (['jpg', 'jpeg'].contains(extension)) {
@@ -146,11 +146,11 @@ class PaymentService {
             } else if (extension == 'gif') {
               contentType = 'image/gif';
             }
-            
+
             // Parse content type into MediaType
             final parts = contentType.split('/');
             final mediaType = MediaType(parts[0], parts[1]);
-            
+
             multipartFile = http.MultipartFile.fromBytes(
               'paymentProofs',
               file.bytes!,
@@ -158,7 +158,8 @@ class PaymentService {
               contentType: mediaType,
             );
             request.files.add(multipartFile);
-            print('📎 Added file (web): ${file.name} (${(file.size / 1024).toStringAsFixed(1)} KB) - Type: $contentType');
+            print(
+                '📎 Added file (web): ${file.name} (${(file.size / 1024).toStringAsFixed(1)} KB) - Type: $contentType');
           } else {
             print('⚠️ Skipping file ${file.name}: bytes not available on web');
           }
@@ -171,27 +172,30 @@ class PaymentService {
               filename: file.name,
             );
             request.files.add(multipartFile);
-            print('📎 Added file (mobile): ${file.name} (${(file.size / 1024).toStringAsFixed(1)} KB)');
+            print(
+                '📎 Added file (mobile): ${file.name} (${(file.size / 1024).toStringAsFixed(1)} KB)');
           } else {
             print('⚠️ Skipping file ${file.name}: path not available');
           }
         }
       }
-      
+
       // Send request
       print('🚀 Sending payment recording request...');
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
-      
+
       print('📥 Response status: ${response.statusCode}');
-      
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = json.decode(response.body);
         print('✅ Payment recorded successfully');
         print('   Payment #: ${data['data']['paymentNumber']}');
         print('   Amount: ₹${data['data']['amountReceived']}');
-        print('   Proofs uploaded: ${data['data']['proofsUploaded'] ?? proofFiles.length}');
-        print('   Invoices updated: ${(data['data']['invoicePayments'] as Map?)?.keys.length ?? 0}');
+        print(
+            '   Proofs uploaded: ${data['data']['proofsUploaded'] ?? proofFiles.length}');
+        print(
+            '   Invoices updated: ${(data['data']['invoicePayments'] as Map?)?.keys.length ?? 0}');
         if (data['data']['emailSent'] == true) {
           print('   📧 Payment receipt email sent');
         }
@@ -216,11 +220,12 @@ class PaymentService {
   ) async {
     try {
       print('📤 PUT: $_baseEndpoint/$paymentId');
-      
-      final data = await _api.put('$_baseEndpoint/$paymentId', body: paymentData);
-      
+
+      final data =
+          await _api.put('$_baseEndpoint/$paymentId', body: paymentData);
+
       print('✅ Payment updated');
-      
+
       return data['data'];
     } catch (e) {
       print('❌ Error updating payment: $e');
@@ -232,9 +237,9 @@ class PaymentService {
   static Future<void> deletePayment(String paymentId) async {
     try {
       print('📤 DELETE: $_baseEndpoint/$paymentId');
-      
+
       await _api.delete('$_baseEndpoint/$paymentId');
-      
+
       print('✅ Payment deleted');
     } catch (e) {
       print('❌ Error deleting payment: $e');
@@ -250,11 +255,11 @@ class PaymentService {
   static Future<List<PaymentProof>> getPaymentProofs(String paymentId) async {
     try {
       print('📤 GET: $_baseEndpoint/$paymentId/proofs');
-      
+
       final data = await _api.get('$_baseEndpoint/$paymentId/proofs');
-      
+
       print('✅ Payment proofs fetched: ${data['data'].length}');
-      
+
       return (data['data'] as List)
           .map((proof) => PaymentProof.fromJson(proof))
           .toList();
@@ -265,15 +270,17 @@ class PaymentService {
   }
 
   /// Download payment proof
-  static Future<String> downloadPaymentProof(String paymentId, String proofId) async {
+  static Future<String> downloadPaymentProof(
+      String paymentId, String proofId) async {
     try {
       print('📤 GET: $_baseEndpoint/$paymentId/proofs/$proofId/download');
-      
+
       // Return the URL for download
-      final url = '${_api.baseUrl}$_baseEndpoint/$paymentId/proofs/$proofId/download';
-      
+      final url =
+          '${_api.baseUrl}$_baseEndpoint/$paymentId/proofs/$proofId/download';
+
       print('✅ Proof download URL: $url');
-      
+
       return url;
     } catch (e) {
       print('❌ Error getting proof download URL: $e');
@@ -282,7 +289,8 @@ class PaymentService {
   }
 
   /// Add proof files to an existing payment
-  static Future<void> addPaymentProofs(String paymentId, List<http.MultipartFile> files) async {
+  static Future<void> addPaymentProofs(
+      String paymentId, List<http.MultipartFile> files) async {
     try {
       print('📤 POST: $_baseEndpoint/$paymentId/proofs');
       final uri = Uri.parse('${_api.baseUrl}$_baseEndpoint/$paymentId/proofs');
@@ -291,12 +299,15 @@ class PaymentService {
       headers.forEach((k, v) {
         if (k.toLowerCase() != 'content-type') request.headers[k] = v;
       });
-      for (final f in files) { request.files.add(f); }
-      final streamed  = await request.send();
-      final response  = await http.Response.fromStream(streamed);
+      for (final f in files) {
+        request.files.add(f);
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final err = json.decode(response.body);
-        throw Exception(err['message'] ?? 'Upload failed (${response.statusCode})');
+        throw Exception(
+            err['message'] ?? 'Upload failed (${response.statusCode})');
       }
       print('✅ Proofs added');
     } catch (e) {
@@ -306,7 +317,8 @@ class PaymentService {
   }
 
   /// Delete a single proof from a payment by index
-  static Future<void> deletePaymentProof(String paymentId, int proofIndex) async {
+  static Future<void> deletePaymentProof(
+      String paymentId, int proofIndex) async {
     try {
       print('📤 DELETE: $_baseEndpoint/$paymentId/proofs/$proofIndex');
       await _api.delete('$_baseEndpoint/$paymentId/proofs/$proofIndex');
@@ -326,11 +338,12 @@ class PaymentService {
   static Future<List<Invoice>> getUnpaidInvoices(String customerId) async {
     try {
       print('📤 GET: $_baseEndpoint/customer/$customerId/unpaid-invoices');
-      
-      final data = await _api.get('$_baseEndpoint/customer/$customerId/unpaid-invoices');
-      
+
+      final data =
+          await _api.get('$_baseEndpoint/customer/$customerId/unpaid-invoices');
+
       print('✅ Unpaid invoices fetched: ${data['data'].length}');
-      
+
       return (data['data'] as List)
           .map((invoice) => Invoice.fromJson(invoice))
           .toList();
@@ -349,20 +362,23 @@ class PaymentService {
     String? startDate,
     String? endDate,
     String? customerName,
+    String? search,
   }) async {
     try {
       final queryParams = <String, String>{};
-      
+
       if (startDate != null) queryParams['startDate'] = startDate;
       if (endDate != null) queryParams['endDate'] = endDate;
       if (customerName != null) queryParams['customerName'] = customerName;
-      
+      if (search != null && search.isNotEmpty) queryParams['search'] = search;
+
       print('📤 GET: $_baseEndpoint/stats/summary');
-      
-      final data = await _api.get('$_baseEndpoint/stats/summary', queryParams: queryParams);
-      
+
+      final data = await _api.get('$_baseEndpoint/stats/summary',
+          queryParams: queryParams);
+
       print('✅ Payment stats fetched');
-      
+
       return data['data'];
     } catch (e) {
       print('❌ Error fetching payment stats: $e');
@@ -377,7 +393,8 @@ class PaymentService {
   /// Get customer's current unused credits balance
   static Future<double> getCustomerUnusedCredits(String customerId) async {
     try {
-      final data = await _api.get('/api/finance/customers/$customerId/unused-credits');
+      final data =
+          await _api.get('/api/finance/customers/$customerId/unused-credits');
       return (data['data']['unusedCredits'] ?? 0).toDouble();
     } catch (e) {
       print('❌ Error fetching customer unused credits: $e');
@@ -386,9 +403,11 @@ class PaymentService {
   }
 
   /// Get customer advance register — all advances + utilization history
-  static Future<Map<String, dynamic>> getCustomerAdvanceRegister(String customerId) async {
+  static Future<Map<String, dynamic>> getCustomerAdvanceRegister(
+      String customerId) async {
     try {
-      final data = await _api.get('/api/finance/customers/$customerId/advance-register');
+      final data =
+          await _api.get('/api/finance/customers/$customerId/advance-register');
       return data['data'] ?? {};
     } catch (e) {
       print('❌ Error fetching advance register: $e');
@@ -400,12 +419,12 @@ class PaymentService {
   static Future<String> getNextPaymentNumber() async {
     try {
       print('📤 GET: $_baseEndpoint/next-payment-number');
-      
+
       final data = await _api.get('$_baseEndpoint/next-payment-number');
-      
+
       final nextNumber = data['data']['nextPaymentNumber'];
       print('✅ Next payment number: $nextNumber');
-      
+
       return nextNumber;
     } catch (e) {
       print('❌ Error getting next payment number: $e');
@@ -445,18 +464,18 @@ class PaymentService {
   }) async {
     try {
       final queryParams = <String, String>{};
-      
+
       if (filter != null) queryParams['filter'] = filter;
       if (startDate != null) queryParams['startDate'] = startDate;
       if (endDate != null) queryParams['endDate'] = endDate;
-      
+
       print('📤 GET: $_baseEndpoint/export/csv');
-      
+
       // Return the URL for download
       final url = '${_api.baseUrl}$_baseEndpoint/export/csv';
-      
+
       print('✅ CSV export URL: $url');
-      
+
       return url;
     } catch (e) {
       print('❌ Error exporting CSV: $e');
@@ -472,7 +491,8 @@ class PaymentService {
     try {
       final headers = await _api.getHeaders();
       final response = await http.get(
-        Uri.parse('${_api.baseUrl}$_baseEndpoint/customer-payments-with-balance/$customerId'),
+        Uri.parse(
+            '${_api.baseUrl}$_baseEndpoint/customer-payments-with-balance/$customerId'),
         headers: headers,
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -480,7 +500,9 @@ class PaymentService {
       }
       final body = json.decode(response.body);
       final data = body['data'] as List? ?? [];
-      return data.map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p)).toList();
+      return data
+          .map<Map<String, dynamic>>((p) => Map<String, dynamic>.from(p))
+          .toList();
     } catch (e) {
       print('❌ Error fetching customer payments with balance: $e');
       rethrow;

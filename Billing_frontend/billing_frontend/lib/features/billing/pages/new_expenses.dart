@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // NEW EXPENSE PAGE — COMPLETE UPDATED
 // ============================================================================
@@ -42,22 +43,22 @@ import 'new_vendor.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR CONSTANTS — exact match to new_vendor_credit.dart
 // ─────────────────────────────────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
-const Color _green      = Color(0xFF27AE60);
+const Color _green = Color(0xFF27AE60);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MUTABLE ITEMIZED EXPENSE ROW MODEL
 // ─────────────────────────────────────────────────────────────────────────────
 class _ItemizedRow {
   String? expenseAccount;
-  double  amount      = 0;
-  String  description = '';
-  final   TextEditingController acctCtrl = TextEditingController();
-  final   TextEditingController amtCtrl  = TextEditingController();
-  final   TextEditingController descCtrl = TextEditingController();
+  double amount = 0;
+  String description = '';
+  final TextEditingController acctCtrl = TextEditingController();
+  final TextEditingController amtCtrl = TextEditingController();
+  final TextEditingController descCtrl = TextEditingController();
 
   _ItemizedRow();
 
@@ -74,7 +75,7 @@ class _ItemizedRow {
 class NewExpensePage extends StatefulWidget {
   final String? expenseId;
   final double? prefilledAmount;
-  final String? prefilledDate;       // format: 'dd/MM/yyyy'
+  final String? prefilledDate; // format: 'dd/MM/yyyy'
   final String? prefilledReference;
   final String? prefilledNotes;
   final String? providerTransactionId;
@@ -103,12 +104,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
   final _formKey = GlobalKey<FormState>();
 
   // ── loading / saving ──────────────────────────────────────────────────────
-  bool _isLoading          = false;
-  bool _isSaving           = false;
-  bool _loadingAccounts    = true;
-  bool _loadingVendors     = true;
+  bool _isLoading = false;
+  bool _isSaving = false;
+  bool _loadingAccounts = true;
+  bool _loadingVendors = true;
   bool _loadingCoaAccounts = true;
-  bool _loadingBalance     = false; // ✅ FIX 3
+  bool _loadingBalance = false; // ✅ FIX 3
 
   bool get _isEdit => widget.expenseId != null;
 
@@ -117,16 +118,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
   final _accountService = AddAccountService();
 
   // ── controllers ──────────────────────────────────────────────────────────
-  final _dateCtrl        = TextEditingController();
-  final _amountCtrl      = TextEditingController();
-  final _taxCtrl         = TextEditingController();
-  final _notesCtrl       = TextEditingController();
-  final _invoiceCtrl     = TextEditingController();
-  final _markupCtrl      = TextEditingController();
+  final _dateCtrl = TextEditingController();
+  final _amountCtrl = TextEditingController();
+  final _taxCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  final _invoiceCtrl = TextEditingController();
+  final _markupCtrl = TextEditingController();
   final _expenseAcctCtrl = TextEditingController();
-  final _customerCtrl    = TextEditingController();
+  final _customerCtrl = TextEditingController();
   // ✅ FIX 4: free text project controller
-  final _projectCtrl     = TextEditingController();
+  final _projectCtrl = TextEditingController();
 
   // ── dropdown selections ───────────────────────────────────────────────────
   String? _selectedPaidThroughId;
@@ -138,9 +139,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
   double? _selectedAccountBalance;
 
   // ── dynamic lists ─────────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _allAccounts    = [];
+  List<Map<String, dynamic>> _allAccounts = [];
   List<Map<String, dynamic>> _coaExpAccounts = [];
-  List<Map<String, dynamic>> _vendorsList    = [];
+  List<Map<String, dynamic>> _vendorsList = [];
 
   // ── customer (billable) ───────────────────────────────────────────────────
   String? _selectedCustomerId;
@@ -148,17 +149,17 @@ class _NewExpensePageState extends State<NewExpensePage> {
   String? _selectedCustomerEmail;
 
   // ── billable ──────────────────────────────────────────────────────────────
-  bool   _isBillable       = false;
+  bool _isBillable = false;
   double _markupPercentage = 0.0;
 
   // ── itemized ──────────────────────────────────────────────────────────────
-  bool               _isItemized = false;
-  List<_ItemizedRow> _itemRows   = [];
+  bool _isItemized = false;
+  List<_ItemizedRow> _itemRows = [];
 
   // ── receipt ───────────────────────────────────────────────────────────────
-  File?      _receiptFile;
+  File? _receiptFile;
   Uint8List? _receiptBytes;
-  String?    _receiptFileName;
+  String? _receiptFileName;
 
   // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
@@ -174,13 +175,15 @@ class _NewExpensePageState extends State<NewExpensePage> {
     if (widget.prefilledDate != null && widget.prefilledDate!.isNotEmpty) {
       _dateCtrl.text = widget.prefilledDate!;
     }
-    if (widget.prefilledReference != null && widget.prefilledReference!.isNotEmpty) {
+    if (widget.prefilledReference != null &&
+        widget.prefilledReference!.isNotEmpty) {
       _invoiceCtrl.text = widget.prefilledReference!;
     }
     if (widget.prefilledNotes != null && widget.prefilledNotes!.isNotEmpty) {
       _notesCtrl.text = widget.prefilledNotes!;
     }
-    if (widget.prefilledPaidThroughName != null && widget.prefilledPaidThroughName!.isNotEmpty) {
+    if (widget.prefilledPaidThroughName != null &&
+        widget.prefilledPaidThroughName!.isNotEmpty) {
       _selectedPaidThroughName = widget.prefilledPaidThroughName;
     }
     _loadAllAccounts();
@@ -213,7 +216,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
     try {
       final list = await _accountService.getAllAccounts();
       setState(() {
-        _allAccounts     = list;
+        _allAccounts = list;
         _loadingAccounts = false;
       });
     } catch (e) {
@@ -226,31 +229,31 @@ class _NewExpensePageState extends State<NewExpensePage> {
   Future<void> _loadCoaExpenseAccounts() async {
     setState(() => _loadingCoaAccounts = true);
     try {
-      final prefs     = await SharedPreferences.getInstance();
-      final token     = prefs.getString('jwt_token') ?? '';
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
 
       // Fetch ALL account types (Asset, Liability, Equity, Income, Expense)
       // ✅ FIXED: Include BOTH broad categories AND specific types from backend enum
       final types = [
-        'Asset',                    // ✅ Broad category (includes Laptop purchase, etc.)
-        'Fixed Asset',              // ✅ Specific type
-        'Other Current Asset',      // ✅ Specific type
-        'Cash',                     // ✅ Specific type
-        'Stock',                    // ✅ Specific type
-        'Other Asset',              // ✅ Specific type
-        'Accounts Receivable',      // ✅ Specific type
-        'Liability',                // ✅ Broad category
-        'Accounts Payable',         // ✅ Specific type
-        'Other Current Liability',  // ✅ Specific type
-        'Non Current Liability',    // ✅ Specific type
-        'Other Liability',          // ✅ Specific type
-        'Equity',                   // ✅ Broad category
-        'Income',                   // ✅ Broad category
-        'Other Income',             // ✅ Specific type
-        'Expense',                  // ✅ Broad category
-        'Other Expense',            // ✅ Specific type
-        'Cost Of Goods Sold',       // ✅ Specific type
+        'Asset', // ✅ Broad category (includes Laptop purchase, etc.)
+        'Fixed Asset', // ✅ Specific type
+        'Other Current Asset', // ✅ Specific type
+        'Cash', // ✅ Specific type
+        'Stock', // ✅ Specific type
+        'Other Asset', // ✅ Specific type
+        'Accounts Receivable', // ✅ Specific type
+        'Liability', // ✅ Broad category
+        'Accounts Payable', // ✅ Specific type
+        'Other Current Liability', // ✅ Specific type
+        'Non Current Liability', // ✅ Specific type
+        'Other Liability', // ✅ Specific type
+        'Equity', // ✅ Broad category
+        'Income', // ✅ Broad category
+        'Other Income', // ✅ Specific type
+        'Expense', // ✅ Broad category
+        'Other Expense', // ✅ Specific type
+        'Cost Of Goods Sold', // ✅ Specific type
       ];
       final futures = types.map((t) {
         final encodedType = Uri.encodeComponent(t);
@@ -268,10 +271,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
       final allAccounts = <Map<String, dynamic>>[];
       for (final resp in responses) {
         if (resp.statusCode == 200) {
-          final body     = json.decode(resp.body);
+          final body = json.decode(resp.body);
           final accounts = (body['data']?['accounts'] as List? ?? []);
           allAccounts.addAll(accounts.map((a) => {
-                '_id':         a['_id']?.toString() ?? '',
+                '_id': a['_id']?.toString() ?? '',
                 'accountName': a['accountName']?.toString() ?? '',
                 'accountType': a['accountType']?.toString() ?? '',
               }));
@@ -286,29 +289,58 @@ class _NewExpensePageState extends State<NewExpensePage> {
         seen.add(id);
         return true;
       }).toList()
-        ..sort((a, b) => (a['accountName'] as String)
-            .compareTo(b['accountName'] as String));
+        ..sort((a, b) =>
+            (a['accountName'] as String).compareTo(b['accountName'] as String));
 
       setState(() {
-        _coaExpAccounts     = unique;
+        _coaExpAccounts = unique;
         _loadingCoaAccounts = false;
       });
-      debugPrint('✅ COA accounts loaded (all types): ${_coaExpAccounts.length}');
+      debugPrint(
+          '✅ COA accounts loaded (all types): ${_coaExpAccounts.length}');
     } catch (e) {
       debugPrint('❌ COA load error: $e — using fallback');
       setState(() {
         _coaExpAccounts = [
-          {'_id': '1', 'accountName': 'Advertising & Marketing', 'accountType': 'Expense'},
-          {'_id': '2', 'accountName': 'Cost of Goods Sold',      'accountType': 'Cost Of Goods Sold'},
-          {'_id': '3', 'accountName': 'Fuel',                    'accountType': 'Expense'},
-          {'_id': '4', 'accountName': 'Insurance',               'accountType': 'Expense'},
-          {'_id': '5', 'accountName': 'Meals & Entertainment',   'accountType': 'Expense'},
-          {'_id': '6', 'accountName': 'Office Supplies',         'accountType': 'Expense'},
-          {'_id': '7', 'accountName': 'Other Expenses',          'accountType': 'Other Expense'},
-          {'_id': '8', 'accountName': 'Professional Fees',       'accountType': 'Expense'},
-          {'_id': '9', 'accountName': 'Rent',                    'accountType': 'Expense'},
-          {'_id': '10','accountName': 'Travel & Conveyance',     'accountType': 'Expense'},
-          {'_id': '11','accountName': 'Utilities',               'accountType': 'Expense'},
+          {
+            '_id': '1',
+            'accountName': 'Advertising & Marketing',
+            'accountType': 'Expense'
+          },
+          {
+            '_id': '2',
+            'accountName': 'Cost of Goods Sold',
+            'accountType': 'Cost Of Goods Sold'
+          },
+          {'_id': '3', 'accountName': 'Fuel', 'accountType': 'Expense'},
+          {'_id': '4', 'accountName': 'Insurance', 'accountType': 'Expense'},
+          {
+            '_id': '5',
+            'accountName': 'Meals & Entertainment',
+            'accountType': 'Expense'
+          },
+          {
+            '_id': '6',
+            'accountName': 'Office Supplies',
+            'accountType': 'Expense'
+          },
+          {
+            '_id': '7',
+            'accountName': 'Other Expenses',
+            'accountType': 'Other Expense'
+          },
+          {
+            '_id': '8',
+            'accountName': 'Professional Fees',
+            'accountType': 'Expense'
+          },
+          {'_id': '9', 'accountName': 'Rent', 'accountType': 'Expense'},
+          {
+            '_id': '10',
+            'accountName': 'Travel & Conveyance',
+            'accountType': 'Expense'
+          },
+          {'_id': '11', 'accountName': 'Utilities', 'accountType': 'Expense'},
         ];
         _loadingCoaAccounts = false;
       });
@@ -322,15 +354,17 @@ class _NewExpensePageState extends State<NewExpensePage> {
           status: 'Active', limit: 1000);
       if (resp['success'] == true) {
         // ✅ FIX 1: handle both list and nested structure
-        final raw  = resp['data'];
+        final raw = resp['data'];
         final List<dynamic> data =
             raw is List ? raw : (raw['vendors'] as List? ?? []);
         setState(() {
           _vendorsList = data
               .map((v) => {
-                    '_id':        v['_id']?.toString() ?? '',
+                    '_id': v['_id']?.toString() ?? '',
                     'vendorName': v['vendorName']?.toString() ?? 'Unknown',
-                    'email':      v['email']?.toString() ?? v['vendorEmail']?.toString() ?? '',
+                    'email': v['email']?.toString() ??
+                        v['vendorEmail']?.toString() ??
+                        '',
                   })
               .toList();
           _loadingVendors = false;
@@ -347,14 +381,17 @@ class _NewExpensePageState extends State<NewExpensePage> {
 
   // ✅ FIX 3: fetch balance when Paid Through account is selected
   Future<void> _fetchAccountBalance(String accountId) async {
-    setState(() { _loadingBalance = true; _selectedAccountBalance = null; });
+    setState(() {
+      _loadingBalance = true;
+      _selectedAccountBalance = null;
+    });
     try {
       final balance = await _accountService.getAccountBalance(accountId);
       setState(() => _selectedAccountBalance = balance);
     } catch (e) {
       // fallback from loaded list
-      final acc = _allAccounts.firstWhere(
-          (a) => a['_id'] == accountId, orElse: () => {});
+      final acc = _allAccounts.firstWhere((a) => a['_id'] == accountId,
+          orElse: () => {});
       if (acc.isNotEmpty) {
         setState(() =>
             _selectedAccountBalance = (acc['currentBalance'] ?? 0).toDouble());
@@ -376,36 +413,36 @@ class _NewExpensePageState extends State<NewExpensePage> {
           parsedDate = DateTime.parse(exp.date);
         } catch (_) {
           final p = exp.date.split('-');
-          parsedDate = DateTime(
-              int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+          parsedDate =
+              DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
         }
 
         setState(() {
-          _dateCtrl.text        = DateFormat('dd/MM/yyyy').format(parsedDate);
+          _dateCtrl.text = DateFormat('dd/MM/yyyy').format(parsedDate);
           _expenseAcctCtrl.text = exp.expenseAccount;
-          _amountCtrl.text      = exp.amount > 0 ? exp.amount.toString() : '';
-          _taxCtrl.text         = exp.tax    > 0 ? exp.tax.toString()    : '';
-          _notesCtrl.text       = exp.notes  ?? '';
-          _invoiceCtrl.text     = exp.invoiceNumber ?? '';
-          _customerCtrl.text    = exp.customerName ?? '';
+          _amountCtrl.text = exp.amount > 0 ? exp.amount.toString() : '';
+          _taxCtrl.text = exp.tax > 0 ? exp.tax.toString() : '';
+          _notesCtrl.text = exp.notes ?? '';
+          _invoiceCtrl.text = exp.invoiceNumber ?? '';
+          _customerCtrl.text = exp.customerName ?? '';
           _selectedPaidThroughName = exp.paidThrough;
-          _selectedVendorName      = exp.vendor;
-          _selectedCustomerName    = exp.customerName;
-          _isBillable              = exp.isBillable;
-          _markupPercentage        = exp.markupPercentage;
-          _markupCtrl.text         =
+          _selectedVendorName = exp.vendor;
+          _selectedCustomerName = exp.customerName;
+          _isBillable = exp.isBillable;
+          _markupPercentage = exp.markupPercentage;
+          _markupCtrl.text =
               exp.markupPercentage > 0 ? exp.markupPercentage.toString() : '';
           _isItemized = exp.isItemized;
 
           if (exp.isItemized) {
             _itemRows = exp.itemizedExpenses.map((i) {
-              final row           = _ItemizedRow();
-              row.expenseAccount  = i.expenseAccount;
-              row.amount          = i.amount;
-              row.description     = i.description ?? '';
-              row.acctCtrl.text   = i.expenseAccount ?? '';
-              row.amtCtrl.text    = i.amount > 0 ? i.amount.toString() : '';
-              row.descCtrl.text   = i.description ?? '';
+              final row = _ItemizedRow();
+              row.expenseAccount = i.expenseAccount;
+              row.amount = i.amount;
+              row.description = i.description ?? '';
+              row.acctCtrl.text = i.expenseAccount ?? '';
+              row.amtCtrl.text = i.amount > 0 ? i.amount.toString() : '';
+              row.descCtrl.text = i.description ?? '';
               return row;
             }).toList();
           }
@@ -443,8 +480,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
     return double.tryParse(_amountCtrl.text) ?? 0.0;
   }
 
-  double _calcTax()      => double.tryParse(_taxCtrl.text) ?? 0.0;
-  double _calcTotal()    => _calcSubtotal() + _calcTax();
+  double _calcTax() => double.tryParse(_taxCtrl.text) ?? 0.0;
+  double _calcTotal() => _calcSubtotal() + _calcTax();
   double _calcBillable() {
     if (!_isBillable) return 0.0;
     return _markupPercentage > 0
@@ -480,14 +517,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
       if (result != null) {
         setState(() {
           if (kIsWeb) {
-            _receiptBytes    = result.files.single.bytes;
+            _receiptBytes = result.files.single.bytes;
             _receiptFileName = result.files.single.name;
-            _receiptFile     = null;
+            _receiptFile = null;
           } else {
             if (result.files.single.path != null) {
-              _receiptFile     = File(result.files.single.path!);
+              _receiptFile = File(result.files.single.path!);
               _receiptFileName = result.files.single.name;
-              _receiptBytes    = null;
+              _receiptBytes = null;
             }
           }
         });
@@ -499,9 +536,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
   }
 
   void _removeReceipt() => setState(() {
-        _receiptFile     = null;
+        _receiptFile = null;
         _receiptFileName = null;
-        _receiptBytes    = null;
+        _receiptBytes = null;
       });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -539,9 +576,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
         final shortage = total - _selectedAccountBalance!;
         final proceed = await _showInsufficientBalanceDialog(
           accountName: _selectedPaidThroughName ?? 'Selected Account',
-          available:   _selectedAccountBalance!,
-          required:    total,
-          shortage:    shortage,
+          available: _selectedAccountBalance!,
+          required: total,
+          shortage: shortage,
         );
         if (!proceed) return;
       }
@@ -549,68 +586,72 @@ class _NewExpensePageState extends State<NewExpensePage> {
 
     setState(() => _isSaving = true);
     try {
-      final parts   = _dateCtrl.text.split('/');
+      final parts = _dateCtrl.text.split('/');
       final fmtDate = '${parts[2]}-${parts[1]}-${parts[0]}';
 
       List<Map<String, dynamic>>? itemizedData;
       if (_isItemized && _itemRows.isNotEmpty) {
-        itemizedData = _itemRows.map((r) => {
-              'expenseAccount': r.expenseAccount ?? r.acctCtrl.text,
-              'amount':         r.amount,
-              'description':    r.descCtrl.text,
-            }).toList();
+        itemizedData = _itemRows
+            .map((r) => {
+                  'expenseAccount': r.expenseAccount ?? r.acctCtrl.text,
+                  'amount': r.amount,
+                  'description': r.descCtrl.text,
+                })
+            .toList();
       }
 
       Map<String, dynamic> result;
 
       if (!_isEdit) {
         result = await _expenseService.createExpense(
-          date:             fmtDate,
-          expenseAccount:   _expenseAcctCtrl.text.trim(),
-          paidThrough:      _selectedPaidThroughName!,
-          amount:           _isItemized ? '0' : _amountCtrl.text.trim(),
-          tax:              _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
-          vendor:           _selectedVendorName,
-          invoiceNumber:    _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
-          customerName:     _selectedCustomerName,
-          isBillable:       _isBillable,
-          project:          _projectCtrl.text.isNotEmpty ? _projectCtrl.text : null,
+          date: fmtDate,
+          expenseAccount: _expenseAcctCtrl.text.trim(),
+          paidThrough: _selectedPaidThroughName!,
+          amount: _isItemized ? '0' : _amountCtrl.text.trim(),
+          tax: _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
+          vendor: _selectedVendorName,
+          invoiceNumber:
+              _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
+          customerName: _selectedCustomerName,
+          isBillable: _isBillable,
+          project: _projectCtrl.text.isNotEmpty ? _projectCtrl.text : null,
           markupPercentage: _markupPercentage,
-          notes:            _notesCtrl.text.isNotEmpty ? _notesCtrl.text : null,
-          isItemized:       _isItemized,
+          notes: _notesCtrl.text.isNotEmpty ? _notesCtrl.text : null,
+          isItemized: _isItemized,
           itemizedExpenses: itemizedData,
-          receiptFile:      _receiptFile,
+          receiptFile: _receiptFile,
           providerTransactionId: widget.providerTransactionId,
         );
       } else {
         result = await _expenseService.updateExpense(
-          id:               widget.expenseId!,
-          date:             fmtDate,
-          expenseAccount:   _expenseAcctCtrl.text.trim(),
-          paidThrough:      _selectedPaidThroughName!,
-          amount:           _isItemized ? '0' : _amountCtrl.text.trim(),
-          tax:              _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
-          vendor:           _selectedVendorName,
-          invoiceNumber:    _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
-          customerName:     _selectedCustomerName,
-          isBillable:       _isBillable,
-          project:          _projectCtrl.text.isNotEmpty ? _projectCtrl.text : null,
+          id: widget.expenseId!,
+          date: fmtDate,
+          expenseAccount: _expenseAcctCtrl.text.trim(),
+          paidThrough: _selectedPaidThroughName!,
+          amount: _isItemized ? '0' : _amountCtrl.text.trim(),
+          tax: _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
+          vendor: _selectedVendorName,
+          invoiceNumber:
+              _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
+          customerName: _selectedCustomerName,
+          isBillable: _isBillable,
+          project: _projectCtrl.text.isNotEmpty ? _projectCtrl.text : null,
           markupPercentage: _markupPercentage,
-          notes:            _notesCtrl.text.isNotEmpty ? _notesCtrl.text : null,
-          isItemized:       _isItemized,
+          notes: _notesCtrl.text.isNotEmpty ? _notesCtrl.text : null,
+          isItemized: _isItemized,
           itemizedExpenses: itemizedData,
-          receiptFile:      _receiptFile,
-          deleteReceipt:    _receiptFile == null && _receiptFileName == null,
+          receiptFile: _receiptFile,
+          deleteReceipt: _receiptFile == null && _receiptFileName == null,
         );
       }
 
       if (result['success'] == true) {
         _showSuccess(result['message'] ?? 'Expense saved successfully!');
         if (mounted) Navigator.pop(context, true);
-        final createdId = result['data']?['_id']?.toString()
-            ?? result['data']?['expenseId']?.toString()
-            ?? result['_id']?.toString()
-            ?? '';
+        final createdId = result['data']?['_id']?.toString() ??
+            result['data']?['expenseId']?.toString() ??
+            result['_id']?.toString() ??
+            '';
         widget.onSavedCallback?.call(createdId);
       }
     } catch (e) {
@@ -659,18 +700,15 @@ class _NewExpensePageState extends State<NewExpensePage> {
             child: Column(children: [
               _dialogRow('Account:', accountName),
               const SizedBox(height: 8),
-              _dialogRow('Available Balance:',
-                  '₹${available.toStringAsFixed(2)}',
+              _dialogRow(
+                  'Available Balance:', '₹${available.toStringAsFixed(2)}',
                   valueColor: _green),
               const SizedBox(height: 8),
-              _dialogRow('Expense Amount:',
-                  '₹${required.toStringAsFixed(2)}',
+              _dialogRow('Expense Amount:', '₹${required.toStringAsFixed(2)}',
                   valueColor: _navyDark),
               const Divider(height: 16),
-              _dialogRow('Shortage:',
-                  '₹${shortage.toStringAsFixed(2)}',
-                  valueColor: Colors.red.shade700,
-                  bold: true),
+              _dialogRow('Shortage:', '₹${shortage.toStringAsFixed(2)}',
+                  valueColor: Colors.red.shade700, bold: true),
             ]),
           ),
           const SizedBox(height: 16),
@@ -704,14 +742,15 @@ class _NewExpensePageState extends State<NewExpensePage> {
   }
 
   Widget _dialogRow(String label, String value,
-      {Color? valueColor, bool bold = false}) =>
+          {Color? valueColor, bool bold = false}) =>
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[700])),
-        Text(value, style: TextStyle(
-          fontSize: 13,
-          fontWeight: bold ? FontWeight.bold : FontWeight.w600,
-          color: valueColor ?? _navyDark,
-        )),
+        Text(value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+              color: valueColor ?? _navyDark,
+            )),
       ]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -720,22 +759,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: Colors.red,
-      behavior: SnackBarBehavior.floating,
-      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
-    ));
+    AppSnackbar.show(context, message: msg, isError: true);
   }
 
   void _showSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: _green,
-      behavior: SnackBarBehavior.floating,
-      margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 150, left: 20, right: 20),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -827,15 +856,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
             TextButton.icon(
               onPressed: _isSaving ? null : () => Navigator.pop(context),
               icon: const Icon(Icons.close, color: Colors.white70, size: 18),
-              label: const Text('Cancel',
-                  style: TextStyle(color: Colors.white70)),
+              label:
+                  const Text('Cancel', style: TextStyle(color: Colors.white70)),
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
               onPressed: _isSaving ? null : _save,
               icon: _isSaving
                   ? const SizedBox(
-                      width: 16, height: 16,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.save, size: 18),
@@ -843,8 +873,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navyAccent,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
             const SizedBox(width: 16),
@@ -916,10 +946,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       borderRadius: BorderRadius.circular(8)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                          color: _navyAccent, width: 2)),
-                  prefixIcon: const Icon(Icons.calendar_today,
-                      color: _navyAccent),
+                      borderSide:
+                          const BorderSide(color: _navyAccent, width: 2)),
+                  prefixIcon:
+                      const Icon(Icons.calendar_today, color: _navyAccent),
                 ),
                 child: Text(_dateCtrl.text,
                     style: const TextStyle(
@@ -954,8 +984,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 label: 'Amount *',
                 hint: '0.00',
                 required: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 prefixText: '₹ ',
                 icon: Icons.currency_rupee,
                 onChanged: (_) => setState(() {}),
@@ -970,8 +1000,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 label: 'Tax Amount',
                 hint: '0.00',
                 required: false,
-                keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 prefixText: '₹ ',
                 icon: Icons.percent,
                 onChanged: (_) => setState(() {}),
@@ -1039,8 +1069,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       final acct = _allAccounts.firstWhere(
                           (a) => a['accountName'] == v,
                           orElse: () => {});
-                      _selectedPaidThroughId =
-                          acct['_id'] as String?;
+                      _selectedPaidThroughId = acct['_id'] as String?;
                       _selectedAccountBalance = null;
                     });
                     // ✅ FIX 3: fetch balance immediately on selection
@@ -1048,16 +1077,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       _fetchAccountBalance(_selectedPaidThroughId!);
                     }
                   },
-                  validator: (v) =>
-                      v == null ? 'Please select account' : null,
+                  validator: (v) => v == null ? 'Please select account' : null,
                 ),
 
           // ✅ FIX 3: Balance shown below Paid Through dropdown
           if (_selectedPaidThroughName != null) ...[
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: _selectedAccountBalance != null &&
                         _calcTotal() > 0 &&
@@ -1089,8 +1116,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 ),
                 const SizedBox(width: 8),
                 Text('Available Balance: ',
-                    style:
-                        TextStyle(fontSize: 13, color: Colors.grey[700])),
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
                 if (_loadingBalance)
                   const SizedBox(
                       width: 16,
@@ -1157,18 +1183,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
                   OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: _navyAccent, width: 2)),
-              prefixIcon: const Icon(Icons.account_tree_outlined,
-                  color: _navyAccent),
+                  borderSide: const BorderSide(color: _navyAccent, width: 2)),
+              prefixIcon:
+                  const Icon(Icons.account_tree_outlined, color: _navyAccent),
               suffixIcon: _loadingCoaAccounts
                   ? const Padding(
                       padding: EdgeInsets.all(12),
                       child: SizedBox(
                           width: 16,
                           height: 16,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2)))
+                          child: CircularProgressIndicator(strokeWidth: 2)))
                   : const Icon(Icons.search, color: _navyAccent),
             ),
             child: Text(
@@ -1176,8 +1200,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
               style: TextStyle(
                 fontSize: 15,
                 color: hasValue ? _navyDark : Colors.grey[500],
-                fontWeight:
-                    hasValue ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
           ),
@@ -1188,17 +1211,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
           Row(children: [
             const SizedBox(width: 4),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: _navyAccent.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 _coaExpAccounts.firstWhere(
-                    (a) => a['accountName'] == _expenseAcctCtrl.text,
-                    orElse: () =>
-                        {'accountType': 'Expense'})['accountType'] as String,
+                        (a) => a['accountName'] == _expenseAcctCtrl.text,
+                        orElse: () => {'accountType': 'Expense'})['accountType']
+                    as String,
                 style: const TextStyle(
                     fontSize: 11,
                     color: _navyAccent,
@@ -1207,14 +1229,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
             ),
             const Spacer(),
             TextButton.icon(
-              onPressed: () =>
-                  setState(() => _expenseAcctCtrl.text = ''),
+              onPressed: () => setState(() => _expenseAcctCtrl.text = ''),
               icon: const Icon(Icons.clear, size: 14, color: Colors.red),
               label: const Text('Clear',
                   style: TextStyle(color: Colors.red, fontSize: 12)),
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -1249,11 +1269,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
           }
 
           return Dialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                  maxWidth: 480, maxHeight: 560),
+              constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
               child: Column(children: [
                 // ── Header ──────────────────────────────────────────
                 Container(
@@ -1264,8 +1283,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                     ),
-                    borderRadius: BorderRadius.vertical(
-                        top: Radius.circular(12)),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(12)),
                   ),
                   child: Row(children: [
                     const Icon(Icons.account_tree_outlined,
@@ -1296,12 +1315,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
                     autofocus: true,
                     decoration: InputDecoration(
                       hintText: 'Search accounts…',
-                      prefixIcon: const Icon(Icons.search,
-                          color: _navyAccent),
+                      prefixIcon: const Icon(Icons.search, color: _navyAccent),
                       suffixIcon: searchCtrl.text.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.clear,
-                                  size: 18),
+                              icon: const Icon(Icons.clear, size: 18),
                               onPressed: () {
                                 searchCtrl.clear();
                                 doFilter('');
@@ -1311,8 +1328,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                           borderRadius: BorderRadius.circular(8)),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: _navyAccent, width: 2)),
+                          borderSide:
+                              const BorderSide(color: _navyAccent, width: 2)),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 10),
@@ -1323,12 +1340,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
 
                 // ── Count ───────────────────────────────────────────
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                   child: Row(children: [
                     Text('${filtered.length} account(s)',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey[500])),
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey[500])),
                   ]),
                 ),
 
@@ -1340,12 +1357,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.search_off,
-                                  size: 40,
-                                  color: Colors.grey[300]),
+                                  size: 40, color: Colors.grey[300]),
                               const SizedBox(height: 8),
                               Text('No accounts found',
-                                  style: TextStyle(
-                                      color: Colors.grey[500])),
+                                  style: TextStyle(color: Colors.grey[500])),
                             ],
                           ),
                         )
@@ -1353,17 +1368,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
                           itemCount: filtered.length,
                           itemBuilder: (_, i) {
                             final acc = filtered[i];
-                            final name =
-                                acc['accountName'] as String;
-                            final type =
-                                acc['accountType'] as String;
-                            final isSelected =
-                                _expenseAcctCtrl.text == name;
+                            final name = acc['accountName'] as String;
+                            final type = acc['accountType'] as String;
+                            final isSelected = _expenseAcctCtrl.text == name;
                             return ListTile(
                               dense: true,
                               selected: isSelected,
-                              selectedTileColor:
-                                  _navyAccent.withOpacity(0.08),
+                              selectedTileColor: _navyAccent.withOpacity(0.08),
                               leading: CircleAvatar(
                                 radius: 16,
                                 backgroundColor: isSelected
@@ -1372,9 +1383,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                 child: Icon(
                                   Icons.account_tree_outlined,
                                   size: 14,
-                                  color: isSelected
-                                      ? Colors.white
-                                      : _navyAccent,
+                                  color:
+                                      isSelected ? Colors.white : _navyAccent,
                                 ),
                               ),
                               title: Text(name,
@@ -1386,8 +1396,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                       color: _navyDark)),
                               subtitle: Text(type,
                                   style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey[500])),
+                                      fontSize: 11, color: Colors.grey[500])),
                               trailing: isSelected
                                   ? const Icon(Icons.check_circle,
                                       color: _navyAccent, size: 18)
@@ -1396,8 +1405,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                 if (onSelected != null) {
                                   onSelected(name);
                                 } else {
-                                  setState(() =>
-                                      _expenseAcctCtrl.text = name);
+                                  setState(() => _expenseAcctCtrl.text = name);
                                 }
                                 Navigator.pop(ctx);
                               },
@@ -1409,8 +1417,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 // ── Footer: Add Account ──────────────────────────────
                 const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -1419,15 +1427,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
                         final ok = await Navigator.push<bool>(
                           context,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  const NewChartOfAccountScreen()),
+                              builder: (_) => const NewChartOfAccountScreen()),
                         );
                         if (ok == true || ok == null) {
                           await _loadCoaExpenseAccounts();
                           // Re-open selector so user can pick the new account
                           if (mounted) {
-                            _showExpenseAccountSelector(
-                                onSelected: onSelected);
+                            _showExpenseAccountSelector(onSelected: onSelected);
                           }
                         }
                       },
@@ -1437,8 +1443,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                           style: TextStyle(color: _navyAccent)),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: _navyAccent),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
                   ),
@@ -1486,10 +1491,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
                     _itemRows.clear();
                     _isItemized = false;
                   }),
-                  icon:
-                      const Icon(Icons.close, size: 16, color: Colors.red),
-                  label: const Text('Remove',
-                      style: TextStyle(color: Colors.red)),
+                  icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                  label:
+                      const Text('Remove', style: TextStyle(color: Colors.red)),
                 ),
               ]),
             ],
@@ -1511,8 +1515,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
               if (cs.maxWidth < 500) {
                 return const Text('ITEMS',
                     style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold));
+                        color: Colors.white, fontWeight: FontWeight.bold));
               }
               return const Row(children: [
                 Expanded(
@@ -1569,21 +1572,18 @@ class _NewExpensePageState extends State<NewExpensePage> {
           if (_itemRows.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: _navyDark.withOpacity(0.06),
                 borderRadius: BorderRadius.circular(8),
-                border:
-                    Border.all(color: _navyAccent.withOpacity(0.3)),
+                border: Border.all(color: _navyAccent.withOpacity(0.3)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Itemized Total',
                       style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: _navyDark)),
+                          fontWeight: FontWeight.bold, color: _navyDark)),
                   Text(
                     '₹${_calcSubtotal().toStringAsFixed(2)}',
                     style: const TextStyle(
@@ -1610,27 +1610,24 @@ class _NewExpensePageState extends State<NewExpensePage> {
         onTap: () => _showExpenseAccountSelector(
           onSelected: (name) => setState(() {
             row.expenseAccount = name;
-            row.acctCtrl.text  = name;
+            row.acctCtrl.text = name;
           }),
         ),
         borderRadius: BorderRadius.circular(isDense ? 6 : 8),
         child: InputDecorator(
           decoration: InputDecoration(
             labelText: isDense ? 'Expense Account' : null,
-            hintText:  isDense ? null : 'Expense Account',
+            hintText: isDense ? null : 'Expense Account',
             isDense: isDense,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(isDense ? 6 : 8)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(isDense ? 6 : 8),
-                borderSide:
-                    const BorderSide(color: _navyAccent, width: 2)),
-            suffixIcon: const Icon(Icons.search,
-                color: _navyAccent, size: 18),
+                borderSide: const BorderSide(color: _navyAccent, width: 2)),
+            suffixIcon: const Icon(Icons.search, color: _navyAccent, size: 18),
             contentPadding: isDense
                 ? null
-                : const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
+                : const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           ),
           child: Text(
             hasVal ? row.expenseAccount! : 'Search…',
@@ -1638,8 +1635,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
             style: TextStyle(
               fontSize: 13,
               color: hasVal ? _navyDark : Colors.grey[500],
-              fontWeight:
-                  hasVal ? FontWeight.w500 : FontWeight.normal,
+              fontWeight: hasVal ? FontWeight.w500 : FontWeight.normal,
             ),
           ),
         ),
@@ -1678,8 +1674,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(6)),
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) => setState(() {
                       row.amount = double.tryParse(v) ?? 0;
                     }),
@@ -1716,17 +1712,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
               controller: row.amtCtrl,
               decoration: InputDecoration(
                 hintText: '0.00',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: _navyAccent, width: 2)),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 12),
+                    borderSide: const BorderSide(color: _navyAccent, width: 2)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
               ),
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               textAlign: TextAlign.right,
               onChanged: (v) => setState(() {
                 row.amount = double.tryParse(v) ?? 0;
@@ -1740,14 +1735,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
               controller: row.descCtrl,
               decoration: InputDecoration(
                 hintText: 'Description (optional)',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: _navyAccent, width: 2)),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
+                    borderSide: const BorderSide(color: _navyAccent, width: 2)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
               onChanged: (v) => row.description = v,
             ),
@@ -1802,8 +1796,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                   const SizedBox(
                       width: 20,
                       height: 20,
-                      child:
-                          CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2))
                 else
                   const Icon(Icons.arrow_drop_down, color: Colors.grey),
               ]),
@@ -1814,15 +1807,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: () => setState(() {
-                _selectedVendorId   = null;
+                _selectedVendorId = null;
                 _selectedVendorName = null;
               }),
               icon: const Icon(Icons.clear, size: 16, color: Colors.red),
               label: const Text('Clear Vendor',
                   style: TextStyle(color: Colors.red, fontSize: 12)),
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -1836,9 +1828,9 @@ class _NewExpensePageState extends State<NewExpensePage> {
   // ✅ Customer selector dialog — same as new_invoice.dart
   Future<void> _showCustomerSelector() async {
     final TextEditingController searchController = TextEditingController();
-    List<BillingCustomer> customers         = [];
+    List<BillingCustomer> customers = [];
     List<BillingCustomer> filteredCustomers = [];
-    bool isLoading      = true;
+    bool isLoading = true;
     String? errorMessage;
 
     showDialog(
@@ -1848,14 +1840,14 @@ class _NewExpensePageState extends State<NewExpensePage> {
           if (isLoading && customers.isEmpty) {
             InvoiceService.getBillingCustomers().then((response) {
               setDialogState(() {
-                customers         = response.customers;
+                customers = response.customers;
                 filteredCustomers = customers;
-                isLoading         = false;
+                isLoading = false;
               });
             }).catchError((error) {
               setDialogState(() {
                 errorMessage = error.toString();
-                isLoading    = false;
+                isLoading = false;
               });
             });
           }
@@ -1902,12 +1894,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
                       : errorMessage != null
                           ? Center(
                               child: Column(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center,
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(Icons.error_outline,
-                                      size: 48,
-                                      color: Colors.red[400]),
+                                      size: 48, color: Colors.red[400]),
                                   const SizedBox(height: 12),
                                   Text('Error loading customers',
                                       style: TextStyle(
@@ -1916,14 +1906,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                           color: Colors.red[700])),
                                   const SizedBox(height: 8),
                                   Text(errorMessage!,
-                                      style: TextStyle(
-                                          color: Colors.grey[600]),
+                                      style: TextStyle(color: Colors.grey[600]),
                                       textAlign: TextAlign.center),
                                   const SizedBox(height: 16),
                                   ElevatedButton(
                                     onPressed: () {
                                       setDialogState(() {
-                                        isLoading    = true;
+                                        isLoading = true;
                                         errorMessage = null;
                                       });
                                     },
@@ -1935,13 +1924,11 @@ class _NewExpensePageState extends State<NewExpensePage> {
                           : filteredCustomers.isEmpty
                               ? const Center(
                                   child: Text('No customers found',
-                                      style:
-                                          TextStyle(color: Colors.grey)))
+                                      style: TextStyle(color: Colors.grey)))
                               : ListView.builder(
                                   itemCount: filteredCustomers.length,
                                   itemBuilder: (context, index) {
-                                    final customer =
-                                        filteredCustomers[index];
+                                    final customer = filteredCustomers[index];
                                     return ListTile(
                                       leading: CircleAvatar(
                                         backgroundColor: _navyAccent,
@@ -1952,31 +1939,29 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                               color: Colors.white),
                                         ),
                                       ),
-                                      title:
-                                          Text(customer.customerName),
+                                      title: Text(customer.customerName),
                                       subtitle: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(customer.customerEmail),
-                                          if (customer.companyName !=
-                                              null)
+                                          if (customer.companyName != null)
                                             Text(
                                               customer.companyName!,
                                               style: TextStyle(
                                                   fontSize: 12,
-                                                  color:
-                                                      Colors.grey[600],
-                                                  fontStyle:
-                                                      FontStyle.italic),
+                                                  color: Colors.grey[600],
+                                                  fontStyle: FontStyle.italic),
                                             ),
                                         ],
                                       ),
                                       onTap: () {
                                         setState(() {
-                                          _selectedCustomerId    = customer.id;
-                                          _selectedCustomerName  = customer.customerName;
-                                          _selectedCustomerEmail = customer.customerEmail;
+                                          _selectedCustomerId = customer.id;
+                                          _selectedCustomerName =
+                                              customer.customerName;
+                                          _selectedCustomerEmail =
+                                              customer.customerEmail;
                                         });
                                         Navigator.pop(context);
                                       },
@@ -2017,8 +2002,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
   // ✅ FIX 1: Vendor selector dialog — same pattern as new_payment_made.dart
   Future<void> _showVendorSelector() async {
     final searchCtrl = TextEditingController();
-    List<Map<String, dynamic>> allVendors  = List.from(_vendorsList);
-    List<Map<String, dynamic>> filtered    = List.from(_vendorsList);
+    List<Map<String, dynamic>> allVendors = List.from(_vendorsList);
+    List<Map<String, dynamic>> filtered = List.from(_vendorsList);
     bool loading = _vendorsList.isEmpty;
 
     showDialog(
@@ -2026,22 +2011,24 @@ class _NewExpensePageState extends State<NewExpensePage> {
       builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
         if (loading && allVendors.isEmpty) {
           BillingVendorsService.getAllVendors(
-            sortBy: 'vendorName', sortOrder: 'asc', limit: 1000,
+            sortBy: 'vendorName',
+            sortOrder: 'asc',
+            limit: 1000,
           ).then((res) {
             if (res['success'] == true) {
-              final raw  = res['data'];
-              final list = raw is List
-                  ? raw
-                  : (raw['vendors'] as List? ?? []);
-              final mapped = list.map<Map<String, dynamic>>((v) => {
-                '_id':        v['_id'] ?? '',
-                'vendorName': v['vendorName'] ?? '',
-                'email':      v['email'] ?? v['vendorEmail'] ?? '',
-              }).toList();
+              final raw = res['data'];
+              final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
+              final mapped = list
+                  .map<Map<String, dynamic>>((v) => {
+                        '_id': v['_id'] ?? '',
+                        'vendorName': v['vendorName'] ?? '',
+                        'email': v['email'] ?? v['vendorEmail'] ?? '',
+                      })
+                  .toList();
               setS(() {
                 allVendors = mapped;
-                filtered   = mapped;
-                loading    = false;
+                filtered = mapped;
+                loading = false;
               });
               // also update the parent list
               setState(() => _vendorsList = mapped);
@@ -2084,15 +2071,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
               const SizedBox(height: 12),
               Expanded(
                 child: loading
-                    ? const Center(
-                        child: CircularProgressIndicator())
+                    ? const Center(child: CircularProgressIndicator())
                     : filtered.isEmpty
-                        ? const Center(
-                            child: Text('No vendors found'))
+                        ? const Center(child: Text('No vendors found'))
                         : ListView.builder(
                             itemCount: filtered.length,
                             itemBuilder: (_, i) {
-                              final v    = filtered[i];
+                              final v = filtered[i];
                               final name = v['vendorName'].toString();
                               return ListTile(
                                 leading: CircleAvatar(
@@ -2101,8 +2086,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                     name.isNotEmpty
                                         ? name[0].toUpperCase()
                                         : '?',
-                                    style: const TextStyle(
-                                        color: Colors.white),
+                                    style: const TextStyle(color: Colors.white),
                                   ),
                                 ),
                                 title: Text(name,
@@ -2113,7 +2097,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                                     : null,
                                 onTap: () {
                                   setState(() {
-                                    _selectedVendorId   = v['_id'];
+                                    _selectedVendorId = v['_id'];
                                     _selectedVendorName = v['vendorName'];
                                   });
                                   Navigator.pop(ctx);
@@ -2196,11 +2180,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 if (_selectedCustomerName != null)
                   InkWell(
                     onTap: () => setState(() {
-                      _selectedCustomerId    = null;
-                      _selectedCustomerName  = null;
+                      _selectedCustomerId = null;
+                      _selectedCustomerName = null;
                       _selectedCustomerEmail = null;
                     }),
-                    child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                    child:
+                        const Icon(Icons.close, size: 18, color: Colors.grey),
                   )
                 else
                   const Icon(Icons.arrow_drop_down, color: Colors.grey),
@@ -2232,10 +2217,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
         children: [
           _sectionTitle('Billable Settings', Icons.attach_money),
           const SizedBox(height: 16),
-
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey[300]!),
               borderRadius: BorderRadius.circular(8),
@@ -2244,28 +2227,26 @@ class _NewExpensePageState extends State<NewExpensePage> {
               contentPadding: EdgeInsets.zero,
               activeColor: _navyAccent,
               title: const Text('Mark as Billable',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600, color: _navyDark)),
+                  style:
+                      TextStyle(fontWeight: FontWeight.w600, color: _navyDark)),
               subtitle: Text(
                 'Charge this expense back to a customer with optional markup',
-                style: TextStyle(
-                    fontSize: 12, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
               value: _isBillable,
               onChanged: (v) => setState(() {
                 _isBillable = v;
                 if (!v) {
-                  _markupPercentage      = 0;
+                  _markupPercentage = 0;
                   _markupCtrl.clear();
                   _projectCtrl.clear();
-                  _selectedCustomerId    = null;
-                  _selectedCustomerName  = null;
+                  _selectedCustomerId = null;
+                  _selectedCustomerName = null;
                   _selectedCustomerEmail = null;
                 }
               }),
             ),
           ),
-
           if (_isBillable) ...[
             const SizedBox(height: 16),
 
@@ -2284,8 +2265,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
               label: 'Markup %',
               hint: '0',
               required: false,
-              keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               suffixText: '%',
               icon: Icons.trending_up,
               onChanged: (v) => setState(() {
@@ -2301,12 +2282,11 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 decoration: BoxDecoration(
                   color: _green.withOpacity(0.07),
                   borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: _green.withOpacity(0.3)),
+                  border: Border.all(color: _green.withOpacity(0.3)),
                 ),
                 child: Column(children: [
-                  _infoRow('Expense Total',
-                      '₹${_calcTotal().toStringAsFixed(2)}'),
+                  _infoRow(
+                      'Expense Total', '₹${_calcTotal().toStringAsFixed(2)}'),
                   if (_markupPercentage > 0) ...[
                     const SizedBox(height: 6),
                     _infoRow(
@@ -2319,8 +2299,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                     children: [
                       const Text('Billable Amount',
                           style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _green)),
+                              fontWeight: FontWeight.bold, color: _green)),
                       Text('₹${_calcBillable().toStringAsFixed(2)}',
                           style: const TextStyle(
                               fontWeight: FontWeight.bold,
@@ -2346,35 +2325,28 @@ class _NewExpensePageState extends State<NewExpensePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _sectionTitle(
-              'Additional Information', Icons.note_alt_outlined),
+          _sectionTitle('Additional Information', Icons.note_alt_outlined),
           const SizedBox(height: 16),
-
           TextFormField(
             controller: _notesCtrl,
             decoration: InputDecoration(
               labelText: 'Notes',
               hintText: 'Internal notes about this expense',
               alignLabelWithHint: true,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(
-                      color: _navyAccent, width: 2)),
-              prefixIcon:
-                  const Icon(Icons.notes, color: _navyAccent),
+                  borderSide: const BorderSide(color: _navyAccent, width: 2)),
+              prefixIcon: const Icon(Icons.notes, color: _navyAccent),
             ),
             maxLines: 3,
           ),
-
           const SizedBox(height: 16),
-
           _receiptFileName == null
               ? OutlinedButton.icon(
                   onPressed: _pickReceipt,
-                  icon: const Icon(Icons.attach_file,
-                      color: _navyAccent),
+                  icon: const Icon(Icons.attach_file, color: _navyAccent),
                   label: const Text('Attach Receipt',
                       style: TextStyle(color: _navyAccent)),
                   style: OutlinedButton.styleFrom(
@@ -2388,8 +2360,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                   decoration: BoxDecoration(
                     color: _green.withOpacity(0.07),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: _green.withOpacity(0.3)),
+                    border: Border.all(color: _green.withOpacity(0.3)),
                   ),
                   child: Row(children: [
                     Icon(Icons.check_circle, color: _green, size: 20),
@@ -2426,14 +2397,11 @@ class _NewExpensePageState extends State<NewExpensePage> {
       children: [
         _sectionTitle('Expense Summary', Icons.summarize),
         const SizedBox(height: 16),
-
         _summaryRow('Subtotal', _calcSubtotal()),
         const SizedBox(height: 6),
         _summaryRow('Tax', _calcTax()),
         const Divider(thickness: 2, height: 24),
-        _summaryRow('Total', _calcTotal(),
-            isBold: true, isTotal: true),
-
+        _summaryRow('Total', _calcTotal(), isBold: true, isTotal: true),
         if (_isBillable) ...[
           const SizedBox(height: 16),
           const Divider(),
@@ -2442,8 +2410,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
             Icon(Icons.check_circle, color: _green, size: 18),
             const SizedBox(width: 8),
             Text('Billable',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, color: _green)),
+                style: TextStyle(fontWeight: FontWeight.bold, color: _green)),
           ]),
           if (_selectedCustomerName != null) ...[
             const SizedBox(height: 6),
@@ -2455,8 +2422,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
           ],
           if (_markupPercentage > 0) ...[
             const SizedBox(height: 8),
-            _summaryRow(
-                'Markup (${_markupPercentage.toStringAsFixed(1)}%)',
+            _summaryRow('Markup (${_markupPercentage.toStringAsFixed(1)}%)',
                 _calcTotal() * _markupPercentage / 100,
                 color: _green),
           ],
@@ -2464,9 +2430,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
           _summaryRow('Billable Amount', _calcBillable(),
               isBold: true, color: _green),
         ],
-
         const SizedBox(height: 16),
-
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -2477,12 +2441,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
               ],
             ),
             borderRadius: BorderRadius.circular(8),
-            border:
-                Border.all(color: _navyAccent.withOpacity(0.3)),
+            border: Border.all(color: _navyAccent.withOpacity(0.3)),
           ),
           child: Column(children: [
-            _infoRow('Account',
-                _selectedPaidThroughName ?? '—'),
+            _infoRow('Account', _selectedPaidThroughName ?? '—'),
             // ✅ FIX 3: show balance in summary
             if (_selectedAccountBalance != null) ...[
               const SizedBox(height: 4),
@@ -2490,8 +2452,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Balance',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey[600])),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                   Text(
                     '₹${_selectedAccountBalance!.toStringAsFixed(2)}',
                     style: TextStyle(
@@ -2508,9 +2469,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
             const SizedBox(height: 4),
             _infoRow('Vendor', _selectedVendorName ?? '—'),
             const SizedBox(height: 4),
-            _infoRow(
-                'Receipt',
-                _receiptFileName != null ? 'Attached' : 'None'),
+            _infoRow('Receipt', _receiptFileName != null ? 'Attached' : 'None'),
           ]),
         ),
       ],
@@ -2541,8 +2500,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
             backgroundColor: _navyAccent,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
@@ -2557,8 +2516,8 @@ class _NewExpensePageState extends State<NewExpensePage> {
             foregroundColor: _navyMid,
             padding: const EdgeInsets.symmetric(vertical: 16),
             side: const BorderSide(color: _navyMid),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
@@ -2589,8 +2548,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
         Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            gradient:
-                const LinearGradient(colors: [_navyDark, _navyLight]),
+            gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(icon, color: Colors.white, size: 18),
@@ -2598,36 +2556,27 @@ class _NewExpensePageState extends State<NewExpensePage> {
         const SizedBox(width: 10),
         Text(title,
             style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                color: _navyDark)),
+                fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
       ]);
 
   Widget _summaryRow(String label, double amount,
-          {Color? color,
-          bool isBold = false,
-          bool isTotal = false}) =>
+          {Color? color, bool isBold = false, bool isTotal = false}) =>
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
               style: TextStyle(
                 fontSize: isTotal ? 15 : 13,
-                fontWeight: isBold || isTotal
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-                color: color ??
-                    (isTotal ? _navyDark : Colors.grey[700]),
+                fontWeight:
+                    isBold || isTotal ? FontWeight.bold : FontWeight.normal,
+                color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
               )),
           Text(
             '${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
             style: TextStyle(
               fontSize: isTotal ? 17 : 13,
-              fontWeight: isBold || isTotal
-                  ? FontWeight.bold
-                  : FontWeight.w500,
-              color: color ??
-                  (isTotal ? _navyAccent : _navyDark),
+              fontWeight: isBold || isTotal ? FontWeight.bold : FontWeight.w500,
+              color: color ?? (isTotal ? _navyAccent : _navyDark),
             ),
           ),
         ],
@@ -2636,9 +2585,7 @@ class _NewExpensePageState extends State<NewExpensePage> {
   Widget _infoRow(String label, String value) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style:
-                  TextStyle(fontSize: 12, color: Colors.grey[600])),
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
           Flexible(
             child: Text(value,
                 style: const TextStyle(
@@ -2673,16 +2620,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
           hintText: hint,
           prefixText: prefixText,
           suffixText: suffixText,
-          prefixIcon:
-              icon != null ? Icon(icon, color: _navyAccent) : null,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8)),
+          prefixIcon: icon != null ? Icon(icon, color: _navyAccent) : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide:
-                  const BorderSide(color: _navyAccent, width: 2)),
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 14),
+              borderSide: const BorderSide(color: _navyAccent, width: 2)),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         ),
         validator: validator,
       );
@@ -2700,16 +2644,13 @@ class _NewExpensePageState extends State<NewExpensePage> {
         isExpanded: true,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon:
-              icon != null ? Icon(icon, color: _navyAccent) : null,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8)),
+          prefixIcon: icon != null ? Icon(icon, color: _navyAccent) : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide:
-                  const BorderSide(color: _navyAccent, width: 2)),
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 14),
+              borderSide: const BorderSide(color: _navyAccent, width: 2)),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         ),
         items: items,
         onChanged: onChanged,
@@ -2719,19 +2660,16 @@ class _NewExpensePageState extends State<NewExpensePage> {
   Widget _loadingField(String label) => InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: Row(children: [
           const SizedBox(
               width: 16,
               height: 16,
-              child:
-                  CircularProgressIndicator(strokeWidth: 2)),
+              child: CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 10),
           Text('Loading...',
-              style: TextStyle(
-                  color: Colors.grey[500], fontSize: 13)),
+              style: TextStyle(color: Colors.grey[500], fontSize: 13)),
         ]),
       );
 }

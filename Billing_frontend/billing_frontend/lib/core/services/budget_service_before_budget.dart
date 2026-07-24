@@ -42,16 +42,16 @@ class BudgetAccountLine {
     this.percentUsed = 0,
   });
 
-  factory BudgetAccountLine.fromJson(Map<String, dynamic> j) => BudgetAccountLine(
+  factory BudgetAccountLine.fromJson(Map<String, dynamic> j) =>
+      BudgetAccountLine(
         accountId: j['accountId'],
         accountName: j['accountName'] ?? '',
         accountType: j['accountType'] ?? '',
         monthlyAmounts: List<double>.from(
             (j['monthlyAmounts'] as List? ?? List.filled(12, 0))
                 .map((v) => (v ?? 0).toDouble())),
-        actualMonthly: List<double>.from(
-            (j['actualMonthly'] as List? ?? [])
-                .map((v) => (v ?? 0).toDouble())),
+        actualMonthly: List<double>.from((j['actualMonthly'] as List? ?? [])
+            .map((v) => (v ?? 0).toDouble())),
         totalBudgeted: (j['totalBudgeted'] ?? 0).toDouble(),
         totalActual: (j['totalActual'] ?? 0).toDouble(),
         variance: (j['variance'] ?? 0).toDouble(),
@@ -65,7 +65,8 @@ class BudgetAccountLine {
         'monthlyAmounts': monthlyAmounts,
       };
 
-  BudgetAccountLine copyWith({List<double>? monthlyAmounts}) => BudgetAccountLine(
+  BudgetAccountLine copyWith({List<double>? monthlyAmounts}) =>
+      BudgetAccountLine(
         accountId: accountId,
         accountName: accountName,
         accountType: accountType,
@@ -191,7 +192,8 @@ class BudgetService {
     final headers = await _getHeaders();
     final res = await http.get(Uri.parse('$_base/stats'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load stats');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load stats');
     return BudgetStats.fromJson(body['data']);
   }
 
@@ -211,18 +213,22 @@ class BudgetService {
       'limit': limit.toString(),
     };
     if (isActive != null) params['isActive'] = isActive.toString();
-    if (financialYear != null && financialYear != 'All') params['financialYear'] = financialYear;
-    if (budgetPeriod != null && budgetPeriod != 'All') params['budgetPeriod'] = budgetPeriod;
+    if (financialYear != null && financialYear != 'All')
+      params['financialYear'] = financialYear;
+    if (budgetPeriod != null && budgetPeriod != 'All')
+      params['budgetPeriod'] = budgetPeriod;
     if (search != null && search.isNotEmpty) params['search'] = search;
 
     final uri = Uri.parse(_base).replace(queryParameters: params);
     final res = await http.get(uri, headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load budgets');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load budgets');
 
     final data = body['data'];
     return BudgetListResult(
-      budgets: (data['budgets'] as List).map((j) => Budget.fromJson(j)).toList(),
+      budgets:
+          (data['budgets'] as List).map((j) => Budget.fromJson(j)).toList(),
       total: data['pagination']?['total'] ?? 0,
       page: data['pagination']?['page'] ?? 1,
       pages: data['pagination']?['pages'] ?? 1,
@@ -242,7 +248,8 @@ class BudgetService {
     final headers = await _getHeaders();
     final res = await http.get(Uri.parse('$_base/$id'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load budget');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load budget');
     return Budget.fromJson(body['data']);
   }
 
@@ -250,9 +257,11 @@ class BudgetService {
 
   static Future<Budget> getBudgetWithActuals(String id) async {
     final headers = await _getHeaders();
-    final res = await http.get(Uri.parse('$_base/$id/actuals'), headers: headers);
+    final res =
+        await http.get(Uri.parse('$_base/$id/actuals'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to load actuals');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to load actuals');
     return Budget.fromJson(body['data']);
   }
 
@@ -266,13 +275,15 @@ class BudgetService {
       body: jsonEncode(data),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 201) throw Exception(body['message'] ?? 'Failed to create budget');
+    if (res.statusCode != 201)
+      throw Exception(body['message'] ?? 'Failed to create budget');
     return Budget.fromJson(body['data']);
   }
 
   // ── Update ────────────────────────────────────────────────────────────────
 
-  static Future<Budget> updateBudget(String id, Map<String, dynamic> data) async {
+  static Future<Budget> updateBudget(
+      String id, Map<String, dynamic> data) async {
     final headers = await _getHeaders();
     final res = await http.put(
       Uri.parse('$_base/$id'),
@@ -280,7 +291,8 @@ class BudgetService {
       body: jsonEncode(data),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to update budget');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to update budget');
     return Budget.fromJson(body['data']);
   }
 
@@ -294,13 +306,15 @@ class BudgetService {
       body: jsonEncode({'isActive': isActive}),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to update budget');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to update budget');
     return Budget.fromJson(body['data']);
   }
 
   // ── Clone ─────────────────────────────────────────────────────────────────
 
-  static Future<Budget> cloneBudget(String id, String newName, String newYear) async {
+  static Future<Budget> cloneBudget(
+      String id, String newName, String newYear) async {
     final headers = await _getHeaders();
     final res = await http.post(
       Uri.parse('$_base/$id/clone'),
@@ -308,7 +322,8 @@ class BudgetService {
       body: jsonEncode({'budgetName': newName, 'financialYear': newYear}),
     );
     final body = jsonDecode(res.body);
-    if (res.statusCode != 201) throw Exception(body['message'] ?? 'Failed to clone budget');
+    if (res.statusCode != 201)
+      throw Exception(body['message'] ?? 'Failed to clone budget');
     return Budget.fromJson(body['data']);
   }
 
@@ -318,7 +333,8 @@ class BudgetService {
     final headers = await _getHeaders();
     final res = await http.delete(Uri.parse('$_base/$id'), headers: headers);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Failed to delete budget');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Failed to delete budget');
   }
 
   // ── Bulk Import ───────────────────────────────────────────────────────────
@@ -333,13 +349,15 @@ class BudgetService {
 
     final request = http.MultipartRequest('POST', Uri.parse('$_base/import'));
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+    request.files.add(
+        http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
     request.fields['budgets'] = jsonEncode(budgets);
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     final body = jsonDecode(res.body);
-    if (res.statusCode != 200) throw Exception(body['message'] ?? 'Import failed');
+    if (res.statusCode != 200)
+      throw Exception(body['message'] ?? 'Import failed');
     return body;
   }
 }

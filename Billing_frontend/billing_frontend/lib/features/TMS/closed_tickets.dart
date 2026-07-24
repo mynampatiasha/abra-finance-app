@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // lib/screens/tms/closed_tickets_screen.dart
 // ============================================================================
 // 🎫 CLOSED TICKETS SCREEN - Historical View with Table & Export
@@ -198,9 +199,8 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
   Future<void> _pickDate(bool isFrom) async {
     final date = await showDatePicker(
       context: context,
-      initialDate: isFrom
-          ? (_dateFrom ?? DateTime.now())
-          : (_dateTo ?? DateTime.now()),
+      initialDate:
+          isFrom ? (_dateFrom ?? DateTime.now()) : (_dateTo ?? DateTime.now()),
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
@@ -266,13 +266,16 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
         final assignedToName = ticket['assigned_to_name'] ?? 'Unassigned';
         final timeline = ticket['timeline']?.toString() ?? 'Not Set';
         final deadline = ticket['deadline'] != null
-            ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(ticket['deadline']))
+            ? DateFormat('dd/MM/yyyy HH:mm')
+                .format(DateTime.parse(ticket['deadline']))
             : 'No deadline';
         final closedDate = ticket['updated_at'] != null
-            ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(ticket['updated_at']))
+            ? DateFormat('dd/MM/yyyy HH:mm')
+                .format(DateTime.parse(ticket['updated_at']))
             : '';
         final createdAt = ticket['created_at'] != null
-            ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(ticket['created_at']))
+            ? DateFormat('dd/MM/yyyy HH:mm')
+                .format(DateTime.parse(ticket['created_at']))
             : '';
 
         csvData.add([
@@ -291,10 +294,12 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
       // Use ExportHelper to export
       await ExportHelper.exportToExcel(
         data: csvData,
-        filename: 'closed_tickets_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}',
+        filename:
+            'closed_tickets_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}',
       );
 
-      _showSuccessSnackbar('✅ Excel file downloaded with ${_filteredTickets.length} tickets!');
+      _showSuccessSnackbar(
+          '✅ Excel file downloaded with ${_filteredTickets.length} tickets!');
     } catch (e) {
       print('❌ Export Error: $e');
       _showErrorSnackbar('Failed to export: $e');
@@ -304,35 +309,11 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message),
-          ],
-        ),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message, isError: true);
   }
 
   @override
@@ -343,7 +324,8 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
         backgroundColor: const Color(0xFF1E3A8A),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+          icon: const Icon(Icons.arrow_back_ios_new,
+              color: Colors.white, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
@@ -364,7 +346,9 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                 children: [
                   _buildStatistics(),
                   _buildSingleRowFilters(),
-                  _isTableView ? _buildTicketsTable() : _buildClosedTicketListView(),
+                  _isTableView
+                      ? _buildTicketsTable()
+                      : _buildClosedTicketListView(),
                 ],
               ),
             ),
@@ -517,7 +501,8 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
               onChanged: (value) {
                 setState(() {
@@ -535,12 +520,17 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
             child: GestureDetector(
               onTap: () => _pickDate(true),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: _dateFrom != null ? const Color(0xFF1E3A8A).withOpacity(0.1) : const Color(0xFFF3F4F6),
+                  color: _dateFrom != null
+                      ? const Color(0xFF1E3A8A).withOpacity(0.1)
+                      : const Color(0xFFF3F4F6),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: _dateFrom != null ? const Color(0xFF1E3A8A) : const Color(0xFFE5E7EB),
+                    color: _dateFrom != null
+                        ? const Color(0xFF1E3A8A)
+                        : const Color(0xFFE5E7EB),
                   ),
                 ),
                 child: Row(
@@ -549,7 +539,9 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                     Icon(
                       Icons.calendar_today,
                       size: 16,
-                      color: _dateFrom != null ? const Color(0xFF1E3A8A) : Colors.grey[600],
+                      color: _dateFrom != null
+                          ? const Color(0xFF1E3A8A)
+                          : Colors.grey[600],
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -559,8 +551,12 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                             : DateFormat('MMM dd, yyyy').format(_dateFrom!),
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight: _dateFrom != null ? FontWeight.w600 : FontWeight.normal,
-                          color: _dateFrom != null ? const Color(0xFF1E3A8A) : Colors.grey[700],
+                          fontWeight: _dateFrom != null
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: _dateFrom != null
+                              ? const Color(0xFF1E3A8A)
+                              : Colors.grey[700],
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -578,12 +574,17 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
             child: GestureDetector(
               onTap: () => _pickDate(false),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: _dateTo != null ? const Color(0xFF1E3A8A).withOpacity(0.1) : const Color(0xFFF3F4F6),
+                  color: _dateTo != null
+                      ? const Color(0xFF1E3A8A).withOpacity(0.1)
+                      : const Color(0xFFF3F4F6),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: _dateTo != null ? const Color(0xFF1E3A8A) : const Color(0xFFE5E7EB),
+                    color: _dateTo != null
+                        ? const Color(0xFF1E3A8A)
+                        : const Color(0xFFE5E7EB),
                   ),
                 ),
                 child: Row(
@@ -592,7 +593,9 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                     Icon(
                       Icons.calendar_today,
                       size: 16,
-                      color: _dateTo != null ? const Color(0xFF1E3A8A) : Colors.grey[600],
+                      color: _dateTo != null
+                          ? const Color(0xFF1E3A8A)
+                          : Colors.grey[600],
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -602,8 +605,12 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                             : DateFormat('MMM dd, yyyy').format(_dateTo!),
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight: _dateTo != null ? FontWeight.w600 : FontWeight.normal,
-                          color: _dateTo != null ? const Color(0xFF1E3A8A) : Colors.grey[700],
+                          fontWeight: _dateTo != null
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: _dateTo != null
+                              ? const Color(0xFF1E3A8A)
+                              : Colors.grey[700],
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -640,15 +647,18 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 filled: true,
                 fillColor: const Color(0xFFF3F4F6),
               ),
               items: [
                 const DropdownMenuItem(
-                    value: '', child: Text('All', style: TextStyle(fontSize: 12))),
+                    value: '',
+                    child: Text('All', style: TextStyle(fontSize: 12))),
                 const DropdownMenuItem(
-                    value: '0', child: Text('Unassigned', style: TextStyle(fontSize: 12))),
+                    value: '0',
+                    child: Text('Unassigned', style: TextStyle(fontSize: 12))),
                 ..._employees.map((emp) {
                   return DropdownMenuItem<String>(
                     value: emp['_id'].toString(),
@@ -706,23 +716,52 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
   // ========================================================================
 
   Widget _buildViewToggle() => Container(
-    decoration: BoxDecoration(border: Border.all(color: const Color(0xFF1E3A8A).withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
-      Container(width: 1, height: 24, color: const Color(0xFF1E3A8A).withOpacity(0.2)),
-      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
-    ]),
-  );
+        decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFF1E3A8A).withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(8)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _toggleButton(
+              icon: Icons.view_list_rounded,
+              label: 'List',
+              isSelected: !_isTableView,
+              onTap: () => setState(() => _isTableView = false)),
+          Container(
+              width: 1,
+              height: 24,
+              color: const Color(0xFF1E3A8A).withOpacity(0.2)),
+          _toggleButton(
+              icon: Icons.table_chart_rounded,
+              label: 'Table',
+              isSelected: _isTableView,
+              onTap: () => setState(() => _isTableView = true)),
+        ]),
+      );
 
-  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) =>
-      InkWell(onTap: onTap, borderRadius: BorderRadius.circular(7),
+  Widget _toggleButton(
+          {required IconData icon,
+          required String label,
+          required bool isSelected,
+          required VoidCallback onTap}) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(color: isSelected ? const Color(0xFF1E3A8A) : Colors.transparent, borderRadius: BorderRadius.circular(7)),
+          decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFF1E3A8A) : Colors.transparent,
+              borderRadius: BorderRadius.circular(7)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 15, color: isSelected ? Colors.white : const Color(0xFF1E3A8A)),
+            Icon(icon,
+                size: 15,
+                color: isSelected ? Colors.white : const Color(0xFF1E3A8A)),
             const SizedBox(width: 5),
-            Text(label, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal, color: isSelected ? Colors.white : const Color(0xFF1E3A8A))),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight:
+                        isSelected ? FontWeight.w700 : FontWeight.normal,
+                    color:
+                        isSelected ? Colors.white : const Color(0xFF1E3A8A))),
           ]),
         ),
       );
@@ -732,11 +771,25 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
       return Container(
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(48),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))]),
-        child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2))
+            ]),
+        child: Center(
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.archive_outlined, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 16),
-          Text('No closed tickets found', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+          Text('No closed tickets found',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700])),
         ])),
       );
     }
@@ -751,19 +804,27 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
   }
 
   Widget _buildClosedTicketListCard(Map<String, dynamic> ticket) {
-    final ticketNum  = ticket['ticket_number']?.toString() ?? 'N/A';
-    final subject    = ticket['subject']?.toString() ?? 'No Subject';
+    final ticketNum = ticket['ticket_number']?.toString() ?? 'N/A';
+    final subject = ticket['subject']?.toString() ?? 'No Subject';
     final assignedTo = ticket['assigned_to_name']?.toString() ?? 'Not Assigned';
-    final priority   = ticket['priority']?.toString() ?? 'Medium';
-    final closedAt   = ticket['closed_at'] ?? ticket['updated_at'];
+    final priority = ticket['priority']?.toString() ?? 'Medium';
+    final closedAt = ticket['closed_at'] ?? ticket['updated_at'];
     DateTime? closedDate;
-    try { closedDate = DateTime.parse(closedAt?.toString() ?? ''); } catch (_) {}
+    try {
+      closedDate = DateTime.parse(closedAt?.toString() ?? '');
+    } catch (_) {}
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -771,36 +832,73 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
           Row(children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: const Color(0xFF1E3A8A), borderRadius: BorderRadius.circular(20)),
-              child: Text(ticketNum, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1E3A8A),
+                  borderRadius: BorderRadius.circular(20)),
+              child: Text(ticketNum,
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white)),
             ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: const Color(0xFF64748B).withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF64748B).withOpacity(0.3))),
-              child: const Text('CLOSED', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF64748B).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: const Color(0xFF64748B).withOpacity(0.3))),
+              child: const Text('CLOSED',
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF64748B))),
             ),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: priority.toLowerCase() == 'high' ? Colors.red[50] : priority.toLowerCase() == 'medium' ? Colors.orange[50] : Colors.green[50],
+                color: priority.toLowerCase() == 'high'
+                    ? Colors.red[50]
+                    : priority.toLowerCase() == 'medium'
+                        ? Colors.orange[50]
+                        : Colors.green[50],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(priority.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: priority.toLowerCase() == 'high' ? Colors.red[700] : priority.toLowerCase() == 'medium' ? Colors.orange[700] : Colors.green[700])),
+              child: Text(priority.toUpperCase(),
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: priority.toLowerCase() == 'high'
+                          ? Colors.red[700]
+                          : priority.toLowerCase() == 'medium'
+                              ? Colors.orange[700]
+                              : Colors.green[700])),
             ),
           ]),
           const SizedBox(height: 10),
-          Text(subject, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)), maxLines: 2, overflow: TextOverflow.ellipsis),
+          Text(subject,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E293B)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
           const SizedBox(height: 8),
           Row(children: [
-            Icon(Icons.assignment_ind_outlined, size: 13, color: Colors.grey[500]),
+            Icon(Icons.assignment_ind_outlined,
+                size: 13, color: Colors.grey[500]),
             const SizedBox(width: 4),
-            Expanded(child: Text('Assigned: $assignedTo', style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+            Expanded(
+                child: Text('Assigned: $assignedTo',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis)),
             if (closedDate != null) ...[
               Icon(Icons.lock_outline, size: 13, color: Colors.grey[500]),
               const SizedBox(width: 4),
-              Text(DateFormat('dd MMM yyyy').format(closedDate), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Text(DateFormat('dd MMM yyyy').format(closedDate),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             ],
           ]),
           const SizedBox(height: 10),
@@ -808,11 +906,15 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
             ElevatedButton.icon(
               onPressed: () => _reopenTicket(ticket['_id']?.toString() ?? ''),
               icon: const Icon(Icons.refresh, size: 14),
-              label: const Text('Reopen', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              label: const Text('Reopen',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                backgroundColor: const Color(0xFF1E3A8A),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
               ),
             ),
@@ -896,7 +998,8 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.archive_rounded, color: Colors.white, size: 22),
+                const Icon(Icons.archive_rounded,
+                    color: Colors.white, size: 22),
                 const SizedBox(width: 12),
                 Text(
                   'Closed Tickets (${_filteredTickets.length})',
@@ -919,372 +1022,390 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
               child: Scrollbar(
                 thumbVisibility: true,
                 trackVisibility: true,
-                notificationPredicate: (notification) => notification.depth == 1,
+                notificationPredicate: (notification) =>
+                    notification.depth == 1,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columnSpacing: 32,
-                      horizontalMargin: 24,
-                      headingRowHeight: 60,
-                      dataRowHeight: 80,
-                      headingRowColor: MaterialStateProperty.all(
-                        const Color(0xFFF9FAFB),
-                      ),
-                      border: TableBorder(
-                        horizontalInside: BorderSide(
-                          color: Colors.grey[200]!,
-                          width: 1,
-                        ),
-                      ),
-                      dividerThickness: 1,
-                      columns: const [
-                  DataColumn(
-                    label: Text(
-                      'Ticket #',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
+                  child: DataTable(
+                    columnSpacing: 32,
+                    horizontalMargin: 24,
+                    headingRowHeight: 60,
+                    dataRowHeight: 80,
+                    headingRowColor: MaterialStateProperty.all(
+                      const Color(0xFFF9FAFB),
+                    ),
+                    border: TableBorder(
+                      horizontalInside: BorderSide(
+                        color: Colors.grey[200]!,
+                        width: 1,
                       ),
                     ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Subject',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Priority',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Created By',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Assigned To',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Timeline',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Created At',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Deadline',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Closed Date',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      'Actions',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Color(0xFF1E3A8A),
-                      ),
-                    ),
-                  ),
-                ],
-                rows: _filteredTickets.map((ticket) {
-                  return DataRow(
-                    cells: [
-                      // Ticket Number
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          margin: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E3A8A),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            ticket['ticket_number'] ?? 'N/A',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                    dividerThickness: 1,
+                    columns: const [
+                      DataColumn(
+                        label: Text(
+                          'Ticket #',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Subject
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 250),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Text(
-                            ticket['subject'] ?? 'No Subject',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF1F2937),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
+                      DataColumn(
+                        label: Text(
+                          'Subject',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Priority
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: _buildPriorityBadge(ticket['priority'] ?? 'Medium'),
-                        ),
-                      ),
-
-                      // Created By
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 150),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ticket['creator_name'] ?? 'Unknown',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1F2937),
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (ticket['creator_email'] != null)
-                                Text(
-                                  ticket['creator_email'],
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[600],
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                            ],
+                      DataColumn(
+                        label: Text(
+                          'Priority',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Assigned To
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 150),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Text(
-                            ticket['assigned_to_name'] ?? 'Unassigned',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: ticket['assigned_to_name'] != null
-                                  ? const Color(0xFF1F2937)
-                                  : Colors.grey[500],
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                      DataColumn(
+                        label: Text(
+                          'Created By',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Timeline
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: _buildTimelineBadge(ticket['timeline']),
-                        ),
-                      ),
-
-                      // Created At
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 140),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ticket['created_at'] != null
-                                    ? DateFormat('MMM dd, yyyy').format(
-                                        DateTime.parse(ticket['created_at']))
-                                    : 'N/A',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1F2937),
-                                ),
-                              ),
-                              if (ticket['created_at'] != null)
-                                Text(
-                                  DateFormat('hh:mm a').format(
-                                      DateTime.parse(ticket['created_at'])),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                            ],
+                      DataColumn(
+                        label: Text(
+                          'Assigned To',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Deadline
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 140),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ticket['deadline'] != null
-                                    ? DateFormat('MMM dd, yyyy').format(
-                                        DateTime.parse(ticket['deadline']))
-                                    : 'No deadline',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: ticket['deadline'] != null
-                                      ? const Color(0xFF1F2937)
-                                      : Colors.grey[500],
-                                ),
-                              ),
-                              if (ticket['deadline'] != null)
-                                Text(
-                                  DateFormat('hh:mm a').format(
-                                      DateTime.parse(ticket['deadline'])),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                            ],
+                      DataColumn(
+                        label: Text(
+                          'Timeline',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Closed Date - Use closed_at if available, otherwise updated_at
-                      DataCell(
-                        Container(
-                          constraints: const BoxConstraints(maxWidth: 140),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _getClosedDate(ticket) != null
-                                    ? DateFormat('MMM dd, yyyy').format(_getClosedDate(ticket)!)
-                                    : 'N/A',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF10B981),
-                                ),
-                              ),
-                              if (_getClosedDate(ticket) != null)
-                                Text(
-                                  DateFormat('hh:mm a').format(_getClosedDate(ticket)!),
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    color: Color(0xFF10B981),
-                                  ),
-                                ),
-                            ],
+                      DataColumn(
+                        label: Text(
+                          'Created At',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
-
-                      // Actions
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                          child: ElevatedButton.icon(
-                            onPressed: () => _showReopenConfirmation(
-                              ticket['_id'].toString(),
-                              ticket['ticket_number'] ?? 'N/A',
-                            ),
-                            icon: const Icon(Icons.replay_rounded, size: 16),
-                            label: const Text(
-                              'Reopen',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1E3A8A),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
+                      DataColumn(
+                        label: Text(
+                          'Deadline',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                        ),
+                      ),
+                      DataColumn(
+                        label: Text(
+                          'Closed Date',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                        ),
+                      ),
+                      DataColumn(
+                        label: Text(
+                          'Actions',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFF1E3A8A),
                           ),
                         ),
                       ),
                     ],
-                  );
-                }).toList(),
-                    ), // DataTable
-                  ), // SingleChildScrollView (horizontal)
-                ), // Scrollbar (inner)
-              ), // SingleChildScrollView (vertical)
-            ), // Scrollbar (outer)
+                    rows: _filteredTickets.map((ticket) {
+                      return DataRow(
+                        cells: [
+                          // Ticket Number
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              margin: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E3A8A),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                ticket['ticket_number'] ?? 'N/A',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Subject
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 250),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Text(
+                                ticket['subject'] ?? 'No Subject',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1F2937),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                              ),
+                            ),
+                          ),
+
+                          // Priority
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: _buildPriorityBadge(
+                                  ticket['priority'] ?? 'Medium'),
+                            ),
+                          ),
+
+                          // Created By
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 150),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ticket['creator_name'] ?? 'Unknown',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1F2937),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (ticket['creator_email'] != null)
+                                    Text(
+                                      ticket['creator_email'],
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Assigned To
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 150),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Text(
+                                ticket['assigned_to_name'] ?? 'Unassigned',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: ticket['assigned_to_name'] != null
+                                      ? const Color(0xFF1F2937)
+                                      : Colors.grey[500],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+
+                          // Timeline
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: _buildTimelineBadge(ticket['timeline']),
+                            ),
+                          ),
+
+                          // Created At
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 140),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ticket['created_at'] != null
+                                        ? DateFormat('MMM dd, yyyy').format(
+                                            DateTime.parse(
+                                                ticket['created_at']))
+                                        : 'N/A',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1F2937),
+                                    ),
+                                  ),
+                                  if (ticket['created_at'] != null)
+                                    Text(
+                                      DateFormat('hh:mm a').format(
+                                          DateTime.parse(ticket['created_at'])),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Deadline
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 140),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ticket['deadline'] != null
+                                        ? DateFormat('MMM dd, yyyy').format(
+                                            DateTime.parse(ticket['deadline']))
+                                        : 'No deadline',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: ticket['deadline'] != null
+                                          ? const Color(0xFF1F2937)
+                                          : Colors.grey[500],
+                                    ),
+                                  ),
+                                  if (ticket['deadline'] != null)
+                                    Text(
+                                      DateFormat('hh:mm a').format(
+                                          DateTime.parse(ticket['deadline'])),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Closed Date - Use closed_at if available, otherwise updated_at
+                          DataCell(
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 140),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _getClosedDate(ticket) != null
+                                        ? DateFormat('MMM dd, yyyy')
+                                            .format(_getClosedDate(ticket)!)
+                                        : 'N/A',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                  ),
+                                  if (_getClosedDate(ticket) != null)
+                                    Text(
+                                      DateFormat('hh:mm a')
+                                          .format(_getClosedDate(ticket)!),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF10B981),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Actions
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showReopenConfirmation(
+                                  ticket['_id'].toString(),
+                                  ticket['ticket_number'] ?? 'N/A',
+                                ),
+                                icon:
+                                    const Icon(Icons.replay_rounded, size: 16),
+                                label: const Text(
+                                  'Reopen',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1E3A8A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ), // DataTable
+                ), // SingleChildScrollView (horizontal)
+              ), // Scrollbar (inner)
+            ), // SingleChildScrollView (vertical)
+          ), // Scrollbar (outer)
         ],
       ),
     );
@@ -1302,7 +1423,7 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
         print('Error parsing closed_at: $e');
       }
     }
-    
+
     // Fallback to updated_at (when ticket status changed to closed)
     if (ticket['updated_at'] != null) {
       try {
@@ -1311,7 +1432,7 @@ class _ClosedTicketsScreenState extends State<ClosedTicketsScreen> {
         print('Error parsing updated_at: $e');
       }
     }
-    
+
     return null;
   }
 

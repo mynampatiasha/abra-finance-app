@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // BULK IMPORT INVOICES DIALOG — UPDATED TEMPLATE COLUMNS
 // ============================================================================
@@ -22,11 +23,11 @@ import 'dart:convert';
 import '../../../../core/utils/export_helper.dart';
 import '../../../../core/services/api_service.dart';
 
-const Color _kNavy   = Color(0xFF1e3a8a);
+const Color _kNavy = Color(0xFF1e3a8a);
 const Color _kPurple = Color(0xFF9B59B6);
-const Color _kGreen  = Color(0xFF27AE60);
-const Color _kBlue   = Color(0xFF2980B9);
-const Color _kRed    = Color(0xFFE74C3C);
+const Color _kGreen = Color(0xFF27AE60);
+const Color _kBlue = Color(0xFF2980B9);
+const Color _kRed = Color(0xFFE74C3C);
 
 class BulkImportInvoicesDialog extends StatefulWidget {
   final VoidCallback onImportComplete;
@@ -38,16 +39,15 @@ class BulkImportInvoicesDialog extends StatefulWidget {
       _BulkImportInvoicesDialogState();
 }
 
-class _BulkImportInvoicesDialogState
-    extends State<BulkImportInvoicesDialog> {
-  bool           _isDownloading = false;
-  bool           _isUploading   = false;
-  String?        _uploadedFileName;
-  int            _importedCount = 0;
-  int            _errorsCount   = 0;
-  List<dynamic>  _errorDetails  = [];
-  bool           _showResults   = false;
-  bool           _importSuccess = false;
+class _BulkImportInvoicesDialogState extends State<BulkImportInvoicesDialog> {
+  bool _isDownloading = false;
+  bool _isUploading = false;
+  String? _uploadedFileName;
+  int _importedCount = 0;
+  int _errorsCount = 0;
+  List<dynamic> _errorDetails = [];
+  bool _showResults = false;
+  bool _importSuccess = false;
 
   // ── Download template ──────────────────────────────────────────────────────
   // UPDATED: Added HSN Code, SAC Code, Unit, Item GST Rate, Place of Supply
@@ -87,9 +87,9 @@ class _BulkImportInvoicesDialogState
             'Net 30',
             'ORD-001',
             'Fleet Management Services - January',
-            '998311',   // HSN Code
-            '',         // SAC Code (blank if HSN used)
-            'Nos',      // Unit
+            '998311', // HSN Code
+            '', // SAC Code (blank if HSN used)
+            'Nos', // Unit
             '1',
             '25000.00',
             '5',
@@ -108,9 +108,9 @@ class _BulkImportInvoicesDialogState
             'Net 15',
             'ORD-002',
             'Driver Hire - 10 Days',
-            '',         // HSN Code (blank if SAC used)
-            '996601',   // SAC Code
-            'Hrs',      // Unit
+            '', // HSN Code (blank if SAC used)
+            '996601', // SAC Code
+            'Hrs', // Unit
             '10',
             '1500.00',
             '0',
@@ -173,7 +173,8 @@ class _BulkImportInvoicesDialogState
             decoration: BoxDecoration(
                 color: _kBlue.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.upload_file_rounded, color: _kBlue, size: 22),
+            child:
+                const Icon(Icons.upload_file_rounded, color: _kBlue, size: 22),
           ),
           const SizedBox(width: 12),
           const Text('Confirm Import',
@@ -190,16 +191,20 @@ class _BulkImportInvoicesDialogState
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: _kGreen.withOpacity(0.3))),
               child: Row(children: [
-                const Icon(Icons.insert_drive_file_rounded, color: _kGreen, size: 20),
+                const Icon(Icons.insert_drive_file_rounded,
+                    color: _kGreen, size: 20),
                 const SizedBox(width: 10),
-                Expanded(child: Text(file.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                Expanded(
+                    child: Text(file.name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13))),
               ]),
             ),
             const SizedBox(height: 14),
             Text(
               'Upload this file for processing?\nImported invoices cannot be undone.',
-              style: TextStyle(fontSize: 13, color: Colors.grey[600], height: 1.5),
+              style:
+                  TextStyle(fontSize: 13, color: Colors.grey[600], height: 1.5),
             ),
           ],
         ),
@@ -213,8 +218,10 @@ class _BulkImportInvoicesDialogState
             icon: const Icon(Icons.upload_rounded, size: 16),
             label: const Text('Yes, Import'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _kNavy, foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              backgroundColor: _kNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ],
@@ -224,13 +231,13 @@ class _BulkImportInvoicesDialogState
 
     setState(() {
       _uploadedFileName = file.name;
-      _isUploading      = true;
-      _showResults      = false;
+      _isUploading = true;
+      _showResults = false;
     });
 
     try {
       final apiService = ApiService();
-      final headers    = await apiService.getHeaders();
+      final headers = await apiService.getHeaders();
 
       final request = http.MultipartRequest(
         'POST',
@@ -241,11 +248,11 @@ class _BulkImportInvoicesDialogState
       });
 
       if (kIsWeb) {
-        request.files.add(http.MultipartFile.fromBytes(
-            'file', file.bytes!, filename: file.name));
+        request.files.add(http.MultipartFile.fromBytes('file', file.bytes!,
+            filename: file.name));
       } else {
-        request.files.add(await http.MultipartFile.fromPath(
-            'file', file.path!, filename: file.name));
+        request.files.add(await http.MultipartFile.fromPath('file', file.path!,
+            filename: file.name));
       }
 
       final streamed = await request.send();
@@ -256,17 +263,17 @@ class _BulkImportInvoicesDialogState
 
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
 
-      final data         = decoded['data'] as Map<String, dynamic>? ?? {};
-      final imported     = (data['imported']    as num?)?.toInt() ?? 0;
-      final errorsCount  = (data['errors']       as num?)?.toInt() ?? 0;
-      final errorDetails = (data['errorDetails'] as List?)          ?? [];
+      final data = decoded['data'] as Map<String, dynamic>? ?? {};
+      final imported = (data['imported'] as num?)?.toInt() ?? 0;
+      final errorsCount = (data['errors'] as num?)?.toInt() ?? 0;
+      final errorDetails = (data['errorDetails'] as List?) ?? [];
 
       setState(() {
-        _isUploading   = false;
+        _isUploading = false;
         _importedCount = imported;
-        _errorsCount   = errorsCount;
-        _errorDetails  = errorDetails;
-        _showResults   = true;
+        _errorsCount = errorsCount;
+        _errorDetails = errorDetails;
+        _showResults = true;
         _importSuccess = decoded['success'] == true;
       });
 
@@ -286,25 +293,17 @@ class _BulkImportInvoicesDialogState
       }
     } catch (e) {
       debugPrint('❌ Import error: $e');
-      setState(() { _isUploading = false; _showResults = false; });
+      setState(() {
+        _isUploading = false;
+        _showResults = false;
+      });
       _toast('Failed to import: $e', success: false);
     }
   }
 
   void _toast(String msg, {required bool success}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        Icon(success ? Icons.check_circle_outline : Icons.error_outline,
-            color: Colors.white, size: 18),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg)),
-      ]),
-      backgroundColor: success ? _kGreen : Colors.red[700],
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: success ? 3 : 5),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    AppSnackbar.show(context, message: msg, isError: true);
   }
 
   // ==========================================================================
@@ -335,23 +334,31 @@ class _BulkImportInvoicesDialogState
                     _buildInfoBox(),
                     const SizedBox(height: 20),
                     _buildStep(
-                      step: '1', color: _kBlue,
+                      step: '1',
+                      color: _kBlue,
                       icon: Icons.download_rounded,
                       title: 'Download Template',
-                      subtitle: 'Get the Excel template with all required columns including HSN/SAC, Unit, GST Rate and Place of Supply.',
+                      subtitle:
+                          'Get the Excel template with all required columns including HSN/SAC, Unit, GST Rate and Place of Supply.',
                       buttonLabel: 'Download Template',
                       isLoading: _isDownloading,
-                      onPressed: (_isDownloading || _isUploading) ? null : _downloadTemplate,
+                      onPressed: (_isDownloading || _isUploading)
+                          ? null
+                          : _downloadTemplate,
                     ),
                     const SizedBox(height: 14),
                     _buildStep(
-                      step: '2', color: _kGreen,
+                      step: '2',
+                      color: _kGreen,
                       icon: Icons.upload_rounded,
                       title: 'Upload Filled File',
-                      subtitle: 'Fill the template and upload to import your invoices.',
+                      subtitle:
+                          'Fill the template and upload to import your invoices.',
                       buttonLabel: 'Select Excel / CSV File',
                       isLoading: _isUploading,
-                      onPressed: (_isDownloading || _isUploading) ? null : _pickAndUpload,
+                      onPressed: (_isDownloading || _isUploading)
+                          ? null
+                          : _pickAndUpload,
                     ),
                     if (_uploadedFileName != null) ...[
                       const SizedBox(height: 14),
@@ -374,71 +381,84 @@ class _BulkImportInvoicesDialogState
   }
 
   Widget _buildHeader() => Container(
-    padding: const EdgeInsets.fromLTRB(28, 22, 18, 18),
-    decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFEEF2F7)))),
-    child: Row(children: [
-      Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-            color: _kPurple.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(12)),
-        child: const Icon(Icons.upload_file_rounded, color: _kPurple, size: 24),
-      ),
-      const SizedBox(width: 14),
-      const Expanded(child: Text('Bulk Import Invoices',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
-      IconButton(
-        onPressed: _isUploading ? null : () => Navigator.pop(context),
-        icon: const Icon(Icons.close),
-        tooltip: 'Close',
-      ),
-    ]),
-  );
+        padding: const EdgeInsets.fromLTRB(28, 22, 18, 18),
+        decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0xFFEEF2F7)))),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: _kPurple.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.upload_file_rounded,
+                color: _kPurple, size: 24),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+              child: Text('Bulk Import Invoices',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+          IconButton(
+            onPressed: _isUploading ? null : () => Navigator.pop(context),
+            icon: const Icon(Icons.close),
+            tooltip: 'Close',
+          ),
+        ]),
+      );
 
   Widget _buildInfoBox() => Container(
-    margin: const EdgeInsets.only(top: 20),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-        color: _kBlue.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kBlue.withOpacity(0.3))),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Icon(Icons.info_outline, color: _kBlue, size: 18),
-        const SizedBox(width: 8),
-        Text('How to Import',
-            style: TextStyle(fontWeight: FontWeight.w700, color: _kBlue, fontSize: 14)),
-      ]),
-      const SizedBox(height: 10),
-      const Text(
-        '1. Download the sample Excel template\n'
-        '2. Fill in invoice data (* fields are required)\n'
-        '3. HSN Code for goods, SAC Code for services\n'
-        '4. Place of Supply determines IGST vs CGST+SGST\n'
-        '5. Save as .xlsx or .csv and upload\n'
-        '6. Review import results below',
-        style: TextStyle(fontSize: 13, height: 1.65),
-      ),
-    ]),
-  );
+        margin: const EdgeInsets.only(top: 20),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: _kBlue.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _kBlue.withOpacity(0.3))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.info_outline, color: _kBlue, size: 18),
+            const SizedBox(width: 8),
+            Text('How to Import',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: _kBlue, fontSize: 14)),
+          ]),
+          const SizedBox(height: 10),
+          const Text(
+            '1. Download the sample Excel template\n'
+            '2. Fill in invoice data (* fields are required)\n'
+            '3. HSN Code for goods, SAC Code for services\n'
+            '4. Place of Supply determines IGST vs CGST+SGST\n'
+            '5. Save as .xlsx or .csv and upload\n'
+            '6. Review import results below',
+            style: TextStyle(fontSize: 13, height: 1.65),
+          ),
+        ]),
+      );
 
   Widget _buildStep({
-    required String step, required Color color, required IconData icon,
-    required String title, required String subtitle,
-    required String buttonLabel, required bool isLoading,
+    required String step,
+    required Color color,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String buttonLabel,
+    required bool isLoading,
     required VoidCallback? onPressed,
   }) {
     final circle = Container(
-      width: 34, height: 34,
+      width: 34,
+      height: 34,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: Center(child: Text(step,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+      child: Center(
+          child: Text(step,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15))),
     );
     final textBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        Text(title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         const SizedBox(height: 4),
         Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
@@ -446,14 +466,18 @@ class _BulkImportInvoicesDialogState
     final button = ElevatedButton.icon(
       onPressed: onPressed,
       icon: isLoading
-          ? const SizedBox(width: 15, height: 15,
-              child: CircularProgressIndicator(strokeWidth: 2,
+          ? const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2,
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
           : Icon(icon, size: 15),
       label: Text(isLoading ? 'Please wait…' : buttonLabel,
           style: const TextStyle(fontSize: 12)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: color, foregroundColor: Colors.white,
+        backgroundColor: color,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: color.withOpacity(0.5),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -468,14 +492,21 @@ class _BulkImportInvoicesDialogState
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         if (constraints.maxWidth < 340) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [circle, const SizedBox(width: 10), Expanded(child: textBlock)]),
-            const SizedBox(height: 10),
-            SizedBox(width: double.infinity, child: button),
-          ]);
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  circle,
+                  const SizedBox(width: 10),
+                  Expanded(child: textBlock)
+                ]),
+                const SizedBox(height: 10),
+                SizedBox(width: double.infinity, child: button),
+              ]);
         }
         return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          circle, const SizedBox(width: 14),
+          circle,
+          const SizedBox(width: 14),
           Expanded(child: textBlock),
           const SizedBox(width: 12),
           button,
@@ -485,52 +516,82 @@ class _BulkImportInvoicesDialogState
   }
 
   Widget _buildFileChip() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(
-        color: _kGreen.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kGreen.withOpacity(0.3))),
-    child: Row(children: [
-      const Icon(Icons.check_circle_outline_rounded, color: _kGreen, size: 20),
-      const SizedBox(width: 10),
-      Expanded(child: Text(_uploadedFileName!,
-          style: const TextStyle(fontWeight: FontWeight.w600, color: _kGreen, fontSize: 13))),
-      if (_isUploading) ...[
-        const SizedBox(width: 8),
-        const SizedBox(width: 16, height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(_kGreen))),
-        const SizedBox(width: 8),
-        Text('Uploading…', style: TextStyle(fontSize: 12, color: _kGreen.withOpacity(0.7))),
-      ],
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+            color: _kGreen.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _kGreen.withOpacity(0.3))),
+        child: Row(children: [
+          const Icon(Icons.check_circle_outline_rounded,
+              color: _kGreen, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(_uploadedFileName!,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: _kGreen,
+                      fontSize: 13))),
+          if (_isUploading) ...[
+            const SizedBox(width: 8),
+            const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(_kGreen))),
+            const SizedBox(width: 8),
+            Text('Uploading…',
+                style:
+                    TextStyle(fontSize: 12, color: _kGreen.withOpacity(0.7))),
+          ],
+        ]),
+      );
 
   Widget _buildResults() {
-    final total      = _importedCount + _errorsCount;
+    final total = _importedCount + _errorsCount;
     final allSuccess = _errorsCount == 0 && _importedCount > 0;
-    final allFailed  = _importedCount == 0 && _errorsCount > 0;
+    final allFailed = _importedCount == 0 && _errorsCount > 0;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Icon(allFailed ? Icons.cancel_rounded : Icons.check_circle_rounded,
             color: allFailed ? _kRed : _kGreen, size: 22),
         const SizedBox(width: 10),
-        Expanded(child: Text(
-          allSuccess ? 'Import Successful!'
-              : allFailed ? 'Import Failed'
-                          : 'Import Completed with Issues',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold,
+        Expanded(
+            child: Text(
+          allSuccess
+              ? 'Import Successful!'
+              : allFailed
+                  ? 'Import Failed'
+                  : 'Import Completed with Issues',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
               color: allFailed ? _kRed : const Color(0xFF2C3E50)),
         )),
       ]),
       const SizedBox(height: 16),
       Row(children: [
-        Expanded(child: _summaryCard(label: 'Total',    value: '$total',          icon: Icons.summarize_outlined,          color: _kBlue)),
+        Expanded(
+            child: _summaryCard(
+                label: 'Total',
+                value: '$total',
+                icon: Icons.summarize_outlined,
+                color: _kBlue)),
         const SizedBox(width: 10),
-        Expanded(child: _summaryCard(label: 'Imported', value: '$_importedCount', icon: Icons.check_circle_outline_rounded, color: _kGreen)),
+        Expanded(
+            child: _summaryCard(
+                label: 'Imported',
+                value: '$_importedCount',
+                icon: Icons.check_circle_outline_rounded,
+                color: _kGreen)),
         const SizedBox(width: 10),
-        Expanded(child: _summaryCard(label: 'Failed',   value: '$_errorsCount',   icon: Icons.cancel_outlined,             color: _errorsCount > 0 ? _kRed : Colors.grey)),
+        Expanded(
+            child: _summaryCard(
+                label: 'Failed',
+                value: '$_errorsCount',
+                icon: Icons.cancel_outlined,
+                color: _errorsCount > 0 ? _kRed : Colors.grey)),
       ]),
       if (_errorDetails.isNotEmpty) ...[
         const SizedBox(height: 20),
@@ -540,12 +601,14 @@ class _BulkImportInvoicesDialogState
               color: _kRed.withOpacity(0.05),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: _kRed.withOpacity(0.25))),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Icon(Icons.warning_amber_rounded, color: _kRed, size: 18),
               const SizedBox(width: 8),
               Text('${_errorDetails.length} row(s) failed:',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: _kRed, fontSize: 13)),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: _kRed, fontSize: 13)),
             ]),
             const SizedBox(height: 10),
             ConstrainedBox(
@@ -554,24 +617,36 @@ class _BulkImportInvoicesDialogState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: _errorDetails.map<Widget>((e) {
-                    final rowNum = e is Map ? (e['row'] ?? '?').toString() : '?';
+                    final rowNum =
+                        e is Map ? (e['row'] ?? '?').toString() : '?';
                     final errMsg = e is Map
-                        ? (e['error'] ?? e['message'] ?? e.toString()).toString()
+                        ? (e['error'] ?? e['message'] ?? e.toString())
+                            .toString()
                         : e.toString();
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 5),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Padding(padding: const EdgeInsets.only(top: 5),
-                            child: Icon(Icons.circle, size: 6, color: _kRed.withOpacity(0.6))),
-                        const SizedBox(width: 8),
-                        Expanded(child: RichText(text: TextSpan(
-                          style: TextStyle(fontSize: 12, color: Colors.red[800]),
+                      child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            TextSpan(text: 'Row $rowNum: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            TextSpan(text: errMsg),
-                          ],
-                        ))),
-                      ]),
+                            Padding(
+                                padding: const EdgeInsets.only(top: 5),
+                                child: Icon(Icons.circle,
+                                    size: 6, color: _kRed.withOpacity(0.6))),
+                            const SizedBox(width: 8),
+                            Expanded(
+                                child: RichText(
+                                    text: TextSpan(
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.red[800]),
+                              children: [
+                                TextSpan(
+                                    text: 'Row $rowNum: ',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                                TextSpan(text: errMsg),
+                              ],
+                            ))),
+                          ]),
                     );
                   }).toList(),
                 ),
@@ -585,15 +660,20 @@ class _BulkImportInvoicesDialogState
         width: double.infinity,
         child: ElevatedButton.icon(
           onPressed: () => Navigator.pop(context),
-          icon: Icon(allSuccess ? Icons.done_all_rounded : Icons.close_rounded, size: 16),
+          icon: Icon(allSuccess ? Icons.done_all_rounded : Icons.close_rounded,
+              size: 16),
           label: Text(
-            allSuccess ? 'Done — $_importedCount Invoice(s) Imported' : 'Close',
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+              allSuccess
+                  ? 'Done — $_importedCount Invoice(s) Imported'
+                  : 'Close',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
             backgroundColor: allSuccess ? _kGreen : _kNavy,
-            foregroundColor: Colors.white, elevation: 0,
+            foregroundColor: Colors.white,
+            elevation: 0,
             minimumSize: const Size(double.infinity, 46),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       ),
@@ -601,8 +681,10 @@ class _BulkImportInvoicesDialogState
   }
 
   Widget _summaryCard({
-    required String label, required String value,
-    required IconData icon, required Color color,
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
@@ -614,9 +696,13 @@ class _BulkImportInvoicesDialogState
       child: Column(children: [
         Icon(icon, color: color, size: 22),
         const SizedBox(height: 8),
-        Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+        Text(value,
+            style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.bold, color: color)),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600]), textAlign: TextAlign.center),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            textAlign: TextAlign.center),
       ]),
     );
   }

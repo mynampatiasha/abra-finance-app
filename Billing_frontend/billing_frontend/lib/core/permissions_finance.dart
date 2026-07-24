@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // permissions_finance.dart
 // Finance permissions — service + full overlay UI in one file.
 // Modules ordered EXACTLY as the sidebar in billing_main_shell.dart:
@@ -8,9 +9,9 @@ import 'package:flutter/material.dart';
 import '../data/services/finance_auth_service.dart';
 
 // ── Colors ────────────────────────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -38,9 +39,9 @@ const List<Map<String, dynamic>> _kModules = [
     'group': 'TMS',
     'icon': Icons.confirmation_number_outlined,
     'permissions': {
-      'raise_ticket':   'Raise a Ticket',
-      'my_tickets':     'My Tickets',
-      'all_tickets':    'All Tickets',
+      'raise_ticket': 'Raise a Ticket',
+      'my_tickets': 'My Tickets',
+      'all_tickets': 'All Tickets',
       'closed_tickets': 'Closed Tickets',
     },
   },
@@ -59,14 +60,14 @@ const List<Map<String, dynamic>> _kModules = [
     'group': 'Sales',
     'icon': Icons.shopping_cart_outlined,
     'permissions': {
-      'customers':          'Customers',
-      'invoices':           'Invoices',
+      'customers': 'Customers',
+      'invoices': 'Invoices',
       'recurring_invoices': 'Recurring Invoices',
-      'payments_received':  'Payments Received',
-      'credit_notes':       'Credit Notes',
-      'quotes':             'Quotes',
-      'sales_orders':       'Sales Orders',
-      'delivery_challans':  'Delivery Challans',
+      'payments_received': 'Payments Received',
+      'credit_notes': 'Credit Notes',
+      'quotes': 'Quotes',
+      'sales_orders': 'Sales Orders',
+      'delivery_challans': 'Delivery Challans',
     },
   },
 
@@ -75,17 +76,17 @@ const List<Map<String, dynamic>> _kModules = [
     'group': 'Purchases',
     'icon': Icons.shopping_bag_outlined,
     'permissions': {
-      'vendors':            'Vendors',
-      'expenses':           'Expenses',
-      'assets':             'Fixed Assets',
+      'vendors': 'Vendors',
+      'expenses': 'Expenses',
+      'assets': 'Fixed Assets',
       'recurring_expenses': 'Recurring Expenses',
-      'purchase_orders':    'Purchase Orders',
-      'bills':              'Bills',
-      'recurring_bills':    'Recurring Bills',
-      'payments_made':      'Payments Made',
-      'vendor_credits':     'Vendor Credits',
-      'eway_bills':         'E-Way Bills',
-      'payment_links':      'Payment Links',
+      'purchase_orders': 'Purchase Orders',
+      'bills': 'Bills',
+      'recurring_bills': 'Recurring Bills',
+      'payments_made': 'Payments Made',
+      'vendor_credits': 'Vendor Credits',
+      'eway_bills': 'E-Way Bills',
+      'payment_links': 'Payment Links',
     },
   },
 
@@ -103,7 +104,7 @@ const List<Map<String, dynamic>> _kModules = [
     'group': 'Time Tracking',
     'icon': Icons.access_time_outlined,
     'permissions': {
-      'projects':   'Projects',
+      'projects': 'Projects',
       'timesheets': 'Timesheet',
     },
   },
@@ -122,10 +123,10 @@ const List<Map<String, dynamic>> _kModules = [
     'group': 'Accountant',
     'icon': Icons.person_outline,
     'permissions': {
-      'manual_journals':      'Manual Journals',
+      'manual_journals': 'Manual Journals',
       'currency_adjustments': 'Currency Adjustments',
-      'chart_of_accounts':    'Chart of Accounts',
-      'budgets':              'Budgets',
+      'chart_of_accounts': 'Chart of Accounts',
+      'budgets': 'Budgets',
     },
   },
 
@@ -192,13 +193,14 @@ class FinancePermissionsScreen extends StatefulWidget {
   }
 
   @override
-  State<FinancePermissionsScreen> createState() => _FinancePermissionsScreenState();
+  State<FinancePermissionsScreen> createState() =>
+      _FinancePermissionsScreenState();
 }
 
 class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
   Map<String, Map<String, dynamic>> _perms = {};
   bool _loading = true;
-  bool _saving  = false;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -218,7 +220,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       raw.forEach((k, v) {
         if (v is Map) {
           converted[k] = {
-            'can_access':  v['can_access']  == true || v['can_access']  == 1,
+            'can_access': v['can_access'] == true || v['can_access'] == 1,
             'edit_delete': v['edit_delete'] == true || v['edit_delete'] == 1,
           };
         } else if (v is bool) {
@@ -233,7 +235,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
   // ── Save ──────────────────────────────────────────────────────────────────
   Future<void> _save() async {
     setState(() => _saving = true);
-    final res = await FinancePermissionsService.savePermissions(widget.userId, _perms);
+    final res =
+        await FinancePermissionsService.savePermissions(widget.userId, _perms);
     if (!mounted) return;
     setState(() => _saving = false);
     if (res['success'] == true) {
@@ -246,8 +249,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
   }
 
   // ── Permission helpers ────────────────────────────────────────────────────
-  bool _access(String k) => _perms[k]?['can_access']  == true;
-  bool _edit(String k)   => _perms[k]?['edit_delete'] == true;
+  bool _access(String k) => _perms[k]?['can_access'] == true;
+  bool _edit(String k) => _perms[k]?['edit_delete'] == true;
 
   void _toggle(String k, String type, bool v) {
     setState(() {
@@ -293,7 +296,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
           child: Container(
             margin: EdgeInsets.all(isWide ? 24 : 8),
             constraints: BoxConstraints(
-              maxWidth:  isWide ? 720 : double.infinity,
+              maxWidth: isWide ? 720 : double.infinity,
               maxHeight: constraints.maxHeight - 32,
             ),
             decoration: BoxDecoration(
@@ -344,7 +347,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       ),
       child: Row(children: [
         Container(
-          width: 46, height: 46,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             gradient: const LinearGradient(colors: [_navyAccent, _navyLight]),
             borderRadius: BorderRadius.circular(12),
@@ -353,7 +357,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
         ),
         const SizedBox(width: 14),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
@@ -383,7 +388,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Container(
-            width: 34, height: 34,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.18),
               shape: BoxShape.circle,
@@ -401,13 +407,16 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(children: [
-        _qBtn('Select All', Icons.check_circle_outline,
-            const Color(0xFF16A34A), const Color(0xFFF0FDF4),
-            const Color(0xFF86EFAC), () => _setAll(true)),
+        _qBtn(
+            'Select All',
+            Icons.check_circle_outline,
+            const Color(0xFF16A34A),
+            const Color(0xFFF0FDF4),
+            const Color(0xFF86EFAC),
+            () => _setAll(true)),
         const SizedBox(width: 8),
-        _qBtn('Edit All', Icons.edit_outlined,
-            _navyLight, const Color(0xFFEFF6FF),
-            const Color(0xFFBFDBFE), () {
+        _qBtn('Edit All', Icons.edit_outlined, _navyLight,
+            const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), () {
           setState(() {
             for (final m in _kModules) {
               for (final k in (m['permissions'] as Map<String, String>).keys) {
@@ -421,15 +430,19 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
           });
         }),
         const SizedBox(width: 8),
-        _qBtn('Clear All', Icons.clear_all,
-            const Color(0xFFDC2626), const Color(0xFFFEF2F2),
-            const Color(0xFFFECACA), () => _setAll(false)),
+        _qBtn(
+            'Clear All',
+            Icons.clear_all,
+            const Color(0xFFDC2626),
+            const Color(0xFFFEF2F2),
+            const Color(0xFFFECACA),
+            () => _setAll(false)),
       ]),
     );
   }
 
-  Widget _qBtn(String label, IconData icon, Color color, Color bg,
-      Color border, VoidCallback onTap) {
+  Widget _qBtn(String label, IconData icon, Color color, Color bg, Color border,
+      VoidCallback onTap) {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -445,9 +458,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
             const SizedBox(width: 5),
             Text(label,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800)),
+                    color: color, fontSize: 11, fontWeight: FontWeight.w800)),
           ]),
         ),
       ),
@@ -457,9 +468,9 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
   // ── Group card ────────────────────────────────────────────────────────────
   Widget _buildGroupCard(Map<String, dynamic> module) {
     final group = module['group'] as String;
-    final icon  = module['icon'] as IconData;
+    final icon = module['icon'] as IconData;
     final perms = module['permissions'] as Map<String, String>;
-    final en    = _enabledCount(perms);
+    final en = _enabledCount(perms);
     final total = perms.length;
     final hasAny = en > 0;
 
@@ -469,7 +480,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: hasAny ? _navyAccent.withOpacity(0.4) : const Color(0xFFE2E8F0),
+          color:
+              hasAny ? _navyAccent.withOpacity(0.4) : const Color(0xFFE2E8F0),
           width: hasAny ? 1.5 : 1,
         ),
         boxShadow: [
@@ -492,16 +504,16 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
             ),
             border: Border(
               bottom: BorderSide(
-                color: hasAny
-                    ? const Color(0xFFBFDBFE)
-                    : const Color(0xFFE2E8F0),
+                color:
+                    hasAny ? const Color(0xFFBFDBFE) : const Color(0xFFE2E8F0),
                 width: hasAny ? 1.5 : 1,
               ),
             ),
           ),
           child: Row(children: [
             Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
@@ -524,8 +536,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                 decoration: BoxDecoration(
-                    color: _navyDark,
-                    borderRadius: BorderRadius.circular(20)),
+                    color: _navyDark, borderRadius: BorderRadius.circular(20)),
                 child: Text('$en/$total',
                     style: const TextStyle(
                         color: Colors.white,
@@ -533,9 +544,10 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
                         fontWeight: FontWeight.w800)),
               ),
             const SizedBox(width: 6),
-            _mBtn('All',   const Color(0xFF16A34A), () => _setGroup(perms, true)),
+            _mBtn('All', const Color(0xFF16A34A), () => _setGroup(perms, true)),
             const SizedBox(width: 4),
-            _mBtn('Clear', const Color(0xFFDC2626), () => _setGroup(perms, false)),
+            _mBtn('Clear', const Color(0xFFDC2626),
+                () => _setGroup(perms, false)),
           ]),
         ),
 
@@ -548,7 +560,7 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(children: [
                 const Expanded(child: SizedBox()),
-                _colHdr('Access',      const Color(0xFF16A34A)),
+                _colHdr('Access', const Color(0xFF16A34A)),
                 const SizedBox(width: 4),
                 _colHdr('Edit/Delete', _navyLight),
               ]),
@@ -577,31 +589,27 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
       );
 
   Widget _colHdr(String label, Color color) => SizedBox(
-    width: 80,
-    child: Text(label,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w800,
-            color: color,
-            letterSpacing: 0.3)),
-  );
+        width: 80,
+        child: Text(label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                color: color,
+                letterSpacing: 0.3)),
+      );
 
   Widget _permRow(String key, String label) {
     final canAccess = _access(key);
-    final canEdit   = _edit(key);
+    final canEdit = _edit(key);
     return Container(
       margin: const EdgeInsets.only(bottom: 5),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: canAccess
-            ? const Color(0xFFF0FDF4)
-            : const Color(0xFFF8FAFC),
+        color: canAccess ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: canAccess
-              ? const Color(0xFF86EFAC)
-              : const Color(0xFFE2E8F0),
+          color: canAccess ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0),
         ),
       ),
       child: Row(children: [
@@ -713,8 +721,8 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [_navyAccent, _navyLight]),
+                gradient:
+                    const LinearGradient(colors: [_navyAccent, _navyLight]),
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
@@ -723,26 +731,25 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
                       offset: const Offset(0, 6))
                 ],
               ),
-              child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _saving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.save_rounded,
-                            color: Colors.white, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      _saving ? 'Saving...' : 'Save Permissions',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900),
-                    ),
-                  ]),
+              child:
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.save_rounded,
+                        color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  _saving ? 'Saving...' : 'Save Permissions',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900),
+                ),
+              ]),
             ),
           ),
         ),
@@ -752,22 +759,6 @@ class _FinancePermissionsScreenState extends State<FinancePermissionsScreen> {
 
   void _toast(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        Icon(
-          error ? Icons.error_outline : Icons.check_circle_outline,
-          color: Colors.white,
-          size: 18,
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg)),
-      ]),
-      backgroundColor:
-          error ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      margin: const EdgeInsets.all(16),
-      duration: Duration(milliseconds: error ? 3000 : 1500),
-    ));
+    AppSnackbar.show(context, message: msg);
   }
 }

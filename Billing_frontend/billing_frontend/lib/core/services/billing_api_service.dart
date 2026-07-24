@@ -16,8 +16,8 @@ class BillingApiService {
   static String get _base => FinanceApiConfig.baseUrl;
 
   static Future<Map<String, String>> _headers() async {
-    final token      = await FinanceSecureStorage.getToken();
-    final branchHdr  = await FinanceSecureStorage.getBranchHeader();
+    final token = await FinanceSecureStorage.getToken();
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -26,27 +26,33 @@ class BillingApiService {
     };
   }
 
-  static Future<Map<String, dynamic>> _get(String path, {Map<String, String>? params}) async {
+  static Future<Map<String, dynamic>> _get(String path,
+      {Map<String, String>? params}) async {
     var uri = Uri.parse('$_base$path');
     if (params != null && params.isNotEmpty) {
       uri = uri.replace(queryParameters: params);
     }
     debugPrint('📤 GET: $uri');
-    final response = await http.get(uri, headers: await _headers())
+    final response = await http
+        .get(uri, headers: await _headers())
         .timeout(const Duration(seconds: 30));
-    debugPrint('📥 ${response.statusCode}: ${response.body.substring(0, response.body.length.clamp(0, 200))}');
+    debugPrint(
+        '📥 ${response.statusCode}: ${response.body.substring(0, response.body.length.clamp(0, 200))}');
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode >= 200 && response.statusCode < 300) return data;
-    throw Exception(data['message'] ?? 'Request failed (${response.statusCode})');
+    throw Exception(
+        data['message'] ?? 'Request failed (${response.statusCode})');
   }
 
   // ============================================================================
   // DASHBOARD APIs
   // ============================================================================
 
-  static Future<DashboardSummary> getDashboardSummary({String basis = 'accrual'}) async {
+  static Future<DashboardSummary> getDashboardSummary(
+      {String basis = 'accrual'}) async {
     try {
-      final data = await _get('/api/finance/home/summary', params: {'basis': basis});
+      final data =
+          await _get('/api/finance/home/summary', params: {'basis': basis});
       return DashboardSummary.fromJson(data['data']);
     } catch (e) {
       debugPrint('❌ Error fetching dashboard summary: $e');
@@ -74,9 +80,11 @@ class BillingApiService {
     }
   }
 
-  static Future<CashFlowData> getCashFlow({String period = 'fiscal_year'}) async {
+  static Future<CashFlowData> getCashFlow(
+      {String period = 'fiscal_year'}) async {
     try {
-      final data = await _get('/api/finance/home/cash-flow', params: {'period': period});
+      final data =
+          await _get('/api/finance/home/cash-flow', params: {'period': period});
       return CashFlowData.fromJson(data['data']);
     } catch (e) {
       debugPrint('❌ Error fetching cash flow: $e');
@@ -118,9 +126,11 @@ class BillingApiService {
     }
   }
 
-  static Future<AccountWatchlist> getAccountWatchlist({String basis = 'accrual'}) async {
+  static Future<AccountWatchlist> getAccountWatchlist(
+      {String basis = 'accrual'}) async {
     try {
-      final data = await _get('/api/finance/home/watchlist', params: {'basis': basis});
+      final data =
+          await _get('/api/finance/home/watchlist', params: {'basis': basis});
       return AccountWatchlist.fromJson(data['data']);
     } catch (e) {
       debugPrint('❌ Error fetching watchlist: $e');
@@ -236,7 +246,7 @@ class DashboardSummary {
       receivables: ReceivablesSummary.fromJson(json['receivables']),
       payables: PayablesSummary.fromJson(json['payables']),
       cashFlow: CashFlowData.fromJson(json['cashFlow']),
-      incomeExpense: json['incomeExpense'] != null 
+      incomeExpense: json['incomeExpense'] != null
           ? IncomeExpenseData.fromJson(json['incomeExpense'])
           : null,
       projects: ProjectsSummary.fromJson(json['projects']),
@@ -482,8 +492,8 @@ class Project {
     return Project(
       name: json['name'] ?? '',
       status: json['status'] ?? '',
-      remaining: json['remaining'] != null 
-          ? (json['remaining'] as num).toDouble() 
+      remaining: json['remaining'] != null
+          ? (json['remaining'] as num).toDouble()
           : null,
     );
   }

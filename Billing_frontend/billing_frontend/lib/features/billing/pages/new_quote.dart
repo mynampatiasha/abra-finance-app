@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // NEW QUOTE SCREEN - Complete Flutter UI
 // ============================================================================
@@ -20,21 +21,32 @@ const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 // Column widths for items table
-const double _colNo      = 36.0;
-const double _colDesc    = 200.0;
-const double _colHsn     = 110.0;
-const double _colUnit    = 80.0;
-const double _colQty     = 70.0;
-const double _colRate    = 95.0;
-const double _colDisc    = 110.0;
-const double _colGst     = 80.0;
+const double _colNo = 36.0;
+const double _colDesc = 200.0;
+const double _colHsn = 110.0;
+const double _colUnit = 80.0;
+const double _colQty = 70.0;
+const double _colRate = 95.0;
+const double _colDisc = 110.0;
+const double _colGst = 80.0;
 const double _colTaxable = 100.0;
-const double _colTax1    = 90.0;
-const double _colAmt     = 95.0;
-const double _colDel     = 44.0;
+const double _colTax1 = 90.0;
+const double _colAmt = 95.0;
+const double _colDel = 44.0;
 
 const List<double> _kGstRates = [0, 5, 12, 18, 28];
-const List<String> _kUnits    = ['Nos','Hrs','Kg','Pcs','Box','Mtr','Ltr','Dz','MT','Set'];
+const List<String> _kUnits = [
+  'Nos',
+  'Hrs',
+  'Kg',
+  'Pcs',
+  'Box',
+  'Mtr',
+  'Ltr',
+  'Dz',
+  'MT',
+  'Set'
+];
 
 class NewQuoteScreen extends StatefulWidget {
   final String? quoteId;
@@ -63,12 +75,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   String? _selectedCustomerName;
   String? _selectedCustomerEmail;
   String? _selectedCustomerPhone;
-  String _customerGSTIN       = '';
-  String _customerPAN         = '';
+  String _customerGSTIN = '';
+  String _customerPAN = '';
   String _gstRegistrationType = '';
   DateTime _quoteDate = DateTime.now();
   DateTime _expiryDate = DateTime.now().add(const Duration(days: 30));
-  
+
   // Tax Settings
   double _tdsRate = 0;
   double _tcsRate = 0;
@@ -93,7 +105,7 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   void initState() {
     super.initState();
     _addNewItem();
-    
+
     if (widget.quoteId != null) {
       _loadQuoteData();
     }
@@ -107,13 +119,15 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     _subjectController.dispose();
     _customerNotesController.dispose();
     _termsConditionsController.dispose();
-    for (final c in _descControllers) { c.dispose(); }
+    for (final c in _descControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _calculateAmounts() {
     setState(() {
-      _subTotal      = 0;
+      _subTotal = 0;
       _totalQuantity = 0;
 
       for (var item in _items) {
@@ -127,26 +141,36 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
           taxable = double.parse(taxable.toStringAsFixed(2));
           item.taxableAmount = taxable;
           final gst = item.itemGstRate;
-          item.cgstAmount = double.parse((taxable * (gst / 2) / 100).toStringAsFixed(2));
+          item.cgstAmount =
+              double.parse((taxable * (gst / 2) / 100).toStringAsFixed(2));
           item.sgstAmount = item.cgstAmount;
           item.igstAmount = 0;
-          item.amount     = double.parse((taxable + item.cgstAmount + item.sgstAmount).toStringAsFixed(2));
-          _subTotal      += taxable;
+          item.amount = double.parse(
+              (taxable + item.cgstAmount + item.sgstAmount).toStringAsFixed(2));
+          _subTotal += taxable;
           _totalQuantity += item.quantity.toInt();
         } else {
           item.taxableAmount = 0;
-          item.cgstAmount    = 0;
-          item.sgstAmount    = 0;
-          item.igstAmount    = 0;
-          item.amount        = 0;
+          item.cgstAmount = 0;
+          item.sgstAmount = 0;
+          item.igstAmount = 0;
+          item.amount = 0;
         }
       }
 
-      _tdsAmount   = _enableTDS ? double.parse((_subTotal * _tdsRate / 100).toStringAsFixed(2)) : 0;
-      _tcsAmount   = _enableTCS ? double.parse((_subTotal * _tcsRate / 100).toStringAsFixed(2)) : 0;
+      _tdsAmount = _enableTDS
+          ? double.parse((_subTotal * _tdsRate / 100).toStringAsFixed(2))
+          : 0;
+      _tcsAmount = _enableTCS
+          ? double.parse((_subTotal * _tcsRate / 100).toStringAsFixed(2))
+          : 0;
       final gstBase = _subTotal - _tdsAmount + _tcsAmount;
-      _gstAmount   = _enableGST ? double.parse((gstBase * _gstRate / 100).toStringAsFixed(2)) : 0;
-      _totalAmount = double.parse((_subTotal - _tdsAmount + _tcsAmount + _gstAmount).toStringAsFixed(2));
+      _gstAmount = _enableGST
+          ? double.parse((gstBase * _gstRate / 100).toStringAsFixed(2))
+          : 0;
+      _totalAmount = double.parse(
+          (_subTotal - _tdsAmount + _tcsAmount + _gstAmount)
+              .toStringAsFixed(2));
     });
   }
 
@@ -168,18 +192,18 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
 
   Future<void> _loadQuoteData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final quote = await QuoteService.getQuote(widget.quoteId!);
-      
+
       setState(() {
         _selectedCustomerId = quote.customerId;
         _selectedCustomerName = quote.customerName;
         _selectedCustomerEmail = quote.customerEmail;
         _selectedCustomerPhone = quote.customerPhone;
-        _customerGSTIN         = quote.customerGSTIN;
-        _customerPAN           = quote.customerPAN;
-        _gstRegistrationType   = quote.gstRegistrationType;
+        _customerGSTIN = quote.customerGSTIN;
+        _customerPAN = quote.customerPAN;
+        _gstRegistrationType = quote.gstRegistrationType;
         _referenceNumberController.text = quote.referenceNumber ?? '';
         _quoteDate = quote.quoteDate;
         _expiryDate = quote.expiryDate;
@@ -188,34 +212,37 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
         _subjectController.text = quote.subject ?? '';
         _customerNotesController.text = quote.customerNotes ?? '';
         _termsConditionsController.text = quote.termsAndConditions ?? '';
-        
+
         _tdsRate = quote.tdsRate;
         _tcsRate = quote.tcsRate;
         _gstRate = quote.gstRate;
         _enableTDS = quote.tdsRate > 0;
         _enableTCS = quote.tcsRate > 0;
         _enableGST = quote.gstRate > 0;
-        
-        _items = quote.items.map((item) => QuoteItemData(
-          itemDetails:  item.itemDetails,
-          quantity:     item.quantity,
-          rate:         item.rate,
-          discount:     item.discount,
-          discountType: item.discountType,
-          amount:       item.amount,
-          hsnCode:      item.hsnCode,
-          unit:         item.unit,
-          itemGstRate:  item.itemGstRate,
-        )).toList();
-        for (final c in _descControllers) { c.dispose(); }
+
+        _items = quote.items
+            .map((item) => QuoteItemData(
+                  itemDetails: item.itemDetails,
+                  quantity: item.quantity,
+                  rate: item.rate,
+                  discount: item.discount,
+                  discountType: item.discountType,
+                  amount: item.amount,
+                  hsnCode: item.hsnCode,
+                  unit: item.unit,
+                  itemGstRate: item.itemGstRate,
+                ))
+            .toList();
+        for (final c in _descControllers) {
+          c.dispose();
+        }
         _descControllers.clear();
         for (final item in _items) {
           _descControllers.add(TextEditingController(text: item.itemDetails));
         }
-        
+
         _calculateAmounts();
       });
-      
     } catch (e) {
       _showErrorSnackbar('Failed to load quote: $e');
     } finally {
@@ -224,13 +251,14 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   }
 
   bool _validateItems() {
-    final nonEmptyItems = _items.where((item) => item.itemDetails.trim().isNotEmpty).toList();
-    
+    final nonEmptyItems =
+        _items.where((item) => item.itemDetails.trim().isNotEmpty).toList();
+
     if (nonEmptyItems.isEmpty) {
       _showErrorSnackbar('Please add at least one item with details');
       return false;
     }
-    
+
     for (var item in nonEmptyItems) {
       if (item.quantity <= 0) {
         _showErrorSnackbar('All items must have quantity greater than 0');
@@ -241,13 +269,14 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
         return false;
       }
     }
-    
+
     return true;
   }
 
   Map<String, dynamic> _buildQuoteData(String status) {
-    final validItems = _items.where((item) => item.itemDetails.trim().isNotEmpty).toList();
-    
+    final validItems =
+        _items.where((item) => item.itemDetails.trim().isNotEmpty).toList();
+
     // Note: organizationId is automatically extracted from JWT token on backend
     // The backend middleware (verifyJWT) adds req.user.organizationId from the token
     // So we don't need to send it from frontend - backend will add it automatically
@@ -279,18 +308,18 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
       return;
     }
     if (!_validateItems()) return;
-    
+
     setState(() => _isSaving = true);
-    
+
     try {
       final quoteData = _buildQuoteData('DRAFT');
-      
+
       if (widget.quoteId != null) {
         await QuoteService.updateQuote(widget.quoteId!, quoteData);
       } else {
         await QuoteService.createQuote(quoteData);
       }
-      
+
       _showSuccessSnackbar('Quote saved as draft');
       Navigator.pop(context, true);
     } catch (e) {
@@ -302,21 +331,21 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
 
   Future<void> _saveAndSend() async {
     if (!_validateItems()) return;
-    
+
     setState(() => _isSaving = true);
-    
+
     try {
       final quoteData = _buildQuoteData('SENT');
-      
+
       Quote quote;
       if (widget.quoteId != null) {
         quote = await QuoteService.updateQuote(widget.quoteId!, quoteData);
       } else {
         quote = await QuoteService.createQuote(quoteData);
       }
-      
+
       await QuoteService.sendQuote(quote.id);
-      
+
       _showSuccessSnackbar('Quote sent to $_selectedCustomerEmail');
       Navigator.pop(context, true);
     } catch (e) {
@@ -344,26 +373,14 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message, isError: true);
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
-@override
+  @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isNarrow = screenWidth < 900;
@@ -385,132 +402,163 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             elevation: 0,
             foregroundColor: Colors.white,
             title: Text(widget.quoteId != null ? 'Edit Quote' : 'New Quote',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
             actions: isNarrow
-            ? [
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: Colors.white),
-                  onSelected: (value) {
-                    if (value == 'draft') _saveAsDraft();
-                    if (value == 'send') _saveAndSend();
-                    if (value == 'mark_sent') _markAsSent();
-                    if (value == 'pdf') {
-                      if (widget.quoteId == null || widget.quoteId!.isEmpty) {
-                        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-                          content: Text('Save the quote first to preview PDF'),
-                          behavior: SnackBarBehavior.floating,
-                        ));
-                        return;
-                      }
-                      openDocumentPdf(context: context, docId: widget.quoteId, pdfEndpoint: '/api/finance/quotes', docNumber: 'Quote');
-                    }
-                    if (value == 'email') {
-                      if (widget.quoteId == null || widget.quoteId!.isEmpty) {
-                        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-                          content: Text('Save the quote first to preview email'),
-                          behavior: SnackBarBehavior.floating,
-                        ));
-                        return;
-                      }
-                      openEmailPreview(context: context, docId: widget.quoteId, emailEndpoint: '/api/finance/quotes');
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'pdf',
-                      child: ListTile(
-                        leading: Icon(Icons.picture_as_pdf_outlined),
-                        title: Text('View PDF'),
-                        contentPadding: EdgeInsets.zero,
+                ? [
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, color: Colors.white),
+                      onSelected: (value) {
+                        if (value == 'draft') _saveAsDraft();
+                        if (value == 'send') _saveAndSend();
+                        if (value == 'mark_sent') _markAsSent();
+                        if (value == 'pdf') {
+                          if (widget.quoteId == null ||
+                              widget.quoteId!.isEmpty) {
+                            ScaffoldMessenger.maybeOf(context)
+                                ?.showSnackBar(const SnackBar(
+                              content:
+                                  Text('Save the quote first to preview PDF'),
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                            return;
+                          }
+                          openDocumentPdf(
+                              context: context,
+                              docId: widget.quoteId,
+                              pdfEndpoint: '/api/finance/quotes',
+                              docNumber: 'Quote');
+                        }
+                        if (value == 'email') {
+                          if (widget.quoteId == null ||
+                              widget.quoteId!.isEmpty) {
+                            ScaffoldMessenger.maybeOf(context)
+                                ?.showSnackBar(const SnackBar(
+                              content:
+                                  Text('Save the quote first to preview email'),
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                            return;
+                          }
+                          openEmailPreview(
+                              context: context,
+                              docId: widget.quoteId,
+                              emailEndpoint: '/api/finance/quotes');
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'pdf',
+                          child: ListTile(
+                            leading: Icon(Icons.picture_as_pdf_outlined),
+                            title: Text('View PDF'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'email',
+                          child: ListTile(
+                            leading: Icon(Icons.email_outlined),
+                            title: Text('Preview Email'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'draft',
+                          child: ListTile(
+                            leading: Icon(Icons.save_outlined),
+                            title: Text('Save as Draft'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'send',
+                          child: ListTile(
+                            leading: Icon(Icons.send),
+                            title: Text('Save & Send'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'mark_sent',
+                          child: ListTile(
+                            leading: Icon(Icons.mark_email_read_outlined),
+                            title: Text('Mark as Sent'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ]
+                : [
+                    IconButton(
+                      tooltip: 'View PDF',
+                      icon: const Icon(Icons.picture_as_pdf_outlined,
+                          color: Colors.white70, size: 20),
+                      onPressed: () {
+                        if (widget.quoteId == null || widget.quoteId!.isEmpty) {
+                          ScaffoldMessenger.maybeOf(context)
+                              ?.showSnackBar(const SnackBar(
+                            content:
+                                Text('Save the quote first to preview PDF'),
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                          return;
+                        }
+                        openDocumentPdf(
+                            context: context,
+                            docId: widget.quoteId,
+                            pdfEndpoint: '/api/finance/quotes',
+                            docNumber: 'Quote');
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Preview Email',
+                      icon: const Icon(Icons.email_outlined,
+                          color: Colors.white70, size: 20),
+                      onPressed: () {
+                        if (widget.quoteId == null || widget.quoteId!.isEmpty) {
+                          ScaffoldMessenger.maybeOf(context)
+                              ?.showSnackBar(const SnackBar(
+                            content:
+                                Text('Save the quote first to preview email'),
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                          return;
+                        }
+                        openEmailPreview(
+                            context: context,
+                            docId: widget.quoteId,
+                            emailEndpoint: '/api/finance/quotes');
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Mark as Sent',
+                      icon: const Icon(Icons.mark_email_read_outlined,
+                          color: Colors.white70, size: 20),
+                      onPressed: _isSaving ? null : _markAsSent,
+                    ),
+                    TextButton.icon(
+                      onPressed: _isSaving ? null : _saveAsDraft,
+                      icon: const Icon(Icons.save_outlined,
+                          color: Colors.white70),
+                      label: const Text('Save as Draft',
+                          style: TextStyle(color: Colors.white70)),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: _isSaving ? null : _saveAndSend,
+                      icon: const Icon(Icons.send, size: 18),
+                      label: const Text('Save & Send'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3498DB),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
                       ),
                     ),
-                    const PopupMenuItem(
-                      value: 'email',
-                      child: ListTile(
-                        leading: Icon(Icons.email_outlined),
-                        title: Text('Preview Email'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'draft',
-                      child: ListTile(
-                        leading: Icon(Icons.save_outlined),
-                        title: Text('Save as Draft'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'send',
-                      child: ListTile(
-                        leading: Icon(Icons.send),
-                        title: Text('Save & Send'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'mark_sent',
-                      child: ListTile(
-                        leading: Icon(Icons.mark_email_read_outlined),
-                        title: Text('Mark as Sent'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
+                    const SizedBox(width: 16),
                   ],
-                ),
-              ]
-            : [
-                IconButton(
-                  tooltip: 'View PDF',
-                  icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white70, size: 20),
-                  onPressed: () {
-                    if (widget.quoteId == null || widget.quoteId!.isEmpty) {
-                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-                        content: Text('Save the quote first to preview PDF'),
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                      return;
-                    }
-                    openDocumentPdf(context: context, docId: widget.quoteId, pdfEndpoint: '/api/finance/quotes', docNumber: 'Quote');
-                  },
-                ),
-                IconButton(
-                  tooltip: 'Preview Email',
-                  icon: const Icon(Icons.email_outlined, color: Colors.white70, size: 20),
-                  onPressed: () {
-                    if (widget.quoteId == null || widget.quoteId!.isEmpty) {
-                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-                        content: Text('Save the quote first to preview email'),
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                      return;
-                    }
-                    openEmailPreview(context: context, docId: widget.quoteId, emailEndpoint: '/api/finance/quotes');
-                  },
-                ),
-                IconButton(
-                  tooltip: 'Mark as Sent',
-                  icon: const Icon(Icons.mark_email_read_outlined, color: Colors.white70, size: 20),
-                  onPressed: _isSaving ? null : _markAsSent,
-                ),
-                TextButton.icon(
-                  onPressed: _isSaving ? null : _saveAsDraft,
-                  icon: const Icon(Icons.save_outlined, color: Colors.white70),
-                  label: const Text('Save as Draft', style: TextStyle(color: Colors.white70)),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: _isSaving ? null : _saveAndSend,
-                  icon: const Icon(Icons.send, size: 18),
-                  label: const Text('Save & Send'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3498DB),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-                const SizedBox(width: 16),
-              ],
           ),
         ),
       ),
@@ -585,52 +633,90 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(gradient: const LinearGradient(colors: [_navyDark, _navyLight]), borderRadius: BorderRadius.circular(6)),
-            child: const Icon(Icons.person_outline, color: Colors.white, size: 18)),
+          Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
+                  borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.person_outline,
+                  color: Colors.white, size: 18)),
           const SizedBox(width: 10),
-          const Text('Customer Information', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('Customer Information',
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
         ]),
         const SizedBox(height: 16),
         InkWell(
           onTap: _showCustomerSelector,
           child: Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8)),
             child: Row(children: [
-              const Icon(Icons.person_outline, color: _navyAccent), const SizedBox(width: 12),
-              Expanded(child: Text(_selectedCustomerName ?? 'Select Customer *',
-                  style: TextStyle(fontSize: 15,
-                      color: _selectedCustomerName != null ? _navyDark : Colors.grey[600],
-                      fontWeight: _selectedCustomerName != null ? FontWeight.w600 : FontWeight.normal))),
+              const Icon(Icons.person_outline, color: _navyAccent),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Text(_selectedCustomerName ?? 'Select Customer *',
+                      style: TextStyle(
+                          fontSize: 15,
+                          color: _selectedCustomerName != null
+                              ? _navyDark
+                              : Colors.grey[600],
+                          fontWeight: _selectedCustomerName != null
+                              ? FontWeight.w600
+                              : FontWeight.normal))),
               const Icon(Icons.arrow_drop_down, color: Colors.grey),
             ]),
           ),
         ),
         if (_selectedCustomerEmail != null) ...[
           const SizedBox(height: 10),
-          Row(children: [const Icon(Icons.email_outlined, size: 16, color: Colors.grey), const SizedBox(width: 6),
-            Text(_selectedCustomerEmail!, style: TextStyle(color: Colors.grey[700], fontSize: 13))]),
+          Row(children: [
+            const Icon(Icons.email_outlined, size: 16, color: Colors.grey),
+            const SizedBox(width: 6),
+            Text(_selectedCustomerEmail!,
+                style: TextStyle(color: Colors.grey[700], fontSize: 13))
+          ]),
         ],
         if (_customerGSTIN.isNotEmpty) ...[
           const SizedBox(height: 6),
           Row(children: [
-            const Icon(Icons.business, size: 16, color: Colors.grey), const SizedBox(width: 6),
-            Text('GSTIN: $_customerGSTIN', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
-            if (_customerPAN.isNotEmpty) ...[const SizedBox(width: 16),
-              Text('PAN: $_customerPAN', style: TextStyle(color: Colors.grey[700], fontSize: 13))],
+            const Icon(Icons.business, size: 16, color: Colors.grey),
+            const SizedBox(width: 6),
+            Text('GSTIN: $_customerGSTIN',
+                style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+            if (_customerPAN.isNotEmpty) ...[
+              const SizedBox(width: 16),
+              Text('PAN: $_customerPAN',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 13))
+            ],
           ]),
         ],
         if (_gstRegistrationType.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: _navyAccent.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
-            child: Text(_gstRegistrationType, style: TextStyle(fontSize: 12, color: _navyMid, fontWeight: FontWeight.w500))),
+          Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  color: _navyAccent.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(20)),
+              child: Text(_gstRegistrationType,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: _navyMid,
+                      fontWeight: FontWeight.w500))),
         ],
       ]),
     );
@@ -674,7 +760,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                       decoration: InputDecoration(
                         labelText: 'Reference Number',
                         hintText: 'Optional',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
                         prefixIcon: const Icon(Icons.numbers),
                       ),
                     ),
@@ -692,10 +779,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                       child: InputDecorator(
                         decoration: InputDecoration(
                           labelText: 'Quote Date *',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.calendar_today),
                         ),
-                        child: Text(DateFormat('dd MMM yyyy').format(_quoteDate)),
+                        child:
+                            Text(DateFormat('dd MMM yyyy').format(_quoteDate)),
                       ),
                     ),
                   ],
@@ -708,7 +797,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         decoration: InputDecoration(
                           labelText: 'Reference Number',
                           hintText: 'Optional',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.numbers),
                         ),
                       ),
@@ -728,10 +818,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         child: InputDecorator(
                           decoration: InputDecoration(
                             labelText: 'Quote Date *',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
                             prefixIcon: const Icon(Icons.calendar_today),
                           ),
-                          child: Text(DateFormat('dd MMM yyyy').format(_quoteDate)),
+                          child: Text(
+                              DateFormat('dd MMM yyyy').format(_quoteDate)),
                         ),
                       ),
                     ),
@@ -757,10 +849,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                       child: InputDecorator(
                         decoration: InputDecoration(
                           labelText: 'Expiry Date *',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.event),
                         ),
-                        child: Text(DateFormat('dd MMM yyyy').format(_expiryDate)),
+                        child:
+                            Text(DateFormat('dd MMM yyyy').format(_expiryDate)),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -769,7 +863,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                       decoration: InputDecoration(
                         labelText: 'Salesperson',
                         hintText: 'Optional',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
                         prefixIcon: const Icon(Icons.person),
                       ),
                     ),
@@ -791,10 +886,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         child: InputDecorator(
                           decoration: InputDecoration(
                             labelText: 'Expiry Date *',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
                             prefixIcon: const Icon(Icons.event),
                           ),
-                          child: Text(DateFormat('dd MMM yyyy').format(_expiryDate)),
+                          child: Text(
+                              DateFormat('dd MMM yyyy').format(_expiryDate)),
                         ),
                       ),
                     ),
@@ -805,7 +902,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         decoration: InputDecoration(
                           labelText: 'Salesperson',
                           hintText: 'Optional',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.person),
                         ),
                       ),
@@ -822,7 +920,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               hintText: _selectedCustomerId == null
                   ? 'Select a customer to associate a project'
                   : 'Optional',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               prefixIcon: const Icon(Icons.folder),
               enabled: _selectedCustomerId != null,
             ),
@@ -835,7 +934,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             decoration: InputDecoration(
               labelText: 'Subject',
               hintText: 'Optional',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               prefixIcon: const Icon(Icons.subject),
             ),
             maxLines: 2,
@@ -846,48 +946,73 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
   }
 
   Widget _buildItemsSection() {
-    final double tableWidth = _colNo + _colDesc + _colHsn + _colUnit + _colQty +
-        _colRate + _colDisc + _colGst + _colTaxable + _colTax1 + _colTax1 + _colAmt + _colDel;
+    final double tableWidth = _colNo +
+        _colDesc +
+        _colHsn +
+        _colUnit +
+        _colQty +
+        _colRate +
+        _colDisc +
+        _colGst +
+        _colTaxable +
+        _colTax1 +
+        _colTax1 +
+        _colAmt +
+        _colDel;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(gradient: const LinearGradient(colors: [_navyDark, _navyLight]), borderRadius: BorderRadius.circular(6)),
-            child: const Icon(Icons.list_alt, color: Colors.white, size: 18)),
+          Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
+                  borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.list_alt, color: Colors.white, size: 18)),
           const SizedBox(width: 10),
-          const Text('Items', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('Items',
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
         ]),
         const SizedBox(height: 14),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: SizedBox(
             width: tableWidth,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Container(
                 decoration: const BoxDecoration(
                   color: _navyDark,
-                  borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                  borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(8),
+                      topRight: Radius.circular(8)),
                 ),
                 child: Row(children: [
-                  _thCell('#',           _colNo),
+                  _thCell('#', _colNo),
                   _thCell('DESCRIPTION', _colDesc),
-                  _thCell('HSN / SAC',   _colHsn),
-                  _thCell('UNIT',        _colUnit),
-                  _thCell('QTY',         _colQty,     align: TextAlign.center),
-                  _thCell('RATE (₹)',    _colRate,    align: TextAlign.right),
-                  _thCell('DISCOUNT',    _colDisc,    align: TextAlign.right),
-                  _thCell('GST %',       _colGst,     align: TextAlign.center),
-                  _thCell('TAXABLE',     _colTaxable, align: TextAlign.right),
-                  _thCell('CGST',        _colTax1,    align: TextAlign.right),
-                  _thCell('SGST',        _colTax1,    align: TextAlign.right),
-                  _thCell('AMOUNT',      _colAmt,     align: TextAlign.right),
+                  _thCell('HSN / SAC', _colHsn),
+                  _thCell('UNIT', _colUnit),
+                  _thCell('QTY', _colQty, align: TextAlign.center),
+                  _thCell('RATE (₹)', _colRate, align: TextAlign.right),
+                  _thCell('DISCOUNT', _colDisc, align: TextAlign.right),
+                  _thCell('GST %', _colGst, align: TextAlign.center),
+                  _thCell('TAXABLE', _colTaxable, align: TextAlign.right),
+                  _thCell('CGST', _colTax1, align: TextAlign.right),
+                  _thCell('SGST', _colTax1, align: TextAlign.right),
+                  _thCell('AMOUNT', _colAmt, align: TextAlign.right),
                   SizedBox(width: _colDel),
                 ]),
               ),
@@ -903,34 +1028,50 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                       bottom: BorderSide(color: Colors.grey[200]!),
                     ),
                   ),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.inbox_outlined, size: 20, color: Colors.grey[400]),
-                    const SizedBox(width: 8),
-                    Text('No items — click Add Item below', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
-                  ]),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inbox_outlined,
+                            size: 20, color: Colors.grey[400]),
+                        const SizedBox(width: 8),
+                        Text('No items — click Add Item below',
+                            style: TextStyle(
+                                color: Colors.grey[500], fontSize: 13)),
+                      ]),
                 )
               else
                 ...List.generate(_items.length, (i) => _buildItemTableRow(i)),
               InkWell(
                 onTap: _addNewItem,
-                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(8),
+                    bottomRight: Radius.circular(8)),
                 child: Container(
                   width: tableWidth,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   decoration: BoxDecoration(
                     color: _navyAccent.withOpacity(0.05),
-                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
+                    borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(8),
+                        bottomRight: Radius.circular(8)),
                     border: Border(
                       left: BorderSide(color: _navyAccent.withOpacity(0.25)),
                       right: BorderSide(color: _navyAccent.withOpacity(0.25)),
                       bottom: BorderSide(color: _navyAccent.withOpacity(0.25)),
                     ),
                   ),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.add_circle_outline, size: 18, color: _navyAccent),
-                    const SizedBox(width: 8),
-                    Text('+ Add Item', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyAccent)),
-                  ]),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_circle_outline,
+                            size: 18, color: _navyAccent),
+                        const SizedBox(width: 8),
+                        Text('+ Add Item',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: _navyAccent)),
+                      ]),
                 ),
               ),
             ]),
@@ -940,15 +1081,23 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     );
   }
 
-  Widget _thCell(String text, double width, {TextAlign align = TextAlign.left}) =>
-      SizedBox(width: width,
-        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          child: Text(text, textAlign: align,
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.4))));
+  Widget _thCell(String text, double width,
+          {TextAlign align = TextAlign.left}) =>
+      SizedBox(
+          width: width,
+          child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              child: Text(text,
+                  textAlign: align,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.4))));
 
   Widget _buildItemTableRow(int index) {
-    final item     = _items[index];
-    final isOdd    = index.isOdd;
+    final item = _items[index];
+    final isOdd = index.isOdd;
     final descCtrl = _descControllers[index];
 
     return Container(
@@ -961,77 +1110,208 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
         ),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-        SizedBox(width: _colNo, child: Center(child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: Colors.grey[600])))),
-        SizedBox(width: _colDesc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: TextFormField(controller: descCtrl,
-            decoration: InputDecoration(hintText: 'Item description',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
-            maxLines: null, keyboardType: TextInputType.multiline,
-            onChanged: (v) { item.itemDetails = v; }))),
-        SizedBox(width: _colHsn, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: TextFormField(initialValue: item.hsnCode,
-            decoration: InputDecoration(hintText: 'HSN/SAC',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
-            onChanged: (v) => item.hsnCode = v))),
-        SizedBox(width: _colUnit, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: DropdownButtonFormField<String>(
-            value: _kUnits.contains(item.unit) ? item.unit : 'Nos', isExpanded: true,
-            decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
-            items: _kUnits.map((u) => DropdownMenuItem(value: u, child: Text(u, style: const TextStyle(fontSize: 12)))).toList(),
-            onChanged: (v) => setState(() => item.unit = v ?? 'Nos')))),
-        SizedBox(width: _colQty, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: TextFormField(initialValue: item.quantity > 0 ? item.quantity.toString() : '',
-            decoration: InputDecoration(hintText: '0',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
-            keyboardType: TextInputType.number, textAlign: TextAlign.center,
-            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-            onChanged: (v) { item.quantity = double.tryParse(v) ?? 0; _calculateAmounts(); }))),
-        SizedBox(width: _colRate, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: TextFormField(initialValue: item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
-            decoration: InputDecoration(hintText: '0.00',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), isDense: true),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true), textAlign: TextAlign.right,
-            onChanged: (v) { item.rate = double.tryParse(v) ?? 0; _calculateAmounts(); }))),
-        SizedBox(width: _colDisc, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(children: [
-            Expanded(child: TextFormField(initialValue: item.discount > 0 ? item.discount.toString() : '',
-              decoration: InputDecoration(hintText: '0',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true), textAlign: TextAlign.right,
-              onChanged: (v) { item.discount = double.tryParse(v) ?? 0; _calculateAmounts(); })),
-            PopupMenuButton<String>(initialValue: item.discountType,
-              icon: const Icon(Icons.arrow_drop_down, size: 18), padding: EdgeInsets.zero,
-              onSelected: (v) => setState(() { item.discountType = v; _calculateAmounts(); }),
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: 'percentage', child: Text('%')),
-                const PopupMenuItem(value: 'amount',     child: Text('₹')),
-              ]),
-          ]))),
-        SizedBox(width: _colGst, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: DropdownButtonFormField<double>(
-            value: _kGstRates.contains(item.itemGstRate) ? item.itemGstRate : 18.0, isExpanded: true,
-            decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), isDense: true),
-            items: _kGstRates.map((r) => DropdownMenuItem(value: r, child: Text('${r.toInt()}%', style: const TextStyle(fontSize: 12)))).toList(),
-            onChanged: (v) => setState(() { item.itemGstRate = v ?? 18; _calculateAmounts(); })))),
-        SizedBox(width: _colTaxable, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(item.taxableAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
-        SizedBox(width: _colTax1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(item.cgstAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
-        SizedBox(width: _colTax1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(item.sgstAmount.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12)))),
-        SizedBox(width: _colAmt, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(item.amount.toStringAsFixed(2), textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navyDark)))),
-        SizedBox(width: _colDel, child: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-          onPressed: () => _removeItem(index), tooltip: 'Remove')),
+        SizedBox(
+            width: _colNo,
+            child: Center(
+                child: Text('${index + 1}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])))),
+        SizedBox(
+            width: _colDesc,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: TextFormField(
+                    controller: descCtrl,
+                    decoration: InputDecoration(
+                        hintText: 'Item description',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        isDense: true),
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                    onChanged: (v) {
+                      item.itemDetails = v;
+                    }))),
+        SizedBox(
+            width: _colHsn,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: TextFormField(
+                    initialValue: item.hsnCode,
+                    decoration: InputDecoration(
+                        hintText: 'HSN/SAC',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        isDense: true),
+                    onChanged: (v) => item.hsnCode = v))),
+        SizedBox(
+            width: _colUnit,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: DropdownButtonFormField<String>(
+                    value: _kUnits.contains(item.unit) ? item.unit : 'Nos',
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 8),
+                        isDense: true),
+                    items: _kUnits
+                        .map((u) => DropdownMenuItem(
+                            value: u,
+                            child:
+                                Text(u, style: const TextStyle(fontSize: 12))))
+                        .toList(),
+                    onChanged: (v) => setState(() => item.unit = v ?? 'Nos')))),
+        SizedBox(
+            width: _colQty,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: TextFormField(
+                    initialValue:
+                        item.quantity > 0 ? item.quantity.toString() : '',
+                    decoration: InputDecoration(
+                        hintText: '0',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        isDense: true),
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))
+                    ],
+                    onChanged: (v) {
+                      item.quantity = double.tryParse(v) ?? 0;
+                      _calculateAmounts();
+                    }))),
+        SizedBox(
+            width: _colRate,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: TextFormField(
+                    initialValue:
+                        item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+                    decoration: InputDecoration(
+                        hintText: '0.00',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        isDense: true),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textAlign: TextAlign.right,
+                    onChanged: (v) {
+                      item.rate = double.tryParse(v) ?? 0;
+                      _calculateAmounts();
+                    }))),
+        SizedBox(
+            width: _colDisc,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: Row(children: [
+                  Expanded(
+                      child: TextFormField(
+                          initialValue:
+                              item.discount > 0 ? item.discount.toString() : '',
+                          decoration: InputDecoration(
+                              hintText: '0',
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6)),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 8),
+                              isDense: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          textAlign: TextAlign.right,
+                          onChanged: (v) {
+                            item.discount = double.tryParse(v) ?? 0;
+                            _calculateAmounts();
+                          })),
+                  PopupMenuButton<String>(
+                      initialValue: item.discountType,
+                      icon: const Icon(Icons.arrow_drop_down, size: 18),
+                      padding: EdgeInsets.zero,
+                      onSelected: (v) => setState(() {
+                            item.discountType = v;
+                            _calculateAmounts();
+                          }),
+                      itemBuilder: (_) => [
+                            const PopupMenuItem(
+                                value: 'percentage', child: Text('%')),
+                            const PopupMenuItem(
+                                value: 'amount', child: Text('₹')),
+                          ]),
+                ]))),
+        SizedBox(
+            width: _colGst,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: DropdownButtonFormField<double>(
+                    value: _kGstRates.contains(item.itemGstRate)
+                        ? item.itemGstRate
+                        : 18.0,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 8),
+                        isDense: true),
+                    items: _kGstRates
+                        .map((r) => DropdownMenuItem(
+                            value: r,
+                            child: Text('${r.toInt()}%',
+                                style: const TextStyle(fontSize: 12))))
+                        .toList(),
+                    onChanged: (v) => setState(() {
+                          item.itemGstRate = v ?? 18;
+                          _calculateAmounts();
+                        })))),
+        SizedBox(
+            width: _colTaxable,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(item.taxableAmount.toStringAsFixed(2),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12)))),
+        SizedBox(
+            width: _colTax1,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(item.cgstAmount.toStringAsFixed(2),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12)))),
+        SizedBox(
+            width: _colTax1,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(item.sgstAmount.toStringAsFixed(2),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12)))),
+        SizedBox(
+            width: _colAmt,
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(item.amount.toStringAsFixed(2),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: _navyDark)))),
+        SizedBox(
+            width: _colDel,
+            child: IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    color: Colors.red, size: 18),
+                onPressed: () => _removeItem(index),
+                tooltip: 'Remove')),
       ]),
     );
   }
@@ -1067,7 +1347,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             decoration: InputDecoration(
               labelText: 'Customer Notes',
               hintText: 'Notes visible on quote',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               alignLabelWithHint: true,
             ),
             maxLines: 3,
@@ -1078,7 +1359,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             decoration: InputDecoration(
               labelText: 'Terms & Conditions',
               hintText: 'Payment terms, policies, etc.',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               alignLabelWithHint: true,
             ),
             maxLines: 3,
@@ -1094,10 +1376,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
       children: [
         const Text(
           'Tax Settings',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1e3a8a)),
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1e3a8a)),
         ),
         const SizedBox(height: 16),
-        
         SwitchListTile(
           title: const Text('Enable GST'),
           value: _enableGST,
@@ -1110,16 +1394,17 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             });
           },
         ),
-        
         if (_enableGST) ...[
           const SizedBox(height: 8),
           TextFormField(
             initialValue: _gstRate.toString(),
             decoration: InputDecoration(
               labelText: 'GST Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (value) {
@@ -1130,12 +1415,11 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             },
           ),
         ],
-        
         const SizedBox(height: 16),
-        
         SwitchListTile(
           title: const Text('Enable TDS'),
-          subtitle: const Text('Tax Deducted at Source', style: TextStyle(fontSize: 12)),
+          subtitle: const Text('Tax Deducted at Source',
+              style: TextStyle(fontSize: 12)),
           value: _enableTDS,
           activeColor: const Color(0xFF3498DB),
           contentPadding: EdgeInsets.zero,
@@ -1146,16 +1430,17 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             });
           },
         ),
-        
         if (_enableTDS) ...[
           const SizedBox(height: 8),
           TextFormField(
             initialValue: _tdsRate.toString(),
             decoration: InputDecoration(
               labelText: 'TDS Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (value) {
@@ -1166,12 +1451,11 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             },
           ),
         ],
-        
         const SizedBox(height: 16),
-        
         SwitchListTile(
           title: const Text('Enable TCS'),
-          subtitle: const Text('Tax Collected at Source', style: TextStyle(fontSize: 12)),
+          subtitle: const Text('Tax Collected at Source',
+              style: TextStyle(fontSize: 12)),
           value: _enableTCS,
           activeColor: const Color(0xFF3498DB),
           contentPadding: EdgeInsets.zero,
@@ -1182,16 +1466,17 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
             });
           },
         ),
-        
         if (_enableTCS) ...[
           const SizedBox(height: 8),
           TextFormField(
             initialValue: _tcsRate.toString(),
             decoration: InputDecoration(
               labelText: 'TCS Rate (%)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               suffixText: '%',
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (value) {
@@ -1212,37 +1497,40 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
       children: [
         const Text(
           'Quote Summary',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1e3a8a)),
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1e3a8a)),
         ),
         const SizedBox(height: 16),
-        
         _buildSummaryRow('Sub Total:', _subTotal, isBold: false),
         const SizedBox(height: 8),
-        
         if (_enableTDS && _tdsAmount > 0) ...[
-          _buildSummaryRow('TDS (${_tdsRate.toStringAsFixed(1)}%):', -_tdsAmount, color: Colors.red[700], isBold: false),
+          _buildSummaryRow(
+              'TDS (${_tdsRate.toStringAsFixed(1)}%):', -_tdsAmount,
+              color: Colors.red[700], isBold: false),
           const SizedBox(height: 8),
         ],
-        
         if (_enableTCS && _tcsAmount > 0) ...[
-          _buildSummaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%):', _tcsAmount, isBold: false),
+          _buildSummaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%):', _tcsAmount,
+              isBold: false),
           const SizedBox(height: 8),
         ],
-        
         if (_enableGST && _gstAmount > 0) ...[
-          _buildSummaryRow('CGST (${(_gstRate / 2).toStringAsFixed(1)}%):', _gstAmount / 2, isBold: false),
+          _buildSummaryRow(
+              'CGST (${(_gstRate / 2).toStringAsFixed(1)}%):', _gstAmount / 2,
+              isBold: false),
           const SizedBox(height: 8),
-          _buildSummaryRow('SGST (${(_gstRate / 2).toStringAsFixed(1)}%):', _gstAmount / 2, isBold: false),
+          _buildSummaryRow(
+              'SGST (${(_gstRate / 2).toStringAsFixed(1)}%):', _gstAmount / 2,
+              isBold: false),
           const SizedBox(height: 8),
         ],
-        
         const Divider(thickness: 2),
         const SizedBox(height: 8),
-        
-        _buildSummaryRow('Total Amount:', _totalAmount, isBold: true, isTotal: true),
-        
+        _buildSummaryRow('Total Amount:', _totalAmount,
+            isBold: true, isTotal: true),
         const SizedBox(height: 16),
-        
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -1256,41 +1544,58 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Quantity:', style: TextStyle(fontSize: 13, color: Color(0xFF34495E))),
-                  Text(_totalQuantity.toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF34495E))),
+                  const Text('Total Quantity:',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF34495E))),
+                  Text(_totalQuantity.toString(),
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF34495E))),
                 ],
               ),
               const SizedBox(height: 4),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Items:', style: TextStyle(fontSize: 13, color: Color(0xFF34495E))),
-                  Text(_items.where((item) => item.itemDetails.isNotEmpty).length.toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF34495E))),
+                  const Text('Total Items:',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF34495E))),
+                  Text(
+                      _items
+                          .where((item) => item.itemDetails.isNotEmpty)
+                          .length
+                          .toString(),
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF34495E))),
                 ],
               ),
             ],
           ),
         ),
-        
         const SizedBox(height: 24),
-        
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
             onPressed: _isSaving ? null : _saveAndSend,
-            icon: _isSaving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send),
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.send),
             label: Text(_isSaving ? 'Sending...' : 'Save & Send Quote'),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF27AE60),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
-        
         const SizedBox(height: 12),
-        
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -1301,13 +1606,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               foregroundColor: const Color(0xFF27AE60),
               padding: const EdgeInsets.symmetric(vertical: 16),
               side: const BorderSide(color: Color(0xFF27AE60)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
-        
         const SizedBox(height: 12),
-        
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -1318,7 +1622,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               foregroundColor: const Color(0xFF3498DB),
               padding: const EdgeInsets.symmetric(vertical: 16),
               side: const BorderSide(color: Color(0xFF3498DB)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -1326,7 +1631,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     );
   }
 
-  Widget _buildSummaryRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _buildSummaryRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1335,7 +1641,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
           style: TextStyle(
             fontSize: isTotal ? 16 : 14,
             fontWeight: isBold || isTotal ? FontWeight.bold : FontWeight.normal,
-            color: color ?? (isTotal ? const Color(0xFF1e3a8a) : const Color(0xFF7F8C8D)),
+            color: color ??
+                (isTotal ? const Color(0xFF1e3a8a) : const Color(0xFF7F8C8D)),
           ),
         ),
         Text(
@@ -1343,7 +1650,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
           style: TextStyle(
             fontSize: isTotal ? 18 : 14,
             fontWeight: isBold || isTotal ? FontWeight.bold : FontWeight.w500,
-            color: color ?? (isTotal ? const Color(0xFF27AE60) : const Color(0xFF1e3a8a)),
+            color: color ??
+                (isTotal ? const Color(0xFF27AE60) : const Color(0xFF1e3a8a)),
           ),
         ),
       ],
@@ -1356,7 +1664,7 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
     List<BillingCustomer> filteredCustomers = [];
     bool isLoading = true;
     String? errorMessage;
-    
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1375,7 +1683,7 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
               });
             });
           }
-          
+
           return AlertDialog(
             title: const Text('Select Customer'),
             content: SizedBox(
@@ -1388,7 +1696,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                     decoration: InputDecoration(
                       hintText: 'Search customers...',
                       prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     onChanged: (value) {
                       setDialogState(() {
@@ -1396,8 +1705,12 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                           filteredCustomers = customers;
                         } else {
                           filteredCustomers = customers.where((customer) {
-                            return customer.customerName.toLowerCase().contains(value.toLowerCase()) ||
-                                   customer.customerEmail.toLowerCase().contains(value.toLowerCase());
+                            return customer.customerName
+                                    .toLowerCase()
+                                    .contains(value.toLowerCase()) ||
+                                customer.customerEmail
+                                    .toLowerCase()
+                                    .contains(value.toLowerCase());
                           }).toList();
                         }
                       });
@@ -1410,27 +1723,37 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                         : errorMessage != null
                             ? Center(child: Text('Error: $errorMessage'))
                             : filteredCustomers.isEmpty
-                                ? const Center(child: Text('No customers found'))
+                                ? const Center(
+                                    child: Text('No customers found'))
                                 : ListView.builder(
                                     itemCount: filteredCustomers.length,
                                     itemBuilder: (context, index) {
                                       final customer = filteredCustomers[index];
                                       return ListTile(
                                         leading: CircleAvatar(
-                                          backgroundColor: const Color(0xFF3498DB),
-                                          child: Text(customer.customerName[0].toUpperCase(), style: const TextStyle(color: Colors.white)),
+                                          backgroundColor:
+                                              const Color(0xFF3498DB),
+                                          child: Text(
+                                              customer.customerName[0]
+                                                  .toUpperCase(),
+                                              style: const TextStyle(
+                                                  color: Colors.white)),
                                         ),
                                         title: Text(customer.customerName),
                                         subtitle: Text(customer.customerEmail),
                                         onTap: () {
                                           setState(() {
-                                            _selectedCustomerId    = customer.id;
-                                            _selectedCustomerName  = customer.customerName;
-                                            _selectedCustomerEmail = customer.customerEmail;
-                                            _selectedCustomerPhone = customer.customerPhone;
-                                            _customerGSTIN         = customer.gstNumber;
-                                            _customerPAN           = customer.panNumber;
-                                            _gstRegistrationType   = customer.gstRegistrationType;
+                                            _selectedCustomerId = customer.id;
+                                            _selectedCustomerName =
+                                                customer.customerName;
+                                            _selectedCustomerEmail =
+                                                customer.customerEmail;
+                                            _selectedCustomerPhone =
+                                                customer.customerPhone;
+                                            _customerGSTIN = customer.gstNumber;
+                                            _customerPAN = customer.panNumber;
+                                            _gstRegistrationType =
+                                                customer.gstRegistrationType;
                                           });
                                           Navigator.pop(context);
                                         },
@@ -1444,7 +1767,10 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => const NewCustomerPage()));
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const NewCustomerPage()));
                       },
                       icon: const Icon(Icons.add),
                       label: const Text('Add New Customer'),
@@ -1486,36 +1812,36 @@ class QuoteItemData {
   double igstAmount;
 
   QuoteItemData({
-    this.itemDetails   = '',
-    this.quantity      = 0,
-    this.rate          = 0,
-    this.discount      = 0,
-    this.discountType  = 'percentage',
-    this.amount        = 0,
-    this.hsnCode       = '',
-    this.unit          = 'Nos',
-    this.itemGstRate   = 18,
+    this.itemDetails = '',
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
+    this.discountType = 'percentage',
+    this.amount = 0,
+    this.hsnCode = '',
+    this.unit = 'Nos',
+    this.itemGstRate = 18,
     this.taxableAmount = 0,
-    this.cgstAmount    = 0,
-    this.sgstAmount    = 0,
-    this.igstAmount    = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails':   itemDetails,
-      'quantity':      quantity,
-      'rate':          rate,
-      'discount':      discount,
-      'discountType':  discountType,
-      'amount':        amount,
-      'hsnCode':       hsnCode,
-      'unit':          unit,
-      'itemGstRate':   itemGstRate,
+      'itemDetails': itemDetails,
+      'quantity': quantity,
+      'rate': rate,
+      'discount': discount,
+      'discountType': discountType,
+      'amount': amount,
+      'hsnCode': hsnCode,
+      'unit': unit,
+      'itemGstRate': itemGstRate,
       'taxableAmount': taxableAmount,
-      'cgstAmount':    cgstAmount,
-      'sgstAmount':    sgstAmount,
-      'igstAmount':    igstAmount,
+      'cgstAmount': cgstAmount,
+      'sgstAmount': sgstAmount,
+      'igstAmount': igstAmount,
     };
   }
 }

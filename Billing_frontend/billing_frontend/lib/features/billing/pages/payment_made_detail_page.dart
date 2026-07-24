@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // PAYMENT MADE DETAIL PAGE
 // ============================================================================
@@ -7,14 +8,15 @@ import '../../../../core/services/payment_made_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_payment_made.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class PaymentMadeDetailPage extends StatefulWidget {
   final PaymentMade payment;
-  const PaymentMadeDetailPage({Key? key, required this.payment}) : super(key: key);
+  const PaymentMadeDetailPage({Key? key, required this.payment})
+      : super(key: key);
 
   @override
   State<PaymentMadeDetailPage> createState() => _PaymentMadeDetailPageState();
@@ -53,7 +55,8 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           foregroundColor: Colors.white,
-          title: Text(_payment.paymentNumber, style: const TextStyle(fontWeight: FontWeight.bold)),
+          title: Text(_payment.paymentNumber,
+              style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
             IconButton(
               icon: const Icon(Icons.download, color: Colors.white),
@@ -61,9 +64,14 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
               onPressed: () async {
                 try {
                   final url = await PaymentMadeService.downloadPDF(_payment.id);
-                  if (mounted) await fetchAndHandleFile(context, url, '${_payment.paymentNumber}.pdf', download: true);
+                  if (mounted)
+                    await fetchAndHandleFile(
+                        context, url, '${_payment.paymentNumber}.pdf',
+                        download: true);
                 } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+                  if (mounted)
+                    AppSnackbar.show(context,
+                        message: 'Failed: $e', isError: true);
                 }
               },
             ),
@@ -84,12 +92,16 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
             ),
             TextButton.icon(
               onPressed: () async {
-                final r = await Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => NewPaymentMadeScreen(paymentId: _payment.id)));
+                final r = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            NewPaymentMadeScreen(paymentId: _payment.id)));
                 if (r == true) Navigator.pop(context, true);
               },
               icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-              label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+              label:
+                  const Text('Edit', style: TextStyle(color: Colors.white70)),
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -129,7 +141,10 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
           child: Column(
             children: [
               _buildMainScroll(p, isScrollable: false),
-              Container(color: Colors.white, padding: const EdgeInsets.all(20), child: _buildSidebar(p)),
+              Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(20),
+                  child: _buildSidebar(p)),
             ],
           ),
         );
@@ -146,10 +161,17 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [_navyDark, _navyMid],
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: const LinearGradient(
+                colors: [_navyDark, _navyMid],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: _navyDark.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4))
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,11 +183,18 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(p.paymentNumber,
-                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text(p.vendorName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                        Text(p.vendorName,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 15)),
                         if ((p.vendorEmail ?? '').isNotEmpty)
-                          Text(p.vendorEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                          Text(p.vendorEmail!,
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 13)),
                       ],
                     ),
                   ),
@@ -179,8 +208,10 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
                 children: [
                   _headerInfo('Payment Date', fmt.format(p.paymentDate)),
                   _headerInfo('Mode', p.paymentMode),
-                  if ((p.referenceNumber ?? '').isNotEmpty) _headerInfo('Reference', p.referenceNumber!),
-                  if ((p.paidFromAccountName ?? '').isNotEmpty) _headerInfo('Paid From', p.paidFromAccountName!),
+                  if ((p.referenceNumber ?? '').isNotEmpty)
+                    _headerInfo('Reference', p.referenceNumber!),
+                  if ((p.paidFromAccountName ?? '').isNotEmpty)
+                    _headerInfo('Paid From', p.paidFromAccountName!),
                 ],
               ),
             ],
@@ -198,21 +229,30 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: p.billsApplied.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey[200]),
               itemBuilder: (_, i) {
                 final b = p.billsApplied[i];
                 return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.check_circle,
+                        color: Colors.green, size: 20),
                   ),
-                  title: Text(b.billNumber, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(b.billNumber,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(fmt.format(b.appliedDate),
                       style: TextStyle(color: Colors.grey[600], fontSize: 12)),
                   trailing: Text('₹${b.amountApplied.toStringAsFixed(2)}',
-                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 15)),
+                      style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15)),
                 );
               },
             ),
@@ -225,7 +265,8 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
             icon: Icons.note,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(p.notes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+              child: Text(p.notes!,
+                  style: TextStyle(color: Colors.grey[800], fontSize: 14)),
             ),
           ),
         ],
@@ -250,11 +291,14 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
             child: const Icon(Icons.summarize, color: Colors.white, size: 16),
           ),
           const SizedBox(width: 8),
-          const Text('Payment Summary', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('Payment Summary',
+              style: TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
         ]),
         const SizedBox(height: 16),
         _amtRow('Sub Total', p.subTotal),
-        if (p.tdsAmount > 0) _amtRow('TDS', -p.tdsAmount, color: Colors.red[700]),
+        if (p.tdsAmount > 0)
+          _amtRow('TDS', -p.tdsAmount, color: Colors.red[700]),
         if (p.tcsAmount > 0) _amtRow('TCS', p.tcsAmount),
         if (p.cgst > 0) _amtRow('CGST', p.cgst),
         if (p.sgst > 0) _amtRow('SGST', p.sgst),
@@ -265,20 +309,26 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [_navyDark.withOpacity(0.06), _navyLight.withOpacity(0.08)]),
+            gradient: LinearGradient(colors: [
+              _navyDark.withOpacity(0.06),
+              _navyLight.withOpacity(0.08)
+            ]),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: _navyAccent.withOpacity(0.2)),
           ),
           child: Column(
             children: [
-              _balanceRow('Total Amount', '₹${p.totalAmount.toStringAsFixed(2)}', Colors.blue),
+              _balanceRow('Total Amount',
+                  '₹${p.totalAmount.toStringAsFixed(2)}', Colors.blue),
               const SizedBox(height: 8),
-              _balanceRow('Applied', '₹${p.amountApplied.toStringAsFixed(2)}', Colors.green),
+              _balanceRow('Applied', '₹${p.amountApplied.toStringAsFixed(2)}',
+                  Colors.green),
               const SizedBox(height: 8),
               const Divider(height: 1),
               const SizedBox(height: 8),
               _balanceRow('Unused', '₹${p.amountUnused.toStringAsFixed(2)}',
-                  p.amountUnused > 0 ? _navyAccent : Colors.grey, isBold: true),
+                  p.amountUnused > 0 ? _navyAccent : Colors.grey,
+                  isBold: true),
             ],
           ),
         ),
@@ -293,7 +343,8 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
               foregroundColor: _navyMid,
               side: BorderSide(color: _navyMid),
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
@@ -301,13 +352,19 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
     );
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -318,13 +375,18 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(icon, color: Colors.white, size: 16),
               ),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: _navyDark)),
             ]),
           ),
           const Divider(height: 1),
@@ -338,42 +400,57 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11)),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13)),
       ],
     );
   }
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(
-            fontSize: isTotal ? 14 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-          )),
-          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}', style: TextStyle(
-            fontSize: isTotal ? 16 : 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            color: color ?? (isTotal ? _navyAccent : _navyDark),
-          )),
+          Text(label,
+              style: TextStyle(
+                fontSize: isTotal ? 14 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+              )),
+          Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: isTotal ? 16 : 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color ?? (isTotal ? _navyAccent : _navyDark),
+              )),
         ],
       ),
     );
   }
 
-  Widget _balanceRow(String label, String value, Color color, {bool isBold = false}) {
+  Widget _balanceRow(String label, String value, Color color,
+      {bool isBold = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.w600 : FontWeight.normal, color: Colors.grey[700])),
-        Text(value, style: TextStyle(fontSize: 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500, color: color)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+                color: Colors.grey[700])),
+        Text(value,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                color: color)),
       ],
     );
   }
@@ -381,12 +458,25 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
   Widget _glowBadge(String status) {
     Color bg;
     switch (status.toUpperCase()) {
-      case 'OPEN': bg = Colors.orange; break;
-      case 'PAID': case 'CLOSED': bg = Colors.green; break;
-      case 'VOID': case 'CANCELLED': bg = Colors.grey; break;
-      case 'DRAFT': bg = Colors.grey; break;
-      case 'OVERDUE': bg = Colors.red; break;
-      default: bg = _navyAccent;
+      case 'OPEN':
+        bg = Colors.orange;
+        break;
+      case 'PAID':
+      case 'CLOSED':
+        bg = Colors.green;
+        break;
+      case 'VOID':
+      case 'CANCELLED':
+        bg = Colors.grey;
+        break;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'OVERDUE':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -395,7 +485,9 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style:
+              TextStyle(color: bg, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 }

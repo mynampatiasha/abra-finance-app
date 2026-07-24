@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 
-const kNavyDark   = Color(0xFF0F172A);
-const kNavy       = Color(0xFF1E3A5F);
+const kNavyDark = Color(0xFF0F172A);
+const kNavy = Color(0xFF1E3A5F);
 const kBlueAccent = Color(0xFF2563EB);
-const kWhite      = Color(0xFFFFFFFF);
-const kPageBg     = Color(0xFFF8FAFC);
+const kWhite = Color(0xFFFFFFFF);
+const kPageBg = Color(0xFFF8FAFC);
 
 class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final List<Widget>? actions;
   final bool showBack;
+
   /// Optional: called AFTER pop, use to reset shell state to Dashboard.
   /// In BillingMainShell pass: onBack: () => setState(() { _selectedIndex = 0; _currentPageTitle = 'Dashboard'; })
   final VoidCallback? onBack;
@@ -65,7 +66,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
               tooltip: 'Back',
               onPressed: () {
                 Navigator.of(context).pop(); // ✅ pop the current page
-                onBack?.call();              // ✅ reset shell to Dashboard
+                onBack?.call(); // ✅ reset shell to Dashboard
               },
             ),
           if (showBack) const SizedBox(width: 4),

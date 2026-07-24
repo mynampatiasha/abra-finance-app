@@ -7,9 +7,9 @@ import '../../../../core/services/quote_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_quote.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class QuoteDetailPage extends StatefulWidget {
@@ -33,25 +33,39 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final q = await QuoteService.getQuote(widget.quoteId);
-      setState(() { _quote = q; _isLoading = false; });
+      setState(() {
+        _quote = q;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -63,7 +77,8 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [_navyDark, _navyMid, _navyLight],
-            begin: Alignment.centerLeft, end: Alignment.centerRight,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
         child: AppBar(
@@ -79,7 +94,10 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
                 tooltip: 'Download PDF',
                 onPressed: () async {
                   final url = await QuoteService.downloadPDF(widget.quoteId);
-                  if (mounted) await fetchAndHandleFile(context, url, '${_quote!.quoteNumber}.pdf', download: true);
+                  if (mounted)
+                    await fetchAndHandleFile(
+                        context, url, '${_quote!.quoteNumber}.pdf',
+                        download: true);
                 },
               ),
               IconButton(
@@ -97,19 +115,28 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
                 },
               ),
             ],
-            if (_quote != null && (_quote!.status == 'DRAFT' || _quote!.status == 'SENT'))
+            if (_quote != null &&
+                (_quote!.status == 'DRAFT' || _quote!.status == 'SENT'))
               TextButton.icon(
                 onPressed: () async {
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewQuoteScreen(quoteId: widget.quoteId)));
-                  if (r == true) { setState(() => _changed = true); _load(); }
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              NewQuoteScreen(quoteId: widget.quoteId)));
+                  if (r == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white70)),
               ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white),
-              onPressed: _load, tooltip: 'Refresh',
+              onPressed: _load,
+              tooltip: 'Refresh',
             ),
             const SizedBox(width: 8),
           ],
@@ -137,9 +164,12 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
           ),
         ]);
       } else {
-        return SingleChildScrollView(child: Column(children: [
+        return SingleChildScrollView(
+            child: Column(children: [
           _buildMainScroll(q, isScrollable: false),
-          Container(color: Colors.white, padding: const EdgeInsets.all(20),
+          Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(20),
               child: _buildAmountSidebar(q)),
         ]));
       }
@@ -155,30 +185,50 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [_navyDark, _navyMid],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+                color: _navyDark.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4))
+          ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(q.quoteNumber,
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(q.customerName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
-              if (q.customerEmail != null)
-                Text(q.customerEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(q.quoteNumber,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(q.customerName,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 15)),
+                  if (q.customerEmail != null)
+                    Text(q.customerEmail!,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13)),
+                ])),
             _glowBadge(q.status),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 24, runSpacing: 8, children: [
-            _headerInfo('Quote Date', DateFormat('dd MMM yyyy').format(q.quoteDate)),
-            _headerInfo('Expiry Date', DateFormat('dd MMM yyyy').format(q.expiryDate)),
-            if (q.salesperson != null) _headerInfo('Salesperson', q.salesperson!),
+            _headerInfo(
+                'Quote Date', DateFormat('dd MMM yyyy').format(q.quoteDate)),
+            _headerInfo(
+                'Expiry Date', DateFormat('dd MMM yyyy').format(q.expiryDate)),
+            if (q.salesperson != null)
+              _headerInfo('Salesperson', q.salesperson!),
             if (q.subject != null) _headerInfo('Subject', q.subject!),
-            if (q.referenceNumber != null) _headerInfo('Reference', q.referenceNumber!),
+            if (q.referenceNumber != null)
+              _headerInfo('Reference', q.referenceNumber!),
           ]),
         ]),
       ),
@@ -200,7 +250,8 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
               q.convertedToInvoice == true
                   ? 'Converted to Invoice${q.convertedDate != null ? ' on ${DateFormat('dd MMM yyyy').format(q.convertedDate!)}' : ''}'
                   : 'Converted to Sales Order',
-              style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  color: Colors.green[800], fontWeight: FontWeight.w600),
             ),
           ]),
         ),
@@ -209,12 +260,15 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
 
       // Line Items
       _detailCard(
-        title: 'Line Items', icon: Icons.list_alt,
+        title: 'Line Items',
+        icon: Icons.list_alt,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-            headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            headingRowColor:
+                WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+            headingTextStyle: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
             columns: const [
               DataColumn(label: Text('ITEM')),
               DataColumn(label: Text('QTY')),
@@ -222,15 +276,21 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
               DataColumn(label: Text('DISCOUNT')),
               DataColumn(label: Text('AMOUNT')),
             ],
-            rows: q.items.map((item) => DataRow(cells: [
-              DataCell(SizedBox(width: 220, child: Text(item.itemDetails, overflow: TextOverflow.ellipsis))),
-              DataCell(Text(item.quantity.toStringAsFixed(0))),
-              DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
-              DataCell(Text(item.discount > 0
-                  ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}' : '—')),
-              DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600))),
-            ])).toList(),
+            rows: q.items
+                .map((item) => DataRow(cells: [
+                      DataCell(SizedBox(
+                          width: 220,
+                          child: Text(item.itemDetails,
+                              overflow: TextOverflow.ellipsis))),
+                      DataCell(Text(item.quantity.toStringAsFixed(0))),
+                      DataCell(Text('₹${item.rate.toStringAsFixed(2)}')),
+                      DataCell(Text(item.discount > 0
+                          ? '${item.discount}${item.discountType == "percentage" ? "%" : "₹"}'
+                          : '—')),
+                      DataCell(Text('₹${item.amount.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.w600))),
+                    ]))
+                .toList(),
           ),
         ),
       ),
@@ -239,15 +299,21 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
 
       // Status Timeline
       _detailCard(
-        title: 'Status Timeline', icon: Icons.timeline,
+        title: 'Status Timeline',
+        icon: Icons.timeline,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
             _timelineItem('Created', q.createdAt, Colors.blue, true),
-            if (q.sentDate != null) _timelineItem('Sent to Customer', q.sentDate!, Colors.orange, true),
-            if (q.acceptedDate != null) _timelineItem('Accepted', q.acceptedDate!, Colors.green, true),
-            if (q.declinedDate != null) _timelineItem('Declined', q.declinedDate!, Colors.red, true),
-            if (q.convertedDate != null) _timelineItem('Converted', q.convertedDate!, Colors.purple, true),
+            if (q.sentDate != null)
+              _timelineItem(
+                  'Sent to Customer', q.sentDate!, Colors.orange, true),
+            if (q.acceptedDate != null)
+              _timelineItem('Accepted', q.acceptedDate!, Colors.green, true),
+            if (q.declinedDate != null)
+              _timelineItem('Declined', q.declinedDate!, Colors.red, true),
+            if (q.convertedDate != null)
+              _timelineItem('Converted', q.convertedDate!, Colors.purple, true),
           ]),
         ),
       ),
@@ -255,10 +321,12 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
       if (q.customerNotes != null && q.customerNotes!.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Customer Notes', icon: Icons.note,
+          title: 'Customer Notes',
+          icon: Icons.note,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(q.customerNotes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(q.customerNotes!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
@@ -266,10 +334,12 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
       if (q.termsAndConditions != null && q.termsAndConditions!.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Terms & Conditions', icon: Icons.description,
+          title: 'Terms & Conditions',
+          icon: Icons.description,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(q.termsAndConditions!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(q.termsAndConditions!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
@@ -286,11 +356,14 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
         Container(
-          width: 12, height: 12,
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(fontWeight: FontWeight.w500))),
         Text(DateFormat('dd MMM yyyy').format(date),
             style: TextStyle(color: Colors.grey[600], fontSize: 12)),
       ]),
@@ -310,7 +383,8 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         ),
         const SizedBox(width: 8),
         const Text('Quote Summary',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
       ]),
       const SizedBox(height: 16),
       _amtRow('Sub Total', q.subTotal),
@@ -328,28 +402,40 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: q.expiryDate.isBefore(DateTime.now()) && q.status == 'SENT'
-              ? Colors.red[50] : Colors.grey[50],
+              ? Colors.red[50]
+              : Colors.grey[50],
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: q.expiryDate.isBefore(DateTime.now()) && q.status == 'SENT'
-                ? Colors.red[200]! : Colors.grey[200]!),
+              color: q.expiryDate.isBefore(DateTime.now()) && q.status == 'SENT'
+                  ? Colors.red[200]!
+                  : Colors.grey[200]!),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(Icons.event, size: 16,
-                color: q.expiryDate.isBefore(DateTime.now()) ? Colors.red : Colors.grey[600]),
+            Icon(Icons.event,
+                size: 16,
+                color: q.expiryDate.isBefore(DateTime.now())
+                    ? Colors.red
+                    : Colors.grey[600]),
             const SizedBox(width: 6),
             Text('Expiry Date',
-                style: TextStyle(fontWeight: FontWeight.w600,
-                    color: q.expiryDate.isBefore(DateTime.now()) ? Colors.red : Colors.grey[700])),
+                style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: q.expiryDate.isBefore(DateTime.now())
+                        ? Colors.red
+                        : Colors.grey[700])),
           ]),
           const SizedBox(height: 6),
           Text(DateFormat('dd MMM yyyy').format(q.expiryDate),
               style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.bold,
-                  color: q.expiryDate.isBefore(DateTime.now()) ? Colors.red : _navyDark)),
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: q.expiryDate.isBefore(DateTime.now())
+                      ? Colors.red
+                      : _navyDark)),
           if (q.expiryDate.isBefore(DateTime.now()) && q.status == 'SENT')
-            Text('Expired', style: TextStyle(color: Colors.red[700], fontSize: 12)),
+            Text('Expired',
+                style: TextStyle(color: Colors.red[700], fontSize: 12)),
         ]),
       ),
 
@@ -365,20 +451,27 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
             foregroundColor: _navyMid,
             side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
     ]);
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
@@ -393,7 +486,11 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
               child: Icon(icon, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
           ]),
         ),
         const Divider(height: 1),
@@ -406,20 +503,35 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
       const SizedBox(height: 2),
-      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+      Text(value,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
     ]);
   }
 
   Widget _glowBadge(String status) {
     Color bg;
     switch (status) {
-      case 'DRAFT':     bg = Colors.grey;   break;
-      case 'SENT':      bg = Colors.blue;   break;
-      case 'ACCEPTED':  bg = Colors.green;  break;
-      case 'DECLINED':  bg = Colors.red;    break;
-      case 'EXPIRED':   bg = Colors.orange; break;
-      case 'CONVERTED': bg = Colors.purple; break;
-      default:          bg = _navyAccent;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'SENT':
+        bg = Colors.blue;
+        break;
+      case 'ACCEPTED':
+        bg = Colors.green;
+        break;
+      case 'DECLINED':
+        bg = Colors.red;
+        break;
+      case 'EXPIRED':
+        bg = Colors.orange;
+        break;
+      case 'CONVERTED':
+        bg = Colors.purple;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -428,19 +540,23 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
-  Widget _amtRow(String label, double amount, {Color? color, bool isBold = false, bool isTotal = false}) {
+  Widget _amtRow(String label, double amount,
+      {Color? color, bool isBold = false, bool isTotal = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: TextStyle(
-          fontSize: isTotal ? 14 : 13,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
-        )),
+        Text(label,
+            style: TextStyle(
+              fontSize: isTotal ? 14 : 13,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color ?? (isTotal ? _navyDark : Colors.grey[700]),
+            )),
         Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
             style: TextStyle(
               fontSize: isTotal ? 16 : 13,
@@ -452,11 +568,15 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
   }
 
   Widget _buildError() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
       const SizedBox(height: 16),
       Text('Error Loading Quote',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700])),
       const SizedBox(height: 8),
       Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
       const SizedBox(height: 24),
@@ -464,7 +584,8 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
         onPressed: _load,
         icon: const Icon(Icons.refresh),
         label: const Text('Retry'),
-        style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
+        style: ElevatedButton.styleFrom(
+            backgroundColor: _navyAccent, foregroundColor: Colors.white),
       ),
     ]));
   }

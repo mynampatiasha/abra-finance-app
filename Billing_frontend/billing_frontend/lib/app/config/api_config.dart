@@ -20,8 +20,8 @@ class ApiConfig {
     }
 
     // 3. Debug AND Profile mode = local development
-    if (kIsWeb) return _webUrl;        // Chrome → localhost
-    return _localPhoneUrl;             // Phone → 192.168.1.8
+    if (kIsWeb) return _webUrl; // Chrome → localhost
+    return _localPhoneUrl; // Phone → 192.168.1.8
   }
 
   static String get wsUrl {

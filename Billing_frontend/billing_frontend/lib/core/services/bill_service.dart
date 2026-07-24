@@ -39,7 +39,8 @@ class BillService {
 
       if (status != null && status != 'All') queryParams['status'] = status;
       if (vendorId != null) queryParams['vendorId'] = vendorId;
-      if (fromDate != null) queryParams['fromDate'] = fromDate.toIso8601String();
+      if (fromDate != null)
+        queryParams['fromDate'] = fromDate.toIso8601String();
       if (toDate != null) queryParams['toDate'] = toDate.toIso8601String();
       if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
@@ -95,7 +96,8 @@ class BillService {
   }
 
   /// Update existing bill
-  static Future<Bill> updateBill(String billId, Map<String, dynamic> billData) async {
+  static Future<Bill> updateBill(
+      String billId, Map<String, dynamic> billData) async {
     try {
       print('📤 PUT: $_baseEndpoint/$billId');
       final data = await _api.put('$_baseEndpoint/$billId', body: billData);
@@ -167,7 +169,8 @@ class BillService {
     try {
       print('📤 POST: $_baseEndpoint/$billId/payment');
       print('📦 Payment: ${json.encode(paymentData)}');
-      final data = await _api.post('$_baseEndpoint/$billId/payment', body: paymentData);
+      final data =
+          await _api.post('$_baseEndpoint/$billId/payment', body: paymentData);
       print('✅ Payment recorded: ₹${paymentData['amount']}');
       return BillPaymentResponse.fromJson(data['data']);
     } catch (e) {
@@ -179,10 +182,11 @@ class BillService {
   /// Download bill PDF — returns authenticated URL with token in query param
   static Future<String> downloadPDF(String billId) async {
     try {
-      final prefs     = await SharedPreferences.getInstance();
-      final token     = prefs.getString('jwt_token') ?? '';
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
-      final url = '${_api.baseUrl}$_baseEndpoint/$billId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
+      final url =
+          '${_api.baseUrl}$_baseEndpoint/$billId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
       print('✅ Bill PDF URL: $url');
       return url;
     } catch (e) {
@@ -222,7 +226,8 @@ class BillService {
   ) async {
     try {
       print('📤 POST: $_baseEndpoint/bulk-import (${bills.length} bills)');
-      final data = await _api.post('$_baseEndpoint/bulk-import', body: {'bills': bills});
+      final data =
+          await _api.post('$_baseEndpoint/bulk-import', body: {'bills': bills});
       print('✅ Bulk import complete');
       return data;
     } catch (e) {
@@ -250,7 +255,8 @@ class BillService {
   }
 
   /// Apply a vendor advance to a bill
-  static Future<Bill> applyCredit(String billId, String advanceId, double amount) async {
+  static Future<Bill> applyCredit(
+      String billId, String advanceId, double amount) async {
     try {
       print('📤 POST: $_baseEndpoint/$billId/apply-credits');
       final data = await _api.post(
@@ -269,8 +275,8 @@ class BillService {
   static Future<Bill> removeCredit(String billId, String creditEntryId) async {
     try {
       print('📤 DELETE: $_baseEndpoint/$billId/apply-credits/$creditEntryId');
-      final data = await _api.delete(
-          '$_baseEndpoint/$billId/apply-credits/$creditEntryId');
+      final data = await _api
+          .delete('$_baseEndpoint/$billId/apply-credits/$creditEntryId');
       print('✅ Credit reversed');
       return Bill.fromJson(data['data']['bill']);
     } catch (e) {
@@ -299,7 +305,8 @@ class BillService {
       if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
       print('📤 GET: $_baseEndpoint/vendors');
-      final data = await _api.get('$_baseEndpoint/vendors', queryParams: queryParams);
+      final data =
+          await _api.get('$_baseEndpoint/vendors', queryParams: queryParams);
       print('✅ Vendors fetched: ${data['data'].length}');
 
       return VendorListResponse.fromJson(data);
@@ -339,7 +346,8 @@ class BillService {
     Map<String, dynamic> vendorData,
   ) async {
     try {
-      final data = await _api.put('$_baseEndpoint/vendors/$vendorId', body: vendorData);
+      final data =
+          await _api.put('$_baseEndpoint/vendors/$vendorId', body: vendorData);
       return Vendor.fromJson(data['data']);
     } catch (e) {
       print('❌ Error updating vendor: $e');
@@ -370,8 +378,11 @@ class BillService {
       final queryParams = <String, String>{};
       if (status != null) queryParams['status'] = status;
 
-      final data = await _api.get('$_baseEndpoint/recurring-profiles', queryParams: queryParams);
-      return (data['data'] as List).map((p) => RecurringBillProfile.fromJson(p)).toList();
+      final data = await _api.get('$_baseEndpoint/recurring-profiles',
+          queryParams: queryParams);
+      return (data['data'] as List)
+          .map((p) => RecurringBillProfile.fromJson(p))
+          .toList();
     } catch (e) {
       print('❌ Error fetching recurring profiles: $e');
       rethrow;
@@ -383,7 +394,8 @@ class BillService {
     Map<String, dynamic> profileData,
   ) async {
     try {
-      final data = await _api.post('$_baseEndpoint/recurring-profiles', body: profileData);
+      final data = await _api.post('$_baseEndpoint/recurring-profiles',
+          body: profileData);
       return RecurringBillProfile.fromJson(data['data']);
     } catch (e) {
       print('❌ Error creating recurring profile: $e');
@@ -394,7 +406,8 @@ class BillService {
   /// Pause recurring profile
   static Future<void> pauseRecurringProfile(String profileId) async {
     try {
-      await _api.put('$_baseEndpoint/recurring-profiles/$profileId/pause', body: {});
+      await _api
+          .put('$_baseEndpoint/recurring-profiles/$profileId/pause', body: {});
     } catch (e) {
       rethrow;
     }
@@ -403,7 +416,8 @@ class BillService {
   /// Resume recurring profile
   static Future<void> resumeRecurringProfile(String profileId) async {
     try {
-      await _api.put('$_baseEndpoint/recurring-profiles/$profileId/resume', body: {});
+      await _api
+          .put('$_baseEndpoint/recurring-profiles/$profileId/resume', body: {});
     } catch (e) {
       rethrow;
     }
@@ -517,13 +531,17 @@ class Bill {
           ? BillAddress.fromJson(json['billingAddress'])
           : null,
       purchaseOrderNumber: json['purchaseOrderNumber'],
-      billDate: DateTime.parse(json['billDate'] ?? DateTime.now().toIso8601String()),
-      dueDate: DateTime.parse(json['dueDate'] ?? DateTime.now().toIso8601String()),
+      billDate:
+          DateTime.parse(json['billDate'] ?? DateTime.now().toIso8601String()),
+      dueDate:
+          DateTime.parse(json['dueDate'] ?? DateTime.now().toIso8601String()),
       paymentTerms: json['paymentTerms'] ?? 'Net 30',
       subject: json['subject'],
       notes: json['notes'],
       termsAndConditions: json['termsAndConditions'],
-      items: (json['items'] as List? ?? []).map((i) => BillItem.fromJson(i)).toList(),
+      items: (json['items'] as List? ?? [])
+          .map((i) => BillItem.fromJson(i))
+          .toList(),
       subTotal: (json['subTotal'] ?? 0).toDouble(),
       tdsRate: (json['tdsRate'] ?? 0).toDouble(),
       tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
@@ -537,12 +555,17 @@ class Bill {
       status: json['status'] ?? 'DRAFT',
       amountPaid: (json['amountPaid'] ?? 0).toDouble(),
       amountDue: (json['amountDue'] ?? 0).toDouble(),
-      payments: (json['payments'] as List? ?? []).map((p) => BillPayment.fromJson(p)).toList(),
+      payments: (json['payments'] as List? ?? [])
+          .map((p) => BillPayment.fromJson(p))
+          .toList(),
       vendorCreditsApplied: (json['vendorCreditsApplied'] as List? ?? [])
-          .map((c) => AppliedCredit.fromJson(c)).toList(),
+          .map((c) => AppliedCredit.fromJson(c))
+          .toList(),
       isRecurring: json['isRecurring'] ?? false,
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
+      createdAt:
+          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      updatedAt:
+          DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -586,41 +609,41 @@ class BillItem {
 
   factory BillItem.fromJson(Map<String, dynamic> json) {
     return BillItem(
-      itemDetails:   json['itemDetails'] ?? '',
-      account:       json['account'],
-      quantity:      (json['quantity']     ?? 0).toDouble(),
-      rate:          (json['rate']         ?? 0).toDouble(),
-      discount:      (json['discount']     ?? 0).toDouble(),
-      discountType:  json['discountType']  ?? 'percentage',
-      amount:        (json['amount']       ?? 0).toDouble(),
-      hsnCode:       json['hsnCode']       ?? '',
-      sacCode:       json['sacCode']       ?? '',
-      unit:          json['unit']          ?? 'Nos',
-      itemGstRate:   (json['itemGstRate']  ?? 0).toDouble(),
-      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
-      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
-      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
-      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
+      itemDetails: json['itemDetails'] ?? '',
+      account: json['account'],
+      quantity: (json['quantity'] ?? 0).toDouble(),
+      rate: (json['rate'] ?? 0).toDouble(),
+      discount: (json['discount'] ?? 0).toDouble(),
+      discountType: json['discountType'] ?? 'percentage',
+      amount: (json['amount'] ?? 0).toDouble(),
+      hsnCode: json['hsnCode'] ?? '',
+      sacCode: json['sacCode'] ?? '',
+      unit: json['unit'] ?? 'Nos',
+      itemGstRate: (json['itemGstRate'] ?? 0).toDouble(),
+      taxableAmount: (json['taxableAmount'] ?? 0).toDouble(),
+      cgstAmount: (json['cgstAmount'] ?? 0).toDouble(),
+      sgstAmount: (json['sgstAmount'] ?? 0).toDouble(),
+      igstAmount: (json['igstAmount'] ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':   itemDetails,
-    'account':       account,
-    'quantity':      quantity,
-    'rate':          rate,
-    'discount':      discount,
-    'discountType':  discountType,
-    'amount':        amount,
-    'hsnCode':       hsnCode,
-    'sacCode':       sacCode,
-    'unit':          unit,
-    'itemGstRate':   itemGstRate,
-    'taxableAmount': taxableAmount,
-    'cgstAmount':    cgstAmount,
-    'sgstAmount':    sgstAmount,
-    'igstAmount':    igstAmount,
-  };
+        'itemDetails': itemDetails,
+        'account': account,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'amount': amount,
+        'hsnCode': hsnCode,
+        'sacCode': sacCode,
+        'unit': unit,
+        'itemGstRate': itemGstRate,
+        'taxableAmount': taxableAmount,
+        'cgstAmount': cgstAmount,
+        'sgstAmount': sgstAmount,
+        'igstAmount': igstAmount,
+      };
 }
 
 /// Applied Credit (vendor advance applied to a bill)
@@ -641,11 +664,12 @@ class AppliedCredit {
 
   factory AppliedCredit.fromJson(Map<String, dynamic> json) {
     return AppliedCredit(
-      id:            json['_id']?.toString() ?? '',
-      creditId:      json['creditId']?.toString() ?? '',
+      id: json['_id']?.toString() ?? '',
+      creditId: json['creditId']?.toString() ?? '',
       paymentNumber: json['paymentNumber'],
-      amount:        (json['amount'] ?? 0).toDouble(),
-      appliedDate:   DateTime.tryParse(json['appliedDate'] ?? '') ?? DateTime.now(),
+      amount: (json['amount'] ?? 0).toDouble(),
+      appliedDate:
+          DateTime.tryParse(json['appliedDate'] ?? '') ?? DateTime.now(),
     );
   }
 }
@@ -678,16 +702,17 @@ class VendorAdvance {
 
   factory VendorAdvance.fromJson(Map<String, dynamic> json) {
     return VendorAdvance(
-      id:             json['_id']?.toString() ?? '',
-      paymentNumber:  json['paymentNumber'] ?? '',
-      paymentDate:    DateTime.tryParse(json['paymentDate'] ?? '') ?? DateTime.now(),
-      paymentMode:    json['paymentMode'] ?? '',
-      amount:         (json['amount'] ?? 0).toDouble(),
-      amountApplied:  (json['amountApplied'] ?? 0).toDouble(),
-      amountUnused:   (json['amountUnused'] ?? 0).toDouble(),
-      status:         json['status'] ?? '',
+      id: json['_id']?.toString() ?? '',
+      paymentNumber: json['paymentNumber'] ?? '',
+      paymentDate:
+          DateTime.tryParse(json['paymentDate'] ?? '') ?? DateTime.now(),
+      paymentMode: json['paymentMode'] ?? '',
+      amount: (json['amount'] ?? 0).toDouble(),
+      amountApplied: (json['amountApplied'] ?? 0).toDouble(),
+      amountUnused: (json['amountUnused'] ?? 0).toDouble(),
+      status: json['status'] ?? '',
       referenceNumber: json['referenceNumber'] ?? '',
-      notes:          json['notes'] ?? '',
+      notes: json['notes'] ?? '',
     );
   }
 }
@@ -716,11 +741,13 @@ class BillPayment {
     return BillPayment(
       paymentId: json['paymentId']?.toString() ?? '',
       amount: (json['amount'] ?? 0).toDouble(),
-      paymentDate: DateTime.parse(json['paymentDate'] ?? DateTime.now().toIso8601String()),
+      paymentDate: DateTime.parse(
+          json['paymentDate'] ?? DateTime.now().toIso8601String()),
       paymentMode: json['paymentMode'] ?? 'Cash',
       referenceNumber: json['referenceNumber'],
       notes: json['notes'],
-      recordedAt: DateTime.parse(json['recordedAt'] ?? DateTime.now().toIso8601String()),
+      recordedAt: DateTime.parse(
+          json['recordedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -746,12 +773,12 @@ class BillAddress {
   }
 
   Map<String, dynamic> toJson() => {
-    'street': street,
-    'city': city,
-    'state': state,
-    'pincode': pincode,
-    'country': country,
-  };
+        'street': street,
+        'city': city,
+        'state': state,
+        'pincode': pincode,
+        'country': country,
+      };
 }
 
 /// Bill List Response
@@ -763,7 +790,8 @@ class BillListResponse {
 
   factory BillListResponse.fromJson(Map<String, dynamic> json) {
     return BillListResponse(
-      bills: (json['data'] as List? ?? []).map((b) => Bill.fromJson(b)).toList(),
+      bills:
+          (json['data'] as List? ?? []).map((b) => Bill.fromJson(b)).toList(),
       pagination: BillPagination.fromJson(json['pagination'] ?? {}),
     );
   }
@@ -776,7 +804,11 @@ class BillPagination {
   final int limit;
   final int pages;
 
-  BillPagination({required this.total, required this.page, required this.limit, required this.pages});
+  BillPagination(
+      {required this.total,
+      required this.page,
+      required this.limit,
+      required this.pages});
 
   factory BillPagination.fromJson(Map<String, dynamic> json) {
     return BillPagination(
@@ -882,21 +914,23 @@ class Vendor {
           : null,
       notes: json['notes'],
       isActive: json['isActive'] ?? true,
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
+      createdAt:
+          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      updatedAt:
+          DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'vendorName': vendorName,
-    'vendorEmail': vendorEmail,
-    'vendorPhone': vendorPhone,
-    'companyName': companyName,
-    'gstNumber': gstNumber,
-    'panNumber': panNumber,
-    'paymentTerms': paymentTerms,
-    'notes': notes,
-  };
+        'vendorName': vendorName,
+        'vendorEmail': vendorEmail,
+        'vendorPhone': vendorPhone,
+        'companyName': companyName,
+        'gstNumber': gstNumber,
+        'panNumber': panNumber,
+        'paymentTerms': paymentTerms,
+        'notes': notes,
+      };
 }
 
 /// Vendor Bank Details
@@ -935,7 +969,8 @@ class VendorListResponse {
 
   factory VendorListResponse.fromJson(Map<String, dynamic> json) {
     return VendorListResponse(
-      vendors: (json['data'] as List? ?? []).map((v) => Vendor.fromJson(v)).toList(),
+      vendors:
+          (json['data'] as List? ?? []).map((v) => Vendor.fromJson(v)).toList(),
       pagination: BillPagination.fromJson(json['pagination'] ?? {}),
     );
   }
@@ -985,15 +1020,23 @@ class RecurringBillProfile {
       vendorName: json['vendorName'] ?? '',
       repeatEvery: json['repeatEvery'] ?? 1,
       repeatUnit: json['repeatUnit'] ?? 'months',
-      startDate: DateTime.parse(json['startDate'] ?? DateTime.now().toIso8601String()),
+      startDate:
+          DateTime.parse(json['startDate'] ?? DateTime.now().toIso8601String()),
       endDate: json['endDate'] != null ? DateTime.parse(json['endDate']) : null,
       maxOccurrences: json['maxOccurrences'],
       occurrencesCount: json['occurrencesCount'] ?? 0,
       status: json['status'] ?? 'ACTIVE',
-      nextBillDate: json['nextBillDate'] != null ? DateTime.parse(json['nextBillDate']) : null,
-      lastBillDate: json['lastBillDate'] != null ? DateTime.parse(json['lastBillDate']) : null,
-      generatedBills: (json['generatedBills'] as List? ?? []).map((b) => GeneratedBillRef.fromJson(b)).toList(),
-      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      nextBillDate: json['nextBillDate'] != null
+          ? DateTime.parse(json['nextBillDate'])
+          : null,
+      lastBillDate: json['lastBillDate'] != null
+          ? DateTime.parse(json['lastBillDate'])
+          : null,
+      generatedBills: (json['generatedBills'] as List? ?? [])
+          .map((b) => GeneratedBillRef.fromJson(b))
+          .toList(),
+      createdAt:
+          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -1004,13 +1047,17 @@ class GeneratedBillRef {
   final String billNumber;
   final DateTime createdDate;
 
-  GeneratedBillRef({required this.billId, required this.billNumber, required this.createdDate});
+  GeneratedBillRef(
+      {required this.billId,
+      required this.billNumber,
+      required this.createdDate});
 
   factory GeneratedBillRef.fromJson(Map<String, dynamic> json) {
     return GeneratedBillRef(
       billId: json['billId']?.toString() ?? '',
       billNumber: json['billNumber'] ?? '',
-      createdDate: DateTime.parse(json['createdDate'] ?? DateTime.now().toIso8601String()),
+      createdDate: DateTime.parse(
+          json['createdDate'] ?? DateTime.now().toIso8601String()),
     );
   }
 }
@@ -1035,58 +1082,58 @@ class MutableBillItem {
   double igstAmount;
 
   MutableBillItem({
-    this.itemDetails  = '',
+    this.itemDetails = '',
     this.account,
-    this.quantity     = 0,
-    this.rate         = 0,
-    this.discount     = 0,
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
     this.discountType = 'percentage',
-    this.amount       = 0,
-    this.hsnCode      = '',
-    this.sacCode      = '',
-    this.unit         = 'Nos',
-    this.itemGstRate  = 18,
-    this.taxableAmount= 0,
-    this.cgstAmount   = 0,
-    this.sgstAmount   = 0,
-    this.igstAmount   = 0,
+    this.amount = 0,
+    this.hsnCode = '',
+    this.sacCode = '',
+    this.unit = 'Nos',
+    this.itemGstRate = 18,
+    this.taxableAmount = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':   itemDetails,
-    'account':       account,
-    'quantity':      quantity,
-    'rate':          rate,
-    'discount':      discount,
-    'discountType':  discountType,
-    'amount':        amount,
-    'hsnCode':       hsnCode,
-    'sacCode':       sacCode,
-    'unit':          unit,
-    'itemGstRate':   itemGstRate,
-    'taxableAmount': taxableAmount,
-    'cgstAmount':    cgstAmount,
-    'sgstAmount':    sgstAmount,
-    'igstAmount':    igstAmount,
-  };
+        'itemDetails': itemDetails,
+        'account': account,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'amount': amount,
+        'hsnCode': hsnCode,
+        'sacCode': sacCode,
+        'unit': unit,
+        'itemGstRate': itemGstRate,
+        'taxableAmount': taxableAmount,
+        'cgstAmount': cgstAmount,
+        'sgstAmount': sgstAmount,
+        'igstAmount': igstAmount,
+      };
 
   factory MutableBillItem.fromBillItem(BillItem item) {
     return MutableBillItem(
-      itemDetails:   item.itemDetails,
-      account:       item.account,
-      quantity:      item.quantity,
-      rate:          item.rate,
-      discount:      item.discount,
-      discountType:  item.discountType,
-      amount:        item.amount,
-      hsnCode:       item.hsnCode,
-      sacCode:       item.sacCode,
-      unit:          item.unit,
-      itemGstRate:   item.itemGstRate,
+      itemDetails: item.itemDetails,
+      account: item.account,
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount,
+      discountType: item.discountType,
+      amount: item.amount,
+      hsnCode: item.hsnCode,
+      sacCode: item.sacCode,
+      unit: item.unit,
+      itemGstRate: item.itemGstRate,
       taxableAmount: item.taxableAmount,
-      cgstAmount:    item.cgstAmount,
-      sgstAmount:    item.sgstAmount,
-      igstAmount:    item.igstAmount,
+      cgstAmount: item.cgstAmount,
+      sgstAmount: item.sgstAmount,
+      igstAmount: item.igstAmount,
     );
   }
 }

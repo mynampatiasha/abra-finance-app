@@ -13,12 +13,13 @@ import '../finance_secure_storage.dart';
 
 class SalesOrderService {
   static String get baseUrl => ApiConfig.baseUrl;
-  
+
   // Get JWT token from SharedPreferences
   static Future<String?> _getToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token');
+      return prefs.getString('finance_jwt_token') ??
+          prefs.getString('jwt_token');
     } catch (e) {
       return null;
     }
@@ -34,11 +35,11 @@ class SalesOrderService {
       'x-branch-ids': branchHdr,
     };
   }
-  
+
   // ============================================================================
   // GET ALL SALES ORDERS WITH FILTERS
   // ============================================================================
-  
+
   static Future<SalesOrderListResponse> getSalesOrders({
     String? status,
     int page = 1,
@@ -52,30 +53,31 @@ class SalesOrderService {
         'page': page.toString(),
         'limit': limit.toString(),
       };
-      
+
       if (status != null && status != 'All') {
         queryParams['status'] = status;
       }
-      
+
       if (search != null && search.isNotEmpty) {
         queryParams['search'] = search;
       }
-      
+
       if (fromDate != null) {
         queryParams['fromDate'] = fromDate.toIso8601String();
       }
-      
+
       if (toDate != null) {
         queryParams['toDate'] = toDate.toIso8601String();
       }
-      
-      final uri = Uri.parse('$baseUrl/api/finance/sales-orders').replace(queryParameters: queryParams);
-      
+
+      final uri = Uri.parse('$baseUrl/api/finance/sales-orders')
+          .replace(queryParameters: queryParams);
+
       final response = await http.get(
         uri,
         headers: await _headers(),
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return SalesOrderListResponse.fromJson(data['data']);
@@ -86,18 +88,18 @@ class SalesOrderService {
       throw Exception('Error fetching sales orders: $e');
     }
   }
-  
+
   // ============================================================================
   // GET SALES ORDER STATISTICS
   // ============================================================================
-  
+
   static Future<SalesOrderStats> getStats() async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/finance/sales-orders/stats'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return SalesOrderStats.fromJson(data['data']);
@@ -108,18 +110,18 @@ class SalesOrderService {
       throw Exception('Error fetching stats: $e');
     }
   }
-  
+
   // ============================================================================
   // GET SINGLE SALES ORDER
   // ============================================================================
-  
+
   static Future<SalesOrder> getSalesOrder(String id) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return SalesOrder.fromJson(data['data']);
@@ -130,19 +132,20 @@ class SalesOrderService {
       throw Exception('Error fetching sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // CREATE NEW SALES ORDER
   // ============================================================================
-  
-  static Future<SalesOrder> createSalesOrder(Map<String, dynamic> salesOrderData) async {
+
+  static Future<SalesOrder> createSalesOrder(
+      Map<String, dynamic> salesOrderData) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders'),
         headers: await _headers(),
         body: json.encode(salesOrderData),
       );
-      
+
       if (response.statusCode == 201) {
         final data = json.decode(response.body);
         return SalesOrder.fromJson(data['data']);
@@ -153,19 +156,20 @@ class SalesOrderService {
       throw Exception('Error creating sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // UPDATE SALES ORDER
   // ============================================================================
-  
-  static Future<SalesOrder> updateSalesOrder(String id, Map<String, dynamic> salesOrderData) async {
+
+  static Future<SalesOrder> updateSalesOrder(
+      String id, Map<String, dynamic> salesOrderData) async {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
         headers: await _headers(),
         body: json.encode(salesOrderData),
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return SalesOrder.fromJson(data['data']);
@@ -176,18 +180,18 @@ class SalesOrderService {
       throw Exception('Error updating sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // DELETE SALES ORDER
   // ============================================================================
-  
+
   static Future<void> deleteSalesOrder(String id) async {
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode != 200) {
         throw Exception('Failed to delete sales order: ${response.body}');
       }
@@ -195,18 +199,18 @@ class SalesOrderService {
       throw Exception('Error deleting sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // SEND SALES ORDER VIA EMAIL
   // ============================================================================
-  
+
   static Future<void> sendSalesOrder(String id) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/send'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode != 200) {
         throw Exception('Failed to send sales order: ${response.body}');
       }
@@ -214,14 +218,14 @@ class SalesOrderService {
       throw Exception('Error sending sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // DOWNLOAD PDF
   // ============================================================================
-  
+
   static Future<String> downloadPDF(String id) async {
     try {
-      final token     = await _getToken();
+      final token = await _getToken();
       final branchHdr = await FinanceSecureStorage.getBranchHeader();
 
       return '$baseUrl/api/finance/sales-orders/$id/download?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
@@ -229,18 +233,18 @@ class SalesOrderService {
       throw Exception('Error preparing PDF download: $e');
     }
   }
-  
+
   // ============================================================================
   // CONFIRM SALES ORDER
   // ============================================================================
-  
+
   static Future<void> confirmSalesOrder(String id) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/confirm'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode != 200) {
         throw Exception('Failed to confirm sales order: ${response.body}');
       }
@@ -248,18 +252,18 @@ class SalesOrderService {
       throw Exception('Error confirming sales order: $e');
     }
   }
-  
+
   // ============================================================================
   // CONVERT TO INVOICE
   // ============================================================================
-  
+
   static Future<Map<String, dynamic>> convertToInvoice(String id) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/$id/convert-to-invoice'),
         headers: await _headers(),
       );
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data;
@@ -270,7 +274,7 @@ class SalesOrderService {
       throw Exception('Error converting to invoice: $e');
     }
   }
-  
+
   // ============================================================================
   // MARK AS SENT (no email — status change only)
   // ============================================================================
@@ -292,8 +296,9 @@ class SalesOrderService {
   // ============================================================================
   // BULK IMPORT SALES ORDERS
   // ============================================================================
-  
-  static Future<Map<String, dynamic>> bulkImportSalesOrders(List<Map<String, dynamic>> salesOrders) async {
+
+  static Future<Map<String, dynamic>> bulkImportSalesOrders(
+      List<Map<String, dynamic>> salesOrders) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/finance/sales-orders/bulk-import'),
@@ -302,7 +307,7 @@ class SalesOrderService {
           'salesOrders': salesOrders,
         }),
       );
-      
+
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
@@ -346,15 +351,15 @@ class SalesOrder {
   final String? customerNotes;
   final String? termsAndConditions;
   final String status;
-  final String  customerGSTIN;
-  final String  customerPAN;
-  final String  gstRegistrationType;
-  final bool    isInterState;
-  final double  totalCGST;
-  final double  totalSGST;
-  final double  totalIGST;
+  final String customerGSTIN;
+  final String customerPAN;
+  final String gstRegistrationType;
+  final bool isInterState;
+  final double totalCGST;
+  final double totalSGST;
+  final double totalIGST;
   final String? convertedFromQuoteNumber;
-  final bool    convertedToInvoice;
+  final bool convertedToInvoice;
   final String? convertedToInvoiceNumber;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -387,13 +392,13 @@ class SalesOrder {
     this.customerNotes,
     this.termsAndConditions,
     required this.status,
-    this.customerGSTIN       = '',
-    this.customerPAN         = '',
+    this.customerGSTIN = '',
+    this.customerPAN = '',
     this.gstRegistrationType = '',
-    this.isInterState        = false,
-    this.totalCGST           = 0,
-    this.totalSGST           = 0,
-    this.totalIGST           = 0,
+    this.isInterState = false,
+    this.totalCGST = 0,
+    this.totalSGST = 0,
+    this.totalIGST = 0,
     this.convertedFromQuoteNumber,
     required this.convertedToInvoice,
     this.convertedToInvoiceNumber,
@@ -411,8 +416,8 @@ class SalesOrder {
       customerEmail: json['customerEmail'],
       customerPhone: json['customerPhone'],
       salesOrderDate: DateTime.parse(json['salesOrderDate']),
-      expectedShipmentDate: json['expectedShipmentDate'] != null 
-          ? DateTime.parse(json['expectedShipmentDate']) 
+      expectedShipmentDate: json['expectedShipmentDate'] != null
+          ? DateTime.parse(json['expectedShipmentDate'])
           : null,
       paymentTerms: json['paymentTerms'] ?? 'Net 30',
       deliveryMethod: json['deliveryMethod'],
@@ -434,13 +439,13 @@ class SalesOrder {
       customerNotes: json['customerNotes'],
       termsAndConditions: json['termsAndConditions'],
       status: json['status'] ?? 'DRAFT',
-      customerGSTIN:        json['customerGSTIN']        ?? '',
-      customerPAN:          json['customerPAN']           ?? '',
-      gstRegistrationType:  json['gstRegistrationType']  ?? '',
-      isInterState:         json['isInterState']          ?? false,
-      totalCGST:            (json['totalCGST']            ?? json['cgst'] ?? 0).toDouble(),
-      totalSGST:            (json['totalSGST']            ?? json['sgst'] ?? 0).toDouble(),
-      totalIGST:            (json['totalIGST']            ?? json['igst'] ?? 0).toDouble(),
+      customerGSTIN: json['customerGSTIN'] ?? '',
+      customerPAN: json['customerPAN'] ?? '',
+      gstRegistrationType: json['gstRegistrationType'] ?? '',
+      isInterState: json['isInterState'] ?? false,
+      totalCGST: (json['totalCGST'] ?? json['cgst'] ?? 0).toDouble(),
+      totalSGST: (json['totalSGST'] ?? json['sgst'] ?? 0).toDouble(),
+      totalIGST: (json['totalIGST'] ?? json['igst'] ?? 0).toDouble(),
       convertedFromQuoteNumber: json['convertedFromQuoteNumber'],
       convertedToInvoice: json['convertedToInvoice'] ?? false,
       convertedToInvoiceNumber: json['convertedToInvoiceNumber'],

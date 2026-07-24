@@ -98,42 +98,42 @@ class VendorCredit {
 
   factory VendorCredit.fromJson(Map<String, dynamic> json) {
     return VendorCredit(
-      id:                   json['_id']?.toString() ?? json['id']?.toString() ?? '',
-      creditNumber:         json['creditNumber']?.toString() ?? '',
-      vendorId:             json['vendorId']?.toString() ?? '',
-      vendorName:           json['vendorName']?.toString() ?? '',
-      vendorEmail:          json['vendorEmail']?.toString(),
-      vendorGSTIN:          json['vendorGSTIN']?.toString(),
-      vendorPAN:            json['vendorPAN']?.toString(),
-      vendorPhone:          json['vendorPhone']?.toString(),
-      gstRegistrationType:  json['gstRegistrationType']?.toString() ?? '',
-      billingAddress:       Map<String, dynamic>.from(json['billingAddress'] ?? {}),
-      shippingAddress:      Map<String, dynamic>.from(json['shippingAddress'] ?? {}),
-      placeOfSupply:        json['placeOfSupply']?.toString() ?? '',
-      isInterState:         json['isInterState'] == true,
+      id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
+      creditNumber: json['creditNumber']?.toString() ?? '',
+      vendorId: json['vendorId']?.toString() ?? '',
+      vendorName: json['vendorName']?.toString() ?? '',
+      vendorEmail: json['vendorEmail']?.toString(),
+      vendorGSTIN: json['vendorGSTIN']?.toString(),
+      vendorPAN: json['vendorPAN']?.toString(),
+      vendorPhone: json['vendorPhone']?.toString(),
+      gstRegistrationType: json['gstRegistrationType']?.toString() ?? '',
+      billingAddress: Map<String, dynamic>.from(json['billingAddress'] ?? {}),
+      shippingAddress: Map<String, dynamic>.from(json['shippingAddress'] ?? {}),
+      placeOfSupply: json['placeOfSupply']?.toString() ?? '',
+      isInterState: json['isInterState'] == true,
       creditDate: json['creditDate'] != null
           ? DateTime.parse(json['creditDate'].toString())
           : DateTime.now(),
-      billId:       json['billId']?.toString(),
-      billNumber:   json['billNumber']?.toString(),
-      reason:       json['reason']?.toString() ?? '',
-      status:       json['status']?.toString() ?? 'OPEN',
-      subTotal:     _toDouble(json['subTotal']),
-      totalCGST:    _toDouble(json['totalCGST']),
-      totalSGST:    _toDouble(json['totalSGST']),
-      totalIGST:    _toDouble(json['totalIGST']),
-      totalTax:     _toDouble(json['totalTax']),
-      gstRate:      _toDouble(json['gstRate']),
-      cgst:         _toDouble(json['cgst']),
-      sgst:         _toDouble(json['sgst']),
-      tdsRate:      _toDouble(json['tdsRate']),
-      tdsAmount:    _toDouble(json['tdsAmount']),
-      tcsRate:      _toDouble(json['tcsRate']),
-      tcsAmount:    _toDouble(json['tcsAmount']),
-      totalAmount:  _toDouble(json['totalAmount']),
-      appliedAmount:_toDouble(json['appliedAmount']),
-      balanceAmount:_toDouble(json['balanceAmount']),
-      notes:        json['notes']?.toString(),
+      billId: json['billId']?.toString(),
+      billNumber: json['billNumber']?.toString(),
+      reason: json['reason']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'OPEN',
+      subTotal: _toDouble(json['subTotal']),
+      totalCGST: _toDouble(json['totalCGST']),
+      totalSGST: _toDouble(json['totalSGST']),
+      totalIGST: _toDouble(json['totalIGST']),
+      totalTax: _toDouble(json['totalTax']),
+      gstRate: _toDouble(json['gstRate']),
+      cgst: _toDouble(json['cgst']),
+      sgst: _toDouble(json['sgst']),
+      tdsRate: _toDouble(json['tdsRate']),
+      tdsAmount: _toDouble(json['tdsAmount']),
+      tcsRate: _toDouble(json['tcsRate']),
+      tcsAmount: _toDouble(json['tcsAmount']),
+      totalAmount: _toDouble(json['totalAmount']),
+      appliedAmount: _toDouble(json['appliedAmount']),
+      balanceAmount: _toDouble(json['balanceAmount']),
+      notes: json['notes']?.toString(),
       items: (json['items'] as List<dynamic>? ?? [])
           .map((i) => VendorCreditItem.fromJson(i as Map<String, dynamic>))
           .toList(),
@@ -194,41 +194,41 @@ class VendorCreditItem {
 
   factory VendorCreditItem.fromJson(Map<String, dynamic> json) {
     return VendorCreditItem(
-      itemDetails:   json['itemDetails']?.toString() ?? '',
-      account:       json['account']?.toString(),
-      hsnCode:       json['hsnCode']?.toString() ?? '',
-      sacCode:       json['sacCode']?.toString() ?? '',
-      unit:          json['unit']?.toString() ?? 'Nos',
-      quantity:      VendorCredit._toDouble(json['quantity']),
-      rate:          VendorCredit._toDouble(json['rate']),
-      discount:      VendorCredit._toDouble(json['discount']),
-      discountType:  json['discountType']?.toString() ?? 'percentage',
+      itemDetails: json['itemDetails']?.toString() ?? '',
+      account: json['account']?.toString(),
+      hsnCode: json['hsnCode']?.toString() ?? '',
+      sacCode: json['sacCode']?.toString() ?? '',
+      unit: json['unit']?.toString() ?? 'Nos',
+      quantity: VendorCredit._toDouble(json['quantity']),
+      rate: VendorCredit._toDouble(json['rate']),
+      discount: VendorCredit._toDouble(json['discount']),
+      discountType: json['discountType']?.toString() ?? 'percentage',
       taxableAmount: VendorCredit._toDouble(json['taxableAmount']),
-      itemGstRate:   VendorCredit._toDouble(json['itemGstRate']),
-      cgstAmount:    VendorCredit._toDouble(json['cgstAmount']),
-      sgstAmount:    VendorCredit._toDouble(json['sgstAmount']),
-      igstAmount:    VendorCredit._toDouble(json['igstAmount']),
-      amount:        VendorCredit._toDouble(json['amount']),
+      itemGstRate: VendorCredit._toDouble(json['itemGstRate']),
+      cgstAmount: VendorCredit._toDouble(json['cgstAmount']),
+      sgstAmount: VendorCredit._toDouble(json['sgstAmount']),
+      igstAmount: VendorCredit._toDouble(json['igstAmount']),
+      amount: VendorCredit._toDouble(json['amount']),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':   itemDetails,
-    'account':       account,
-    'hsnCode':       hsnCode,
-    'sacCode':       sacCode,
-    'unit':          unit,
-    'quantity':      quantity,
-    'rate':          rate,
-    'discount':      discount,
-    'discountType':  discountType,
-    'taxableAmount': taxableAmount,
-    'itemGstRate':   itemGstRate,
-    'cgstAmount':    cgstAmount,
-    'sgstAmount':    sgstAmount,
-    'igstAmount':    igstAmount,
-    'amount':        amount,
-  };
+        'itemDetails': itemDetails,
+        'account': account,
+        'hsnCode': hsnCode,
+        'sacCode': sacCode,
+        'unit': unit,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'taxableAmount': taxableAmount,
+        'itemGstRate': itemGstRate,
+        'cgstAmount': cgstAmount,
+        'sgstAmount': sgstAmount,
+        'igstAmount': igstAmount,
+        'amount': amount,
+      };
 }
 
 class CreditApplication {
@@ -370,6 +370,7 @@ class VendorCreditService {
       'x-branch-ids': branchHdr,
     };
   }
+
   static Future<VendorCreditsResponse> getVendorCredits({
     String? status,
     int page = 1,
@@ -418,7 +419,8 @@ class VendorCreditService {
   }
 
   // CREATE vendor credit
-  static Future<VendorCredit> createVendorCredit(Map<String, dynamic> body) async {
+  static Future<VendorCredit> createVendorCredit(
+      Map<String, dynamic> body) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse(_base),
@@ -426,14 +428,16 @@ class VendorCreditService {
       body: jsonEncode(body),
     );
     final data = jsonDecode(response.body);
-    if ((response.statusCode == 200 || response.statusCode == 201) && data['success'] == true) {
+    if ((response.statusCode == 200 || response.statusCode == 201) &&
+        data['success'] == true) {
       return VendorCredit.fromJson(data['data']);
     }
     throw Exception(data['message'] ?? 'Failed to create vendor credit');
   }
 
   // UPDATE vendor credit
-  static Future<VendorCredit> updateVendorCredit(String id, Map<String, dynamic> body) async {
+  static Future<VendorCredit> updateVendorCredit(
+      String id, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
     final response = await http.put(
       Uri.parse('$_base/$id'),
@@ -450,7 +454,8 @@ class VendorCreditService {
   // DELETE vendor credit
   static Future<void> deleteVendorCredit(String id) async {
     final headers = await _getHeaders();
-    final response = await http.delete(Uri.parse('$_base/$id'), headers: headers);
+    final response =
+        await http.delete(Uri.parse('$_base/$id'), headers: headers);
     final data = jsonDecode(response.body);
     if (response.statusCode != 200 || data['success'] != true) {
       throw Exception(data['message'] ?? 'Failed to delete vendor credit');
@@ -473,15 +478,18 @@ class VendorCreditService {
   // MARK AS SENT
   static Future<void> markAsSent(String id) async {
     final headers = await _getHeaders();
-    final response = await http.put(Uri.parse('$_base/$id/mark-as-sent'), headers: headers);
+    final response =
+        await http.put(Uri.parse('$_base/$id/mark-as-sent'), headers: headers);
     final data = jsonDecode(response.body);
     if (response.statusCode != 200 || data['success'] != true) {
-      throw Exception(data['message'] ?? 'Failed to mark vendor credit as sent');
+      throw Exception(
+          data['message'] ?? 'Failed to mark vendor credit as sent');
     }
   }
 
   // APPLY credit to a bill
-  static Future<void> applyToBill(String creditId, Map<String, dynamic> body) async {
+  static Future<void> applyToBill(
+      String creditId, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse('$_base/$creditId/apply'),
@@ -495,7 +503,8 @@ class VendorCreditService {
   }
 
   // REFUND vendor credit — returns the refund sub-doc _id for journalRef
-  static Future<String> refundCredit(String creditId, Map<String, dynamic> body) async {
+  static Future<String> refundCredit(
+      String creditId, Map<String, dynamic> body) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse('$_base/$creditId/refund'),
@@ -513,7 +522,8 @@ class VendorCreditService {
   // GET stats
   static Future<VendorCreditStats> getStats() async {
     final headers = await _getHeaders();
-    final response = await http.get(Uri.parse('$_base/stats'), headers: headers);
+    final response =
+        await http.get(Uri.parse('$_base/stats'), headers: headers);
     final data = jsonDecode(response.body);
     if (response.statusCode == 200 && data['success'] == true) {
       return VendorCreditStats.fromJson(data['data']);
@@ -541,7 +551,8 @@ class VendorCreditService {
   }
 
   // BULK IMPORT
-  static Future<Map<String, dynamic>> bulkImport(List<Map<String, dynamic>> credits) async {
+  static Future<Map<String, dynamic>> bulkImport(
+      List<Map<String, dynamic>> credits) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse('$_base/bulk-import'),
@@ -556,10 +567,15 @@ class VendorCreditService {
   }
 
 // GET open bills for a vendor (for applying credits)
-  static Future<List<Map<String, dynamic>>> getOpenBillsForVendor(String vendorId) async {
+  static Future<List<Map<String, dynamic>>> getOpenBillsForVendor(
+      String vendorId) async {
     final headers = await _getHeaders();
-    final uri = Uri.parse('${ApiConfig.baseUrl}/api/finance/bills')
-        .replace(queryParameters: {'vendorId': vendorId, 'status': 'OPEN', 'limit': '100'});
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/finance/bills').replace(
+        queryParameters: {
+          'vendorId': vendorId,
+          'status': 'OPEN',
+          'limit': '100'
+        });
     final response = await http.get(uri, headers: headers);
     final data = jsonDecode(response.body);
     if (response.statusCode == 200 && data['success'] == true) {
@@ -605,21 +621,21 @@ class MutableCreditItem {
   double amount;
 
   MutableCreditItem({
-    this.itemDetails   = '',
+    this.itemDetails = '',
     this.account,
-    this.hsnCode       = '',
-    this.sacCode       = '',
-    this.unit          = 'Nos',
-    this.quantity      = 0,
-    this.rate          = 0,
-    this.discount      = 0,
-    this.discountType  = 'percentage',
+    this.hsnCode = '',
+    this.sacCode = '',
+    this.unit = 'Nos',
+    this.quantity = 0,
+    this.rate = 0,
+    this.discount = 0,
+    this.discountType = 'percentage',
     this.taxableAmount = 0,
-    this.itemGstRate   = 18,
-    this.cgstAmount    = 0,
-    this.sgstAmount    = 0,
-    this.igstAmount    = 0,
-    this.amount        = 0,
+    this.itemGstRate = 18,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
+    this.amount = 0,
   });
 
   void recalculate({bool isInterState = false}) {
@@ -631,32 +647,36 @@ class MutableCreditItem {
     }
     taxableAmount = double.parse(taxable.toStringAsFixed(2));
     if (isInterState) {
-      igstAmount = double.parse((taxable * itemGstRate / 100).toStringAsFixed(2));
+      igstAmount =
+          double.parse((taxable * itemGstRate / 100).toStringAsFixed(2));
       cgstAmount = 0;
       sgstAmount = 0;
     } else {
-      cgstAmount = double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
-      sgstAmount = double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      cgstAmount =
+          double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
+      sgstAmount =
+          double.parse((taxable * (itemGstRate / 2) / 100).toStringAsFixed(2));
       igstAmount = 0;
     }
-    amount = double.parse((taxableAmount + cgstAmount + sgstAmount + igstAmount).toStringAsFixed(2));
+    amount = double.parse((taxableAmount + cgstAmount + sgstAmount + igstAmount)
+        .toStringAsFixed(2));
   }
 
   Map<String, dynamic> toJson() => {
-    'itemDetails':   itemDetails,
-    'account':       account,
-    'hsnCode':       hsnCode,
-    'sacCode':       sacCode,
-    'unit':          unit,
-    'quantity':      quantity,
-    'rate':          rate,
-    'discount':      discount,
-    'discountType':  discountType,
-    'taxableAmount': taxableAmount,
-    'itemGstRate':   itemGstRate,
-    'cgstAmount':    cgstAmount,
-    'sgstAmount':    sgstAmount,
-    'igstAmount':    igstAmount,
-    'amount':        amount,
-  };
+        'itemDetails': itemDetails,
+        'account': account,
+        'hsnCode': hsnCode,
+        'sacCode': sacCode,
+        'unit': unit,
+        'quantity': quantity,
+        'rate': rate,
+        'discount': discount,
+        'discountType': discountType,
+        'taxableAmount': taxableAmount,
+        'itemGstRate': itemGstRate,
+        'cgstAmount': cgstAmount,
+        'sgstAmount': sgstAmount,
+        'igstAmount': igstAmount,
+        'amount': amount,
+      };
 }

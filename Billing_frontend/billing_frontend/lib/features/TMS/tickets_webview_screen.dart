@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // File: lib/features/TMS/tickets_webview_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -29,7 +30,7 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
   @override
   void initState() {
     super.initState();
-    
+
     if (kIsWeb) {
       // For web, open in new tab instead of WebView
       _openInBrowser();
@@ -70,10 +71,11 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
     };
 
     final phpPage = pageMap[widget.initialPage] ?? 'TMS/raise_ticket.php';
-    final url = 'https://hrm.fleet.abra-travels.com/index.php?token=${widget.jwtToken}&redirect=$phpPage';
-    
+    final url =
+        'https://hrm.fleet.abra-travels.com/index.php?token=${widget.jwtToken}&redirect=$phpPage';
+
     debugPrint('🌐 Opening in browser: $url');
-    
+
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -95,8 +97,9 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
     };
 
     final phpPage = pageMap[widget.initialPage] ?? 'TMS/raise_ticket.php';
-    final url = 'https://hrm.fleet.abra-travels.com/index.php?token=${widget.jwtToken}&redirect=$phpPage';
-    
+    final url =
+        'https://hrm.fleet.abra-travels.com/index.php?token=${widget.jwtToken}&redirect=$phpPage';
+
     debugPrint('🌐 ========================================');
     debugPrint('🌐 WEBVIEW INITIALIZATION');
     debugPrint('🌐 Initial Page: ${widget.initialPage}');
@@ -104,7 +107,7 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
     debugPrint('🌐 URL: $url');
     debugPrint('🌐 JWT Token: ${widget.jwtToken.substring(0, 20)}...');
     debugPrint('🌐 ========================================');
-    
+
     // Create platform-specific parameters
     late final PlatformWebViewControllerCreationParams params;
     if (WebViewPlatform.instance is AndroidWebViewPlatform) {
@@ -118,7 +121,8 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
       params = const PlatformWebViewControllerCreationParams();
     }
 
-    final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
+    final WebViewController controller =
+        WebViewController.fromPlatformCreationParams(params);
 
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -131,7 +135,7 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
           onPageFinished: (url) {
             debugPrint('✅ Page finished loading: $url');
             setState(() => _isLoading = false);
-            
+
             if (url.contains('raise_ticket.php')) {
               setState(() => _currentPageTitle = 'Raise a Ticket');
             } else if (url.contains('my_tickets.php')) {
@@ -145,12 +149,9 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
           onWebResourceError: (error) {
             debugPrint('❌ WebView Error: ${error.description}');
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Error loading page: ${error.description}'),
-                  backgroundColor: Colors.red,
-                ),
-              );
+              AppSnackbar.show(context,
+                  message: 'Error loading page: ${error.description}',
+                  isError: true);
             }
           },
         ),
@@ -162,11 +163,12 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
     if (!kIsWeb && controller.platform is AndroidWebViewController) {
       debugPrint('🤖 Configuring Android WebView permissions...');
       AndroidWebViewController.enableDebugging(true);
-      (controller.platform as AndroidWebViewController).setGeolocationPermissionsPromptCallbacks(
+      (controller.platform as AndroidWebViewController)
+          .setGeolocationPermissionsPromptCallbacks(
         onShowPrompt: (request) async {
           debugPrint('📍 Geolocation permission requested by WebView');
           debugPrint('📍 Origin: ${request.origin}');
-          
+
           // Grant geolocation permission
           return GeolocationPermissionsResponse(
             allow: true,
@@ -178,7 +180,8 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
       // Enable camera, microphone, and other media permissions
       // Note: setOnPermissionRequest is not available in webview_flutter_android 3.16.9
       // Permissions are handled through Android manifest and system prompts
-      debugPrint('🔐 Android WebView configured - permissions handled by system');
+      debugPrint(
+          '🔐 Android WebView configured - permissions handled by system');
     }
 
     // ✅ iOS-SPECIFIC: Configure WKWebView for media permissions
@@ -205,7 +208,8 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.open_in_browser, size: 64, color: Color(0xFF0D47A1)),
+              const Icon(Icons.open_in_browser,
+                  size: 64, color: Color(0xFF0D47A1)),
               const SizedBox(height: 24),
               const Text(
                 'Opening Ticket System',
@@ -267,7 +271,8 @@ class _TicketsWebViewScreenState extends State<TicketsWebViewScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0D47A1)),
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(Color(0xFF0D47A1)),
                     ),
                     SizedBox(height: 16),
                     Text(

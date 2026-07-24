@@ -1,5 +1,5 @@
-import 'web_utils_stub.dart'
-    if (dart.library.html) 'web_utils_web.dart' as html;
+import 'web_utils_stub.dart' if (dart.library.html) 'web_utils_web.dart'
+    as html;
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,11 +16,11 @@ Future<String> _getBranchHeader() async {
   }
 }
 
-const Color _navy  = Color(0xFF0F1E3D);
-const Color _blue  = Color(0xFF2563EB);
+const Color _navy = Color(0xFF0F1E3D);
+const Color _blue = Color(0xFF2563EB);
 const Color _green = Color(0xFF27AE60);
 const Color _amber = Color(0xFFF59E0B);
-const Color _red   = Color(0xFFEF4444);
+const Color _red = Color(0xFFEF4444);
 
 // ─── iframe registry (web only) ──────────────────────────────────────────────
 // Each viewType ID can only be registered ONCE with platformViewRegistry.
@@ -30,7 +30,8 @@ int _iframeCounter = 0;
 
 /// Registers a PDF iframe by fetching the PDF as a blob and rendering it directly.
 /// This avoids Google Docs Viewer which requires a publicly accessible URL.
-String _registerPdfIframe(String pdfUrl, void Function(html.IFrameElement) onElement) {
+String _registerPdfIframe(
+    String pdfUrl, void Function(html.IFrameElement) onElement) {
   if (!kIsWeb) return '';
   final id = 'doc-iframe-${_iframeCounter++}';
 
@@ -38,21 +39,23 @@ String _registerPdfIframe(String pdfUrl, void Function(html.IFrameElement) onEle
   html.platformViewRegistry.registerViewFactory(id, (_) {
     final iframe = html.IFrameElement()
       ..style.border = 'none'
-      ..style.width  = '100%'
+      ..style.width = '100%'
       ..style.height = '100%';
     onElement(iframe);
 
     // Fetch the PDF with credentials (token is in the URL query param)
     // and render it as a blob URL so no external viewer is needed.
-    html.HttpRequest.request(pdfUrl, method: 'GET', responseType: 'arraybuffer').then((xhr) {
+    html.HttpRequest.request(pdfUrl, method: 'GET', responseType: 'arraybuffer')
+        .then((xhr) {
       final bytes = xhr.response as dynamic;
-      final blob  = html.Blob([bytes], 'application/pdf');
-      final url   = html.Url.createObjectUrl(blob);
-      iframe.src  = url;
+      final blob = html.Blob([bytes], 'application/pdf');
+      final url = html.Url.createObjectUrl(blob);
+      iframe.src = url;
     }).catchError((e) {
       debugPrint('⚠️ PDF iframe load error: $e');
       // Fallback: show a simple error message in the iframe
-      final errorHtml = '<html><body style="font-family:sans-serif;padding:20px;color:#555">'
+      final errorHtml =
+          '<html><body style="font-family:sans-serif;padding:20px;color:#555">'
           '<p>Could not load PDF preview.</p>'
           '<p><a href="$pdfUrl" target="_blank">Open PDF directly</a></p>'
           '</body></html>';
@@ -67,15 +70,15 @@ String _registerPdfIframe(String pdfUrl, void Function(html.IFrameElement) onEle
 
 String _registerHtmlIframe(String html_) {
   if (!kIsWeb) return '';
-  final id   = 'email-iframe-${_iframeCounter++}';
+  final id = 'email-iframe-${_iframeCounter++}';
   final blob = html.Blob([html_], 'text/html');
-  final url  = html.Url.createObjectUrl(blob);
+  final url = html.Url.createObjectUrl(blob);
   // ignore: undefined_prefixed_name
   html.platformViewRegistry.registerViewFactory(id, (_) {
     final iframe = html.IFrameElement()
-      ..src          = url
+      ..src = url
       ..style.border = 'none'
-      ..style.width  = '100%'
+      ..style.width = '100%'
       ..style.height = '100%';
     return iframe;
   });
@@ -87,29 +90,30 @@ String _registerHtmlIframe(String html_) {
 // =============================================================================
 
 Future<void> openDocumentPdf({
-  required BuildContext                              context,
-  required String?                                   docId,
-  required String                                    pdfEndpoint,
-  required String                                    docNumber,
-  Map<String, dynamic>                               fields = const {},
-  Future<void> Function(Map<String, dynamic>)?       onSaveFields,
+  required BuildContext context,
+  required String? docId,
+  required String pdfEndpoint,
+  required String docNumber,
+  Map<String, dynamic> fields = const {},
+  Future<void> Function(Map<String, dynamic>)? onSaveFields,
 }) async {
   if (docId == null || docId.isEmpty) {
     _snack(context, 'Save the document first to preview PDF');
     return;
   }
   try {
-    final prefs     = await SharedPreferences.getInstance();
-    final token     = prefs.getString('jwt_token') ?? '';
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token') ?? '';
     final branchHdr = await _getBranchHeader();
-    final url   = '${ApiConfig.baseUrl}$pdfEndpoint/$docId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
+    final url =
+        '${ApiConfig.baseUrl}$pdfEndpoint/$docId/pdf?token=$token&branchIds=${Uri.encodeComponent(branchHdr)}';
     if (!context.mounted) return;
     await showDialog(
       context: context,
       builder: (_) => _PdfPreviewDialog(
-        url:          url,
-        docNumber:    docNumber,
-        fields:       Map<String, dynamic>.from(fields),
+        url: url,
+        docNumber: docNumber,
+        fields: Map<String, dynamic>.from(fields),
         onSaveFields: onSaveFields,
       ),
     );
@@ -120,25 +124,27 @@ Future<void> openDocumentPdf({
 
 Future<void> openEmailPreview({
   required BuildContext context,
-  required String?      docId,
-  required String       emailEndpoint,
-  String?               sendEndpoint,
+  required String? docId,
+  required String emailEndpoint,
+  String? sendEndpoint,
 }) async {
   if (docId == null || docId.isEmpty) {
     _snack(context, 'Save the document first to preview email');
     return;
   }
   try {
-    final api  = ApiService();
+    final api = ApiService();
     final data = await api.get('$emailEndpoint/$docId/email-preview');
     if (data['success'] != true) {
-      if (context.mounted) _snack(context, (data['message'] as String?) ?? 'Failed to load email preview');
+      if (context.mounted)
+        _snack(context,
+            (data['message'] as String?) ?? 'Failed to load email preview');
       return;
     }
     final preview = (data['data'] as Map<String, dynamic>?) ?? {};
-    final html    = (preview['html']    as String?) ?? '';
+    final html = (preview['html'] as String?) ?? '';
     final subject = (preview['subject'] as String?) ?? 'Email Preview';
-    final to      = (preview['to']      as String?) ?? '';
+    final to = (preview['to'] as String?) ?? '';
     if (html.isEmpty) {
       if (context.mounted) _snack(context, 'Email preview is empty');
       return;
@@ -147,10 +153,10 @@ Future<void> openEmailPreview({
     await showDialog(
       context: context,
       builder: (_) => _EmailPreviewDialog(
-        html:         html,
-        subject:      subject,
-        to:           to,
-        docId:        docId,
+        html: html,
+        subject: subject,
+        to: to,
+        docId: docId,
         sendEndpoint: sendEndpoint ?? emailEndpoint,
         saveEndpoint: emailEndpoint,
       ),
@@ -163,7 +169,10 @@ Future<void> openEmailPreview({
 void _snack(BuildContext ctx, String msg, {Color? color}) {
   try {
     ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating),
+      SnackBar(
+          content: Text(msg),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating),
     );
   } catch (_) {
     debugPrint('⚠️ _snack: $msg');
@@ -184,9 +193,9 @@ class _DiffEntry {
 }
 
 class _PdfPreviewDialog extends StatefulWidget {
-  final String                                       url;
-  final String                                       docNumber;
-  final Map<String, dynamic>                         fields;
+  final String url;
+  final String docNumber;
+  final Map<String, dynamic> fields;
   final Future<void> Function(Map<String, dynamic>)? onSaveFields;
 
   const _PdfPreviewDialog({
@@ -205,24 +214,24 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
   WebViewController? _wvc;
 
   // ── web ────────────────────────────────────────────────────────────────────
-  String              _iframeId      = '';
+  String _iframeId = '';
   html.IFrameElement? _iframeElement; // kept so we can mutate .src on refresh
 
   // ── fields ─────────────────────────────────────────────────────────────────
-  late Map<String, dynamic>                _edited;
-  late Map<String, dynamic>                _original;
-  Map<String, dynamic>                     _prevSnapshot = {};
-  final Map<String, TextEditingController> _ctls         = {};
+  late Map<String, dynamic> _edited;
+  late Map<String, dynamic> _original;
+  Map<String, dynamic> _prevSnapshot = {};
+  final Map<String, TextEditingController> _ctls = {};
 
-  _PdfTab _tab     = _PdfTab.preview;
-  bool    _loading = true;
-  bool    _saving  = false;
+  _PdfTab _tab = _PdfTab.preview;
+  bool _loading = true;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _original = Map<String, dynamic>.from(widget.fields);
-    _edited   = Map<String, dynamic>.from(widget.fields);
+    _edited = Map<String, dynamic>.from(widget.fields);
     for (final e in _edited.entries) {
       _ctls[e.key] = TextEditingController(text: e.value?.toString() ?? '');
     }
@@ -238,9 +247,11 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
         _iframeId = _registerPdfIframe(pdfUrl, (el) => _iframeElement = el);
       } else {
         // Refresh: re-fetch the PDF as a blob and update src in-place
-        html.HttpRequest.request(pdfUrl, method: 'GET', responseType: 'arraybuffer').then((xhr) {
+        html.HttpRequest.request(pdfUrl,
+                method: 'GET', responseType: 'arraybuffer')
+            .then((xhr) {
           final bytes = xhr.response as dynamic;
-          final blob  = html.Blob([bytes], 'application/pdf');
+          final blob = html.Blob([bytes], 'application/pdf');
           _iframeElement?.src = html.Url.createObjectUrl(blob);
         }).catchError((e) {
           debugPrint('⚠️ PDF refresh error: $e');
@@ -252,8 +263,12 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
         _wvc = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
           ..setNavigationDelegate(NavigationDelegate(
-            onPageStarted:      (_) { if (mounted) setState(() => _loading = true); },
-            onPageFinished:     (_) { if (mounted) setState(() => _loading = false); },
+            onPageStarted: (_) {
+              if (mounted) setState(() => _loading = true);
+            },
+            onPageFinished: (_) {
+              if (mounted) setState(() => _loading = false);
+            },
             onWebResourceError: (e) {
               if (mounted) {
                 setState(() => _loading = false);
@@ -283,23 +298,33 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
 
   Future<void> _saveAndRefresh() async {
     for (final k in _edited.keys) _edited[k] = _ctls[k]?.text ?? '';
-    if (_changes.isEmpty) { _snack(context, 'No changes to save'); return; }
+    if (_changes.isEmpty) {
+      _snack(context, 'No changes to save');
+      return;
+    }
     setState(() => _saving = true);
     try {
       await widget.onSaveFields?.call(Map<String, dynamic>.from(_edited));
       if (!mounted) return;
       _prevSnapshot = Map<String, dynamic>.from(_original);
-      _original     = Map<String, dynamic>.from(_edited);
+      _original = Map<String, dynamic>.from(_edited);
       _initViewer(widget.url); // refresh viewer
-      setState(() { _saving = false; _tab = _PdfTab.diff; });
+      setState(() {
+        _saving = false;
+        _tab = _PdfTab.diff;
+      });
     } catch (e) {
-      if (mounted) { setState(() => _saving = false); _snack(context, 'Save failed: $e', color: _red); }
+      if (mounted) {
+        setState(() => _saving = false);
+        _snack(context, 'Save failed: $e', color: _red);
+      }
     }
   }
 
   String _label(String key) => key
       .replaceAllMapped(RegExp(r'([A-Z])'), (m) => ' ${m.group(0)}')
-      .replaceAll('_', ' ').trim()
+      .replaceAll('_', ' ')
+      .trim()
       .split(' ')
       .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
       .join(' ');
@@ -329,15 +354,21 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
               topLeft: Radius.circular(12), topRight: Radius.circular(12)),
         ),
         child: Row(children: [
-          const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+          const Icon(Icons.picture_as_pdf_outlined,
+              color: Colors.white, size: 20),
           const SizedBox(width: 10),
-          Expanded(child: Text(widget.docNumber,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-              overflow: TextOverflow.ellipsis)),
+          Expanded(
+              child: Text(widget.docNumber,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14),
+                  overflow: TextOverflow.ellipsis)),
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white, size: 20),
             onPressed: () => Navigator.pop(context),
-            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
           ),
         ]),
       );
@@ -345,9 +376,9 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
   Widget _tabs() => Container(
         color: _navy.withOpacity(0.07),
         child: Row(children: [
-          _tabItem(Icons.visibility_outlined, 'Preview',     _PdfTab.preview),
-          _tabItem(Icons.edit_outlined,       'Edit Fields', _PdfTab.edit),
-          _tabItem(Icons.compare_arrows,      'Changes',     _PdfTab.diff),
+          _tabItem(Icons.visibility_outlined, 'Preview', _PdfTab.preview),
+          _tabItem(Icons.edit_outlined, 'Edit Fields', _PdfTab.edit),
+          _tabItem(Icons.compare_arrows, 'Changes', _PdfTab.diff),
         ]),
       );
 
@@ -359,14 +390,18 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: on ? _blue : Colors.transparent, width: 2)),
+            border: Border(
+                bottom: BorderSide(
+                    color: on ? _blue : Colors.transparent, width: 2)),
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 13, color: on ? _blue : Colors.grey),
             const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 11,
-                fontWeight: on ? FontWeight.w600 : FontWeight.normal,
-                color: on ? _blue : Colors.grey[600])),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: on ? FontWeight.w600 : FontWeight.normal,
+                    color: on ? _blue : Colors.grey[600])),
           ]),
         ),
       ),
@@ -379,8 +414,8 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
           duration: const Duration(milliseconds: 180),
           child: switch (_tab) {
             _PdfTab.preview => _pdfView(),
-            _PdfTab.edit    => _editView(),
-            _PdfTab.diff    => _diffView(),
+            _PdfTab.edit => _editView(),
+            _PdfTab.diff => _diffView(),
           },
         ),
       );
@@ -392,12 +427,14 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
           HtmlElementView(viewType: _iframeId)
         else
           const Center(child: CircularProgressIndicator(color: _navy)),
-        if (_loading) const Center(child: CircularProgressIndicator(color: _navy)),
+        if (_loading)
+          const Center(child: CircularProgressIndicator(color: _navy)),
       ]);
     }
     return Stack(key: const ValueKey('pdf-native'), children: [
       if (_wvc != null) WebViewWidget(controller: _wvc!),
-      if (_loading) const Center(child: CircularProgressIndicator(color: _navy)),
+      if (_loading)
+        const Center(child: CircularProgressIndicator(color: _navy)),
     ]);
   }
 
@@ -434,29 +471,32 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
           child: const Row(children: [
             Icon(Icons.info_outline, size: 14, color: _amber),
             SizedBox(width: 8),
-            Expanded(child: Text('Edit fields below, then tap Save & Refresh.',
-                style: TextStyle(fontSize: 12, color: _amber))),
+            Expanded(
+                child: Text('Edit fields below, then tap Save & Refresh.',
+                    style: TextStyle(fontSize: 12, color: _amber))),
           ]),
         ),
         const SizedBox(height: 16),
         ..._ctls.entries.map((e) => Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: TextFormField(
-            controller: e.value,
-            decoration: InputDecoration(
-              labelText: _label(e.key),
-              labelStyle: const TextStyle(fontSize: 13),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: _blue, width: 1.5),
+              padding: const EdgeInsets.only(bottom: 14),
+              child: TextFormField(
+                controller: e.value,
+                decoration: InputDecoration(
+                  labelText: _label(e.key),
+                  labelStyle: const TextStyle(fontSize: 13),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _blue, width: 1.5),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  isDense: true,
+                ),
+                style: const TextStyle(fontSize: 13),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              isDense: true,
-            ),
-            style: const TextStyle(fontSize: 13),
-          ),
-        )),
+            )),
       ]),
     );
   }
@@ -465,8 +505,9 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
     final changed = <String, _DiffEntry>{};
     for (final k in _edited.keys) {
       final before = _prevSnapshot[k]?.toString() ?? '';
-      final after  = _edited[k]?.toString() ?? '';
-      if (before != after) changed[k] = _DiffEntry(before: before, after: after);
+      final after = _edited[k]?.toString() ?? '';
+      if (before != after)
+        changed[k] = _DiffEntry(before: before, after: after);
     }
     if (changed.isEmpty) {
       return const Center(
@@ -487,56 +528,75 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
         Row(children: [
           const Icon(Icons.compare_arrows, size: 16, color: _navy),
           const SizedBox(width: 6),
-          Text('${changed.length} field${changed.length > 1 ? 's' : ''} changed',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: _navy, fontSize: 13)),
+          Text(
+              '${changed.length} field${changed.length > 1 ? 's' : ''} changed',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600, color: _navy, fontSize: 13)),
         ]),
         const SizedBox(height: 12),
         ...changed.entries.map((e) => Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
               ),
-              child: Text(_label(e.key),
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _navy)),
-            ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: _red.withOpacity(0.07),
-              child: Row(children: [
-                const Icon(Icons.remove, size: 12, color: _red),
-                const SizedBox(width: 6),
-                Expanded(child: Text(
-                  e.value.before.isEmpty ? '(empty)' : e.value.before,
-                  style: const TextStyle(fontSize: 12, color: _red, decoration: TextDecoration.lineThrough),
-                )),
-              ]),
-            ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: _green.withOpacity(0.07),
-              child: Row(children: [
-                const Icon(Icons.add, size: 12, color: _green),
-                const SizedBox(width: 6),
-                Expanded(child: Text(
-                  e.value.after.isEmpty ? '(empty)' : e.value.after,
-                  style: const TextStyle(fontSize: 12, color: _green, fontWeight: FontWeight.w500),
-                )),
-              ]),
-            ),
-          ]),
-        )),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(8),
+                            topRight: Radius.circular(8)),
+                      ),
+                      child: Text(_label(e.key),
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _navy)),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      color: _red.withOpacity(0.07),
+                      child: Row(children: [
+                        const Icon(Icons.remove, size: 12, color: _red),
+                        const SizedBox(width: 6),
+                        Expanded(
+                            child: Text(
+                          e.value.before.isEmpty ? '(empty)' : e.value.before,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: _red,
+                              decoration: TextDecoration.lineThrough),
+                        )),
+                      ]),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      color: _green.withOpacity(0.07),
+                      child: Row(children: [
+                        const Icon(Icons.add, size: 12, color: _green),
+                        const SizedBox(width: 6),
+                        Expanded(
+                            child: Text(
+                          e.value.after.isEmpty ? '(empty)' : e.value.after,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: _green,
+                              fontWeight: FontWeight.w500),
+                        )),
+                      ]),
+                    ),
+                  ]),
+            )),
       ],
     );
   }
@@ -547,7 +607,8 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
           color: Colors.grey[50],
           border: Border(top: BorderSide(color: Colors.grey[200]!)),
           borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
+              bottomLeft: Radius.circular(12),
+              bottomRight: Radius.circular(12)),
         ),
         child: Row(children: [
           Expanded(
@@ -557,7 +618,8 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
                 foregroundColor: _navy,
                 side: const BorderSide(color: _navy),
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               child: const Text('Close'),
             ),
@@ -568,15 +630,19 @@ class _PdfPreviewDialogState extends State<_PdfPreviewDialog> {
               child: ElevatedButton.icon(
                 onPressed: _saving ? null : _saveAndRefresh,
                 icon: _saving
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.save_outlined, size: 16),
                 label: Text(_saving ? 'Saving...' : 'Save & Refresh'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _blue,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),
@@ -616,21 +682,21 @@ class _EmailPreviewDialog extends StatefulWidget {
 
 class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
   WebViewController? _wvc;
-  String             _iframeId = '';
+  String _iframeId = '';
 
   late TextEditingController _toCtl;
   late TextEditingController _subCtl;
   late TextEditingController _bodyCtl;
 
-  _EmailTab _tab     = _EmailTab.preview;
-  bool      _saving  = false;
-  bool      _sending = false;
+  _EmailTab _tab = _EmailTab.preview;
+  bool _saving = false;
+  bool _sending = false;
 
   @override
   void initState() {
     super.initState();
-    _toCtl   = TextEditingController(text: widget.to);
-    _subCtl  = TextEditingController(text: widget.subject);
+    _toCtl = TextEditingController(text: widget.to);
+    _subCtl = TextEditingController(text: widget.subject);
     _bodyCtl = TextEditingController(text: widget.html);
     _loadHtml(widget.html);
   }
@@ -660,31 +726,43 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
     final body = _bodyCtl.text;
     setState(() => _saving = true);
     try {
-      final api    = ApiService();
+      final api = ApiService();
       final result = await api.patch(
         '${widget.saveEndpoint}/${widget.docId}/email-preview',
-        body: {'to': _toCtl.text.trim(), 'subject': _subCtl.text.trim(), 'html': body},
+        body: {
+          'to': _toCtl.text.trim(),
+          'subject': _subCtl.text.trim(),
+          'html': body
+        },
       );
       if (!mounted) return;
       if (result['success'] == true) {
         final updatedHtml = (result['data']?['html'] as String?) ?? body;
         _loadHtml(updatedHtml);
-        setState(() { _saving = false; _tab = _EmailTab.preview; });
+        setState(() {
+          _saving = false;
+          _tab = _EmailTab.preview;
+        });
         _snack(context, 'Email updated', color: _green);
       } else {
         setState(() => _saving = false);
-        _snack(context, (result['message'] as String?) ?? 'Save failed', color: _red);
+        _snack(context, (result['message'] as String?) ?? 'Save failed',
+            color: _red);
       }
     } catch (e) {
-      if (mounted) { setState(() => _saving = false); _snack(context, 'Error: $e', color: _red); }
+      if (mounted) {
+        setState(() => _saving = false);
+        _snack(context, 'Error: $e', color: _red);
+      }
     }
   }
 
   Future<void> _send() async {
     setState(() => _sending = true);
     try {
-      final api    = ApiService();
-      final result = await api.post('${widget.sendEndpoint}/${widget.docId}/send');
+      final api = ApiService();
+      final result =
+          await api.post('${widget.sendEndpoint}/${widget.docId}/send');
       if (!mounted) return;
       if (result['success'] == true) {
         Navigator.pop(context);
@@ -695,10 +773,14 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         ));
       } else {
         setState(() => _sending = false);
-        _snack(context, (result['message'] as String?) ?? 'Send failed', color: _red);
+        _snack(context, (result['message'] as String?) ?? 'Send failed',
+            color: _red);
       }
     } catch (e) {
-      if (mounted) { setState(() => _sending = false); _snack(context, 'Error: $e', color: _red); }
+      if (mounted) {
+        setState(() => _sending = false);
+        _snack(context, 'Error: $e', color: _red);
+      }
     }
   }
 
@@ -722,19 +804,27 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         child: Row(children: [
           const Icon(Icons.email_outlined, color: Colors.white, size: 20),
           const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(_subCtl.text.isNotEmpty ? _subCtl.text : widget.subject,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                overflow: TextOverflow.ellipsis),
-            if (_toCtl.text.isNotEmpty)
-              Text('To: ${_toCtl.text}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                  overflow: TextOverflow.ellipsis),
-          ])),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(_subCtl.text.isNotEmpty ? _subCtl.text : widget.subject,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14),
+                    overflow: TextOverflow.ellipsis),
+                if (_toCtl.text.isNotEmpty)
+                  Text('To: ${_toCtl.text}',
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 11),
+                      overflow: TextOverflow.ellipsis),
+              ])),
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white, size: 20),
             onPressed: () => Navigator.pop(context),
-            padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
           ),
         ]),
       );
@@ -743,7 +833,7 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         color: _navy.withOpacity(0.07),
         child: Row(children: [
           _tabItem(Icons.visibility_outlined, 'Preview', _EmailTab.preview),
-          _tabItem(Icons.edit_outlined,       'Edit',    _EmailTab.edit),
+          _tabItem(Icons.edit_outlined, 'Edit', _EmailTab.edit),
         ]),
       );
 
@@ -755,14 +845,18 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: on ? _blue : Colors.transparent, width: 2)),
+            border: Border(
+                bottom: BorderSide(
+                    color: on ? _blue : Colors.transparent, width: 2)),
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 13, color: on ? _blue : Colors.grey),
             const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 12,
-                fontWeight: on ? FontWeight.w600 : FontWeight.normal,
-                color: on ? _blue : Colors.grey[600])),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: on ? FontWeight.w600 : FontWeight.normal,
+                    color: on ? _blue : Colors.grey[600])),
           ]),
         ),
       ),
@@ -778,18 +872,21 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
     if (kIsWeb) {
       return HtmlElementView(key: ValueKey(_iframeId), viewType: _iframeId);
     }
-    return WebViewWidget(key: const ValueKey('email-preview'), controller: _wvc!);
+    return WebViewWidget(
+        key: const ValueKey('email-preview'), controller: _wvc!);
   }
 
   Widget _editWidget() => SingleChildScrollView(
         key: const ValueKey('email-edit'),
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _field('To',      _toCtl,  hint: 'recipient@example.com'),
+          _field('To', _toCtl, hint: 'recipient@example.com'),
           const SizedBox(height: 12),
           _field('Subject', _subCtl, hint: 'Email subject'),
           const SizedBox(height: 12),
-          const Text('Body (HTML)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
+          const Text('Body (HTML)',
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
           const SizedBox(height: 6),
           Container(
             decoration: BoxDecoration(
@@ -811,7 +908,8 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
           Row(children: [
             const Icon(Icons.info_outline, size: 12, color: _amber),
             const SizedBox(width: 4),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               'Edit the raw HTML above. Changes are saved as-is without reformatting.',
               style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             )),
@@ -819,22 +917,27 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         ]),
       );
 
-  Widget _field(String label, TextEditingController ctl, {String? hint}) => Column(
+  Widget _field(String label, TextEditingController ctl, {String? hint}) =>
+      Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
           const SizedBox(height: 4),
           TextFormField(
             controller: ctl,
             decoration: InputDecoration(
               hintText: hint,
               hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: _blue, width: 1.5),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               isDense: true,
             ),
             style: const TextStyle(fontSize: 13),
@@ -848,7 +951,8 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
           color: Colors.grey[50],
           border: Border(top: BorderSide(color: Colors.grey[200]!)),
           borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
+              bottomLeft: Radius.circular(12),
+              bottomRight: Radius.circular(12)),
         ),
         child: Row(children: [
           Expanded(
@@ -858,7 +962,8 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
                 foregroundColor: _navy,
                 side: const BorderSide(color: _navy),
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               child: const Text('Close'),
             ),
@@ -870,15 +975,19 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
               child: ElevatedButton.icon(
                 onPressed: _saving ? null : _save,
                 icon: _saving
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.save_outlined, size: 16),
                 label: Text(_saving ? 'Saving...' : 'Save'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _navy,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),
@@ -888,15 +997,19 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
               child: ElevatedButton.icon(
                 onPressed: _sending ? null : _send,
                 icon: _sending
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.send, size: 16),
                 label: Text(_sending ? 'Sending...' : 'Send Now'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _blue,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),

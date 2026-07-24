@@ -64,8 +64,8 @@ class Quote {
     required this.quoteDate,
     required this.expiryDate,
     this.salesperson,
-    this.customerGSTIN       = '',
-    this.customerPAN         = '',
+    this.customerGSTIN = '',
+    this.customerPAN = '',
     this.gstRegistrationType = '',
     this.projectName,
     this.subject,
@@ -106,9 +106,9 @@ class Quote {
       quoteDate: DateTime.parse(json['quoteDate']),
       expiryDate: DateTime.parse(json['expiryDate']),
       salesperson: json['salesperson'],
-      customerGSTIN:        json['customerGSTIN']        ?? '',
-      customerPAN:          json['customerPAN']           ?? '',
-      gstRegistrationType:  json['gstRegistrationType']  ?? '',
+      customerGSTIN: json['customerGSTIN'] ?? '',
+      customerPAN: json['customerPAN'] ?? '',
+      gstRegistrationType: json['gstRegistrationType'] ?? '',
       projectName: json['projectName'],
       subject: json['subject'],
       items: (json['items'] as List<dynamic>?)
@@ -128,11 +128,18 @@ class Quote {
       customerNotes: json['customerNotes'],
       termsAndConditions: json['termsAndConditions'],
       status: json['status'] ?? 'DRAFT',
-      sentDate: json['sentDate'] != null ? DateTime.parse(json['sentDate']) : null,
-      acceptedDate: json['acceptedDate'] != null ? DateTime.parse(json['acceptedDate']) : null,
-      declinedDate: json['declinedDate'] != null ? DateTime.parse(json['declinedDate']) : null,
+      sentDate:
+          json['sentDate'] != null ? DateTime.parse(json['sentDate']) : null,
+      acceptedDate: json['acceptedDate'] != null
+          ? DateTime.parse(json['acceptedDate'])
+          : null,
+      declinedDate: json['declinedDate'] != null
+          ? DateTime.parse(json['declinedDate'])
+          : null,
       declineReason: json['declineReason'],
-      convertedDate: json['convertedDate'] != null ? DateTime.parse(json['convertedDate']) : null,
+      convertedDate: json['convertedDate'] != null
+          ? DateTime.parse(json['convertedDate'])
+          : null,
       convertedToInvoice: json['convertedToInvoice'],
       convertedToSalesOrder: json['convertedToSalesOrder'],
       createdAt: DateTime.parse(json['createdAt']),
@@ -191,51 +198,51 @@ class QuoteItem {
     required this.itemDetails,
     required this.quantity,
     required this.rate,
-    this.discount      = 0,
-    this.discountType  = 'percentage',
+    this.discount = 0,
+    this.discountType = 'percentage',
     required this.amount,
-    this.hsnCode       = '',
-    this.unit          = 'Nos',
-    this.itemGstRate   = 18,
+    this.hsnCode = '',
+    this.unit = 'Nos',
+    this.itemGstRate = 18,
     this.taxableAmount = 0,
-    this.cgstAmount    = 0,
-    this.sgstAmount    = 0,
-    this.igstAmount    = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   factory QuoteItem.fromJson(Map<String, dynamic> json) {
     return QuoteItem(
-      itemDetails:   json['itemDetails']   ?? '',
-      quantity:      (json['quantity']     ?? 0).toDouble(),
-      rate:          (json['rate']         ?? 0).toDouble(),
-      discount:      (json['discount']     ?? 0).toDouble(),
-      discountType:  json['discountType']  ?? 'percentage',
-      amount:        (json['amount']       ?? 0).toDouble(),
-      hsnCode:       json['hsnCode']       ?? '',
-      unit:          json['unit']          ?? 'Nos',
-      itemGstRate:   (json['itemGstRate']  ?? 18).toDouble(),
-      taxableAmount: (json['taxableAmount']?? 0).toDouble(),
-      cgstAmount:    (json['cgstAmount']   ?? 0).toDouble(),
-      sgstAmount:    (json['sgstAmount']   ?? 0).toDouble(),
-      igstAmount:    (json['igstAmount']   ?? 0).toDouble(),
+      itemDetails: json['itemDetails'] ?? '',
+      quantity: (json['quantity'] ?? 0).toDouble(),
+      rate: (json['rate'] ?? 0).toDouble(),
+      discount: (json['discount'] ?? 0).toDouble(),
+      discountType: json['discountType'] ?? 'percentage',
+      amount: (json['amount'] ?? 0).toDouble(),
+      hsnCode: json['hsnCode'] ?? '',
+      unit: json['unit'] ?? 'Nos',
+      itemGstRate: (json['itemGstRate'] ?? 18).toDouble(),
+      taxableAmount: (json['taxableAmount'] ?? 0).toDouble(),
+      cgstAmount: (json['cgstAmount'] ?? 0).toDouble(),
+      sgstAmount: (json['sgstAmount'] ?? 0).toDouble(),
+      igstAmount: (json['igstAmount'] ?? 0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'itemDetails':   itemDetails,
-      'quantity':      quantity,
-      'rate':          rate,
-      'discount':      discount,
-      'discountType':  discountType,
-      'amount':        amount,
-      'hsnCode':       hsnCode,
-      'unit':          unit,
-      'itemGstRate':   itemGstRate,
+      'itemDetails': itemDetails,
+      'quantity': quantity,
+      'rate': rate,
+      'discount': discount,
+      'discountType': discountType,
+      'amount': amount,
+      'hsnCode': hsnCode,
+      'unit': unit,
+      'itemGstRate': itemGstRate,
       'taxableAmount': taxableAmount,
-      'cgstAmount':    cgstAmount,
-      'sgstAmount':    sgstAmount,
-      'igstAmount':    igstAmount,
+      'cgstAmount': cgstAmount,
+      'sgstAmount': sgstAmount,
+      'igstAmount': igstAmount,
     };
   }
 }
@@ -364,7 +371,8 @@ class QuoteService {
       }
 
       debugPrint('📡 Making API request to /api/quotes');
-      final response = await _apiService.get('/api/finance/quotes', queryParams: queryParams);
+      final response = await _apiService.get('/api/finance/quotes',
+          queryParams: queryParams);
 
       debugPrint('✅ QuoteService: Successfully fetched quotes');
       debugPrint('   Response keys: ${response.keys.toList()}');
@@ -417,7 +425,8 @@ class QuoteService {
       debugPrint('   Customer: ${quoteData['customerName']}');
       debugPrint('   Items: ${(quoteData['items'] as List).length}');
 
-      final response = await _apiService.post('/api/finance/quotes', body: quoteData);
+      final response =
+          await _apiService.post('/api/finance/quotes', body: quoteData);
 
       debugPrint('✅ QuoteService: Successfully created quote');
 
@@ -430,11 +439,13 @@ class QuoteService {
   }
 
   // Update existing quote
-  static Future<Quote> updateQuote(String quoteId, Map<String, dynamic> quoteData) async {
+  static Future<Quote> updateQuote(
+      String quoteId, Map<String, dynamic> quoteData) async {
     try {
       debugPrint('✏️ QuoteService: Updating quote $quoteId...');
 
-      final response = await _apiService.put('/api/finance/quotes/$quoteId', body: quoteData);
+      final response = await _apiService.put('/api/finance/quotes/$quoteId',
+          body: quoteData);
 
       debugPrint('✅ QuoteService: Successfully updated quote');
 
@@ -465,7 +476,8 @@ class QuoteService {
     try {
       debugPrint('📬 QuoteService: Marking quote $quoteId as sent...');
 
-      final response = await _apiService.patch('/api/finance/quotes/$quoteId/mark-as-sent', body: {});
+      final response = await _apiService
+          .patch('/api/finance/quotes/$quoteId/mark-as-sent', body: {});
 
       debugPrint('✅ QuoteService: Successfully marked quote as sent');
 
@@ -482,7 +494,8 @@ class QuoteService {
     try {
       debugPrint('📧 QuoteService: Sending quote $quoteId...');
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/send');
+      final response =
+          await _apiService.post('/api/finance/quotes/$quoteId/send');
 
       debugPrint('✅ QuoteService: Successfully sent quote');
 
@@ -497,12 +510,14 @@ class QuoteService {
   // Download quote PDF
   static Future<String> downloadPDF(String quoteId) async {
     try {
-      debugPrint('📄 QuoteService: Getting PDF download URL for quote $quoteId...');
+      debugPrint(
+          '📄 QuoteService: Getting PDF download URL for quote $quoteId...');
 
       final headers = await _apiService.getHeaders();
       final token = headers['Authorization']?.replaceFirst('Bearer ', '') ?? '';
       final branchIds = headers['x-branch-ids'] ?? 'ALL';
-      final url = '${_apiService.baseUrl}/api/finance/quotes/$quoteId/download?token=$token&branchIds=${Uri.encodeComponent(branchIds)}';
+      final url =
+          '${_apiService.baseUrl}/api/finance/quotes/$quoteId/download?token=$token&branchIds=${Uri.encodeComponent(branchIds)}';
 
       debugPrint('✅ QuoteService: PDF URL generated: $url');
       return url;
@@ -517,7 +532,8 @@ class QuoteService {
     try {
       debugPrint('✅ QuoteService: Accepting quote $quoteId...');
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/accept');
+      final response =
+          await _apiService.post('/api/finance/quotes/$quoteId/accept');
 
       debugPrint('✅ QuoteService: Successfully accepted quote');
 
@@ -534,9 +550,12 @@ class QuoteService {
     try {
       debugPrint('❌ QuoteService: Declining quote $quoteId...');
 
-      final body = reason != null && reason.isNotEmpty ? {'declineReason': reason} : <String, dynamic>{};
+      final body = reason != null && reason.isNotEmpty
+          ? {'declineReason': reason}
+          : <String, dynamic>{};
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/decline', body: body);
+      final response = await _apiService
+          .post('/api/finance/quotes/$quoteId/decline', body: body);
 
       debugPrint('✅ QuoteService: Successfully declined quote');
 
@@ -553,7 +572,8 @@ class QuoteService {
     try {
       debugPrint('📋 QuoteService: Cloning quote $quoteId...');
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/clone');
+      final response =
+          await _apiService.post('/api/finance/quotes/$quoteId/clone');
 
       debugPrint('✅ QuoteService: Successfully cloned quote');
 
@@ -570,16 +590,16 @@ class QuoteService {
     try {
       debugPrint('🧾 QuoteService: Converting quote $quoteId to invoice...');
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/convert-to-invoice');
+      final response = await _apiService
+          .post('/api/finance/quotes/$quoteId/convert-to-invoice');
 
       debugPrint('✅ QuoteService: Successfully converted quote to invoice');
 
- final data = response['data'] ?? response;
-  // Backend returns {quote, invoice} — extract quote
-  final quoteData = data is Map && data.containsKey('quote') 
-      ? data['quote'] 
-      : data;
-  return Quote.fromJson(quoteData);
+      final data = response['data'] ?? response;
+      // Backend returns {quote, invoice} — extract quote
+      final quoteData =
+          data is Map && data.containsKey('quote') ? data['quote'] : data;
+      return Quote.fromJson(quoteData);
     } catch (e) {
       debugPrint('❌ QuoteService: Error converting quote to invoice: $e');
       rethrow;
@@ -589,9 +609,11 @@ class QuoteService {
   // Convert quote to sales order
   static Future<Quote> convertToSalesOrder(String quoteId) async {
     try {
-      debugPrint('📦 QuoteService: Converting quote $quoteId to sales order...');
+      debugPrint(
+          '📦 QuoteService: Converting quote $quoteId to sales order...');
 
-      final response = await _apiService.post('/api/finance/quotes/$quoteId/convert-to-sales-order');
+      final response = await _apiService
+          .post('/api/finance/quotes/$quoteId/convert-to-sales-order');
 
       debugPrint('✅ QuoteService: Successfully converted quote to sales order');
 
@@ -606,10 +628,12 @@ class QuoteService {
   // ============================================================================
   // 🆕 BULK IMPORT QUOTES
   // ============================================================================
-  
-  static Future<Map<String, dynamic>> bulkImportQuotes(List<Map<String, dynamic>> quotesData) async {
+
+  static Future<Map<String, dynamic>> bulkImportQuotes(
+      List<Map<String, dynamic>> quotesData) async {
     try {
-      debugPrint('📦 QuoteService: Starting bulk import of ${quotesData.length} quotes...');
+      debugPrint(
+          '📦 QuoteService: Starting bulk import of ${quotesData.length} quotes...');
 
       final response = await _apiService.post(
         '/api/finance/quotes/bulk-import',

@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // GLOBAL TIMER BAR — shows active timer across all screens
 // ============================================================================
@@ -8,10 +9,10 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../../../core/services/timer_service.dart';
 
-const Color _navy   = Color(0xFF1e3a8a);
-const Color _green  = Color(0xFF27AE60);
+const Color _navy = Color(0xFF1e3a8a);
+const Color _green = Color(0xFF27AE60);
 const Color _orange = Color(0xFFE67E22);
-const Color _red    = Color(0xFFE74C3C);
+const Color _red = Color(0xFFE74C3C);
 
 class GlobalTimerBar extends StatefulWidget {
   final Widget child;
@@ -33,7 +34,8 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
     super.initState();
     _fetchActiveTimer();
     // Poll backend every 30 seconds to sync
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchActiveTimer());
+    _pollTimer =
+        Timer.periodic(const Duration(seconds: 30), (_) => _fetchActiveTimer());
   }
 
   @override
@@ -48,13 +50,16 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
       final timers = await TimerService.getActiveTimers();
       if (!mounted) return;
       if (timers.isEmpty) {
-        setState(() { _activeTimer = null; _elapsedSeconds = 0; });
+        setState(() {
+          _activeTimer = null;
+          _elapsedSeconds = 0;
+        });
         _tickTimer?.cancel();
         return;
       }
       final timer = timers.first;
       setState(() {
-        _activeTimer    = timer;
+        _activeTimer = timer;
         _elapsedSeconds = timer.elapsedSeconds;
       });
       if (timer.isRunning) _startTick();
@@ -76,14 +81,14 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
     try {
       final result = await TimerService.stopTimer(_activeTimer!.id);
       _tickTimer?.cancel();
-      setState(() { _activeTimer = null; _elapsedSeconds = 0; _isStopping = false; });
+      setState(() {
+        _activeTimer = null;
+        _elapsedSeconds = 0;
+        _isStopping = false;
+      });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Timer stopped — ${result.hours} hrs logged'),
-          backgroundColor: _green,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ));
+        AppSnackbar.show(context,
+            message: 'Timer stopped — ${result.hours} hrs logged');
       }
     } catch (e) {
       setState(() => _isStopping = false);
@@ -97,37 +102,37 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
         await TimerService.pauseTimer(_activeTimer!.id);
         _tickTimer?.cancel();
         setState(() => _activeTimer = ActiveTimer(
-          id: _activeTimer!.id,
-          projectId: _activeTimer!.projectId,
-          projectName: _activeTimer!.projectName,
-          taskId: _activeTimer!.taskId,
-          taskName: _activeTimer!.taskName,
-          userId: _activeTimer!.userId,
-          userName: _activeTimer!.userName,
-          isBillable: _activeTimer!.isBillable,
-          notes: _activeTimer!.notes,
-          status: 'paused',
-          startedAt: _activeTimer!.startedAt,
-          elapsedSeconds: _elapsedSeconds,
-          elapsedFormatted: TimerService.formatDuration(_elapsedSeconds),
-        ));
+              id: _activeTimer!.id,
+              projectId: _activeTimer!.projectId,
+              projectName: _activeTimer!.projectName,
+              taskId: _activeTimer!.taskId,
+              taskName: _activeTimer!.taskName,
+              userId: _activeTimer!.userId,
+              userName: _activeTimer!.userName,
+              isBillable: _activeTimer!.isBillable,
+              notes: _activeTimer!.notes,
+              status: 'paused',
+              startedAt: _activeTimer!.startedAt,
+              elapsedSeconds: _elapsedSeconds,
+              elapsedFormatted: TimerService.formatDuration(_elapsedSeconds),
+            ));
       } else {
         await TimerService.resumeTimer(_activeTimer!.id);
         setState(() => _activeTimer = ActiveTimer(
-          id: _activeTimer!.id,
-          projectId: _activeTimer!.projectId,
-          projectName: _activeTimer!.projectName,
-          taskId: _activeTimer!.taskId,
-          taskName: _activeTimer!.taskName,
-          userId: _activeTimer!.userId,
-          userName: _activeTimer!.userName,
-          isBillable: _activeTimer!.isBillable,
-          notes: _activeTimer!.notes,
-          status: 'running',
-          startedAt: _activeTimer!.startedAt,
-          elapsedSeconds: _elapsedSeconds,
-          elapsedFormatted: TimerService.formatDuration(_elapsedSeconds),
-        ));
+              id: _activeTimer!.id,
+              projectId: _activeTimer!.projectId,
+              projectName: _activeTimer!.projectName,
+              taskId: _activeTimer!.taskId,
+              taskName: _activeTimer!.taskName,
+              userId: _activeTimer!.userId,
+              userName: _activeTimer!.userName,
+              isBillable: _activeTimer!.isBillable,
+              notes: _activeTimer!.notes,
+              status: 'running',
+              startedAt: _activeTimer!.startedAt,
+              elapsedSeconds: _elapsedSeconds,
+              elapsedFormatted: TimerService.formatDuration(_elapsedSeconds),
+            ));
         _startTick();
       }
     } catch (_) {}
@@ -148,26 +153,51 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: _navy,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, -3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, -3))
+        ],
       ),
       child: Row(children: [
         // Pulsing dot
         AnimatedContainer(
           duration: const Duration(milliseconds: 500),
-          width: 10, height: 10,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(
             color: isRunning ? _green : _orange,
             shape: BoxShape.circle,
-            boxShadow: isRunning ? [BoxShadow(color: _green.withOpacity(0.6), blurRadius: 6, spreadRadius: 2)] : [],
+            boxShadow: isRunning
+                ? [
+                    BoxShadow(
+                        color: _green.withOpacity(0.6),
+                        blurRadius: 6,
+                        spreadRadius: 2)
+                  ]
+                : [],
           ),
         ),
         const SizedBox(width: 10),
         // Project name
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(_activeTimer?.projectName ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
-          if ((_activeTimer?.taskName ?? '').isNotEmpty)
-            Text(_activeTimer!.taskName, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11), overflow: TextOverflow.ellipsis),
-        ])),
+        Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+              Text(_activeTimer?.projectName ?? '',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                  overflow: TextOverflow.ellipsis),
+              if ((_activeTimer?.taskName ?? '').isNotEmpty)
+                Text(_activeTimer!.taskName,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.7), fontSize: 11),
+                    overflow: TextOverflow.ellipsis),
+            ])),
         const SizedBox(width: 10),
         // Timer display
         Text(
@@ -194,7 +224,8 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
             ),
             child: Icon(
               isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: _orange, size: 20,
+              color: _orange,
+              size: 20,
             ),
           ),
         ),
@@ -211,7 +242,11 @@ class _GlobalTimerBarState extends State<GlobalTimerBar> {
               border: Border.all(color: _red.withOpacity(0.4)),
             ),
             child: _isStopping
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.stop_rounded, color: _red, size: 20),
           ),
         ),

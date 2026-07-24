@@ -28,7 +28,8 @@ class ReconciliationBillingService {
     try {
       print('📤 Uploading statement file...');
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/import');
+      final uri =
+          Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/import');
       final request = http.MultipartRequest('POST', uri);
 
       // Add headers
@@ -84,7 +85,8 @@ class ReconciliationBillingService {
     try {
       print('📤 Uploading statement file (bytes)...');
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/import');
+      final uri =
+          Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/import');
       final request = http.MultipartRequest('POST', uri);
 
       // Add headers
@@ -200,7 +202,8 @@ class ReconciliationBillingService {
         queryParams['endDate'] = endDate.toIso8601String().split('T')[0];
       }
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/provider-transactions')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/provider-transactions')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -210,7 +213,9 @@ class ReconciliationBillingService {
 
       if (response['success']) {
         final List<dynamic> data = response['data'];
-        return data.map((json) => ProviderTransactionModel.fromJson(json)).toList();
+        return data
+            .map((json) => ProviderTransactionModel.fromJson(json))
+            .toList();
       }
 
       return [];
@@ -238,7 +243,8 @@ class ReconciliationBillingService {
       }
       if (matched != null) queryParams['matched'] = matched.toString();
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/system-expenses')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/system-expenses')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -299,49 +305,48 @@ class ReconciliationBillingService {
   }
 
   /// Manual match (user selects both)
-Future<Map<String, dynamic>> manualMatch({
-  required String providerTxnId,
-  required String expenseId,
-  bool forceMatch = false, // ← ADD THIS PARAMETER
-}) async {
-  try {
-    final response = await _apiService.post(
-      '/api/finance/reconciliation/manual-match',
-      body: {
-        'providerTxnId': providerTxnId,
-        'expenseId': expenseId,
-        'forceMatch': forceMatch, // ← SEND TO BACKEND
-      },
-    );
+  Future<Map<String, dynamic>> manualMatch({
+    required String providerTxnId,
+    required String expenseId,
+    bool forceMatch = false, // ← ADD THIS PARAMETER
+  }) async {
+    try {
+      final response = await _apiService.post(
+        '/api/finance/reconciliation/manual-match',
+        body: {
+          'providerTxnId': providerTxnId,
+          'expenseId': expenseId,
+          'forceMatch': forceMatch, // ← SEND TO BACKEND
+        },
+      );
 
-    // ✅ RETURN THE FULL RESPONSE (not just success boolean)
-    return response;
-  } catch (e) {
-    print('❌ Error manual matching: $e');
-    rethrow; // ← CHANGE: Rethrow instead of wrapping in Exception
+      // ✅ RETURN THE FULL RESPONSE (not just success boolean)
+      return response;
+    } catch (e) {
+      print('❌ Error manual matching: $e');
+      rethrow; // ← CHANGE: Rethrow instead of wrapping in Exception
+    }
   }
-}
 
-
-/// Verify opening balance against statement
-Future<Map<String, dynamic>> verifyOpeningBalance({
-  required String accountId,
-  required double statementOpeningBalance,
-}) async {
-  try {
-    final response = await _apiService.post(
-      '/api/finance/reconciliation/sessions/verify-opening-balance',
-      body: {
-        'accountId': accountId,
-        'statementOpeningBalance': statementOpeningBalance,
-      },
-    );
-    return response;
-  } catch (e) {
-    print('❌ Error verifying opening balance: $e');
-    throw Exception('Failed to verify opening balance: $e');
+  /// Verify opening balance against statement
+  Future<Map<String, dynamic>> verifyOpeningBalance({
+    required String accountId,
+    required double statementOpeningBalance,
+  }) async {
+    try {
+      final response = await _apiService.post(
+        '/api/finance/reconciliation/sessions/verify-opening-balance',
+        body: {
+          'accountId': accountId,
+          'statementOpeningBalance': statementOpeningBalance,
+        },
+      );
+      return response;
+    } catch (e) {
+      print('❌ Error verifying opening balance: $e');
+      throw Exception('Failed to verify opening balance: $e');
+    }
   }
-}
 
   /// Accept pending match
   Future<bool> acceptMatch(String providerTxnId) async {
@@ -433,7 +438,8 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
       if (accountId != null) queryParams['accountId'] = accountId;
       if (status != null) queryParams['status'] = status;
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/sessions')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/sessions')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -443,7 +449,9 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
 
       if (response['success']) {
         final List<dynamic> data = response['data'];
-        return data.map((json) => ReconciliationSessionModel.fromJson(json)).toList();
+        return data
+            .map((json) => ReconciliationSessionModel.fromJson(json))
+            .toList();
       }
 
       return [];
@@ -454,7 +462,8 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
   }
 
   /// Get session details
-  Future<ReconciliationSessionModel?> getSessionDetails(String sessionId) async {
+  Future<ReconciliationSessionModel?> getSessionDetails(
+      String sessionId) async {
     try {
       final response = await _apiService.get(
         '/api/finance/reconciliation/sessions/$sessionId',
@@ -472,7 +481,7 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
   }
 
   /// Finalize and lock session
-/// Finalize and lock session with closing balance verification
+  /// Finalize and lock session with closing balance verification
   Future<Map<String, dynamic>> finalizeSession(
     String sessionId, {
     required double statementClosingBalance,
@@ -495,7 +504,6 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
       throw Exception('Failed to finalize session: $e');
     }
   }
-
 
   /// Carry forward an unmatched transaction to next period
   Future<Map<String, dynamic>> carryForwardTransaction(
@@ -622,10 +630,11 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
     }
   }
 
-/// Get alerts for an account
+  /// Get alerts for an account
   Future<List<Map<String, dynamic>>> getAlerts(String accountId) async {
     try {
-      final response = await _apiService.get('/api/finance/reconciliation/alerts/$accountId');
+      final response = await _apiService
+          .get('/api/finance/reconciliation/alerts/$accountId');
       if (response['success'] == true) {
         return List<Map<String, dynamic>>.from(response['data']);
       }
@@ -748,7 +757,8 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
         'endDate': endDate.toIso8601String().split('T')[0],
       };
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/petty-cash/summary')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/petty-cash/summary')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -779,7 +789,8 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
         'endDate': endDate.toIso8601String().split('T')[0],
       };
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/stats/$accountId')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/stats/$accountId')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -795,12 +806,14 @@ Future<Map<String, dynamic>> verifyOpeningBalance({
   }
 
   /// Get import history
-  Future<List<Map<String, dynamic>>> getImportHistory({String? accountId}) async {
+  Future<List<Map<String, dynamic>>> getImportHistory(
+      {String? accountId}) async {
     try {
       final queryParams = <String, String>{};
       if (accountId != null) queryParams['accountId'] = accountId;
 
-      final uri = Uri.parse('${_apiService.baseUrl}/api/finance/reconciliation/import-history')
+      final uri = Uri.parse(
+              '${_apiService.baseUrl}/api/finance/reconciliation/import-history')
           .replace(queryParameters: queryParams);
 
       final response = await _apiService.get(
@@ -897,7 +910,8 @@ class ProviderTransactionModel {
       matchedExpenseId: json['matchedExpenseId'],
       matchConfidence: json['matchConfidence'],
       matchedBy: json['matchedBy'],
-      matchedAt: json['matchedAt'] != null ? DateTime.parse(json['matchedAt']) : null,
+      matchedAt:
+          json['matchedAt'] != null ? DateTime.parse(json['matchedAt']) : null,
       variance: (json['variance'] ?? 0).toDouble(),
       varianceReason: json['varianceReason'],
       importBatchId: json['importBatchId'] ?? '',
@@ -1020,21 +1034,30 @@ class ReconciliationSessionModel {
       startedBy: json['startedBy'] ?? 'system',
       startedAt: DateTime.parse(json['startedAt']),
       completedBy: json['completedBy'],
-      completedAt: json['completedAt'] != null ? DateTime.parse(json['completedAt']) : null,
+      completedAt: json['completedAt'] != null
+          ? DateTime.parse(json['completedAt'])
+          : null,
       isLocked: json['isLocked'] ?? false,
-      lockedAt: json['lockedAt'] != null ? DateTime.parse(json['lockedAt']) : null,
+      lockedAt:
+          json['lockedAt'] != null ? DateTime.parse(json['lockedAt']) : null,
       lockedBy: json['lockedBy'],
       reconciliationNotes: json['reconciliationNotes'],
       requiresApproval: json['requiresApproval'] ?? false,
       submittedForApproval: json['submittedForApproval'] ?? false,
       submittedBy: json['submittedBy'],
-      submittedAt: json['submittedAt'] != null ? DateTime.parse(json['submittedAt']) : null,
+      submittedAt: json['submittedAt'] != null
+          ? DateTime.parse(json['submittedAt'])
+          : null,
       approvalStatus: json['approvalStatus'] ?? 'NOT_REQUIRED',
       approvedBy: json['approvedBy'],
-      approvedAt: json['approvedAt'] != null ? DateTime.parse(json['approvedAt']) : null,
+      approvedAt: json['approvedAt'] != null
+          ? DateTime.parse(json['approvedAt'])
+          : null,
       approvalNotes: json['approvalNotes'],
       rejectedBy: json['rejectedBy'],
-      rejectedAt: json['rejectedAt'] != null ? DateTime.parse(json['rejectedAt']) : null,
+      rejectedAt: json['rejectedAt'] != null
+          ? DateTime.parse(json['rejectedAt'])
+          : null,
       rejectionReason: json['rejectionReason'],
     );
   }
@@ -1070,7 +1093,9 @@ class ColumnMappingModel {
       columnMappings: Map<String, String>.from(json['columnMappings'] ?? {}),
       dateFormat: json['dateFormat'] ?? 'DD/MM/YYYY',
       usageCount: json['usageCount'] ?? 0,
-      lastUsedAt: json['lastUsedAt'] != null ? DateTime.parse(json['lastUsedAt']) : null,
+      lastUsedAt: json['lastUsedAt'] != null
+          ? DateTime.parse(json['lastUsedAt'])
+          : null,
     );
   }
 }

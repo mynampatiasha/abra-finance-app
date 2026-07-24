@@ -28,7 +28,7 @@ class RecurringExpense {
   final String expenseAccount;
   final String paidThrough;
   final double amount;
-  final bool? isBillable;  // NEW FIELD
+  final bool? isBillable; // NEW FIELD
   final double tax;
   final double? gstRate;
   final int repeatEvery;
@@ -52,7 +52,7 @@ class RecurringExpense {
     required this.expenseAccount,
     required this.paidThrough,
     required this.amount,
-    this.isBillable,  // NEW FIELD
+    this.isBillable, // NEW FIELD
     required this.tax,
     this.gstRate,
     required this.repeatEvery,
@@ -78,9 +78,10 @@ class RecurringExpense {
       expenseAccount: json['expenseAccount'] ?? '',
       paidThrough: json['paidThrough'] ?? '',
       amount: (json['amount'] ?? 0).toDouble(),
-      isBillable: json['isBillable'],  // NEW FIELD
+      isBillable: json['isBillable'], // NEW FIELD
       tax: (json['tax'] ?? 0).toDouble(),
-      gstRate: json['gstRate'] != null ? (json['gstRate'] as num).toDouble() : null,
+      gstRate:
+          json['gstRate'] != null ? (json['gstRate'] as num).toDouble() : null,
       repeatEvery: json['repeatEvery'] ?? 1,
       repeatUnit: json['repeatUnit'] ?? 'month',
       startDate: DateTime.parse(json['startDate']),
@@ -89,8 +90,8 @@ class RecurringExpense {
       nextExpenseDate: DateTime.parse(json['nextExpenseDate']),
       status: json['status'] ?? 'ACTIVE',
       totalExpensesGenerated: json['totalExpensesGenerated'] ?? 0,
-      lastGeneratedDate: json['lastGeneratedDate'] != null 
-          ? DateTime.parse(json['lastGeneratedDate']) 
+      lastGeneratedDate: json['lastGeneratedDate'] != null
+          ? DateTime.parse(json['lastGeneratedDate'])
           : null,
       expenseCreationMode: json['expenseCreationMode'] ?? 'auto_create',
       notes: json['notes'],
@@ -106,7 +107,7 @@ class RecurringExpense {
       'expenseAccount': expenseAccount,
       'paidThrough': paidThrough,
       'amount': amount,
-      'isBillable': isBillable,  // NEW FIELD
+      'isBillable': isBillable, // NEW FIELD
       'tax': tax,
       'gstRate': gstRate,
       'repeatEvery': repeatEvery,
@@ -185,7 +186,7 @@ class RecurringExpenseService {
   // ============================================================================
   // GET RECURRING EXPENSES
   // ============================================================================
-  
+
   static Future<Map<String, dynamic>> getRecurringExpenses({
     String? status,
     String? fromDate,
@@ -198,7 +199,7 @@ class RecurringExpenseService {
         'page': page.toString(),
         'limit': limit.toString(),
       };
-      
+
       if (status != null && status != 'All') {
         queryParams['status'] = status;
       }
@@ -208,19 +209,20 @@ class RecurringExpenseService {
       if (toDate != null) {
         queryParams['toDate'] = toDate;
       }
-      
-      final uri = Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses')
-          .replace(queryParameters: queryParams);
-      
+
+      final uri =
+          Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses')
+              .replace(queryParameters: queryParams);
+
       print('🔍 GET Recurring Expenses: $uri');
-      
+
       final response = await http.get(
         uri,
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return {
@@ -249,18 +251,18 @@ class RecurringExpenseService {
   // ============================================================================
   // GET STATS
   // ============================================================================
-  
+
   static Future<RecurringExpenseStats?> getStats() async {
     try {
       print('📊 GET Stats');
-      
+
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/stats'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return RecurringExpenseStats.fromJson(data['data']);
@@ -275,18 +277,18 @@ class RecurringExpenseService {
   // ============================================================================
   // GET SINGLE RECURRING EXPENSE
   // ============================================================================
-  
+
   static Future<RecurringExpense?> getRecurringExpense(String id) async {
     try {
       print('🔍 GET Recurring Expense: $id');
-      
+
       final response = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return RecurringExpense.fromJson(data['data']);
@@ -301,7 +303,7 @@ class RecurringExpenseService {
   // ============================================================================
   // CREATE RECURRING EXPENSE (UPDATED WITH TAX SUPPORT)
   // ============================================================================
-  
+
   static Future<bool> createRecurringExpense(Map<String, dynamic> data) async {
     try {
       // Ensure tax fields are properly formatted
@@ -311,10 +313,10 @@ class RecurringExpenseService {
       if (data.containsKey('gstRate')) {
         data['gstRate'] = (data['gstRate'] as num).toDouble();
       }
-      
+
       print('📝 CREATE Recurring Expense');
       print('Data: ${json.encode(data)}');
-      
+
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses'),
         headers: await _headers(),
@@ -323,7 +325,7 @@ class RecurringExpenseService {
 
       print('📡 Response Status: ${response.statusCode}');
       print('📡 Response Body: ${response.body}');
-      
+
       return response.statusCode == 201;
     } catch (e) {
       print('❌ Exception in createRecurringExpense: $e');
@@ -334,8 +336,9 @@ class RecurringExpenseService {
   // ============================================================================
   // UPDATE RECURRING EXPENSE (UPDATED WITH TAX SUPPORT)
   // ============================================================================
-  
-  static Future<bool> updateRecurringExpense(String id, Map<String, dynamic> data) async {
+
+  static Future<bool> updateRecurringExpense(
+      String id, Map<String, dynamic> data) async {
     try {
       // Ensure tax fields are properly formatted
       if (data.containsKey('tax')) {
@@ -344,10 +347,10 @@ class RecurringExpenseService {
       if (data.containsKey('gstRate')) {
         data['gstRate'] = (data['gstRate'] as num).toDouble();
       }
-      
+
       print('✏️ UPDATE Recurring Expense: $id');
       print('Data: ${json.encode(data)}');
-      
+
       final response = await http.put(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
         headers: await _headers(),
@@ -356,7 +359,7 @@ class RecurringExpenseService {
 
       print('📡 Response Status: ${response.statusCode}');
       print('📡 Response Body: ${response.body}');
-      
+
       return response.statusCode == 200;
     } catch (e) {
       print('❌ Exception in updateRecurringExpense: $e');
@@ -367,18 +370,19 @@ class RecurringExpenseService {
   // ============================================================================
   // PAUSE RECURRING EXPENSE
   // ============================================================================
-  
+
   static Future<bool> pauseRecurringExpense(String id) async {
     try {
       print('⏸️ PAUSE Recurring Expense: $id');
-      
+
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/pause'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/pause'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       return response.statusCode == 200;
     } catch (e) {
       print('❌ Exception in pauseRecurringExpense: $e');
@@ -389,18 +393,19 @@ class RecurringExpenseService {
   // ============================================================================
   // RESUME RECURRING EXPENSE
   // ============================================================================
-  
+
   static Future<bool> resumeRecurringExpense(String id) async {
     try {
       print('▶️ RESUME Recurring Expense: $id');
-      
+
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/resume'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/resume'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       return response.statusCode == 200;
     } catch (e) {
       print('❌ Exception in resumeRecurringExpense: $e');
@@ -411,18 +416,19 @@ class RecurringExpenseService {
   // ============================================================================
   // STOP RECURRING EXPENSE
   // ============================================================================
-  
+
   static Future<bool> stopRecurringExpense(String id) async {
     try {
       print('⏹️ STOP Recurring Expense: $id');
-      
+
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/stop'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/stop'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       return response.statusCode == 200;
     } catch (e) {
       print('❌ Exception in stopRecurringExpense: $e');
@@ -433,18 +439,19 @@ class RecurringExpenseService {
   // ============================================================================
   // GENERATE EXPENSE MANUALLY
   // ============================================================================
-  
+
   static Future<bool> generateManualExpense(String id) async {
     try {
       print('🔧 GENERATE Manual Expense: $id');
-      
+
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/generate'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/generate'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       return response.statusCode == 201;
     } catch (e) {
       print('❌ Exception in generateManualExpense: $e');
@@ -455,18 +462,19 @@ class RecurringExpenseService {
   // ============================================================================
   // GET CHILD EXPENSES
   // ============================================================================
-  
+
   static Future<List<dynamic>> getChildExpenses(String id) async {
     try {
       print('📋 GET Child Expenses: $id');
-      
+
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/child-expenses'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id/child-expenses'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data['data'] ?? [];
@@ -481,18 +489,18 @@ class RecurringExpenseService {
   // ============================================================================
   // DELETE RECURRING EXPENSE
   // ============================================================================
-  
+
   static Future<bool> deleteRecurringExpense(String id) async {
     try {
       print('🗑️ DELETE Recurring Expense: $id');
-      
+
       final response = await http.delete(
         Uri.parse('${ApiConfig.baseUrl}/api/finance/recurring-expenses/$id'),
         headers: await _headers(),
       );
 
       print('📡 Response Status: ${response.statusCode}');
-      
+
       return response.statusCode == 200;
     } catch (e) {
       print('❌ Exception in deleteRecurringExpense: $e');

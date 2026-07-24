@@ -18,7 +18,8 @@ import 'package:http/http.dart' as http;
 import 'api_service.dart';
 
 // ✅ IMPORT shared classes from invoice_service.dart
-import '../../../../core/services/invoice_service.dart' show Address, BillingCustomer, BillingCustomerListResponse, Pagination;
+import '../../../../core/services/invoice_service.dart'
+    show Address, BillingCustomer, BillingCustomerListResponse, Pagination;
 
 class CreditNoteService {
   static final ApiService _api = ApiService();
@@ -46,7 +47,8 @@ class CreditNoteService {
 
       if (status != null) queryParams['status'] = status;
       if (customerId != null) queryParams['customerId'] = customerId;
-      if (fromDate != null) queryParams['fromDate'] = fromDate.toIso8601String();
+      if (fromDate != null)
+        queryParams['fromDate'] = fromDate.toIso8601String();
       if (toDate != null) queryParams['toDate'] = toDate.toIso8601String();
       if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
@@ -96,7 +98,8 @@ class CreditNoteService {
   }
 
   /// Create new credit note
-  static Future<CreditNote> createCreditNote(Map<String, dynamic> creditNoteData) async {
+  static Future<CreditNote> createCreditNote(
+      Map<String, dynamic> creditNoteData) async {
     try {
       print('📤 POST: $_baseEndpoint');
       print('📦 Data: ${json.encode(creditNoteData)}');
@@ -119,7 +122,8 @@ class CreditNoteService {
       print('📤 PUT: $_baseEndpoint/$creditNoteId');
       print('📦 Data: ${json.encode(creditNoteData)}');
 
-      final data = await _api.put('$_baseEndpoint/$creditNoteId', body: creditNoteData);
+      final data =
+          await _api.put('$_baseEndpoint/$creditNoteId', body: creditNoteData);
 
       print('✅ Credit note updated: ${data['data']['creditNoteNumber']}');
 
@@ -150,8 +154,10 @@ class CreditNoteService {
   static Future<CreditNote> markCreditNoteAsSent(String creditNoteId) async {
     try {
       print('📤 PATCH: $_baseEndpoint/$creditNoteId/mark-as-sent');
-      final data = await _api.patch('$_baseEndpoint/$creditNoteId/mark-as-sent');
-      print('✅ Credit note marked as sent: ${data['data']['creditNoteNumber']}');
+      final data =
+          await _api.patch('$_baseEndpoint/$creditNoteId/mark-as-sent');
+      print(
+          '✅ Credit note marked as sent: ${data['data']['creditNoteNumber']}');
       return CreditNote.fromJson(data['data']);
     } catch (e) {
       print('❌ Error marking credit note as sent: $e');
@@ -168,7 +174,8 @@ class CreditNoteService {
       print('📤 POST: $_baseEndpoint/$creditNoteId/refund');
       print('📦 Refund: ${json.encode(refundData)}');
 
-      final data = await _api.post('$_baseEndpoint/$creditNoteId/refund', body: refundData);
+      final data = await _api.post('$_baseEndpoint/$creditNoteId/refund',
+          body: refundData);
 
       print('✅ Refund recorded: ₹${refundData['amount']}');
 
@@ -188,7 +195,8 @@ class CreditNoteService {
       print('📤 POST: $_baseEndpoint/$creditNoteId/apply');
       print('📦 Application: ${json.encode(applicationData)}');
 
-      final data = await _api.post('$_baseEndpoint/$creditNoteId/apply', body: applicationData);
+      final data = await _api.post('$_baseEndpoint/$creditNoteId/apply',
+          body: applicationData);
 
       print('✅ Credit applied to ${applicationData['invoiceNumber']}');
 
@@ -205,9 +213,11 @@ class CreditNoteService {
     String applicationId,
   ) async {
     try {
-      print('📤 DELETE: $_baseEndpoint/$creditNoteId/applications/$applicationId');
+      print(
+          '📤 DELETE: $_baseEndpoint/$creditNoteId/applications/$applicationId');
 
-      final data = await _api.delete('$_baseEndpoint/$creditNoteId/applications/$applicationId');
+      final data = await _api
+          .delete('$_baseEndpoint/$creditNoteId/applications/$applicationId');
 
       print('✅ Credit application deleted: ${data['message']}');
 
@@ -258,16 +268,16 @@ class CreditNoteService {
   static Future<String> downloadImportTemplate() async {
     try {
       print('📥 Downloading import template...');
- 
+
       // ✅ FIXED: Use _api.get() so auth token is sent in headers
       // Then get a short-lived signed URL from the response — same pattern as downloadPDF()
       final data = await _api.get('$_baseEndpoint/template/download');
- 
+
       // Backend should return { "downloadUrl": "..." } or { "url": "..." }
       final url = data['downloadUrl'] ?? data['url'] ?? data['data'];
- 
+
       print('✅ Template URL: $url');
- 
+
       return url;
     } catch (e) {
       print('❌ Error downloading template: $e');
@@ -322,7 +332,8 @@ class CreditNoteService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = json.decode(response.body);
-        print('✅ Import completed: ${data['successCount']} successful, ${data['errorCount']} failed');
+        print(
+            '✅ Import completed: ${data['successCount']} successful, ${data['errorCount']} failed');
 
         return ImportResult.fromJson(data);
       } else {
@@ -349,7 +360,8 @@ class CreditNoteService {
 
       if (status != null) queryParams['status'] = status;
       if (customerId != null) queryParams['customerId'] = customerId;
-      if (fromDate != null) queryParams['fromDate'] = fromDate.toIso8601String();
+      if (fromDate != null)
+        queryParams['fromDate'] = fromDate.toIso8601String();
       if (toDate != null) queryParams['toDate'] = toDate.toIso8601String();
 
       final url = Uri.parse('${_api.baseUrl}$_baseEndpoint/export').replace(
@@ -372,9 +384,11 @@ class CreditNoteService {
     Map<String, dynamic> body,
   ) async {
     try {
-      final data = await _api.post('$_baseEndpoint/$creditNoteId/refund', body: body);
+      final data =
+          await _api.post('$_baseEndpoint/$creditNoteId/refund', body: body);
       if (data['success'] != true) {
-        throw Exception(data['error'] ?? data['message'] ?? 'Failed to process refund');
+        throw Exception(
+            data['error'] ?? data['message'] ?? 'Failed to process refund');
       }
       // Backend returns refundId at the top level of data (mirrors VendorCredit pattern)
       return data['data']?['refundId']?.toString() ?? creditNoteId;
@@ -734,10 +748,10 @@ class CreditNoteSummary {
   factory CreditNoteSummary.fromJson(Map<String, dynamic> json) {
     return CreditNoteSummary(
       creditNoteNumber: json['creditNoteNumber'] ?? '',
-      totalAmount:      (json['totalAmount']   ?? 0).toDouble(),
-      creditUsed:       (json['creditUsed']    ?? 0).toDouble(),
-      creditBalance:    (json['creditBalance'] ?? 0).toDouble(),
-      status:           json['status']          ?? '',
+      totalAmount: (json['totalAmount'] ?? 0).toDouble(),
+      creditUsed: (json['creditUsed'] ?? 0).toDouble(),
+      creditBalance: (json['creditBalance'] ?? 0).toDouble(),
+      status: json['status'] ?? '',
     );
   }
 }
@@ -754,7 +768,7 @@ class CreditApplicationResponse {
 
   factory CreditApplicationResponse.fromJson(Map<String, dynamic> json) {
     return CreditApplicationResponse(
-      creditNote:  CreditNoteSummary.fromJson(json['creditNote']),
+      creditNote: CreditNoteSummary.fromJson(json['creditNote']),
       application: CreditApplication.fromJson(json['application']),
     );
   }

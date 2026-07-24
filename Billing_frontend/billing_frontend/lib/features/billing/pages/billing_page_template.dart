@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 import 'package:flutter/material.dart';
 
 class BillingPageTemplate extends StatefulWidget {
@@ -57,24 +58,21 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
                     ),
                   ],
                 ),
-                
+
                 const Spacer(),
-                
+
                 // Action buttons
                 if (widget.actions != null) ...widget.actions!,
-                
+
                 // New button
                 if (widget.showNewButton) ...[
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
-                    onPressed: widget.onNewPressed ?? () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Create New ${widget.title}'),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    },
+                    onPressed: widget.onNewPressed ??
+                        () {
+                          AppSnackbar.show(context,
+                              message: 'Create New ${widget.title}');
+                        },
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text('New'),
                     style: ElevatedButton.styleFrom(
@@ -91,7 +89,7 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
                     ),
                   ),
                 ],
-                
+
                 // More options button
                 const SizedBox(width: 8),
                 IconButton(
@@ -109,7 +107,7 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
             ),
           ),
         ),
-        
+
         // Main content area
         Expanded(
           child: Container(
@@ -140,9 +138,7 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
             ],
           ),
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Import functionality')),
-            );
+            AppSnackbar.show(context, message: 'Import functionality');
           },
         ),
         PopupMenuItem(
@@ -154,9 +150,7 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
             ],
           ),
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Export functionality')),
-            );
+            AppSnackbar.show(context, message: 'Export functionality');
           },
         ),
         PopupMenuItem(
@@ -168,9 +162,7 @@ class _BillingPageTemplateState extends State<BillingPageTemplate> {
             ],
           ),
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Settings functionality')),
-            );
+            AppSnackbar.show(context, message: 'Settings functionality');
           },
         ),
       ],

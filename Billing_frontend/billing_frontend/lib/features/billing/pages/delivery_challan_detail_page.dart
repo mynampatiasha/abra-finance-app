@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // DELIVERY CHALLAN DETAIL PAGE
 // ============================================================================
@@ -7,17 +8,19 @@ import '../../../../core/services/delivery_challan_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
 import 'new_delivery_challan.dart';
 
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 
 class DeliveryChallanDetailPage extends StatefulWidget {
   final String challanId;
-  const DeliveryChallanDetailPage({Key? key, required this.challanId}) : super(key: key);
+  const DeliveryChallanDetailPage({Key? key, required this.challanId})
+      : super(key: key);
 
   @override
-  State<DeliveryChallanDetailPage> createState() => _DeliveryChallanDetailPageState();
+  State<DeliveryChallanDetailPage> createState() =>
+      _DeliveryChallanDetailPageState();
 }
 
 class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
@@ -33,25 +36,40 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
-      final c = await DeliveryChallanService.getDeliveryChallan(widget.challanId);
-      setState(() { _challan = c; _isLoading = false; });
+      final c =
+          await DeliveryChallanService.getDeliveryChallan(widget.challanId);
+      setState(() {
+        _challan = c;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () async { Navigator.pop(context, _changed); return false; },
+      onWillPop: () async {
+        Navigator.pop(context, _changed);
+        return false;
+      },
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: _buildAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _error != null ? _buildError() : _buildBody(),
+            : _error != null
+                ? _buildError()
+                : _buildBody(),
       ),
     );
   }
@@ -63,7 +81,8 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [_navyDark, _navyMid, _navyLight],
-            begin: Alignment.centerLeft, end: Alignment.centerRight,
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
         child: AppBar(
@@ -79,10 +98,16 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
                 tooltip: 'Download PDF',
                 onPressed: () async {
                   try {
-                    final url = await DeliveryChallanService.downloadPDF(widget.challanId);
-                    if (mounted) await fetchAndHandleFile(context, url, '${_challan!.challanNumber}.pdf', download: true);
+                    final url = await DeliveryChallanService.downloadPDF(
+                        widget.challanId);
+                    if (mounted)
+                      await fetchAndHandleFile(
+                          context, url, '${_challan!.challanNumber}.pdf',
+                          download: true);
                   } catch (e) {
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+                    if (mounted)
+                      AppSnackbar.show(context,
+                          message: 'Failed: $e', isError: true);
                   }
                 },
               ),
@@ -104,16 +129,24 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
             if (_challan != null && _challan!.status == 'DRAFT')
               TextButton.icon(
                 onPressed: () async {
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewDeliveryChallanScreen(challanId: widget.challanId)));
-                  if (r == true) { setState(() => _changed = true); _load(); }
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => NewDeliveryChallanScreen(
+                              challanId: widget.challanId)));
+                  if (r == true) {
+                    setState(() => _changed = true);
+                    _load();
+                  }
                 },
                 icon: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                label: const Text('Edit', style: TextStyle(color: Colors.white70)),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white70)),
               ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white),
-              onPressed: _load, tooltip: 'Refresh',
+              onPressed: _load,
+              tooltip: 'Refresh',
             ),
             const SizedBox(width: 8),
           ],
@@ -141,9 +174,12 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
           ),
         ]);
       } else {
-        return SingleChildScrollView(child: Column(children: [
+        return SingleChildScrollView(
+            child: Column(children: [
           _buildMainScroll(c, isScrollable: false),
-          Container(color: Colors.white, padding: const EdgeInsets.all(20),
+          Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(20),
               child: _buildSidebar(c)),
         ]));
       }
@@ -159,31 +195,50 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [_navyDark, _navyMid],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: _navyDark.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+                color: _navyDark.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4))
+          ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(c.challanNumber,
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(c.customerName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
-              if (c.customerEmail != null)
-                Text(c.customerEmail!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(c.challanNumber,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(c.customerName,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 15)),
+                  if (c.customerEmail != null)
+                    Text(c.customerEmail!,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13)),
+                ])),
             _glowBadge(c.status),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 24, runSpacing: 8, children: [
-            _headerInfo('Challan Date', DateFormat('dd MMM yyyy').format(c.challanDate)),
+            _headerInfo('Challan Date',
+                DateFormat('dd MMM yyyy').format(c.challanDate)),
             if (c.expectedDeliveryDate != null)
-              _headerInfo('Expected Delivery', DateFormat('dd MMM yyyy').format(c.expectedDeliveryDate!)),
+              _headerInfo('Expected Delivery',
+                  DateFormat('dd MMM yyyy').format(c.expectedDeliveryDate!)),
             _headerInfo('Purpose', c.purpose),
             _headerInfo('Transport', c.transportMode),
-            if (c.vehicleNumber != null) _headerInfo('Vehicle', c.vehicleNumber!),
+            if (c.vehicleNumber != null)
+              _headerInfo('Vehicle', c.vehicleNumber!),
             if (c.orderNumber != null) _headerInfo('Order #', c.orderNumber!),
           ]),
         ]),
@@ -193,12 +248,15 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
 
       // Items
       _detailCard(
-        title: 'Items', icon: Icons.inventory_2,
+        title: 'Items',
+        icon: Icons.inventory_2,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
-            headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            headingRowColor:
+                WidgetStateProperty.all(_navyDark.withOpacity(0.9)),
+            headingTextStyle: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
             columns: const [
               DataColumn(label: Text('ITEM')),
               DataColumn(label: Text('QTY')),
@@ -207,14 +265,20 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
               DataColumn(label: Text('DISPATCHED')),
               DataColumn(label: Text('DELIVERED')),
             ],
-            rows: c.items.map((item) => DataRow(cells: [
-              DataCell(SizedBox(width: 200, child: Text(item.itemDetails, overflow: TextOverflow.ellipsis))),
-              DataCell(Text(item.quantity.toStringAsFixed(0))),
-              DataCell(Text(item.unit)),
-              DataCell(Text(item.hsnCode ?? '—')),
-              DataCell(Text(item.quantityDispatched.toStringAsFixed(0))),
-              DataCell(Text(item.quantityDelivered.toStringAsFixed(0))),
-            ])).toList(),
+            rows: c.items
+                .map((item) => DataRow(cells: [
+                      DataCell(SizedBox(
+                          width: 200,
+                          child: Text(item.itemDetails,
+                              overflow: TextOverflow.ellipsis))),
+                      DataCell(Text(item.quantity.toStringAsFixed(0))),
+                      DataCell(Text(item.unit)),
+                      DataCell(Text(item.hsnCode ?? '—')),
+                      DataCell(
+                          Text(item.quantityDispatched.toStringAsFixed(0))),
+                      DataCell(Text(item.quantityDelivered.toStringAsFixed(0))),
+                    ]))
+                .toList(),
           ),
         ),
       ),
@@ -223,7 +287,8 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
 
       // Transport Details
       _detailCard(
-        title: 'Transport Details', icon: Icons.local_shipping,
+        title: 'Transport Details',
+        icon: Icons.local_shipping,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
@@ -250,26 +315,37 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
       if (c.linkedInvoices.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Linked Invoices', icon: Icons.receipt_long,
+          title: 'Linked Invoices',
+          icon: Icons.receipt_long,
           child: ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: c.linkedInvoices.length,
-            separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
+            separatorBuilder: (_, __) =>
+                Divider(height: 1, color: Colors.grey[200]),
             itemBuilder: (_, i) {
               final inv = c.linkedInvoices[i];
               return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 leading: Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8)),
-                  child: const Icon(Icons.receipt, color: Colors.green, size: 20),
+                  decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8)),
+                  child:
+                      const Icon(Icons.receipt, color: Colors.green, size: 20),
                 ),
-                title: Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(DateFormat('dd MMM yyyy').format(inv.invoicedDate),
+                title: Text(inv.invoiceNumber,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                    DateFormat('dd MMM yyyy').format(inv.invoicedDate),
                     style: TextStyle(color: Colors.grey[600], fontSize: 12)),
                 trailing: Text('₹${inv.amount.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 15)),
+                    style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15)),
               );
             },
           ),
@@ -280,7 +356,8 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
       if (c.deliveryAddress != null) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Delivery Address', icon: Icons.location_on,
+          title: 'Delivery Address',
+          icon: Icons.location_on,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Text(_formatAddress(c.deliveryAddress!),
@@ -292,10 +369,12 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
       if (c.customerNotes != null && c.customerNotes!.isNotEmpty) ...[
         const SizedBox(height: 16),
         _detailCard(
-          title: 'Notes', icon: Icons.note,
+          title: 'Notes',
+          icon: Icons.note,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(c.customerNotes!, style: TextStyle(color: Colors.grey[800], fontSize: 14)),
+            child: Text(c.customerNotes!,
+                style: TextStyle(color: Colors.grey[800], fontSize: 14)),
           ),
         ),
       ],
@@ -308,8 +387,13 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
   }
 
   String _formatAddress(Address addr) {
-    final parts = [addr.street, addr.city, addr.state, addr.pincode, addr.country]
-        .where((p) => p != null && p!.isNotEmpty).toList();
+    final parts = [
+      addr.street,
+      addr.city,
+      addr.state,
+      addr.pincode,
+      addr.country
+    ].where((p) => p != null && p!.isNotEmpty).toList();
     return parts.join(', ');
   }
 
@@ -318,9 +402,10 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
       Icon(icon, size: 18, color: _navyAccent),
       const SizedBox(width: 10),
       Text('$label: ', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-      Expanded(child: Text(value,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          overflow: TextOverflow.ellipsis)),
+      Expanded(
+          child: Text(value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis)),
     ]);
   }
 
@@ -337,15 +422,18 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
         ),
         const SizedBox(width: 8),
         const Text('Challan Summary',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
       ]),
       const SizedBox(height: 16),
 
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [_navyDark.withOpacity(0.06), _navyLight.withOpacity(0.08)]),
+          gradient: LinearGradient(colors: [
+            _navyDark.withOpacity(0.06),
+            _navyLight.withOpacity(0.08)
+          ]),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: _navyAccent.withOpacity(0.2)),
         ),
@@ -358,7 +446,9 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
           const SizedBox(height: 8),
           const Divider(height: 1),
           const SizedBox(height: 8),
-          _sidebarRow('Linked Invoices', '${c.linkedInvoices.length}', _navyAccent, isBold: true),
+          _sidebarRow(
+              'Linked Invoices', '${c.linkedInvoices.length}', _navyAccent,
+              isBold: true),
         ]),
       ),
 
@@ -373,15 +463,21 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.green[200]!),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Icon(Icons.check_circle, color: Colors.green[700], size: 16),
               const SizedBox(width: 6),
-              Text('Delivered', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green[800])),
+              Text('Delivered',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, color: Colors.green[800])),
             ]),
             const SizedBox(height: 6),
             Text(DateFormat('dd MMM yyyy').format(c.actualDeliveryDate!),
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.green[700])),
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[700])),
           ]),
         ),
 
@@ -397,29 +493,43 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
             foregroundColor: _navyMid,
             side: BorderSide(color: _navyMid),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ),
     ]);
   }
 
-  Widget _sidebarRow(String label, String value, Color color, {bool isBold = false}) {
+  Widget _sidebarRow(String label, String value, Color color,
+      {bool isBold = false}) {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-      Text(label, style: TextStyle(fontSize: 13,
-          fontWeight: isBold ? FontWeight.w600 : FontWeight.normal, color: Colors.grey[700])),
-      Text(value, style: TextStyle(fontSize: 13,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.w500, color: color)),
+      Text(label,
+          style: TextStyle(
+              fontSize: 13,
+              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+              color: Colors.grey[700])),
+      Text(value,
+          style: TextStyle(
+              fontSize: 13,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              color: color)),
     ]);
   }
 
-  Widget _detailCard({required String title, required IconData icon, required Widget child}) {
+  Widget _detailCard(
+      {required String title, required IconData icon, required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
@@ -434,7 +544,11 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
               child: Icon(icon, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: _navyDark)),
           ]),
         ),
         const Divider(height: 1),
@@ -447,20 +561,35 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
       const SizedBox(height: 2),
-      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+      Text(value,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
     ]);
   }
 
   Widget _glowBadge(String status) {
     Color bg;
     switch (status) {
-      case 'DRAFT':     bg = Colors.grey;   break;
-      case 'OPEN':      bg = Colors.blue;   break;
-      case 'DISPATCHED': bg = Colors.orange; break;
-      case 'DELIVERED': bg = Colors.green;  break;
-      case 'RETURNED':  bg = Colors.red;    break;
-      case 'CANCELLED': bg = Colors.red;    break;
-      default:          bg = _navyAccent;
+      case 'DRAFT':
+        bg = Colors.grey;
+        break;
+      case 'OPEN':
+        bg = Colors.blue;
+        break;
+      case 'DISPATCHED':
+        bg = Colors.orange;
+        break;
+      case 'DELIVERED':
+        bg = Colors.green;
+        break;
+      case 'RETURNED':
+        bg = Colors.red;
+        break;
+      case 'CANCELLED':
+        bg = Colors.red;
+        break;
+      default:
+        bg = _navyAccent;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -469,16 +598,22 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: bg, width: 1.5),
       ),
-      child: Text(status, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+      child: Text(status,
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
     );
   }
 
   Widget _buildError() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
       const SizedBox(height: 16),
       Text('Error Loading Challan',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+          style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700])),
       const SizedBox(height: 8),
       Text(_error ?? '', style: TextStyle(color: Colors.grey[600])),
       const SizedBox(height: 24),
@@ -486,7 +621,8 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
         onPressed: _load,
         icon: const Icon(Icons.refresh),
         label: const Text('Retry'),
-        style: ElevatedButton.styleFrom(backgroundColor: _navyAccent, foregroundColor: Colors.white),
+        style: ElevatedButton.styleFrom(
+            backgroundColor: _navyAccent, foregroundColor: Colors.white),
       ),
     ]));
   }

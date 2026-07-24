@@ -20,7 +20,7 @@ import '../finance_secure_storage.dart';
 class AddAccountService {
   // Uses centralized API configuration
   String get baseUrl => '${ApiConfig.baseUrl}/api/finance';
-  
+
   // Timeout duration
   final Duration timeout = const Duration(seconds: 30);
 
@@ -29,7 +29,8 @@ class AddAccountService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('jwt_token');
-      debugPrint('🔑 Retrieved JWT token: ${token != null ? "Present (${token.length} chars)" : "Missing"}');
+      debugPrint(
+          '🔑 Retrieved JWT token: ${token != null ? "Present (${token.length} chars)" : "Missing"}');
       return token;
     } catch (e) {
       debugPrint('❌ Error retrieving JWT token: $e');
@@ -45,23 +46,24 @@ class AddAccountService {
       'Content-Type': 'application/json',
       'x-branch-ids': branchHdr,
     };
-    
+
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
       debugPrint('✅ Authorization header added');
     } else {
       debugPrint('⚠️ No JWT token available - request may fail');
     }
-    
+
     return headers;
   }
 
   /// Add a new account (supports custom types)
-  Future<Map<String, dynamic>> addAccount(Map<String, dynamic> accountData) async {
+  Future<Map<String, dynamic>> addAccount(
+      Map<String, dynamic> accountData) async {
     try {
       debugPrint('📡 Making HTTP request...');
       final headers = await _getHeaders();
-      
+
       final response = await http
           .post(
             Uri.parse('$baseUrl/accounts/add'),
@@ -70,12 +72,14 @@ class AddAccountService {
           )
           .timeout(timeout);
 
-      debugPrint('🔧 Response received in ${response.contentLength}ms, status: ${response.statusCode}');
+      debugPrint(
+          '🔧 Response received in ${response.contentLength}ms, status: ${response.statusCode}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body);
       } else {
-        debugPrint('❌ Failed to add account: ${response.statusCode} - ${response.body}');
+        debugPrint(
+            '❌ Failed to add account: ${response.statusCode} - ${response.body}');
         throw Exception('Failed to add account: ${response.body}');
       }
     } catch (e) {
@@ -88,7 +92,7 @@ class AddAccountService {
   Future<List<Map<String, dynamic>>> getCustomAccountTypes() async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .get(
             Uri.parse('$baseUrl/accounts/custom-types'),
@@ -109,15 +113,14 @@ class AddAccountService {
   }
 
   /// Get all accounts
-  Future<List<Map<String, dynamic>>> getAllAccounts({bool allBranches = false}) async {
+  Future<List<Map<String, dynamic>>> getAllAccounts(
+      {bool allBranches = false}) async {
     try {
       final headers = await _getHeaders();
       final uri = Uri.parse(
         '$baseUrl/accounts${allBranches ? '?allBranches=true' : ''}',
       );
-      final response = await http
-          .get(uri, headers: headers)
-          .timeout(timeout);
+      final response = await http.get(uri, headers: headers).timeout(timeout);
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
@@ -135,7 +138,7 @@ class AddAccountService {
   Future<Map<String, dynamic>> getAccountById(String accountId) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .get(
             Uri.parse('$baseUrl/accounts/$accountId'),
@@ -161,7 +164,7 @@ class AddAccountService {
   ) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .put(
             Uri.parse('$baseUrl/accounts/$accountId'),
@@ -184,7 +187,7 @@ class AddAccountService {
   Future<bool> deleteAccount(String accountId) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .delete(
             Uri.parse('$baseUrl/accounts/$accountId'),
@@ -203,10 +206,11 @@ class AddAccountService {
   }
 
   /// Get accounts by type
-  Future<List<Map<String, dynamic>>> getAccountsByType(String accountType) async {
+  Future<List<Map<String, dynamic>>> getAccountsByType(
+      String accountType) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .get(
             Uri.parse('$baseUrl/accounts/type/$accountType'),
@@ -230,7 +234,7 @@ class AddAccountService {
   Future<double> getAccountBalance(String accountId) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .get(
             Uri.parse('$baseUrl/accounts/$accountId/balance'),
@@ -257,7 +261,7 @@ class AddAccountService {
   ) async {
     try {
       final headers = await _getHeaders();
-      
+
       final response = await http
           .patch(
             Uri.parse('$baseUrl/accounts/$accountId/status'),

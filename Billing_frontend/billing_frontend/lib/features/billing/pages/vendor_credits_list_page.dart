@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // VENDOR CREDITS LIST PAGE
 // ============================================================================
@@ -41,7 +42,13 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   bool _isTableView = true;
 
   String _selectedStatus = 'All';
-  final List<String> _statusFilters = ['All', 'OPEN', 'PARTIALLY_APPLIED', 'CLOSED', 'VOID'];
+  final List<String> _statusFilters = [
+    'All',
+    'OPEN',
+    'PARTIALLY_APPLIED',
+    'CLOSED',
+    'VOID'
+  ];
 
   DateTime? _fromDate;
   DateTime? _toDate;
@@ -77,7 +84,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   // -----------------------------------------------------------------------
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       String? from, to;
       if (_dateFilterType == 'Within Date Range') {
@@ -106,7 +116,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() { _errorMessage = e.toString(); _isLoading = false; });
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
@@ -138,7 +151,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Filter by Date', style: TextStyle(color: _navyDark)),
-              IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+              IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx)),
             ],
           ),
           content: SizedBox(
@@ -148,7 +163,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Filter Type', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const Text('Filter Type',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -161,22 +177,34 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                       isExpanded: true,
                       underline: const SizedBox(),
                       items: const [
-                        DropdownMenuItem(value: 'All', child: Text('All Dates')),
-                        DropdownMenuItem(value: 'Within Date Range', child: Text('Within Date Range')),
-                        DropdownMenuItem(value: 'Particular Date', child: Text('Particular Date')),
+                        DropdownMenuItem(
+                            value: 'All', child: Text('All Dates')),
+                        DropdownMenuItem(
+                            value: 'Within Date Range',
+                            child: Text('Within Date Range')),
+                        DropdownMenuItem(
+                            value: 'Particular Date',
+                            child: Text('Particular Date')),
                         DropdownMenuItem(value: 'Today', child: Text('Today')),
-                        DropdownMenuItem(value: 'This Week', child: Text('This Week')),
-                        DropdownMenuItem(value: 'This Month', child: Text('This Month')),
-                        DropdownMenuItem(value: 'Last Month', child: Text('Last Month')),
-                        DropdownMenuItem(value: 'This Year', child: Text('This Year')),
+                        DropdownMenuItem(
+                            value: 'This Week', child: Text('This Week')),
+                        DropdownMenuItem(
+                            value: 'This Month', child: Text('This Month')),
+                        DropdownMenuItem(
+                            value: 'Last Month', child: Text('Last Month')),
+                        DropdownMenuItem(
+                            value: 'This Year', child: Text('This Year')),
                       ],
                       onChanged: (v) {
                         setS(() {
                           tType = v ?? 'All';
                           final now = DateTime.now();
-                          if (v == 'Today') { tFrom = now; tTo = now; }
-                          else if (v == 'This Week') {
-                            tFrom = now.subtract(Duration(days: now.weekday - 1));
+                          if (v == 'Today') {
+                            tFrom = now;
+                            tTo = now;
+                          } else if (v == 'This Week') {
+                            tFrom =
+                                now.subtract(Duration(days: now.weekday - 1));
                             tTo = now.add(Duration(days: 7 - now.weekday));
                           } else if (v == 'This Month') {
                             tFrom = DateTime(now.year, now.month, 1);
@@ -188,7 +216,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                             tFrom = DateTime(now.year, 1, 1);
                             tTo = DateTime(now.year, 12, 31);
                           } else if (v == 'All') {
-                            tFrom = null; tTo = null; tPart = null;
+                            tFrom = null;
+                            tTo = null;
+                            tPart = null;
                           }
                         });
                       },
@@ -196,13 +226,19 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                   ),
                   const SizedBox(height: 20),
                   if (tType == 'Within Date Range') ...[
-                    _datePicker(ctx, 'From Date', tFrom, (d) => setS(() => tFrom = d)),
+                    _datePicker(
+                        ctx, 'From Date', tFrom, (d) => setS(() => tFrom = d)),
                     const SizedBox(height: 16),
-                    _datePicker(ctx, 'To Date', tTo, (d) => setS(() => tTo = d)),
+                    _datePicker(
+                        ctx, 'To Date', tTo, (d) => setS(() => tTo = d)),
                   ],
                   if (tType == 'Particular Date')
-                    _datePicker(ctx, 'Select Date', tPart, (d) => setS(() => tPart = d)),
-                  if (tType != 'All' && tType != 'Within Date Range' && tType != 'Particular Date' && tFrom != null)
+                    _datePicker(ctx, 'Select Date', tPart,
+                        (d) => setS(() => tPart = d)),
+                  if (tType != 'All' &&
+                      tType != 'Within Date Range' &&
+                      tType != 'Particular Date' &&
+                      tFrom != null)
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
@@ -221,7 +257,12 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => setS(() { tFrom = null; tTo = null; tPart = null; tType = 'All'; }),
+              onPressed: () => setS(() {
+                tFrom = null;
+                tTo = null;
+                tPart = null;
+                tType = 'All';
+              }),
               child: const Text('Clear', style: TextStyle(color: Colors.red)),
             ),
             ElevatedButton(
@@ -246,11 +287,13 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
     );
   }
 
-  Widget _datePicker(BuildContext ctx, String label, DateTime? value, Function(DateTime) onPick) {
+  Widget _datePicker(BuildContext ctx, String label, DateTime? value,
+      Function(DateTime) onPick) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text(label,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         const SizedBox(height: 8),
         InkWell(
           onTap: () async {
@@ -272,8 +315,11 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               const Icon(Icons.calendar_today, size: 18, color: _navyAccent),
               const SizedBox(width: 8),
               Text(
-                value != null ? DateFormat('dd/MM/yyyy').format(value) : 'Select date',
-                style: TextStyle(color: value != null ? _navyDark : Colors.grey[600]),
+                value != null
+                    ? DateFormat('dd/MM/yyyy').format(value)
+                    : 'Select date',
+                style: TextStyle(
+                    color: value != null ? _navyDark : Colors.grey[600]),
               ),
             ]),
           ),
@@ -286,8 +332,12 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
 
   void _clearFilters() {
     setState(() {
-      _fromDate = null; _toDate = null; _particularDate = null;
-      _dateFilterType = 'All'; _selectedStatus = 'All'; _currentPage = 1;
+      _fromDate = null;
+      _toDate = null;
+      _particularDate = null;
+      _dateFilterType = 'All';
+      _selectedStatus = 'All';
+      _currentPage = 1;
     });
     _load();
   }
@@ -300,7 +350,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
     showDialog(
       context: context,
       builder: (_) => _ImportDialog(
-        onComplete: () { _refresh(); _showSuccess('Import completed!'); },
+        onComplete: () {
+          _refresh();
+          _showSuccess('Import completed!');
+        },
       ),
     );
   }
@@ -314,22 +367,48 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       _showSuccess('Preparing export...');
       final all = await VendorCreditService.getAllForExport(
           status: _selectedStatus == 'All' ? null : _selectedStatus);
-      if (all.isEmpty) { _showError('No data to export'); return; }
+      if (all.isEmpty) {
+        _showError('No data to export');
+        return;
+      }
 
       final data = [
-        ['Credit #', 'Vendor Name', 'Vendor Email', 'Credit Date', 'Bill Reference',
-          'Reason', 'Status', 'Sub Total', 'CGST', 'SGST', 'TDS', 'TCS',
-          'Total Amount', 'Applied Amount', 'Balance Amount', 'Notes'],
+        [
+          'Credit #',
+          'Vendor Name',
+          'Vendor Email',
+          'Credit Date',
+          'Bill Reference',
+          'Reason',
+          'Status',
+          'Sub Total',
+          'CGST',
+          'SGST',
+          'TDS',
+          'TCS',
+          'Total Amount',
+          'Applied Amount',
+          'Balance Amount',
+          'Notes'
+        ],
         ...all.map((c) => [
-          c.creditNumber, c.vendorName, c.vendorEmail ?? '',
-          DateFormat('dd/MM/yyyy').format(c.creditDate),
-          c.billNumber ?? '', c.reason, c.status,
-          c.subTotal.toStringAsFixed(2), c.cgst.toStringAsFixed(2),
-          c.sgst.toStringAsFixed(2), c.tdsAmount.toStringAsFixed(2),
-          c.tcsAmount.toStringAsFixed(2), c.totalAmount.toStringAsFixed(2),
-          c.appliedAmount.toStringAsFixed(2), c.balanceAmount.toStringAsFixed(2),
-          c.notes ?? '',
-        ]),
+              c.creditNumber,
+              c.vendorName,
+              c.vendorEmail ?? '',
+              DateFormat('dd/MM/yyyy').format(c.creditDate),
+              c.billNumber ?? '',
+              c.reason,
+              c.status,
+              c.subTotal.toStringAsFixed(2),
+              c.cgst.toStringAsFixed(2),
+              c.sgst.toStringAsFixed(2),
+              c.tdsAmount.toStringAsFixed(2),
+              c.tcsAmount.toStringAsFixed(2),
+              c.totalAmount.toStringAsFixed(2),
+              c.appliedAmount.toStringAsFixed(2),
+              c.balanceAmount.toStringAsFixed(2),
+              c.notes ?? '',
+            ]),
       ];
 
       await ExportHelper.exportToExcel(data: data, filename: 'vendor_credits');
@@ -348,15 +427,19 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Mark as Sent?', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Mark as Sent?',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text(
           'The email will NOT be sent to the vendor.\n\nDo you want to mark this vendor credit as Sent anyway?',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _navyDark, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navyDark, foregroundColor: Colors.white),
             child: const Text('Mark as Sent'),
           ),
         ],
@@ -367,30 +450,42 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       await VendorCreditService.markAsSent(c.id);
       _showSuccess('Vendor credit marked as sent');
       _refresh();
-    } catch (e) { _showError('Failed: $e'); }
+    } catch (e) {
+      _showError('Failed: $e');
+    }
   }
 
   Future<void> _voidCredit(VendorCredit c) async {
-    final ok = await _confirm('Void Credit',
-        'Are you sure you want to void ${c.creditNumber}? This cannot be undone.', 'Void', Colors.orange);
+    final ok = await _confirm(
+        'Void Credit',
+        'Are you sure you want to void ${c.creditNumber}? This cannot be undone.',
+        'Void',
+        Colors.orange);
     if (ok == true) {
       try {
         await VendorCreditService.voidVendorCredit(c.id);
         _showSuccess('Credit voided');
         _refresh();
-      } catch (e) { _showError('Failed: $e'); }
+      } catch (e) {
+        _showError('Failed: $e');
+      }
     }
   }
 
   Future<void> _deleteCredit(VendorCredit c) async {
-    final ok = await _confirm('Delete Credit',
-        'Are you sure you want to delete ${c.creditNumber}?', 'Delete', Colors.red);
+    final ok = await _confirm(
+        'Delete Credit',
+        'Are you sure you want to delete ${c.creditNumber}?',
+        'Delete',
+        Colors.red);
     if (ok == true) {
       try {
         await VendorCreditService.deleteVendorCredit(c.id);
         _showSuccess('Deleted');
         _refresh();
-      } catch (e) { _showError('Failed: $e'); }
+      } catch (e) {
+        _showError('Failed: $e');
+      }
     }
   }
 
@@ -410,7 +505,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20)],
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.3), blurRadius: 20)
+                  ],
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
@@ -432,7 +530,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                         ),
                         child: const Text(
                           'Vendor Credit Lifecycle Process',
-                          style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -445,7 +546,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                             child: Image.asset(
                               'assets/vendor_credit.png',
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => _buildFallbackDiagram(),
+                              errorBuilder: (_, __, ___) =>
+                                  _buildFallbackDiagram(),
                             ),
                           ),
                         ),
@@ -455,7 +557,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                         padding: const EdgeInsets.all(12),
                         color: Colors.grey[100],
                         child: Text('Tip: Pinch to zoom, drag to pan',
-                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                            style: TextStyle(
+                                color: Colors.grey[600], fontSize: 12),
                             textAlign: TextAlign.center),
                       ),
                     ],
@@ -464,7 +567,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               ),
             ),
             Positioned(
-              top: 30, right: 30,
+              top: 30,
+              right: 30,
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white, size: 30),
                 onPressed: () => Navigator.pop(context),
@@ -482,9 +586,17 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
 
   Widget _buildFallbackDiagram() {
     final stages = [
-      {'label': 'Credit\nCreated', 'color': Colors.blue, 'icon': Icons.add_circle},
+      {
+        'label': 'Credit\nCreated',
+        'color': Colors.blue,
+        'icon': Icons.add_circle
+      },
       {'label': 'OPEN', 'color': Colors.orange, 'icon': Icons.pending},
-      {'label': 'Partially\nApplied', 'color': Colors.purple, 'icon': Icons.incomplete_circle},
+      {
+        'label': 'Partially\nApplied',
+        'color': Colors.purple,
+        'icon': Icons.incomplete_circle
+      },
       {'label': 'CLOSED', 'color': Colors.green, 'icon': Icons.check_circle},
     ];
 
@@ -493,7 +605,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('Vendor Credit Flow', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _navyDark)),
+          const Text('Vendor Credit Flow',
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.bold, color: _navyDark)),
           const SizedBox(height: 24),
           Wrap(
             alignment: WrapAlignment.center,
@@ -506,13 +620,18 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                     decoration: BoxDecoration(
                       color: (stages[i]['color'] as Color).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: stages[i]['color'] as Color, width: 2),
+                      border: Border.all(
+                          color: stages[i]['color'] as Color, width: 2),
                     ),
                     child: Column(children: [
-                      Icon(stages[i]['icon'] as IconData, color: stages[i]['color'] as Color, size: 32),
+                      Icon(stages[i]['icon'] as IconData,
+                          color: stages[i]['color'] as Color, size: 32),
                       const SizedBox(height: 6),
                       Text(stages[i]['label'] as String,
-                          style: TextStyle(color: stages[i]['color'] as Color, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(
+                              color: stages[i]['color'] as Color,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12),
                           textAlign: TextAlign.center),
                     ]),
                   ),
@@ -544,17 +663,21 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
     );
   }
 
-  Future<bool?> _confirm(String title, String content, String label, Color color) {
+  Future<bool?> _confirm(
+      String title, String content, String label, Color color) {
     return showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(title),
         content: Text(content),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: color, foregroundColor: Colors.white),
             child: Text(label),
           ),
         ],
@@ -566,11 +689,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   // SNACKBARS
   // -----------------------------------------------------------------------
 
-  void _showSuccess(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating));
+  void _showSuccess(String msg) => AppSnackbar.show(context, message: msg);
 
-  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating));
+  void _showError(String msg) =>
+      AppSnackbar.show(context, message: msg, isError: true);
 
   // -----------------------------------------------------------------------
   // BUILD
@@ -587,12 +709,16 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             _buildTopBar(),
             if (_stats != null) _buildStats(),
             _isLoading
-                ? const SizedBox(height: 400, child: Center(child: CircularProgressIndicator()))
+                ? const SizedBox(
+                    height: 400,
+                    child: Center(child: CircularProgressIndicator()))
                 : _errorMessage != null
                     ? SizedBox(height: 400, child: _buildError())
                     : _credits.isEmpty
                         ? SizedBox(height: 400, child: _buildEmpty())
-                        : _isTableView ? _buildTable() : _buildListView(),
+                        : _isTableView
+                            ? _buildTable()
+                            : _buildListView(),
             if (!_isLoading && _credits.isNotEmpty) _buildPagination(),
           ],
         ),
@@ -624,19 +750,29 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 underline: const SizedBox(),
                 items: _statusFilters.map((s) {
                   String label;
-                  if (s == 'All') label = isWide ? 'All Credits' : 'All';
-                  else if (s == 'PARTIALLY_APPLIED') label = isWide ? 'Partial' : 'Part.';
-                  else label = s[0] + s.substring(1).toLowerCase();
+                  if (s == 'All')
+                    label = isWide ? 'All Credits' : 'All';
+                  else if (s == 'PARTIALLY_APPLIED')
+                    label = isWide ? 'Partial' : 'Part.';
+                  else
+                    label = s[0] + s.substring(1).toLowerCase();
                   return DropdownMenuItem(
                     value: s,
-                    child: Text(label, style: TextStyle(
-                      fontSize: isWide ? 16 : 14,
-                      fontWeight: FontWeight.w600,
-                    )),
+                    child: Text(label,
+                        style: TextStyle(
+                          fontSize: isWide ? 16 : 14,
+                          fontWeight: FontWeight.w600,
+                        )),
                   );
                 }).toList(),
                 onChanged: (v) {
-                  if (v != null) { setState(() { _selectedStatus = v; _currentPage = 1; }); _load(); }
+                  if (v != null) {
+                    setState(() {
+                      _selectedStatus = v;
+                      _currentPage = 1;
+                    });
+                    _load();
+                  }
                 },
               ),
             ),
@@ -648,11 +784,15 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 decoration: InputDecoration(
                   hintText: isWide ? 'Search credit#, vendor...' : 'Search...',
                   prefixIcon: const Icon(Icons.search, size: 18),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
                   contentPadding: const EdgeInsets.symmetric(vertical: 6),
                   isDense: true,
                 ),
-                onChanged: (v) { setState(() => _searchQuery = v); _load(); },
+                onChanged: (v) {
+                  setState(() => _searchQuery = v);
+                  _load();
+                },
               ),
             ),
             const SizedBox(width: 6),
@@ -664,14 +804,21 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                   onPressed: _showFilterDialog,
                   tooltip: 'Filter',
                   style: IconButton.styleFrom(
-                    backgroundColor: _hasFilters ? _navyAccent.withOpacity(0.15) : Colors.grey[200],
+                    backgroundColor: _hasFilters
+                        ? _navyAccent.withOpacity(0.15)
+                        : Colors.grey[200],
                     padding: const EdgeInsets.all(8),
                   ),
                 ),
                 if (_hasFilters)
-                  Positioned(right: 6, top: 6,
-                    child: Container(width: 7, height: 7,
-                        decoration: const BoxDecoration(color: _navyAccent, shape: BoxShape.circle))),
+                  Positioned(
+                      right: 6,
+                      top: 6,
+                      child: Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                              color: _navyAccent, shape: BoxShape.circle))),
               ],
             ),
             if (_hasFilters)
@@ -686,28 +833,38 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               icon: const Icon(Icons.refresh, size: 20),
               onPressed: _isLoading ? null : _refresh,
               tooltip: 'Refresh',
-              style: IconButton.styleFrom(backgroundColor: Colors.grey[200], padding: const EdgeInsets.all(8)),
+              style: IconButton.styleFrom(
+                  backgroundColor: Colors.grey[200],
+                  padding: const EdgeInsets.all(8)),
             ),
             // View Process
             IconButton(
-              icon: const Icon(Icons.account_tree, size: 20, color: _navyAccent),
+              icon:
+                  const Icon(Icons.account_tree, size: 20, color: _navyAccent),
               onPressed: _viewProcess,
               tooltip: 'View Process',
               style: IconButton.styleFrom(
-                  backgroundColor: _navyAccent.withOpacity(0.1), padding: const EdgeInsets.all(8)),
+                  backgroundColor: _navyAccent.withOpacity(0.1),
+                  padding: const EdgeInsets.all(8)),
             ),
             const SizedBox(width: 4),
             _buildViewToggle(),
             const SizedBox(width: 4),
-            _actionBtn(isWide ? 'Import' : 'Import', Icons.upload_file, const Color(0xFF9B59B6), _showImportDialog, compact: !isWide),
+            _actionBtn(isWide ? 'Import' : 'Import', Icons.upload_file,
+                const Color(0xFF9B59B6), _showImportDialog,
+                compact: !isWide),
             const SizedBox(width: 6),
-            _actionBtn(isWide ? 'Export' : 'Export', Icons.file_download, const Color(0xFF27AE60),
-                _isLoading ? null : _export, compact: !isWide),
+            _actionBtn(isWide ? 'Export' : 'Export', Icons.file_download,
+                const Color(0xFF27AE60), _isLoading ? null : _export,
+                compact: !isWide),
             const SizedBox(width: 6),
-            _actionBtn(isWide ? 'New Vendor Credit' : 'New', Icons.add, _navyAccent, () async {
+            _actionBtn(
+                isWide ? 'New Vendor Credit' : 'New', Icons.add, _navyAccent,
+                () async {
               final result = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const NewVendorCreditScreen()),
+                MaterialPageRoute(
+                    builder: (_) => const NewVendorCreditScreen()),
               );
               if (result == true) _refresh();
             }, compact: !isWide),
@@ -717,7 +874,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
     });
   }
 
-  Widget _actionBtn(String label, IconData icon, Color color, VoidCallback? onTap, {bool compact = false}) {
+  Widget _actionBtn(
+      String label, IconData icon, Color color, VoidCallback? onTap,
+      {bool compact = false}) {
     return ElevatedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: compact ? 14 : 16),
@@ -725,14 +884,14 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12, vertical: compact ? 8 : 10),
+        padding: EdgeInsets.symmetric(
+            horizontal: compact ? 8 : 12, vertical: compact ? 8 : 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
-
 
   // -----------------------------------------------------------------------
   // STATS CARDS
@@ -744,16 +903,26 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       color: Colors.white,
       child: LayoutBuilder(builder: (context, constraints) {
         final cards = [
-          _statCard('Total Credits', _stats!.totalCredits.toString(), Icons.receipt, Colors.blue),
-          _statCard('Total Amount', '₹${_stats!.totalCreditAmount.toStringAsFixed(0)}', Icons.account_balance_wallet, _navyAccent),
-          _statCard('Open', _stats!.openCredits.toString(), Icons.pending, Colors.orange),
-          _statCard('Partial', _stats!.partiallyApplied.toString(), Icons.incomplete_circle, Colors.purple),
-          _statCard('Balance', '₹${_stats!.totalBalance.toStringAsFixed(0)}', Icons.savings, Colors.green),
+          _statCard('Total Credits', _stats!.totalCredits.toString(),
+              Icons.receipt, Colors.blue),
+          _statCard(
+              'Total Amount',
+              '₹${_stats!.totalCreditAmount.toStringAsFixed(0)}',
+              Icons.account_balance_wallet,
+              _navyAccent),
+          _statCard('Open', _stats!.openCredits.toString(), Icons.pending,
+              Colors.orange),
+          _statCard('Partial', _stats!.partiallyApplied.toString(),
+              Icons.incomplete_circle, Colors.purple),
+          _statCard('Balance', '₹${_stats!.totalBalance.toStringAsFixed(0)}',
+              Icons.savings, Colors.green),
         ];
 
         // Always single row — cards shrink proportionally on small screens
         return Row(
-          children: cards.expand((c) => [Expanded(child: c), const SizedBox(width: 8)]).toList()
+          children: cards
+              .expand((c) => [Expanded(child: c), const SizedBox(width: 8)])
+              .toList()
             ..removeLast(),
         );
       }),
@@ -783,8 +952,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                 Icon(icon, size: isCompact ? 16 : 20, color: color),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: Text(label,
-                    style: TextStyle(fontSize: isCompact ? 11 : 13, color: Colors.grey[700]),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                        fontSize: isCompact ? 11 : 13, color: Colors.grey[700]),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
@@ -792,7 +963,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               ],
             ),
             const SizedBox(height: 4),
-            Text(value,
+            Text(
+              value,
               style: TextStyle(
                 fontSize: isCompact ? 15 : 18,
                 fontWeight: FontWeight.bold,
@@ -812,20 +984,32 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   // -----------------------------------------------------------------------
 
   Widget _buildViewToggle() => Container(
-    height: 42,
-    decoration: BoxDecoration(
-      border: Border.all(color: Colors.grey.shade300),
-      borderRadius: BorderRadius.circular(10),
-      color: Colors.white,
-    ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      _toggleButton(icon: Icons.view_list_rounded, label: 'List', isSelected: !_isTableView, onTap: () => setState(() => _isTableView = false)),
-      Container(width: 1, height: 24, color: Colors.grey.shade300),
-      _toggleButton(icon: Icons.table_chart_rounded, label: 'Table', isSelected: _isTableView, onTap: () => setState(() => _isTableView = true)),
-    ]),
-  );
+        height: 42,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.white,
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _toggleButton(
+              icon: Icons.view_list_rounded,
+              label: 'List',
+              isSelected: !_isTableView,
+              onTap: () => setState(() => _isTableView = false)),
+          Container(width: 1, height: 24, color: Colors.grey.shade300),
+          _toggleButton(
+              icon: Icons.table_chart_rounded,
+              label: 'Table',
+              isSelected: _isTableView,
+              onTap: () => setState(() => _isTableView = true)),
+        ]),
+      );
 
-  Widget _toggleButton({required IconData icon, required String label, required bool isSelected, required VoidCallback onTap}) {
+  Widget _toggleButton(
+      {required IconData icon,
+      required String label,
+      required bool isSelected,
+      required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(9),
@@ -837,9 +1021,14 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           borderRadius: BorderRadius.circular(9),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
+          Icon(icon,
+              size: 16, color: isSelected ? Colors.white : Colors.grey[600]),
           const SizedBox(width: 5),
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.grey[600])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? Colors.white : Colors.grey[600])),
         ]),
       ),
     );
@@ -862,74 +1051,144 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Row 1: credit # + status badge
           Row(children: [
-            Expanded(child: InkWell(
+            Expanded(
+                child: InkWell(
               onTap: () => _openDetail(c),
-              child: Text(c.creditNumber, style: TextStyle(color: _navyAccent, fontWeight: FontWeight.bold, fontSize: 15, decoration: TextDecoration.underline), overflow: TextOverflow.ellipsis),
+              child: Text(c.creditNumber,
+                  style: TextStyle(
+                      color: _navyAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      decoration: TextDecoration.underline),
+                  overflow: TextOverflow.ellipsis),
             )),
             _statusBadge(c.status),
           ]),
           const SizedBox(height: 8),
           // Row 2: vendor + date
           Row(children: [
-            const Icon(Icons.store_outlined, size: 14, color: Color(0xFF7F8C8D)),
+            const Icon(Icons.store_outlined,
+                size: 14, color: Color(0xFF7F8C8D)),
             const SizedBox(width: 5),
-            Expanded(child: Text(c.vendorName, style: TextStyle(fontSize: 13, color: Colors.grey[700]), overflow: TextOverflow.ellipsis)),
-            const Icon(Icons.calendar_today, size: 14, color: Color(0xFF7F8C8D)),
+            Expanded(
+                child: Text(c.vendorName,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.calendar_today,
+                size: 14, color: Color(0xFF7F8C8D)),
             const SizedBox(width: 5),
-            Text(DateFormat('dd MMM yyyy').format(c.creditDate), style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+            Text(DateFormat('dd MMM yyyy').format(c.creditDate),
+                style: TextStyle(fontSize: 13, color: Colors.grey[700])),
           ]),
           if (c.reason.isNotEmpty) ...[
             const SizedBox(height: 4),
             Row(children: [
-              const Icon(Icons.info_outline, size: 14, color: Color(0xFF7F8C8D)),
+              const Icon(Icons.info_outline,
+                  size: 14, color: Color(0xFF7F8C8D)),
               const SizedBox(width: 5),
-              Expanded(child: Text(c.reason, style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+              Expanded(
+                  child: Text(c.reason,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis)),
             ]),
           ],
           const SizedBox(height: 8),
           // Row 3: amounts
           Row(children: [
-            _amountChip('Total', '₹${c.totalAmount.toStringAsFixed(2)}', _navyDark),
+            _amountChip(
+                'Total', '₹${c.totalAmount.toStringAsFixed(2)}', _navyDark),
             const SizedBox(width: 8),
-            _amountChip('Applied', '₹${c.appliedAmount.toStringAsFixed(2)}', Colors.green[700]!),
+            _amountChip('Applied', '₹${c.appliedAmount.toStringAsFixed(2)}',
+                Colors.green[700]!),
             const SizedBox(width: 8),
-            _amountChip('Balance', '₹${c.balanceAmount.toStringAsFixed(2)}', c.balanceAmount > 0 ? _navyAccent : Colors.grey[500]!),
+            _amountChip('Balance', '₹${c.balanceAmount.toStringAsFixed(2)}',
+                c.balanceAmount > 0 ? _navyAccent : Colors.grey[500]!),
           ]),
           const Divider(height: 16),
           // Actions row
           Row(children: [
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
               onSelected: (v) async {
                 switch (v) {
-                  case 'view': _openDetail(c); break;
+                  case 'view':
+                    _openDetail(c);
+                    break;
                   case 'edit':
-                    final r = await Navigator.push(context, MaterialPageRoute(builder: (_) => NewVendorCreditScreen(creditId: c.id)));
+                    final r = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                NewVendorCreditScreen(creditId: c.id)));
                     if (r == true) _refresh();
                     break;
-                  case 'void':         await _voidCredit(c);        break;
-                  case 'mark_as_sent': await _markCreditAsSent(c);  break;
-                  case 'delete':       await _deleteCredit(c);       break;
+                  case 'void':
+                    await _voidCredit(c);
+                    break;
+                  case 'mark_as_sent':
+                    await _markCreditAsSent(c);
+                    break;
+                  case 'delete':
+                    await _deleteCredit(c);
+                    break;
                 }
               },
               itemBuilder: (_) => [
-                PopupMenuItem(value: 'view', child: ListTile(leading: const Icon(Icons.visibility, size: 17, color: _navyAccent), title: const Text('View Details'), contentPadding: EdgeInsets.zero)),
+                PopupMenuItem(
+                    value: 'view',
+                    child: ListTile(
+                        leading: const Icon(Icons.visibility,
+                            size: 17, color: _navyAccent),
+                        title: const Text('View Details'),
+                        contentPadding: EdgeInsets.zero)),
                 if (c.status != 'VOID' && c.status != 'CLOSED')
-                  const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, size: 17), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'edit',
+                      child: ListTile(
+                          leading: Icon(Icons.edit, size: 17),
+                          title: Text('Edit'),
+                          contentPadding: EdgeInsets.zero)),
                 if (c.status != 'VOID')
-                  const PopupMenuItem(value: 'mark_as_sent', child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: Colors.orange), title: Text('Mark as Sent', style: TextStyle(color: Colors.orange)), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'mark_as_sent',
+                      child: ListTile(
+                          leading: Icon(Icons.mark_email_read_outlined,
+                              size: 17, color: Colors.orange),
+                          title: Text('Mark as Sent',
+                              style: TextStyle(color: Colors.orange)),
+                          contentPadding: EdgeInsets.zero)),
                 if (c.status == 'OPEN' || c.status == 'PARTIALLY_APPLIED')
-                  const PopupMenuItem(value: 'void', child: ListTile(leading: Icon(Icons.block, size: 17, color: Colors.orange), title: Text('Void', style: TextStyle(color: Colors.orange)), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'void',
+                      child: ListTile(
+                          leading:
+                              Icon(Icons.block, size: 17, color: Colors.orange),
+                          title: Text('Void',
+                              style: TextStyle(color: Colors.orange)),
+                          contentPadding: EdgeInsets.zero)),
                 if (c.status != 'CLOSED')
-                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete, size: 17, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                          leading:
+                              Icon(Icons.delete, size: 17, color: Colors.red),
+                          title: Text('Delete',
+                              style: TextStyle(color: Colors.red)),
+                          contentPadding: EdgeInsets.zero)),
               ],
             ),
           ]),
@@ -941,7 +1200,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   Widget _amountChip(String label, String value, Color color) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
-      Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+      Text(value,
+          style: TextStyle(
+              fontSize: 13, fontWeight: FontWeight.bold, color: color)),
     ]);
   }
 
@@ -955,7 +1216,12 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: LayoutBuilder(builder: (context, constraints) {
         return Scrollbar(
@@ -972,22 +1238,28 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFF0D1B3E)),
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFF0D1B3E)),
                   headingTextStyle: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15),
                   headingRowHeight: 56,
                   dataRowMinHeight: 60,
                   dataRowMaxHeight: 74,
                   dataTextStyle: const TextStyle(fontSize: 15),
                   dataRowColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.hovered)) return _navyAccent.withOpacity(0.05);
+                    if (states.contains(WidgetState.hovered))
+                      return _navyAccent.withOpacity(0.05);
                     return null;
                   }),
                   dividerThickness: 1,
                   columnSpacing: 18,
                   horizontalMargin: 16,
                   columns: [
-                    DataColumn(label: SizedBox(width: 36,
+                    DataColumn(
+                        label: SizedBox(
+                      width: 36,
                       child: Checkbox(
                         value: _selectAll,
                         fillColor: WidgetStateProperty.all(Colors.white),
@@ -995,21 +1267,34 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                         onChanged: (v) {
                           setState(() {
                             _selectAll = v ?? false;
-                            if (_selectAll) _selected.addAll(_credits.map((c) => c.id));
-                            else _selected.clear();
+                            if (_selectAll)
+                              _selected.addAll(_credits.map((c) => c.id));
+                            else
+                              _selected.clear();
                           });
                         },
                       ),
                     )),
-                    const DataColumn(label: SizedBox(width: 130, child: Text('Credit #'))),
-                    const DataColumn(label: SizedBox(width: 160, child: Text('Vendor'))),
-                    const DataColumn(label: SizedBox(width: 110, child: Text('Date'))),
-                    const DataColumn(label: SizedBox(width: 120, child: Text('Bill Reference'))),
-                    const DataColumn(label: SizedBox(width: 100, child: Text('Status'))),
-                    const DataColumn(label: SizedBox(width: 110, child: Text('Total Amount'))),
-                    const DataColumn(label: SizedBox(width: 110, child: Text('Applied'))),
-                    const DataColumn(label: SizedBox(width: 110, child: Text('Balance'))),
-                    const DataColumn(label: SizedBox(width: 80, child: Text('Actions'))),
+                    const DataColumn(
+                        label: SizedBox(width: 130, child: Text('Credit #'))),
+                    const DataColumn(
+                        label: SizedBox(width: 160, child: Text('Vendor'))),
+                    const DataColumn(
+                        label: SizedBox(width: 110, child: Text('Date'))),
+                    const DataColumn(
+                        label: SizedBox(
+                            width: 120, child: Text('Bill Reference'))),
+                    const DataColumn(
+                        label: SizedBox(width: 100, child: Text('Status'))),
+                    const DataColumn(
+                        label:
+                            SizedBox(width: 110, child: Text('Total Amount'))),
+                    const DataColumn(
+                        label: SizedBox(width: 110, child: Text('Applied'))),
+                    const DataColumn(
+                        label: SizedBox(width: 110, child: Text('Balance'))),
+                    const DataColumn(
+                        label: SizedBox(width: 80, child: Text('Actions'))),
                   ],
                   rows: _credits.map((c) => _buildRow(c)).toList(),
                 ),
@@ -1027,7 +1312,8 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       selected: isSel,
       color: WidgetStateProperty.resolveWith((states) {
         if (isSel) return _navyAccent.withOpacity(0.06);
-        if (states.contains(WidgetState.hovered)) return _navyAccent.withOpacity(0.04);
+        if (states.contains(WidgetState.hovered))
+          return _navyAccent.withOpacity(0.04);
         return null;
       }),
       cells: [
@@ -1035,8 +1321,13 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           value: isSel,
           onChanged: (_) {
             setState(() {
-              if (isSel) { _selected.remove(c.id); _selectAll = false; }
-              else { _selected.add(c.id); if (_selected.length == _credits.length) _selectAll = true; }
+              if (isSel) {
+                _selected.remove(c.id);
+                _selectAll = false;
+              } else {
+                _selected.add(c.id);
+                if (_selected.length == _credits.length) _selectAll = true;
+              }
             });
           },
         )),
@@ -1044,13 +1335,16 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           width: 130,
           child: InkWell(
             onTap: () async {
-              final r = await Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => NewVendorCreditScreen(creditId: c.id)));
+              final r = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => NewVendorCreditScreen(creditId: c.id)));
               if (r == true) _refresh();
             },
             child: Text(c.creditNumber,
                 style: const TextStyle(
-                    color: _navyAccent, fontWeight: FontWeight.w600,
+                    color: _navyAccent,
+                    fontWeight: FontWeight.w600,
                     decoration: TextDecoration.underline),
                 overflow: TextOverflow.ellipsis),
           ),
@@ -1061,10 +1355,12 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(c.vendorName, overflow: TextOverflow.ellipsis,
+              Text(c.vendorName,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w500)),
               if (c.vendorEmail != null)
-                Text(c.vendorEmail!, overflow: TextOverflow.ellipsis,
+                Text(c.vendorEmail!,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 13, color: Colors.grey[600])),
             ],
           ),
@@ -1076,19 +1372,24 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
         DataCell(SizedBox(
           width: 120,
           child: c.billNumber != null
-              ? Text(c.billNumber!, style: const TextStyle(color: _navyAccent), overflow: TextOverflow.ellipsis)
+              ? Text(c.billNumber!,
+                  style: const TextStyle(color: _navyAccent),
+                  overflow: TextOverflow.ellipsis)
               : Text('—', style: TextStyle(color: Colors.grey[500])),
         )),
         DataCell(SizedBox(width: 100, child: _statusBadge(c.status))),
         DataCell(SizedBox(
           width: 110,
           child: Text('₹${c.totalAmount.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.w600), textAlign: TextAlign.right),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.right),
         )),
         DataCell(SizedBox(
           width: 110,
           child: Text('₹${c.appliedAmount.toStringAsFixed(2)}',
-              style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w500), textAlign: TextAlign.right),
+              style: const TextStyle(
+                  color: Colors.green, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.right),
         )),
         DataCell(SizedBox(
           width: 110,
@@ -1104,40 +1405,70 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             icon: const Icon(Icons.more_vert, size: 20),
             onSelected: (v) async {
               switch (v) {
-                case 'view': _openDetail(c); break;
+                case 'view':
+                  _openDetail(c);
+                  break;
                 case 'edit':
-                  final r = await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => NewVendorCreditScreen(creditId: c.id)));
+                  final r = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              NewVendorCreditScreen(creditId: c.id)));
                   if (r == true) _refresh();
                   break;
-                case 'void': await _voidCredit(c); break;
-                case 'mark_as_sent': await _markCreditAsSent(c); break;
-                case 'delete': await _deleteCredit(c); break;
+                case 'void':
+                  await _voidCredit(c);
+                  break;
+                case 'mark_as_sent':
+                  await _markCreditAsSent(c);
+                  break;
+                case 'delete':
+                  await _deleteCredit(c);
+                  break;
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(value: 'view',
-                child: ListTile(leading: Icon(Icons.visibility, size: 17, color: _navyAccent),
-                    title: Text('View Details'), contentPadding: EdgeInsets.zero)),
+              const PopupMenuItem(
+                  value: 'view',
+                  child: ListTile(
+                      leading:
+                          Icon(Icons.visibility, size: 17, color: _navyAccent),
+                      title: Text('View Details'),
+                      contentPadding: EdgeInsets.zero)),
               if (c.status != 'VOID' && c.status != 'CLOSED')
-                const PopupMenuItem(value: 'edit',
-                  child: ListTile(leading: Icon(Icons.edit, size: 17),
-                      title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(
+                    value: 'edit',
+                    child: ListTile(
+                        leading: Icon(Icons.edit, size: 17),
+                        title: Text('Edit'),
+                        contentPadding: EdgeInsets.zero)),
               if (c.status != 'VOID')
-                const PopupMenuItem(value: 'mark_as_sent',
-                  child: ListTile(leading: Icon(Icons.mark_email_read_outlined, size: 17, color: Colors.orange),
-                      title: Text('Mark as Sent', style: TextStyle(color: Colors.orange)),
-                      contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(
+                    value: 'mark_as_sent',
+                    child: ListTile(
+                        leading: Icon(Icons.mark_email_read_outlined,
+                            size: 17, color: Colors.orange),
+                        title: Text('Mark as Sent',
+                            style: TextStyle(color: Colors.orange)),
+                        contentPadding: EdgeInsets.zero)),
               if (c.status == 'OPEN' || c.status == 'PARTIALLY_APPLIED')
-                const PopupMenuItem(value: 'void',
-                  child: ListTile(leading: Icon(Icons.block, size: 17, color: Colors.orange),
-                      title: Text('Void', style: TextStyle(color: Colors.orange)),
-                      contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(
+                    value: 'void',
+                    child: ListTile(
+                        leading:
+                            Icon(Icons.block, size: 17, color: Colors.orange),
+                        title: Text('Void',
+                            style: TextStyle(color: Colors.orange)),
+                        contentPadding: EdgeInsets.zero)),
               if (c.status != 'CLOSED')
-                const PopupMenuItem(value: 'delete',
-                  child: ListTile(leading: Icon(Icons.delete, size: 17, color: Colors.red),
-                      title: Text('Delete', style: TextStyle(color: Colors.red)),
-                      contentPadding: EdgeInsets.zero)),
+                const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                        leading:
+                            Icon(Icons.delete, size: 17, color: Colors.red),
+                        title:
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                        contentPadding: EdgeInsets.zero)),
             ],
           ),
         )),
@@ -1149,23 +1480,41 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => VendorCreditDetailPage(creditId: c.id)),
-    ).then((result) { if (result == true) _refresh(); });
+    ).then((result) {
+      if (result == true) _refresh();
+    });
   }
 
   Widget _statusBadge(String status) {
     Color bg, fg;
     switch (status) {
-      case 'OPEN': bg = Colors.orange[100]!; fg = Colors.orange[800]!; break;
-      case 'PARTIALLY_APPLIED': bg = Colors.purple[100]!; fg = Colors.purple[800]!; break;
-      case 'CLOSED': bg = Colors.green[100]!; fg = Colors.green[800]!; break;
-      case 'VOID': bg = Colors.grey[200]!; fg = Colors.grey[700]!; break;
-      default: bg = Colors.blue[100]!; fg = Colors.blue[800]!;
+      case 'OPEN':
+        bg = Colors.orange[100]!;
+        fg = Colors.orange[800]!;
+        break;
+      case 'PARTIALLY_APPLIED':
+        bg = Colors.purple[100]!;
+        fg = Colors.purple[800]!;
+        break;
+      case 'CLOSED':
+        bg = Colors.green[100]!;
+        fg = Colors.green[800]!;
+        break;
+      case 'VOID':
+        bg = Colors.grey[200]!;
+        fg = Colors.grey[700]!;
+        break;
+      default:
+        bg = Colors.blue[100]!;
+        fg = Colors.blue[800]!;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Text(status.replaceAll('_', ' '),
-          style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13),
+          style:
+              TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13),
           textAlign: TextAlign.center),
     );
   }
@@ -1184,13 +1533,15 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             ? Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Showing ${(_currentPage - 1) * _perPage + 1}–${(_currentPage * _perPage).clamp(0, _totalCredits)} of $_totalCredits',
+                  Text(
+                      'Showing ${(_currentPage - 1) * _perPage + 1}–${(_currentPage * _perPage).clamp(0, _totalCredits)} of $_totalCredits',
                       style: TextStyle(color: Colors.grey[700])),
                   _pageControls(),
                 ],
               )
             : Column(children: [
-                Text('Showing ${(_currentPage - 1) * _perPage + 1}–${(_currentPage * _perPage).clamp(0, _totalCredits)} of $_totalCredits',
+                Text(
+                    'Showing ${(_currentPage - 1) * _perPage + 1}–${(_currentPage * _perPage).clamp(0, _totalCredits)} of $_totalCredits',
                     style: TextStyle(color: Colors.grey[700])),
                 const SizedBox(height: 8),
                 _pageControls(),
@@ -1205,16 +1556,25 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
       children: [
         IconButton(
           icon: const Icon(Icons.chevron_left),
-          onPressed: _currentPage > 1 ? () { setState(() => _currentPage--); _load(); } : null,
+          onPressed: _currentPage > 1
+              ? () {
+                  setState(() => _currentPage--);
+                  _load();
+                }
+              : null,
         ),
         ...List.generate(_totalPages.clamp(0, 5), (i) {
           final p = i + 1;
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: InkWell(
-              onTap: () { setState(() => _currentPage = p); _load(); },
+              onTap: () {
+                setState(() => _currentPage = p);
+                _load();
+              },
               child: Container(
-                width: 32, height: 32,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   gradient: _currentPage == p
                       ? const LinearGradient(colors: [_navyDark, _navyAccent])
@@ -1222,17 +1582,26 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 alignment: Alignment.center,
-                child: Text('$p', style: TextStyle(
-                  color: _currentPage == p ? Colors.white : Colors.grey[700],
-                  fontWeight: _currentPage == p ? FontWeight.bold : FontWeight.normal,
-                )),
+                child: Text('$p',
+                    style: TextStyle(
+                      color:
+                          _currentPage == p ? Colors.white : Colors.grey[700],
+                      fontWeight: _currentPage == p
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    )),
               ),
             ),
           );
         }),
         IconButton(
           icon: const Icon(Icons.chevron_right),
-          onPressed: _currentPage < _totalPages ? () { setState(() => _currentPage++); _load(); } : null,
+          onPressed: _currentPage < _totalPages
+              ? () {
+                  setState(() => _currentPage++);
+                  _load();
+                }
+              : null,
         ),
       ],
     );
@@ -1250,7 +1619,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           Icon(Icons.credit_score, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text('No vendor credits found',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700])),
           const SizedBox(height: 8),
           Text('Create a vendor credit for returned goods or overcharges',
               style: TextStyle(color: Colors.grey[600])),
@@ -1258,7 +1630,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           ElevatedButton.icon(
             onPressed: () async {
               final r = await Navigator.push(
-                  context, MaterialPageRoute(builder: (_) => const NewVendorCreditScreen()));
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const NewVendorCreditScreen()));
               if (r == true) _refresh();
             },
             icon: const Icon(Icons.add),
@@ -1282,12 +1656,16 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
           Icon(Icons.error_outline, size: 80, color: Colors.red[400]),
           const SizedBox(height: 16),
           Text('Error Loading Credits',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700])),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(_errorMessage ?? 'Unknown error',
-                style: TextStyle(color: Colors.grey[600]), textAlign: TextAlign.center),
+                style: TextStyle(color: Colors.grey[600]),
+                textAlign: TextAlign.center),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -1295,8 +1673,10 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
             icon: const Icon(Icons.refresh),
             label: const Text('Retry'),
             style: ElevatedButton.styleFrom(
-                backgroundColor: _navyAccent, foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16)),
+                backgroundColor: _navyAccent,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16)),
           ),
         ],
       ),
@@ -1326,17 +1706,65 @@ class _ImportDialogState extends State<_ImportDialog> {
     setState(() => _downloading = true);
     try {
       final data = [
-        ['Credit Date* (YYYY-MM-DD)', 'Vendor Name*', 'Vendor Email', 'Bill Number (Optional)',
-          'Reason*', 'Item Description*', 'Quantity*', 'Rate*', 'GST Rate (%)',
-          'TDS Rate (%)', 'TCS Rate (%)', 'Notes'],
-        ['2024-01-15', 'ABC Vendor', 'abc@vendor.com', 'BILL-2024-001',
-          'Goods Returned', 'Office Chair (Returned)', '2', '5000', '18', '0', '0', 'Defective item returned'],
-        ['2024-01-20', 'XYZ Supplier', 'xyz@supplier.com', '',
-          'Overcharged by Vendor', 'Overcharge Adjustment', '1', '2500', '5', '0', '0', 'Vendor overcharged for services'],
-        ['--- DELETE THIS ROW ---', 'Reason options: Goods Returned / Overcharged by Vendor / Quality Issue / Advance Payment Excess / Discount After Billing / Duplicate Invoice / Service Not Delivered / Other',
-          '', '', '', '', '', '', '', '', '', ''],
+        [
+          'Credit Date* (YYYY-MM-DD)',
+          'Vendor Name*',
+          'Vendor Email',
+          'Bill Number (Optional)',
+          'Reason*',
+          'Item Description*',
+          'Quantity*',
+          'Rate*',
+          'GST Rate (%)',
+          'TDS Rate (%)',
+          'TCS Rate (%)',
+          'Notes'
+        ],
+        [
+          '2024-01-15',
+          'ABC Vendor',
+          'abc@vendor.com',
+          'BILL-2024-001',
+          'Goods Returned',
+          'Office Chair (Returned)',
+          '2',
+          '5000',
+          '18',
+          '0',
+          '0',
+          'Defective item returned'
+        ],
+        [
+          '2024-01-20',
+          'XYZ Supplier',
+          'xyz@supplier.com',
+          '',
+          'Overcharged by Vendor',
+          'Overcharge Adjustment',
+          '1',
+          '2500',
+          '5',
+          '0',
+          '0',
+          'Vendor overcharged for services'
+        ],
+        [
+          '--- DELETE THIS ROW ---',
+          'Reason options: Goods Returned / Overcharged by Vendor / Quality Issue / Advance Payment Excess / Discount After Billing / Duplicate Invoice / Service Not Delivered / Other',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          ''
+        ],
       ];
-      await ExportHelper.exportToExcel(data: data, filename: 'vendor_credits_import_template');
+      await ExportHelper.exportToExcel(
+          data: data, filename: 'vendor_credits_import_template');
       setState(() => _downloading = false);
       _snack('Template downloaded!', Colors.green);
     } catch (e) {
@@ -1355,7 +1783,11 @@ class _ImportDialogState extends State<_ImportDialog> {
       if (result == null || result.files.isEmpty) return;
 
       final file = result.files.first;
-      setState(() { _fileName = file.name; _uploading = true; _results = null; });
+      setState(() {
+        _fileName = file.name;
+        _uploading = true;
+        _results = null;
+      });
 
       final bytes = file.bytes;
       if (bytes == null) throw Exception('Could not read file');
@@ -1371,7 +1803,9 @@ class _ImportDialogState extends State<_ImportDialog> {
 
       for (int i = 1; i < rows.length; i++) {
         final row = rows[i];
-        if (row.isEmpty || _str(row, 0).isEmpty || _str(row, 0).startsWith('---')) continue;
+        if (row.isEmpty ||
+            _str(row, 0).isEmpty ||
+            _str(row, 0).startsWith('---')) continue;
         try {
           final creditDate = _str(row, 0);
           final vendorName = _str(row, 1);
@@ -1394,13 +1828,22 @@ class _ImportDialogState extends State<_ImportDialog> {
 
           toImport.add({
             'creditDate': creditDate,
-            'vendorId': 'import_${vendorName.toLowerCase().replaceAll(' ', '_')}',
+            'vendorId':
+                'import_${vendorName.toLowerCase().replaceAll(' ', '_')}',
             'vendorName': vendorName,
             'vendorEmail': _str(row, 2),
             'billNumber': _str(row, 3).isNotEmpty ? _str(row, 3) : null,
             'reason': reason,
-            'items': [{'itemDetails': itemDesc, 'quantity': qty, 'rate': rate, 'amount': amount,
-              'discount': 0, 'discountType': 'percentage'}],
+            'items': [
+              {
+                'itemDetails': itemDesc,
+                'quantity': qty,
+                'rate': rate,
+                'amount': amount,
+                'discount': 0,
+                'discountType': 'percentage'
+              }
+            ],
             'gstRate': gst,
             'tdsRate': double.tryParse(_str(row, 9)) ?? 0,
             'tcsRate': double.tryParse(_str(row, 10)) ?? 0,
@@ -1427,34 +1870,49 @@ class _ImportDialogState extends State<_ImportDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('${toImport.length} credit(s) ready to import',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 16)),
               if (errors.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text('${errors.length} row(s) skipped', style: const TextStyle(color: Colors.red)),
+                Text('${errors.length} row(s) skipped',
+                    style: const TextStyle(color: Colors.red)),
                 const SizedBox(height: 6),
                 Container(
                   constraints: const BoxConstraints(maxHeight: 130),
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(6)),
                   child: SingleChildScrollView(
-                    child: Text(errors.join('\n'), style: const TextStyle(fontSize: 11, color: Colors.red)),
+                    child: Text(errors.join('\n'),
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.red)),
                   ),
                 ),
               ],
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(backgroundColor: _navyAccent),
-              child: const Text('Import', style: TextStyle(color: Colors.white)),
+              child:
+                  const Text('Import', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
       );
 
-      if (confirmed != true) { setState(() { _uploading = false; _fileName = null; }); return; }
+      if (confirmed != true) {
+        setState(() {
+          _uploading = false;
+          _fileName = null;
+        });
+        return;
+      }
 
       final res = await VendorCreditService.bulkImport(toImport);
       setState(() {
@@ -1469,7 +1927,10 @@ class _ImportDialogState extends State<_ImportDialog> {
 
       if ((res['data']['successCount'] ?? 0) > 0) widget.onComplete();
     } catch (e) {
-      setState(() { _uploading = false; _fileName = null; });
+      setState(() {
+        _uploading = false;
+        _fileName = null;
+      });
       _snack('Import failed: $e', Colors.red);
     }
   }
@@ -1482,38 +1943,51 @@ class _ImportDialogState extends State<_ImportDialog> {
   List<List<dynamic>> _parseExcel(Uint8List bytes) {
     final ex = excel_pkg.Excel.decodeBytes(bytes);
     final sheet = ex.tables.keys.first;
-    return (ex.tables[sheet]?.rows ?? []).map((row) => row.map((c) {
-      if (c?.value == null) return '';
-      if (c!.value is excel_pkg.TextCellValue) return (c.value as excel_pkg.TextCellValue).value;
-      return c.value;
-    }).toList()).toList();
+    return (ex.tables[sheet]?.rows ?? [])
+        .map((row) => row.map((c) {
+              if (c?.value == null) return '';
+              if (c!.value is excel_pkg.TextCellValue)
+                return (c.value as excel_pkg.TextCellValue).value;
+              return c.value;
+            }).toList())
+        .toList();
   }
 
   List<List<dynamic>> _parseCSV(Uint8List bytes) {
-    return utf8.decode(bytes, allowMalformed: true)
+    return utf8
+        .decode(bytes, allowMalformed: true)
         .split(RegExp(r'\r?\n'))
         .where((l) => l.trim().isNotEmpty)
         .map((l) {
-          final fields = <String>[];
-          final buf = StringBuffer();
-          bool inQ = false;
-          for (int i = 0; i < l.length; i++) {
-            final c = l[i];
-            if (c == '"') {
-              if (inQ && i + 1 < l.length && l[i + 1] == '"') { buf.write('"'); i++; }
-              else inQ = !inQ;
-            } else if (c == ',' && !inQ) { fields.add(buf.toString()); buf.clear(); }
-            else buf.write(c);
-          }
+      final fields = <String>[];
+      final buf = StringBuffer();
+      bool inQ = false;
+      for (int i = 0; i < l.length; i++) {
+        final c = l[i];
+        if (c == '"') {
+          if (inQ && i + 1 < l.length && l[i + 1] == '"') {
+            buf.write('"');
+            i++;
+          } else
+            inQ = !inQ;
+        } else if (c == ',' && !inQ) {
           fields.add(buf.toString());
-          return fields.map((f) => f.startsWith('"') && f.endsWith('"') ? f.substring(1, f.length - 1) : f).toList();
-        }).toList();
+          buf.clear();
+        } else
+          buf.write(c);
+      }
+      fields.add(buf.toString());
+      return fields
+          .map((f) => f.startsWith('"') && f.endsWith('"')
+              ? f.substring(1, f.length - 1)
+              : f)
+          .toList();
+    }).toList();
   }
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating));
+    AppSnackbar.show(context, message: msg);
   }
 
   @override
@@ -1535,17 +2009,24 @@ class _ImportDialogState extends State<_ImportDialog> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [_navyDark, _navyLight]),
+                      gradient:
+                          const LinearGradient(colors: [_navyDark, _navyLight]),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.upload_file, color: Colors.white, size: 24),
+                    child: const Icon(Icons.upload_file,
+                        color: Colors.white, size: 24),
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text('Bulk Import Vendor Credits',
-                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: _navyDark)),
+                        style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                            color: _navyDark)),
                   ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                  IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context)),
                 ],
               ),
               const Divider(height: 28),
@@ -1560,12 +2041,16 @@ class _ImportDialogState extends State<_ImportDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Icon(Icons.info_outline, color: _navyAccent, size: 18),
+                      const Icon(Icons.info_outline,
+                          color: _navyAccent, size: 18),
                       const SizedBox(width: 8),
-                      Text('How to Import', style: TextStyle(fontWeight: FontWeight.w600, color: _navyMid)),
+                      Text('How to Import',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, color: _navyMid)),
                     ]),
                     const SizedBox(height: 8),
-                    const Text('1. Download the sample template\n'
+                    const Text(
+                        '1. Download the sample template\n'
                         '2. Fill in your vendor credit data\n'
                         '3. Delete the instructions row before uploading\n'
                         '4. Upload completed .xlsx or .csv file',
@@ -1577,12 +2062,18 @@ class _ImportDialogState extends State<_ImportDialog> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _downloading || _uploading ? null : _downloadTemplate,
+                  onPressed:
+                      _downloading || _uploading ? null : _downloadTemplate,
                   icon: _downloading
-                      ? const SizedBox(width: 18, height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.download),
-                  label: Text(_downloading ? 'Downloading...' : 'Download Sample Template'),
+                  label: Text(_downloading
+                      ? 'Downloading...'
+                      : 'Download Sample Template'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _navyAccent,
                     foregroundColor: Colors.white,
@@ -1596,10 +2087,14 @@ class _ImportDialogState extends State<_ImportDialog> {
                 child: OutlinedButton.icon(
                   onPressed: _downloading || _uploading ? null : _upload,
                   icon: _uploading
-                      ? const SizedBox(width: 18, height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: _navyMid))
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: _navyMid))
                       : const Icon(Icons.upload_file),
-                  label: Text(_uploading ? 'Processing...' : 'Upload Excel / CSV File'),
+                  label: Text(
+                      _uploading ? 'Processing...' : 'Upload Excel / CSV File'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _navyMid,
                     side: const BorderSide(color: _navyMid),
@@ -1617,10 +2112,14 @@ class _ImportDialogState extends State<_ImportDialog> {
                     border: Border.all(color: Colors.green[200]!),
                   ),
                   child: Row(children: [
-                    Icon(Icons.check_circle, color: Colors.green[700], size: 18),
+                    Icon(Icons.check_circle,
+                        color: Colors.green[700], size: 18),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(_fileName!,
-                        style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.w600))),
+                    Expanded(
+                        child: Text(_fileName!,
+                            style: TextStyle(
+                                color: Colors.green[700],
+                                fontWeight: FontWeight.w600))),
                   ]),
                 ),
               ],
@@ -1629,7 +2128,10 @@ class _ImportDialogState extends State<_ImportDialog> {
                 const Divider(),
                 const SizedBox(height: 12),
                 const Text('Import Results',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _navyDark)),
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _navyDark)),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(14),
@@ -1639,9 +2141,11 @@ class _ImportDialogState extends State<_ImportDialog> {
                     border: Border.all(color: Colors.grey[200]!),
                   ),
                   child: Column(children: [
-                    _resultRow('Total Processed', '${_results!['total']}', Colors.blue),
+                    _resultRow('Total Processed', '${_results!['total']}',
+                        Colors.blue),
                     const SizedBox(height: 6),
-                    _resultRow('Successfully Imported', '${_results!['success']}', Colors.green),
+                    _resultRow('Successfully Imported',
+                        '${_results!['success']}', Colors.green),
                     const SizedBox(height: 6),
                     _resultRow('Failed', '${_results!['failed']}', Colors.red),
                     if ((_results!['errors'] as List).isNotEmpty) ...[
@@ -1649,10 +2153,13 @@ class _ImportDialogState extends State<_ImportDialog> {
                       Container(
                         constraints: const BoxConstraints(maxHeight: 120),
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(6)),
                         child: SingleChildScrollView(
                           child: Text((_results!['errors'] as List).join('\n'),
-                              style: const TextStyle(fontSize: 11, color: Colors.red)),
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.red)),
                         ),
                       ),
                     ],
@@ -1664,7 +2171,8 @@ class _ImportDialogState extends State<_ImportDialog> {
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _navyAccent, foregroundColor: Colors.white,
+                      backgroundColor: _navyAccent,
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     child: const Text('Close'),
@@ -1685,8 +2193,11 @@ class _ImportDialogState extends State<_ImportDialog> {
         Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-          child: Text(value, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12)),
+          child: Text(value,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600)),
         ),
       ],
     );

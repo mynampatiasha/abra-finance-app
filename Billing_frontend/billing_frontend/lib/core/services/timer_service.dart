@@ -42,23 +42,27 @@ class ActiveTimer {
   });
 
   factory ActiveTimer.fromJson(Map<String, dynamic> j) => ActiveTimer(
-    id:              j['_id']?.toString() ?? '',
-    projectId:       j['projectId']?.toString() ?? '',
-    projectName:     j['projectName']?.toString() ?? '',
-    taskId:          j['taskId']?.toString() ?? '',
-    taskName:        j['taskName']?.toString() ?? '',
-    userId:          j['userId']?.toString() ?? '',
-    userName:        j['userName']?.toString() ?? '',
-    isBillable:      j['isBillable'] == true,
-    notes:           j['notes']?.toString() ?? '',
-    status:          j['status']?.toString() ?? 'running',
-    startedAt:       j['startedAt'] != null ? DateTime.parse(j['startedAt']) : DateTime.now(),
-    elapsedSeconds:  (j['currentElapsedSeconds'] ?? j['elapsedSeconds'] ?? 0) as int,
-    elapsedFormatted: j['currentElapsedFormatted']?.toString() ?? '00:00:00',
-  );
+        id: j['_id']?.toString() ?? '',
+        projectId: j['projectId']?.toString() ?? '',
+        projectName: j['projectName']?.toString() ?? '',
+        taskId: j['taskId']?.toString() ?? '',
+        taskName: j['taskName']?.toString() ?? '',
+        userId: j['userId']?.toString() ?? '',
+        userName: j['userName']?.toString() ?? '',
+        isBillable: j['isBillable'] == true,
+        notes: j['notes']?.toString() ?? '',
+        status: j['status']?.toString() ?? 'running',
+        startedAt: j['startedAt'] != null
+            ? DateTime.parse(j['startedAt'])
+            : DateTime.now(),
+        elapsedSeconds:
+            (j['currentElapsedSeconds'] ?? j['elapsedSeconds'] ?? 0) as int,
+        elapsedFormatted:
+            j['currentElapsedFormatted']?.toString() ?? '00:00:00',
+      );
 
   bool get isRunning => status == 'running';
-  bool get isPaused  => status == 'paused';
+  bool get isPaused => status == 'paused';
 }
 
 class TimerStopResult {
@@ -75,22 +79,24 @@ class TimerStopResult {
   });
 
   factory TimerStopResult.fromJson(Map<String, dynamic> j) => TimerStopResult(
-    elapsedSeconds:   (j['elapsedSeconds'] ?? 0) as int,
-    elapsedFormatted: j['elapsedFormatted']?.toString() ?? '00:00:00',
-    hours:            (j['hours'] ?? 0).toDouble(),
-    timesheetEntry:   (j['timesheetEntry'] as Map<String, dynamic>?) ?? {},
-  );
+        elapsedSeconds: (j['elapsedSeconds'] ?? 0) as int,
+        elapsedFormatted: j['elapsedFormatted']?.toString() ?? '00:00:00',
+        hours: (j['hours'] ?? 0).toDouble(),
+        timesheetEntry: (j['timesheetEntry'] as Map<String, dynamic>?) ?? {},
+      );
 }
 
 class TimerService {
   static Future<Map<String, String>> _headers() async {
-    final prefs      = await SharedPreferences.getInstance();
-    final token      = prefs.getString('finance_jwt_token') ?? prefs.getString('jwt_token') ?? '';
-    final branchHdr  = await FinanceSecureStorage.getBranchHeader();
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('finance_jwt_token') ??
+        prefs.getString('jwt_token') ??
+        '';
+    final branchHdr = await FinanceSecureStorage.getBranchHeader();
     return {
       'Authorization': 'Bearer $token',
-      'Content-Type':  'application/json',
-      'x-branch-ids':  branchHdr,
+      'Content-Type': 'application/json',
+      'x-branch-ids': branchHdr,
     };
   }
 
@@ -104,7 +110,9 @@ class TimerService {
     );
     final body = json.decode(res.body) as Map<String, dynamic>;
     if (body['success'] == true) {
-      return (body['data'] as List).map((j) => ActiveTimer.fromJson(j)).toList();
+      return (body['data'] as List)
+          .map((j) => ActiveTimer.fromJson(j))
+          .toList();
     }
     return [];
   }
@@ -125,15 +133,15 @@ class TimerService {
       Uri.parse('$_base/api/finance/timers/start'),
       headers: await _headers(),
       body: json.encode({
-        'projectId':   projectId,
+        'projectId': projectId,
         'projectName': projectName,
-        'taskId':      taskId,
-        'taskName':    taskName,
-        'userId':      userId,
-        'userName':    userName,
-        'userEmail':   userEmail,
-        'isBillable':  isBillable,
-        'notes':       notes,
+        'taskId': taskId,
+        'taskName': taskName,
+        'userId': userId,
+        'userName': userName,
+        'userEmail': userEmail,
+        'isBillable': isBillable,
+        'notes': notes,
       }),
     );
     final body = json.decode(res.body) as Map<String, dynamic>;
@@ -159,7 +167,8 @@ class TimerService {
       headers: await _headers(),
     );
     final body = json.decode(res.body) as Map<String, dynamic>;
-    if (body['success'] != true) throw Exception(body['message'] ?? 'Failed to resume timer');
+    if (body['success'] != true)
+      throw Exception(body['message'] ?? 'Failed to resume timer');
   }
 
   // ── POST /:id/stop ─────────────────────────────────────────────────────────
@@ -172,7 +181,7 @@ class TimerService {
       Uri.parse('$_base/api/finance/timers/$timerId/stop'),
       headers: await _headers(),
       body: json.encode({
-        if (notes != null)      'notes':      notes,
+        if (notes != null) 'notes': notes,
         if (isBillable != null) 'isBillable': isBillable,
       }),
     );
@@ -188,7 +197,8 @@ class TimerService {
       headers: await _headers(),
     );
     final body = json.decode(res.body) as Map<String, dynamic>;
-    if (body['success'] != true) throw Exception(body['message'] ?? 'Failed to discard timer');
+    if (body['success'] != true)
+      throw Exception(body['message'] ?? 'Failed to discard timer');
   }
 
   // ── Format duration helper ─────────────────────────────────────────────────

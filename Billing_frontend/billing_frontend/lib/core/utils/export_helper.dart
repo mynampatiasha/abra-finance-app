@@ -6,7 +6,7 @@
 
 import 'dart:convert';
 import 'dart:io' show File, Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show Uint8List, kIsWeb;
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -21,7 +21,7 @@ class ExportHelper {
   }) async {
     try {
       print('📤 Starting CSV export: $filename');
-      
+
       if (data.isEmpty) {
         throw Exception('No data to export');
       }
@@ -38,7 +38,7 @@ class ExportHelper {
           ..setAttribute('download', '${filename}_$timestamp.csv')
           ..click();
         html.Url.revokeObjectUrl(url);
-        
+
         print('✅ CSV downloaded via browser');
         return '${filename}_$timestamp.csv';
       } else {
@@ -46,9 +46,9 @@ class ExportHelper {
         final directory = await getApplicationDocumentsDirectory();
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final filePath = '${directory.path}/${filename}_$timestamp.csv';
-        
+
         print('📁 Saving to: $filePath');
-        
+
         final file = File(filePath);
         await file.writeAsString(csv);
 
@@ -84,10 +84,15 @@ class ExportHelper {
     required List<String> headers,
     required List<List<dynamic>> data,
     required String filename,
+    String? orgName,
+    Uint8List? orgLogoBytes,
+    String? orgAddress,
+    String? orgPhone,
+    String? orgGst,
   }) async {
     try {
       print('📤 Starting PDF export: $filename');
-      
+
       if (data.isEmpty) {
         throw Exception('No data to export');
       }
@@ -99,24 +104,97 @@ class ExportHelper {
           pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(32),
           build: (context) => [
-            // Title
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                title,
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
+            // Company Header
+            if (orgName != null || orgLogoBytes != null) ...[
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      if (orgLogoBytes != null)
+                        pw.Container(
+                          height: 50,
+                          margin: const pw.EdgeInsets.only(bottom: 8),
+                          child: pw.Image(pw.MemoryImage(orgLogoBytes)),
+                        ),
+                      if (orgName != null)
+                        pw.Text(
+                          orgName,
+                          style: pw.TextStyle(
+                            fontSize: 16,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.blue900,
+                          ),
+                        ),
+                      if (orgAddress != null && orgAddress.isNotEmpty)
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(top: 4),
+                          child: pw.Text(
+                            orgAddress,
+                            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                          ),
+                        ),
+                      if (orgPhone != null && orgPhone.isNotEmpty)
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(top: 2),
+                          child: pw.Text(
+                            'Ph: $orgPhone',
+                            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                          ),
+                        ),
+                      if (orgGst != null && orgGst.isNotEmpty)
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(top: 2),
+                          child: pw.Text(
+                            'GSTIN: $orgGst',
+                            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                          ),
+                        ),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        title.split('\n').last, // Usually the report name/date
+                        style: pw.TextStyle(
+                          fontSize: 20,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        'Generated on ${DateTime.now().toString().split('.')[0]}',
+                        style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.Divider(color: PdfColors.grey400),
+              pw.SizedBox(height: 16),
+            ] else ...[
+              // Fallback basic header
+              pw.Header(
+                level: 0,
+                child: pw.Text(
+                  title,
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Text(
-              'Generated on ${DateTime.now().toString().split('.')[0]}',
-              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
-            ),
-            pw.SizedBox(height: 20),
-            
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Generated on ${DateTime.now().toString().split('.')[0]}',
+                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 20),
+            ],
+
             // Data table
             pw.Table.fromTextArray(
               headers: headers,
@@ -150,7 +228,7 @@ class ExportHelper {
           ..setAttribute('download', '${filename}_$timestamp.pdf')
           ..click();
         html.Url.revokeObjectUrl(url);
-        
+
         print('✅ PDF downloaded via browser');
         return '${filename}_$timestamp.pdf';
       } else {
@@ -158,7 +236,7 @@ class ExportHelper {
         final directory = await getApplicationDocumentsDirectory();
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final filePath = '${directory.path}/${filename}_$timestamp.pdf';
-        
+
         final file = File(filePath);
         await file.writeAsBytes(await pdf.save());
 

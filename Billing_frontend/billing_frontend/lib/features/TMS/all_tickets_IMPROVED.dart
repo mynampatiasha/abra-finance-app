@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // lib/screens/tms/all_tickets_screen.dart
 // ============================================================================
 // 🎫 ALL TICKETS SCREEN - Admin Dashboard with Table View & Export
@@ -210,10 +211,12 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
       // Use ExportHelper to export
       await ExportHelper.exportToExcel(
         data: csvData,
-        filename: 'all_tickets_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}',
+        filename:
+            'all_tickets_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}',
       );
 
-      _showSuccessSnackbar('✅ Excel file downloaded with ${_filteredTickets.length} tickets!');
+      _showSuccessSnackbar(
+          '✅ Excel file downloaded with ${_filteredTickets.length} tickets!');
     } catch (e) {
       print('❌ Export Error: $e');
       _showErrorSnackbar('Failed to export: $e');
@@ -366,37 +369,11 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    AppSnackbar.show(context, message: message, isError: true);
   }
 
   @override
@@ -565,7 +542,8 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
             controller: _searchController,
             decoration: InputDecoration(
               hintText: 'Search tickets...',
-              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
+              prefixIcon:
+                  const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear_rounded),
@@ -621,8 +599,8 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
                         child: Text('Open', style: TextStyle(fontSize: 13))),
                     DropdownMenuItem(
                         value: 'In Progress',
-                        child:
-                            Text('In Progress', style: TextStyle(fontSize: 13))),
+                        child: Text('In Progress',
+                            style: TextStyle(fontSize: 13))),
                     DropdownMenuItem(
                         value: 'closed',
                         child: Text('Closed', style: TextStyle(fontSize: 13))),
@@ -943,10 +921,12 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
                         DataCell(_buildStatusBadge(ticket['status'] ?? 'Open')),
 
                         // Priority
-                        DataCell(_buildPriorityBadge(ticket['priority'] ?? 'Medium')),
+                        DataCell(_buildPriorityBadge(
+                            ticket['priority'] ?? 'Medium')),
 
                         // Assigned To
-                        DataCell(_buildAssignedToBadge(ticket['assigned_to_name'])),
+                        DataCell(
+                            _buildAssignedToBadge(ticket['assigned_to_name'])),
 
                         // Timeline
                         DataCell(_buildTimelineBadge(ticket['timeline'])),
@@ -1235,8 +1215,7 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.person_off_rounded,
-                size: 14, color: Color(0xFFF59E0B)),
+            Icon(Icons.person_off_rounded, size: 14, color: Color(0xFFF59E0B)),
             SizedBox(width: 4),
             Text(
               'Unassigned',

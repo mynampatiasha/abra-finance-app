@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // ADD ACCOUNT DIALOG - WITH CUSTOM ACCOUNT TYPE SUPPORT
 // ============================================================================
@@ -24,31 +25,38 @@ class AddAccountDialog extends StatefulWidget {
 class _AddAccountDialogState extends State<AddAccountDialog> {
   final _formKey = GlobalKey<FormState>();
   final AddAccountService _accountService = AddAccountService();
-  
+
   // Form Fields
   String _selectedAccountType = 'FUEL_CARD';
   final TextEditingController _accountNameController = TextEditingController();
   final TextEditingController _holderNameController = TextEditingController();
-  final TextEditingController _openingBalanceController = TextEditingController();
+  final TextEditingController _openingBalanceController =
+      TextEditingController();
   final TextEditingController _providerNameController = TextEditingController();
   final TextEditingController _cardNumberController = TextEditingController();
-  final TextEditingController _accountNumberController = TextEditingController();
+  final TextEditingController _accountNumberController =
+      TextEditingController();
   final TextEditingController _ifscCodeController = TextEditingController();
   final TextEditingController _bankNameController = TextEditingController();
   final TextEditingController _fastagNumberController = TextEditingController();
-  final TextEditingController _vehicleNumberController = TextEditingController();
-  
+  final TextEditingController _vehicleNumberController =
+      TextEditingController();
+
   // Custom type fields
-  final TextEditingController _customTypeNameController = TextEditingController();
-  
+  final TextEditingController _customTypeNameController =
+      TextEditingController();
+
   // Bank details for other account types
-  final TextEditingController _linkedBankNameController = TextEditingController();
-  final TextEditingController _linkedAccountNumberController = TextEditingController();
-  final TextEditingController _linkedIfscCodeController = TextEditingController();
-  
+  final TextEditingController _linkedBankNameController =
+      TextEditingController();
+  final TextEditingController _linkedAccountNumberController =
+      TextEditingController();
+  final TextEditingController _linkedIfscCodeController =
+      TextEditingController();
+
   bool _isLoading = false;
   bool _showLinkedBankDetails = false;
-  
+
   // Custom fields for OTHER type
   List<Map<String, TextEditingController>> _customFields = [];
 
@@ -94,7 +102,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
 
   // Loaded custom account types
   List<Map<String, dynamic>> _customAccountTypes = [];
-  
+
   // Combined account types
   List<Map<String, dynamic>> _accountTypes = [];
 
@@ -120,20 +128,20 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
     _linkedBankNameController.dispose();
     _linkedAccountNumberController.dispose();
     _linkedIfscCodeController.dispose();
-    
+
     // Dispose custom field controllers
     for (var field in _customFields) {
       field['name']?.dispose();
       field['value']?.dispose();
     }
-    
+
     super.dispose();
   }
 
   Future<void> _loadCustomAccountTypes() async {
     try {
       final customTypes = await _accountService.getCustomAccountTypes();
-      
+
       setState(() {
         _customAccountTypes = customTypes.map((type) {
           return {
@@ -144,7 +152,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
             'isCustom': true,
           };
         }).toList();
-        
+
         // Combine predefined and custom types
         _accountTypes = [..._predefinedAccountTypes, ..._customAccountTypes];
       });
@@ -203,13 +211,10 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
     }
 
     // Additional validation for OTHER type
-    if (_selectedAccountType == 'OTHER' && _customTypeNameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a custom account type name'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    if (_selectedAccountType == 'OTHER' &&
+        _customTypeNameController.text.trim().isEmpty) {
+      AppSnackbar.show(context,
+          message: 'Please enter a custom account type name', isError: true);
       return;
     }
 
@@ -222,8 +227,8 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       final accountData = {
         'accountType': _selectedAccountType,
         'accountName': _accountNameController.text.trim(),
-        'holderName': _holderNameController.text.trim().isNotEmpty 
-            ? _holderNameController.text.trim() 
+        'holderName': _holderNameController.text.trim().isNotEmpty
+            ? _holderNameController.text.trim()
             : null,
         'openingBalance': _openingBalanceController.text.trim().isNotEmpty
             ? double.parse(_openingBalanceController.text.trim())
@@ -233,7 +238,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       // Add custom type name if OTHER is selected
       if (_selectedAccountType == 'OTHER') {
         accountData['customTypeName'] = _customTypeNameController.text.trim();
-        
+
         // Add custom fields
         if (_customFields.isNotEmpty) {
           accountData['customFields'] = _customFields.map((field) {
@@ -248,31 +253,36 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       // Add type-specific fields
       switch (_selectedAccountType) {
         case 'FUEL_CARD':
-          accountData['providerName'] = _providerNameController.text.trim().isNotEmpty
-              ? _providerNameController.text.trim()
-              : null;
-          accountData['cardNumber'] = _cardNumberController.text.trim().isNotEmpty
-              ? _cardNumberController.text.trim()
-              : null;
+          accountData['providerName'] =
+              _providerNameController.text.trim().isNotEmpty
+                  ? _providerNameController.text.trim()
+                  : null;
+          accountData['cardNumber'] =
+              _cardNumberController.text.trim().isNotEmpty
+                  ? _cardNumberController.text.trim()
+                  : null;
           break;
         case 'BANK':
           accountData['bankName'] = _bankNameController.text.trim().isNotEmpty
               ? _bankNameController.text.trim()
               : null;
-          accountData['accountNumber'] = _accountNumberController.text.trim().isNotEmpty
-              ? _accountNumberController.text.trim()
-              : null;
+          accountData['accountNumber'] =
+              _accountNumberController.text.trim().isNotEmpty
+                  ? _accountNumberController.text.trim()
+                  : null;
           accountData['ifscCode'] = _ifscCodeController.text.trim().isNotEmpty
               ? _ifscCodeController.text.trim()
               : null;
           break;
         case 'FASTAG':
-          accountData['fastagNumber'] = _fastagNumberController.text.trim().isNotEmpty
-              ? _fastagNumberController.text.trim()
-              : null;
-          accountData['vehicleNumber'] = _vehicleNumberController.text.trim().isNotEmpty
-              ? _vehicleNumberController.text.trim()
-              : null;
+          accountData['fastagNumber'] =
+              _fastagNumberController.text.trim().isNotEmpty
+                  ? _fastagNumberController.text.trim()
+                  : null;
+          accountData['vehicleNumber'] =
+              _vehicleNumberController.text.trim().isNotEmpty
+                  ? _vehicleNumberController.text.trim()
+                  : null;
           break;
       }
 
@@ -296,21 +306,12 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
 
       if (mounted) {
         Navigator.pop(context, result);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account added successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        AppSnackbar.show(context, message: 'Account added successfully');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to add account: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        AppSnackbar.show(context,
+            message: 'Failed to add account: $e', isError: true);
       }
     } finally {
       if (mounted) {
@@ -320,6 +321,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       }
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -396,7 +398,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
                       setState(() {
                         _selectedAccountType = type['value'];
                         _showLinkedBankDetails = false;
-                        
+
                         // Clear custom fields when switching away from OTHER
                         if (_selectedAccountType != 'OTHER') {
                           for (var field in _customFields) {
@@ -486,7 +488,8 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
                           controller: _customTypeNameController,
                           decoration: InputDecoration(
                             labelText: 'Custom Account Type Name *',
-                            hintText: 'e.g., Digital Wallet, Corporate Card, UPI',
+                            hintText:
+                                'e.g., Digital Wallet, Corporate Card, UPI',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -503,7 +506,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      
+
                       _buildAccountNameField(),
                       const SizedBox(height: 16),
                       _buildHolderNameField(),
@@ -511,7 +514,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
                       _buildOpeningBalanceField(),
                       const SizedBox(height: 16),
                       ..._buildTypeSpecificFields(),
-                      
+
                       // Custom Fields Section (only for OTHER)
                       if (_selectedAccountType == 'OTHER') ...[
                         const SizedBox(height: 24),
@@ -539,7 +542,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
                         const SizedBox(height: 12),
                         ..._buildCustomFieldsWidgets(),
                       ],
-                      
+
                       // Optional Bank Account Details for non-bank accounts
                       if (_selectedAccountType != 'BANK') ...[
                         const SizedBox(height: 24),
@@ -700,7 +703,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
     return _customFields.asMap().entries.map((entry) {
       final index = entry.key;
       final field = entry.value;
-      
+
       return Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
@@ -756,6 +759,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       );
     }).toList();
   }
+
   List<Widget> _buildTypeSpecificFields() {
     switch (_selectedAccountType) {
       case 'FUEL_CARD':

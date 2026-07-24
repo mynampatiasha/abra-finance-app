@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // RECONCILIATION PAGE - Bank/Provider Transaction Matching
 // ============================================================================
@@ -43,7 +44,12 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
 
   // Filters
   String _selectedFilter = 'All';
-  final List<String> _filterOptions = ['All', 'Matched', 'Unmatched', 'Pending'];
+  final List<String> _filterOptions = [
+    'All',
+    'Matched',
+    'Unmatched',
+    'Pending'
+  ];
 
   // Date range
   DateTime? _fromDate;
@@ -181,9 +187,10 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
         ];
 
         // Calculate balances
-        _providerBalance = _providerTransactions.fold(
-            0, (sum, txn) => sum + txn.amount);
-        _systemBalance = _systemExpenses.fold(0, (sum, exp) => sum + exp.amount);
+        _providerBalance =
+            _providerTransactions.fold(0, (sum, txn) => sum + txn.amount);
+        _systemBalance =
+            _systemExpenses.fold(0, (sum, exp) => sum + exp.amount);
 
         // Calculate statistics
         _calculateStatistics();
@@ -527,9 +534,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
                 labelStyle: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isSelected
-                      ? const Color(0xFF3498DB)
-                      : Colors.grey[700],
+                  color:
+                      isSelected ? const Color(0xFF3498DB) : Colors.grey[700],
                 ),
               ),
             );
@@ -593,7 +599,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.account_balance, color: Colors.white, size: 20),
+                const Icon(Icons.account_balance,
+                    color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 const Text(
                   'Provider Transactions',
@@ -662,8 +669,7 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
       onTap: () {
         if (!isMatched) {
           setState(() {
-            _selectedProviderTxnId =
-                isSelected ? null : transaction.id;
+            _selectedProviderTxnId = isSelected ? null : transaction.id;
           });
         }
       },
@@ -817,7 +823,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
                   TextButton(
                     onPressed: () => _unmatchTransaction(transaction),
                     style: TextButton.styleFrom(foregroundColor: Colors.red),
-                    child: const Text('Unmatch', style: TextStyle(fontSize: 11)),
+                    child:
+                        const Text('Unmatch', style: TextStyle(fontSize: 11)),
                   ),
                 ],
               ),
@@ -907,8 +914,7 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
       onTap: () {
         if (!isMatched) {
           setState(() {
-            _selectedSystemExpenseId =
-                isSelected ? null : expense.id;
+            _selectedSystemExpenseId = isSelected ? null : expense.id;
           });
         }
       },
@@ -1046,8 +1052,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
   // ============================================================================
 
   Widget _buildMatchingArrows() {
-    final canMatch = _selectedProviderTxnId != null &&
-        _selectedSystemExpenseId != null;
+    final canMatch =
+        _selectedProviderTxnId != null && _selectedSystemExpenseId != null;
 
     return Center(
       child: Column(
@@ -1071,8 +1077,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
                 color: Colors.grey[300],
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.compare_arrows,
-                  size: 28, color: Colors.grey[500]),
+              child:
+                  Icon(Icons.compare_arrows, size: 28, color: Colors.grey[500]),
             ),
           const SizedBox(height: 12),
           Text(
@@ -1095,9 +1101,7 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
 
   Widget _buildActionBar() {
     final isFullyReconciled = _totalUnmatched == 0 &&
-        _providerTransactions
-                .where((t) => t.status == 'PENDING')
-                .isEmpty;
+        _providerTransactions.where((t) => t.status == 'PENDING').isEmpty;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1238,8 +1242,9 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
       // Mock: Auto-match some transactions
       setState(() {
         // Example: Mark first unmatched as pending with 80% confidence
-        final unmatchedProvider = _providerTransactions
-            .firstWhere((t) => t.status == 'UNMATCHED', orElse: () => _providerTransactions.first);
+        final unmatchedProvider = _providerTransactions.firstWhere(
+            (t) => t.status == 'UNMATCHED',
+            orElse: () => _providerTransactions.first);
         unmatchedProvider.status = 'PENDING';
         unmatchedProvider.confidence = 80;
 
@@ -1263,8 +1268,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
     setState(() {
       final providerTxn = _providerTransactions
           .firstWhere((t) => t.id == _selectedProviderTxnId);
-      final systemExp = _systemExpenses
-          .firstWhere((e) => e.id == _selectedSystemExpenseId);
+      final systemExp =
+          _systemExpenses.firstWhere((e) => e.id == _selectedSystemExpenseId);
 
       providerTxn.status = 'MATCHED';
       providerTxn.matchedExpenseId = systemExp.id;
@@ -1312,8 +1317,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Unmatch Transaction'),
-        content: const Text(
-            'Are you sure you want to unmatch this transaction?'),
+        content:
+            const Text('Are you sure you want to unmatch this transaction?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -1323,8 +1328,8 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
             onPressed: () {
               // TODO: Call backend unmatch API
               setState(() {
-                final matchedExpense = _systemExpenses.firstWhere(
-                    (e) => e.id == transaction.matchedExpenseId);
+                final matchedExpense = _systemExpenses
+                    .firstWhere((e) => e.id == transaction.matchedExpenseId);
                 matchedExpense.isMatched = false;
                 matchedExpense.matchedProviderTxnId = null;
 
@@ -1415,23 +1420,11 @@ class _ReconciliationPageState extends State<ReconciliationPage> {
   }
 
   void _showSuccessSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message);
   }
 
   void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppSnackbar.show(context, message: message, isError: true);
   }
 }
 

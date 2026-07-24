@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // DETAIL PAGE ACTIONS — shared Download PDF + Share helpers
 // Used by all detail pages (invoice, bill, quote, etc.)
@@ -44,7 +45,8 @@ Future<void> fetchAndHandleFile(
         html.window.open(blobUrl, '_blank');
         _snack(context, '✅ File opened', Colors.green);
       }
-      Future.delayed(const Duration(seconds: 5), () => html.Url.revokeObjectUrl(blobUrl));
+      Future.delayed(
+          const Duration(seconds: 5), () => html.Url.revokeObjectUrl(blobUrl));
     } else {
       // Mobile — save to temp directory and open with system viewer
       final dir = await getTemporaryDirectory();
@@ -63,7 +65,8 @@ Future<void> fetchAndHandleFile(
 }
 
 /// Share plain text summary of a document.
-Future<void> shareText(BuildContext context, String text, String subject) async {
+Future<void> shareText(
+    BuildContext context, String text, String subject) async {
   try {
     await Share.share(text, subject: subject);
   } catch (e) {
@@ -73,10 +76,5 @@ Future<void> shareText(BuildContext context, String text, String subject) async 
 
 void _snack(BuildContext context, String msg, Color color) {
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(msg),
-    backgroundColor: color,
-    behavior: SnackBarBehavior.floating,
-    duration: const Duration(seconds: 2),
-  ));
+  AppSnackbar.show(context, message: msg);
 }

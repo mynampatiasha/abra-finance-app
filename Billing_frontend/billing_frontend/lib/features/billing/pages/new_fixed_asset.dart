@@ -1,3 +1,4 @@
+import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 // NEW / EDIT FIXED ASSET PAGE
 // ============================================================================
@@ -9,8 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class NewFixedAssetPage extends StatefulWidget {
-  final String   baseUrl;
-  final String   token;
+  final String baseUrl;
+  final String token;
   final Map<String, dynamic>? existingAsset; // null = create mode
   const NewFixedAssetPage({
     super.key,
@@ -24,56 +25,61 @@ class NewFixedAssetPage extends StatefulWidget {
 }
 
 class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
-
-  final _formKey   = GlobalKey<FormState>();
-  bool  _saving    = false;
-  bool  _loadingCOA= false;
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+  bool _loadingCOA = false;
 
   // ── Controllers ───────────────────────────────────────────────────────────
-  final _assetNameCtrl        = TextEditingController();
-  final _descCtrl             = TextEditingController();
-  final _serialCtrl           = TextEditingController();
-  final _vendorCtrl           = TextEditingController();
-  final _assetCostCtrl        = TextEditingController();
-  final _salvageCtrl          = TextEditingController();
-  final _usefulLifeCtrl       = TextEditingController(text: '60');
-  final _depRateCtrl          = TextEditingController(text: '20');
-  final _notesCtrl            = TextEditingController();
-  final _assetAccCtrl         = TextEditingController();
-  final _depAccCtrl           = TextEditingController();
-  final _expAccCtrl           = TextEditingController(text: 'Depreciation Expense');
+  final _assetNameCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  final _serialCtrl = TextEditingController();
+  final _vendorCtrl = TextEditingController();
+  final _assetCostCtrl = TextEditingController();
+  final _salvageCtrl = TextEditingController();
+  final _usefulLifeCtrl = TextEditingController(text: '60');
+  final _depRateCtrl = TextEditingController(text: '20');
+  final _notesCtrl = TextEditingController();
+  final _assetAccCtrl = TextEditingController();
+  final _depAccCtrl = TextEditingController();
+  final _expAccCtrl = TextEditingController(text: 'Depreciation Expense');
 
   // ── Dropdowns ─────────────────────────────────────────────────────────────
-  String  _assetType           = 'IT Equipment';
-  String  _depMethod           = 'straight_line';
-  String  _depFrequency        = 'yearly';
+  String _assetType = 'IT Equipment';
+  String _depMethod = 'straight_line';
+  String _depFrequency = 'yearly';
   String? _paidThrough;
-  String  _purchaseDate        = DateTime.now().toIso8601String().split('T')[0];
-  String  _depStartDate        = DateTime.now().toIso8601String().split('T')[0];
+  String _purchaseDate = DateTime.now().toIso8601String().split('T')[0];
+  String _depStartDate = DateTime.now().toIso8601String().split('T')[0];
 
   // ── COA accounts ──────────────────────────────────────────────────────────
   List<Map<String, dynamic>> _bankAccounts = [];
-  List<Map<String, dynamic>> _coaAccounts  = [];
+  List<Map<String, dynamic>> _coaAccounts = [];
 
   // ── Options ───────────────────────────────────────────────────────────────
   static const _assetTypes = [
-    'IT Equipment', 'Furniture & Fixtures', 'Machinery',
-    'Vehicle', 'Building', 'Land', 'Office Equipment', 'Other',
+    'IT Equipment',
+    'Furniture & Fixtures',
+    'Machinery',
+    'Vehicle',
+    'Building',
+    'Land',
+    'Office Equipment',
+    'Other',
   ];
   static const _depMethods = [
-    {'value': 'straight_line',    'label': 'Straight Line'},
-    {'value': 'declining_balance','label': 'Declining Balance'},
-    {'value': 'none',             'label': 'No Depreciation'},
+    {'value': 'straight_line', 'label': 'Straight Line'},
+    {'value': 'declining_balance', 'label': 'Declining Balance'},
+    {'value': 'none', 'label': 'No Depreciation'},
   ];
   static const _depFreqs = [
-    {'value': 'yearly',  'label': 'Yearly'},
+    {'value': 'yearly', 'label': 'Yearly'},
     {'value': 'monthly', 'label': 'Monthly'},
   ];
 
   Map<String, String> get _headers => {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer ${widget.token}',
-  };
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${widget.token}',
+      };
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   @override
@@ -86,33 +92,44 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
   @override
   void dispose() {
     for (final c in [
-      _assetNameCtrl, _descCtrl, _serialCtrl, _vendorCtrl, _assetCostCtrl,
-      _salvageCtrl, _usefulLifeCtrl, _depRateCtrl, _notesCtrl,
-      _assetAccCtrl, _depAccCtrl, _expAccCtrl,
-    ]) { c.dispose(); }
+      _assetNameCtrl,
+      _descCtrl,
+      _serialCtrl,
+      _vendorCtrl,
+      _assetCostCtrl,
+      _salvageCtrl,
+      _usefulLifeCtrl,
+      _depRateCtrl,
+      _notesCtrl,
+      _assetAccCtrl,
+      _depAccCtrl,
+      _expAccCtrl,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _populateExisting() {
     final a = widget.existingAsset!;
-    _assetNameCtrl.text  = a['assetName']         ?? '';
-    _descCtrl.text       = a['description']        ?? '';
-    _serialCtrl.text     = a['serialNumber']       ?? '';
-    _vendorCtrl.text     = a['vendor']             ?? '';
-    _assetCostCtrl.text  = a['assetCost']?.toString() ?? '';
-    _salvageCtrl.text    = a['salvageValue']?.toString() ?? '0';
+    _assetNameCtrl.text = a['assetName'] ?? '';
+    _descCtrl.text = a['description'] ?? '';
+    _serialCtrl.text = a['serialNumber'] ?? '';
+    _vendorCtrl.text = a['vendor'] ?? '';
+    _assetCostCtrl.text = a['assetCost']?.toString() ?? '';
+    _salvageCtrl.text = a['salvageValue']?.toString() ?? '0';
     _usefulLifeCtrl.text = a['usefulLifeMonths']?.toString() ?? '60';
-    _depRateCtrl.text    = a['depreciationRate']?.toString() ?? '20';
-    _notesCtrl.text      = a['notes']              ?? '';
-    _assetAccCtrl.text   = a['assetAccountName']   ?? '';
-    _depAccCtrl.text     = a['depreciationAccountName'] ?? '';
-    _expAccCtrl.text     = a['expenseAccountName'] ?? 'Depreciation Expense';
-    _assetType           = a['assetType']          ?? 'IT Equipment';
-    _depMethod           = a['depreciationMethod'] ?? 'straight_line';
-    _depFrequency        = a['depreciationFrequency'] ?? 'yearly';
-    _purchaseDate        = a['purchaseDate']        ?? _purchaseDate;
-    _depStartDate        = a['depreciationStartDate'] ?? _purchaseDate;
-    _paidThrough         = a['paidThrough'];
+    _depRateCtrl.text = a['depreciationRate']?.toString() ?? '20';
+    _notesCtrl.text = a['notes'] ?? '';
+    _assetAccCtrl.text = a['assetAccountName'] ?? '';
+    _depAccCtrl.text = a['depreciationAccountName'] ?? '';
+    _expAccCtrl.text = a['expenseAccountName'] ?? 'Depreciation Expense';
+    _assetType = a['assetType'] ?? 'IT Equipment';
+    _depMethod = a['depreciationMethod'] ?? 'straight_line';
+    _depFrequency = a['depreciationFrequency'] ?? 'yearly';
+    _purchaseDate = a['purchaseDate'] ?? _purchaseDate;
+    _depStartDate = a['depreciationStartDate'] ?? _purchaseDate;
+    _paidThrough = a['paidThrough'];
   }
 
   // ── Load COA & Bank Accounts ──────────────────────────────────────────────
@@ -128,11 +145,10 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
         final data = jsonDecode(bankRes.body);
         setState(() {
           _bankAccounts = List<Map<String, dynamic>>.from(
-            (data['data'] ?? data['accounts'] ?? []).map((a) => {
-              'id':   a['_id'] ?? a['id'] ?? '',
-              'name': a['accountName'] ?? a['name'] ?? '',
-            })
-          );
+              (data['data'] ?? data['accounts'] ?? []).map((a) => {
+                    'id': a['_id'] ?? a['id'] ?? '',
+                    'name': a['accountName'] ?? a['name'] ?? '',
+                  }));
         });
       }
     } catch (e) {
@@ -144,7 +160,8 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
 
   // ── Auto-fill account names when asset name changes ───────────────────────
   void _onAssetNameChanged(String name) {
-    if (_assetAccCtrl.text.isEmpty || _assetAccCtrl.text.contains('Fixed Asset')) {
+    if (_assetAccCtrl.text.isEmpty ||
+        _assetAccCtrl.text.contains('Fixed Asset')) {
       _assetAccCtrl.text = '$_assetType - $name';
     }
     if (_depAccCtrl.text.isEmpty || _depAccCtrl.text.contains('Accumulated')) {
@@ -155,15 +172,16 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
   // ── Date Picker ───────────────────────────────────────────────────────────
   Future<String?> _pickDate(String initial) async {
     final parts = initial.split('-');
-    final init  = parts.length == 3
-        ? DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]))
+    final init = parts.length == 3
+        ? DateTime(
+            int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]))
         : DateTime.now();
 
     final picked = await showDatePicker(
-      context:     context,
+      context: context,
       initialDate: init,
-      firstDate:   DateTime(2000),
-      lastDate:    DateTime(2100),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
     );
     return picked?.toIso8601String().split('T')[0];
   }
@@ -175,39 +193,43 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
 
     try {
       final body = {
-        'assetName':              _assetNameCtrl.text.trim(),
-        'assetType':              _assetType,
-        'description':            _descCtrl.text.trim(),
-        'serialNumber':           _serialCtrl.text.trim(),
-        'vendor':                 _vendorCtrl.text.trim(),
-        'purchaseDate':           _purchaseDate,
-        'assetCost':              double.tryParse(_assetCostCtrl.text) ?? 0,
-        'paidThrough':            _paidThrough,
-        'assetAccountName':       _assetAccCtrl.text.trim(),
-        'depreciationAccountName':_depAccCtrl.text.trim(),
-        'expenseAccountName':     _expAccCtrl.text.trim(),
-        'depreciationMethod':     _depMethod,
-        'depreciationFrequency':  _depFrequency,
-        'usefulLifeMonths':       int.tryParse(_usefulLifeCtrl.text) ?? 60,
-        'salvageValue':           double.tryParse(_salvageCtrl.text) ?? 0,
-        'depreciationRate':       double.tryParse(_depRateCtrl.text) ?? 20,
-        'depreciationStartDate':  _depStartDate,
-        'notes':                  _notesCtrl.text.trim(),
+        'assetName': _assetNameCtrl.text.trim(),
+        'assetType': _assetType,
+        'description': _descCtrl.text.trim(),
+        'serialNumber': _serialCtrl.text.trim(),
+        'vendor': _vendorCtrl.text.trim(),
+        'purchaseDate': _purchaseDate,
+        'assetCost': double.tryParse(_assetCostCtrl.text) ?? 0,
+        'paidThrough': _paidThrough,
+        'assetAccountName': _assetAccCtrl.text.trim(),
+        'depreciationAccountName': _depAccCtrl.text.trim(),
+        'expenseAccountName': _expAccCtrl.text.trim(),
+        'depreciationMethod': _depMethod,
+        'depreciationFrequency': _depFrequency,
+        'usefulLifeMonths': int.tryParse(_usefulLifeCtrl.text) ?? 60,
+        'salvageValue': double.tryParse(_salvageCtrl.text) ?? 0,
+        'depreciationRate': double.tryParse(_depRateCtrl.text) ?? 20,
+        'depreciationStartDate': _depStartDate,
+        'notes': _notesCtrl.text.trim(),
       };
 
-      final isEdit   = widget.existingAsset != null;
-      final id       = widget.existingAsset?['_id'] ?? '';
-      final url      = isEdit
+      final isEdit = widget.existingAsset != null;
+      final id = widget.existingAsset?['_id'] ?? '';
+      final url = isEdit
           ? '${widget.baseUrl}/api/finance/fixed-assets/$id'
           : '${widget.baseUrl}/api/finance/fixed-assets';
 
       final res = isEdit
-          ? await http.put(Uri.parse(url), headers: _headers, body: jsonEncode(body))
-          : await http.post(Uri.parse(url), headers: _headers, body: jsonEncode(body));
+          ? await http.put(Uri.parse(url),
+              headers: _headers, body: jsonEncode(body))
+          : await http.post(Uri.parse(url),
+              headers: _headers, body: jsonEncode(body));
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 || res.statusCode == 201) {
-        _showSnack(isEdit ? 'Asset updated successfully' : 'Asset created successfully');
+        _showSnack(isEdit
+            ? 'Asset updated successfully'
+            : 'Asset created successfully');
         if (mounted) Navigator.pop(context, true);
       } else {
         _showSnack(data['message'] ?? 'Error saving asset', error: true);
@@ -221,10 +243,7 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
 
   void _showSnack(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:         Text(msg),
-      backgroundColor: error ? Colors.red : Colors.green,
-    ));
+    AppSnackbar.show(context, message: msg, isError: true);
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -244,14 +263,16 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
             padding: const EdgeInsets.only(right: 12),
             child: _saving
                 ? const SizedBox(
-                    width: 24, height: 24,
+                    width: 24,
+                    height: 24,
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : ElevatedButton(
                     onPressed: _save,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1A1A2E),
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     child: const Text('Save Asset'),
                   ),
@@ -265,14 +286,17 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
           children: [
             _section('Basic Information', [
               _field('Asset Name *', _assetNameCtrl,
-                  validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
+                  validator: (v) =>
+                      (v?.trim().isEmpty ?? true) ? 'Required' : null,
                   onChanged: _onAssetNameChanged),
               const SizedBox(height: 12),
               _dropdown<String>(
-                label:   'Asset Type *',
-                value:   _assetType,
-                items:   _assetTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                onChanged:(v) => setState(() => _assetType = v ?? _assetType),
+                label: 'Asset Type *',
+                value: _assetType,
+                items: _assetTypes
+                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                    .toList(),
+                onChanged: (v) => setState(() => _assetType = v ?? _assetType),
               ),
               const SizedBox(height: 12),
               _field('Description', _descCtrl, maxLines: 2),
@@ -283,25 +307,23 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
                 Expanded(child: _field('Vendor', _vendorCtrl)),
               ]),
             ]),
-
             _section('Purchase Details', [
               Row(children: [
                 Expanded(
                   child: _dateTile('Purchase Date', _purchaseDate,
                       onTap: () async {
-                        final d = await _pickDate(_purchaseDate);
-                        if (d != null) setState(() => _purchaseDate = d);
-                      }),
+                    final d = await _pickDate(_purchaseDate);
+                    if (d != null) setState(() => _purchaseDate = d);
+                  }),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _field('Asset Cost (₹) *', _assetCostCtrl,
-                      keyboardType: TextInputType.number,
-                      validator: (v) {
-                        if (v?.trim().isEmpty ?? true) return 'Required';
-                        if (double.tryParse(v!) == null) return 'Invalid number';
-                        return null;
-                      }),
+                      keyboardType: TextInputType.number, validator: (v) {
+                    if (v?.trim().isEmpty ?? true) return 'Required';
+                    if (double.tryParse(v!) == null) return 'Invalid number';
+                    return null;
+                  }),
                 ),
               ]),
               const SizedBox(height: 12),
@@ -313,48 +335,59 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
                       decoration: const InputDecoration(
                         labelText: 'Paid Through (optional)',
                         border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                       ),
                       items: [
-                        const DropdownMenuItem<String>(value: null, child: Text('-- Select Account --')),
+                        const DropdownMenuItem<String>(
+                            value: null, child: Text('-- Select Account --')),
                         ..._bankAccounts.map((a) => DropdownMenuItem<String>(
-                          value: a['id'] as String,
-                          child: Text(a['name'] as String),
-                        )),
+                              value: a['id'] as String,
+                              child: Text(a['name'] as String),
+                            )),
                       ],
                       onChanged: (v) => setState(() => _paidThrough = v),
                     ),
             ]),
-
             _section('Depreciation Settings', [
               _dropdown<String>(
-                label:    'Depreciation Method *',
-                value:    _depMethod,
-                items:    _depMethods.map((m) => DropdownMenuItem(
-                  value: m['value'], child: Text(m['label']!),
-                )).toList(),
-                onChanged:(v) => setState(() => _depMethod = v ?? _depMethod),
+                label: 'Depreciation Method *',
+                value: _depMethod,
+                items: _depMethods
+                    .map((m) => DropdownMenuItem(
+                          value: m['value'],
+                          child: Text(m['label']!),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => _depMethod = v ?? _depMethod),
               ),
               if (_depMethod != 'none') ...[
                 const SizedBox(height: 12),
                 _dropdown<String>(
-                  label:    'Depreciation Frequency',
-                  value:    _depFrequency,
-                  items:    _depFreqs.map((f) => DropdownMenuItem(
-                    value: f['value'], child: Text(f['label']!),
-                  )).toList(),
-                  onChanged:(v) => setState(() => _depFrequency = v ?? _depFrequency),
+                  label: 'Depreciation Frequency',
+                  value: _depFrequency,
+                  items: _depFreqs
+                      .map((f) => DropdownMenuItem(
+                            value: f['value'],
+                            child: Text(f['label']!),
+                          ))
+                      .toList(),
+                  onChanged: (v) =>
+                      setState(() => _depFrequency = v ?? _depFrequency),
                 ),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
                     child: _field('Useful Life (months) *', _usefulLifeCtrl,
                         keyboardType: TextInputType.number,
-                        validator: (v) => (int.tryParse(v ?? '') == null) ? 'Enter months' : null),
+                        validator: (v) => (int.tryParse(v ?? '') == null)
+                            ? 'Enter months'
+                            : null),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: _field('Salvage Value (₹)', _salvageCtrl,
-                      keyboardType: TextInputType.number)),
+                  Expanded(
+                      child: _field('Salvage Value (₹)', _salvageCtrl,
+                          keyboardType: TextInputType.number)),
                 ]),
                 if (_depMethod == 'declining_balance') ...[
                   const SizedBox(height: 12),
@@ -364,27 +397,26 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
                 const SizedBox(height: 12),
                 _dateTile('Depreciation Start Date', _depStartDate,
                     onTap: () async {
-                      final d = await _pickDate(_depStartDate);
-                      if (d != null) setState(() => _depStartDate = d);
-                    }),
+                  final d = await _pickDate(_depStartDate);
+                  if (d != null) setState(() => _depStartDate = d);
+                }),
               ],
             ]),
-
             _section('COA Accounts', [
-              _infoChip('These COA accounts will be auto-created if they don\'t exist.'),
+              _infoChip(
+                  'These COA accounts will be auto-created if they don\'t exist.'),
               const SizedBox(height: 12),
               _field('Asset Account Name *', _assetAccCtrl,
-                  validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null),
+                  validator: (v) =>
+                      (v?.trim().isEmpty ?? true) ? 'Required' : null),
               const SizedBox(height: 12),
               _field('Accumulated Depreciation Account', _depAccCtrl),
               const SizedBox(height: 12),
               _field('Depreciation Expense Account', _expAccCtrl),
             ]),
-
             _section('Notes', [
               _field('Notes (optional)', _notesCtrl, maxLines: 3),
             ]),
-
             const SizedBox(height: 80),
           ],
         ),
@@ -395,11 +427,13 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
   // ── Section wrapper ───────────────────────────────────────────────────────
   Widget _section(String title, List<Widget> children) {
     return Container(
-      margin:      const EdgeInsets.only(bottom: 16),
-      decoration:  BoxDecoration(
-        color:        Colors.white,
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow:    [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,7 +441,9 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
             child: Text(title,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
                     color: Color(0xFF1A1A2E))),
           ),
           const Divider(height: 1),
@@ -421,22 +457,25 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
   }
 
   // ── Field helpers ─────────────────────────────────────────────────────────
-  Widget _field(String label, TextEditingController ctrl, {
+  Widget _field(
+    String label,
+    TextEditingController ctrl, {
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
     String? Function(String?)? validator,
     void Function(String)? onChanged,
   }) {
     return TextFormField(
-      controller:    ctrl,
-      maxLines:      maxLines,
-      keyboardType:  keyboardType,
-      onChanged:     onChanged,
-      validator:     validator,
+      controller: ctrl,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      onChanged: onChanged,
+      validator: validator,
       decoration: InputDecoration(
-        labelText:      label,
-        border:         const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        labelText: label,
+        border: const OutlineInputBorder(),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       ),
     );
   }
@@ -448,13 +487,14 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
     required void Function(T?) onChanged,
   }) {
     return DropdownButtonFormField<T>(
-      value:     value,
+      value: value,
       decoration: InputDecoration(
-        labelText:      label,
-        border:         const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        labelText: label,
+        border: const OutlineInputBorder(),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       ),
-      items:     items,
+      items: items,
       onChanged: onChanged,
     );
   }
@@ -467,7 +507,8 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
           labelText: label,
           border: const OutlineInputBorder(),
           suffixIcon: const Icon(Icons.calendar_today, size: 18),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         ),
         child: Text(value, style: const TextStyle(fontSize: 14)),
       ),
@@ -476,16 +517,19 @@ class _NewFixedAssetPageState extends State<NewFixedAssetPage> {
 
   Widget _infoChip(String msg) {
     return Container(
-      padding:    const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color:        const Color(0xFFE3F2FD),
+        color: const Color(0xFFE3F2FD),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 16, color: Color(0xFF1565C0)),
           const SizedBox(width: 8),
-          Expanded(child: Text(msg, style: const TextStyle(fontSize: 12, color: Color(0xFF1565C0)))),
+          Expanded(
+              child: Text(msg,
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF1565C0)))),
         ],
       ),
     );

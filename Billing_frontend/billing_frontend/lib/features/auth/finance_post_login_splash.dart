@@ -23,9 +23,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 // ── Finance navy color system ─────────────────────────────────────────────────
-const Color _navyDark   = Color(0xFF0D1B3E);
-const Color _navyMid    = Color(0xFF1A3A6B);
-const Color _navyLight  = Color(0xFF2463AE);
+const Color _navyDark = Color(0xFF0D1B3E);
+const Color _navyMid = Color(0xFF1A3A6B);
+const Color _navyLight = Color(0xFF2463AE);
 const Color _navyAccent = Color(0xFF3D8EFF);
 const Color _goldAccent = Color(0xFFFBBF24);
 const Color _greenAccent = Color(0xFF00C896);
@@ -43,13 +43,11 @@ class FinancePostLoginSplash extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<FinancePostLoginSplash> createState() =>
-      _FinancePostLoginSplashState();
+  State<FinancePostLoginSplash> createState() => _FinancePostLoginSplashState();
 }
 
 class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
     with TickerProviderStateMixin {
-
   // Ripple rings — 4 staggered expanding rings
   late final AnimationController _rippleCtrl;
   late final List<Animation<double>> _rippleScales;
@@ -85,22 +83,21 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
     super.initState();
 
     // Orbiting bg
-    _orbitCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 10))
-      ..repeat();
+    _orbitCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 10))
+          ..repeat();
 
     // Ripple — 4 rings staggered
     _rippleCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 2400));
+        vsync: this, duration: const Duration(milliseconds: 2400));
 
     _rippleScales = List.generate(
         4,
         (i) => Tween<double>(begin: 0.2, end: 4.0).animate(
               CurvedAnimation(
                 parent: _rippleCtrl,
-                curve: Interval(i * 0.14, 0.82 + i * 0.05,
-                    curve: Curves.easeOut),
+                curve:
+                    Interval(i * 0.14, 0.82 + i * 0.05, curve: Curves.easeOut),
               ),
             ));
 
@@ -109,52 +106,42 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
         (i) => Tween<double>(begin: 0.4, end: 0.0).animate(
               CurvedAnimation(
                 parent: _rippleCtrl,
-                curve: Interval(i * 0.14, 0.88 + i * 0.04,
-                    curve: Curves.easeOut),
+                curve:
+                    Interval(i * 0.14, 0.88 + i * 0.04, curve: Curves.easeOut),
               ),
             ));
 
     // Central icon
     _iconCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 700));
-    _iconScale = Tween<double>(begin: 0.3, end: 1.0).animate(
-        CurvedAnimation(parent: _iconCtrl, curve: Curves.elasticOut));
-    _iconFade =
-        CurvedAnimation(parent: _iconCtrl, curve: Curves.easeOut);
+        vsync: this, duration: const Duration(milliseconds: 700));
+    _iconScale = Tween<double>(begin: 0.3, end: 1.0)
+        .animate(CurvedAnimation(parent: _iconCtrl, curve: Curves.elasticOut));
+    _iconFade = CurvedAnimation(parent: _iconCtrl, curve: Curves.easeOut);
 
     // Text
     _textCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 600));
-    _textFade =
-        CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut);
-    _textSlide =
-        Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
-            .animate(CurvedAnimation(
-                parent: _textCtrl, curve: Curves.easeOutCubic));
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _textFade = CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut);
+    _textSlide = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
+        .animate(
+            CurvedAnimation(parent: _textCtrl, curve: Curves.easeOutCubic));
 
     // Check
     _checkCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 500));
-    _checkScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _checkCtrl, curve: Curves.elasticOut));
+        vsync: this, duration: const Duration(milliseconds: 500));
+    _checkScale = Tween<double>(begin: 0.0, end: 1.0)
+        .animate(CurvedAnimation(parent: _checkCtrl, curve: Curves.elasticOut));
 
     // Ticker count-up
     _tickerCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 1200));
-    _tickerAnim =
-        CurvedAnimation(parent: _tickerCtrl, curve: Curves.easeOut);
+        vsync: this, duration: const Duration(milliseconds: 1200));
+    _tickerAnim = CurvedAnimation(parent: _tickerCtrl, curve: Curves.easeOut);
 
     // Exit
     _exitCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 700));
-    _exitFade = Tween<double>(begin: 1.0, end: 0.0).animate(
-        CurvedAnimation(parent: _exitCtrl, curve: Curves.easeInCubic));
+        vsync: this, duration: const Duration(milliseconds: 700));
+    _exitFade = Tween<double>(begin: 1.0, end: 0.0)
+        .animate(CurvedAnimation(parent: _exitCtrl, curve: Curves.easeInCubic));
 
     _runSequence();
   }
@@ -246,8 +233,8 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: _navyAccent.withOpacity(
-                                    _rippleOpacities[i].value),
+                                color: _navyAccent
+                                    .withOpacity(_rippleOpacities[i].value),
                                 width: 1.5,
                               ),
                             ),
@@ -304,16 +291,14 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
                                     width: 1.5),
                                 boxShadow: [
                                   BoxShadow(
-                                    color:
-                                        Colors.black.withOpacity(0.3),
+                                    color: Colors.black.withOpacity(0.3),
                                     blurRadius: 20,
                                     offset: const Offset(0, 8),
                                   ),
                                 ],
                               ),
                               child: Column(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center,
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   // Chart bars icon (finance-themed)
                                   _FinanceIconWidget(),
@@ -333,20 +318,17 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
                                   decoration: BoxDecoration(
                                     color: _greenAccent,
                                     shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: _navyDark, width: 2),
+                                    border:
+                                        Border.all(color: _navyDark, width: 2),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: _greenAccent
-                                            .withOpacity(0.6),
+                                        color: _greenAccent.withOpacity(0.6),
                                         blurRadius: 12,
                                       ),
                                     ],
                                   ),
-                                  child: const Icon(
-                                      Icons.check_rounded,
-                                      color: Colors.white,
-                                      size: 16),
+                                  child: const Icon(Icons.check_rounded,
+                                      color: Colors.white, size: 16),
                                 ),
                               ),
                             ),
@@ -397,10 +379,8 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
-                                      Icons.corporate_fare_rounded,
-                                      color: _navyAccent,
-                                      size: 13),
+                                  const Icon(Icons.corporate_fare_rounded,
+                                      color: _navyAccent, size: 13),
                                   const SizedBox(width: 7),
                                   Text(
                                     widget.orgName,
@@ -460,11 +440,9 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
                                   horizontal: 16, vertical: 8),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.06),
-                                borderRadius:
-                                    BorderRadius.circular(50),
+                                borderRadius: BorderRadius.circular(50),
                                 border: Border.all(
-                                    color:
-                                        Colors.white.withOpacity(0.1)),
+                                    color: Colors.white.withOpacity(0.1)),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -523,14 +501,11 @@ class _FinancePostLoginSplashState extends State<FinancePostLoginSplash>
           const SizedBox(height: 6),
           Text(value,
               style: TextStyle(
-                  color: color,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800)),
+                  color: color, fontSize: 18, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
           Text(label,
               style: TextStyle(
-                  color: Colors.white.withOpacity(0.5),
-                  fontSize: 10)),
+                  color: Colors.white.withOpacity(0.5), fontSize: 10)),
         ],
       ),
     );
@@ -567,8 +542,8 @@ class _FinanceIconWidgetState extends State<_FinanceIconWidget>
         (i) => Tween<double>(begin: 0, end: _heights[i]).animate(
               CurvedAnimation(
                 parent: _ctrl,
-                curve: Interval(i * 0.1, 0.6 + i * 0.08,
-                    curve: Curves.elasticOut),
+                curve:
+                    Interval(i * 0.1, 0.6 + i * 0.08, curve: Curves.elasticOut),
               ),
             ));
     _ctrl.forward();
@@ -623,11 +598,10 @@ class _LoadingDotsState extends State<_LoadingDots>
     _ctrls = List.generate(
         3,
         (_) => AnimationController(
-            vsync: this,
-            duration: const Duration(milliseconds: 500)));
+            vsync: this, duration: const Duration(milliseconds: 500)));
     _anims = _ctrls
-        .map((c) => Tween<double>(begin: 0.25, end: 1.0).animate(
-            CurvedAnimation(parent: c, curve: Curves.easeInOut)))
+        .map((c) => Tween<double>(begin: 0.25, end: 1.0)
+            .animate(CurvedAnimation(parent: c, curve: Curves.easeInOut)))
         .toList();
     for (int i = 0; i < 3; i++) {
       Future.delayed(Duration(milliseconds: i * 170), () {
@@ -698,8 +672,7 @@ class _SplashBgPainter extends CustomPainter {
     final cx = size.width / 2;
     final cy = size.height / 2;
     for (int i = 0; i < 3; i++) {
-      final angle =
-          (progress * math.pi * 2) + (i * math.pi * 2 / 3);
+      final angle = (progress * math.pi * 2) + (i * math.pi * 2 / 3);
       final r = size.width * 0.32;
       final glow = Paint()
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 70)
@@ -709,9 +682,7 @@ class _SplashBgPainter extends CustomPainter {
           const Color(0xFF2463AE).withOpacity(0.09),
         ][i];
       canvas.drawCircle(
-          Offset(cx + r * math.cos(angle),
-                 cy + r * math.sin(angle)),
-          90, glow);
+          Offset(cx + r * math.cos(angle), cy + r * math.sin(angle)), 90, glow);
     }
 
     // Top accent line
@@ -728,6 +699,5 @@ class _SplashBgPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SplashBgPainter old) =>
-      old.progress != progress;
+  bool shouldRepaint(_SplashBgPainter old) => old.progress != progress;
 }
