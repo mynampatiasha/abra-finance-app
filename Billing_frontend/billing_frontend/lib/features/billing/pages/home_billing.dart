@@ -187,24 +187,24 @@ class _HomeBillingState extends State<HomeBilling> {
 
   void _goToExpenseCategory(String categoryName, [List<String>? othersList]) {
     try {
-      final params = <String, String>{};
-      String reportKey = 'expense-details';
-      String reportName = 'Expense Details';
+      // ── If Others clicked, first show the category list dialog (Step 1) ──
+      if (categoryName == 'Others' && othersList != null && othersList.isNotEmpty) {
+        _showOthersCategoriesDialog(othersList);
+        return;
+      }
 
-      if (categoryName == 'Others' && othersList != null) {
-        params['expenseAccount'] = othersList.where((n) => n.isNotEmpty).join('||');
-      } else if (categoryName != 'Others') {
+      // ── Navigate directly to expense-details for a specific category ──
+      final params = <String, String>{};
+      if (categoryName != 'Others') {
         params['expenseAccount'] = categoryName;
       }
-      
       params['period'] = _periodTopExpenses;
 
       Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => ReportViewerPage(
-              report:
-                  ReportMeta(key: reportKey, name: reportName),
+              report: ReportMeta(key: 'expense-details', name: 'Expense Details'),
               orgName: _orgName,
               initialParams: params.isEmpty ? null : params,
             ),
@@ -212,6 +212,149 @@ class _HomeBillingState extends State<HomeBilling> {
     } catch (e) {
       AppSnackbar.show(context, message: 'Error: $e');
     }
+  }
+
+  /// Step 1: Show a dialog listing the expense categories grouped under "Others".
+  /// Tapping a category navigates to Expense Details for that category (Step 2).
+  void _showOthersCategoriesDialog(List<String> categoryNames) {
+    // Filter out empty names and sort alphabetically
+    final cats = categoryNames.where((n) => n.isNotEmpty).toList()..sort();
+
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: Container(
+          width: 480,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1E3A8A),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.pie_chart_outline, color: Colors.white, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Other Expense Categories',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Tap a category to view its expenses',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.75),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              // Category list
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: cats.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
+                  itemBuilder: (_, i) {
+                    final catName = cats[i];
+                    return ListTile(
+                      leading: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: _kDonutColors[i % _kDonutColors.length],
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      title: Text(
+                        catName,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF1E3A8A),
+                        ),
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF94A3B8)),
+                      onTap: () {
+                        Navigator.pop(context); // close dialog
+                        // Step 2: navigate to expense details for this category
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReportViewerPage(
+                              report: ReportMeta(key: 'expense-details', name: 'Expense Details — $catName'),
+                              orgName: _orgName,
+                              initialParams: {
+                                'expenseAccount': catName,
+                                'period': _periodTopExpenses,
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              // Footer hint
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: Colors.grey[500]),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${cats.length} categories grouped under "Others"',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _goToBankAccount(Map<String, dynamic> bank) {
