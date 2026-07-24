@@ -770,11 +770,13 @@ router.get('/sales-by-salesperson', async (req, res) => {
 // FIX-2: AR Aging Summary — adds customers[] rows so table renders
 router.get('/ar-aging-summary', async (req, res) => {
   try {
-    const today = new Date();
+    const { start, end } = parseDateRange(req.query);
+    const today = end;
     const scope = orgScope(req);
     const Invoice = col('Invoice', 'invoices');
 
     const invoices = await Invoice.find({
+      invoiceDate: { $gte: start, $lte: end },
       status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] },
       amountDue: { $gt: 0 },
       ...scope
@@ -811,6 +813,7 @@ router.get('/ar-aging-summary', async (req, res) => {
 
     const total = Object.values(buckets).reduce((s, v) => s + v, 0);
     const customers = Object.values(customerMap).map(c => ({
+      _id: c.customerId, // ADDED so frontend can drill down without showing in table
       customerName: c.customerName,
       currentBalance: fmt(c.current), days1_30Balance: fmt(c.days1_30), days31_60Balance: fmt(c.days31_60),
       days61_90Balance: fmt(c.days61_90), days91PlusBalance: fmt(c.days91Plus), total: fmt(c.total),
@@ -838,10 +841,22 @@ router.get('/ar-aging-summary', async (req, res) => {
 
 router.get('/ar-aging-details', async (req, res) => {
   try {
-    const today = new Date();
+    const { start, end } = parseDateRange(req.query);
+    const today = end;
     const scope = orgScope(req);
+    const query = { invoiceDate: { $gte: start, $lte: end }, status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, amountDue: { $gt: 0 }, ...scope };
+
+    if (req.query.customerId) {
+      const cid = safeObjId(req.query.customerId);
+      if (cid) {
+        query.customerId = cid;
+      } else {
+        query.customerId = req.query.customerId;
+      }
+    }
+
     const Invoice = col('Invoice', 'invoices');
-    const invoices = await Invoice.find({ status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, amountDue: { $gt: 0 }, ...scope }).sort({ dueDate: 1 }).lean();
+    const invoices = await Invoice.find(query).sort({ dueDate: 1 }).lean();
     const rows = invoices.map(inv => {
       const days = Math.floor((today - new Date(inv.dueDate)) / 86400000);
       let bucket;
@@ -1071,11 +1086,13 @@ router.get('/recurring-invoice-details', async (req, res) => {
 // FIX-1: AP Aging Summary — adds vendors[] rows so Flutter table renders
 router.get('/ap-aging-summary', async (req, res) => {
   try {
-    const today = new Date();
+    const { start, end } = parseDateRange(req.query);
+    const today = end;
     const scope = orgScope(req);
     const Bill = col('Bill', 'bills');
 
     const bills = await Bill.find({
+      billDate: { $gte: start, $lte: end },
       status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] },
       amountDue: { $gt: 0 },
       ...scope
@@ -1111,6 +1128,7 @@ router.get('/ap-aging-summary', async (req, res) => {
 
     const total = Object.values(buckets).reduce((s, v) => s + v, 0);
     const vendors = Object.values(vendorMap).map(v => ({
+      _id: v.vendorId, // ADDED so frontend can drill down without showing in table
       vendorName: v.vendorName,
       currentBalance: fmt(v.current), days1_30Balance: fmt(v.days1_30), days31_60Balance: fmt(v.days31_60),
       days61_90Balance: fmt(v.days61_90), days91PlusBalance: fmt(v.days91Plus), total: fmt(v.total),
@@ -1135,10 +1153,22 @@ router.get('/ap-aging-summary', async (req, res) => {
 
 router.get('/ap-aging-details', async (req, res) => {
   try {
-    const today = new Date();
+    const { start, end } = parseDateRange(req.query);
+    const today = end;
     const scope = orgScope(req);
+    const query = { billDate: { $gte: start, $lte: end }, status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope };
+    
+    if (req.query.vendorId) {
+      const vid = safeObjId(req.query.vendorId);
+      if (vid) {
+        query.vendorId = vid;
+      } else {
+        query.vendorId = req.query.vendorId;
+      }
+    }
+
     const Bill = col('Bill', 'bills');
-    const bills = await Bill.find({ status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope }).sort({ dueDate: 1 }).lean();
+    const bills = await Bill.find(query).sort({ dueDate: 1 }).lean();
     const rows = bills.map(b => {
       const days = Math.floor((today - new Date(b.dueDate)) / 86400000);
       let bucket;
