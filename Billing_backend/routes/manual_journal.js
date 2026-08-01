@@ -41,7 +41,7 @@ const journalLineSchema = new mongoose.Schema({
 const manualJournalSchema = new mongoose.Schema({
   orgId:    { type: String, index: true, default: null },
   branchId: { type: String, index: true, default: null },
-  journalNumber: { type: String, required: true, index: true },
+  journalNumber: { type: String, required: true },
   date:          { type: Date, required: true, default: Date.now },
   referenceNumber: { type: String, default: '' },
   notes:         { type: String, default: '' },

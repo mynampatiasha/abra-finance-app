@@ -184,6 +184,11 @@ class BankTransactionService {
         'limit': '$limit',
       });
 
+  // ── Single transaction by ID (for BT deep-links, independent of pagination) ──
+
+  Future<Map<String, dynamic>> getTransactionById(String id) =>
+      _get('/api/finance/banking/transactions/transaction/$id');
+
   // ── COA options ──────────────────────────────────────────────────────────────
 
   Future<List<COAOption>> getCOAOptions(String context) async {

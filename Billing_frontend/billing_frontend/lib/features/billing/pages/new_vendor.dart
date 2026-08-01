@@ -354,9 +354,12 @@ class _NewVendorPageState extends State<NewVendorPage>
                 '${_openingBalAsOf!.year}';
           }
           _gstNumberCtrl.text = v.gstNumber;
-          _gstRegType = v.gstRegistrationType;
-          _placeOfSupply =
-              _kIndianStates.contains(v.placeOfSupply) ? v.placeOfSupply : '';
+          _gstRegType = _kGstRegTypes.firstWhere(
+              (e) => e.toLowerCase().trim() == v.gstRegistrationType.toLowerCase().trim(),
+              orElse: () => '');
+          _placeOfSupply = _kIndianStates.firstWhere(
+              (e) => e.toLowerCase().trim() == v.placeOfSupply.toLowerCase().trim(),
+              orElse: () => '');
           _panNumberCtrl.text = v.panNumber;
           _taxPreference =
               v.taxPreference.isNotEmpty ? v.taxPreference : 'Taxable';
@@ -368,9 +371,9 @@ class _NewVendorPageState extends State<NewVendorPage>
           _bAttentionCtrl.text = v.billingAddress.attention;
           _bStreet1Ctrl.text = v.billingAddress.street;
           _bCityCtrl.text = v.billingAddress.city;
-          _bState = _kIndianStates.contains(v.billingAddress.state)
-              ? v.billingAddress.state
-              : '';
+          _bState = _kIndianStates.firstWhere(
+              (e) => e.toLowerCase().trim() == v.billingAddress.state.toLowerCase().trim(),
+              orElse: () => '');
           _bZipCtrl.text = v.billingAddress.zip;
           _bCountry = _kCountries.contains(v.billingAddress.country)
               ? v.billingAddress.country
@@ -381,9 +384,9 @@ class _NewVendorPageState extends State<NewVendorPage>
           _sAttentionCtrl.text = v.shippingAddress.attention;
           _sStreet1Ctrl.text = v.shippingAddress.street;
           _sCityCtrl.text = v.shippingAddress.city;
-          _sState = _kIndianStates.contains(v.shippingAddress.state)
-              ? v.shippingAddress.state
-              : '';
+          _sState = _kIndianStates.firstWhere(
+              (e) => e.toLowerCase().trim() == v.shippingAddress.state.toLowerCase().trim(),
+              orElse: () => '');
           _sZipCtrl.text = v.shippingAddress.zip;
           _sCountry = _kCountries.contains(v.shippingAddress.country)
               ? v.shippingAddress.country

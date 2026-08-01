@@ -22,6 +22,14 @@ import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'report_detail_page.dart';
 import 'pl_expense_drilldown_page.dart';
+import 'account_detail_page.dart';
+import 'new_expenses.dart';
+import 'new_invoice.dart';
+import 'new_bill.dart';
+import 'new_credit_note.dart';
+import 'new_payment_page.dart';
+import 'new_payment_made.dart';
+import 'new_manual_journal.dart';
 
 // ─── Scroll behaviour ────────────────────────────────────────────────────────
 class _AllDeviceScroll extends MaterialScrollBehavior {
@@ -773,15 +781,25 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
     if (list != null) {
       final hSet = <String>{};
+      bool hasLinks = false;
       for (final r in list) {
-        if (r is Map)
+        if (r is Map) {
+          if (r.containsKey('atId') || r.containsKey('btId')) hasLinks = true;
           hSet.addAll(r.keys.cast<String>().where((k) =>
               !k.startsWith('_') &&
               k != 'id' &&
+              k != 'atId' &&
+              k != 'atType' &&
+              k != 'btId' &&
+              k != 'bankAccountId' &&
               r[k] is! List &&
               r[k] is! Map));
+        }
       }
       _headers = hSet.toList();
+      if (hasLinks) {
+        _headers.add('links');
+      }
       _rows = list.map<Map<String, dynamic>>((r) {
         if (r is Map<String, dynamic>) return r;
         if (r is Map) return Map<String, dynamic>.from(r);
@@ -845,7 +863,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       } catch (_) {}
     }
     final hl = h.toLowerCase();
-    if (hl.contains('day') || hl.contains('bucket')) return s; // Prevent formatting 'Days Overdue' as currency
+    if ((hl.contains('day') || hl.contains('bucket')) && !hl.contains('1-15') && !hl.contains('16-30') && !hl.contains('31-45') && !hl.contains('45 days')) return s; // Prevent formatting 'Days Overdue' as currency
     if (hl.contains('amount') ||
         hl.contains('total') ||
         hl.contains('paid') ||
@@ -858,6 +876,10 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         hl.contains('profit') ||
         hl.contains('loss') ||
         hl.contains('budget') ||
+        hl.contains('1-15') ||
+        hl.contains('16-30') ||
+        hl.contains('31-45') ||
+        hl.contains('45 days') ||
         hl.contains('rate') ||
         hl.contains('price') ||
         hl.contains('billed') ||
@@ -1730,7 +1752,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                       const SizedBox(height: 4),
                       Text(
                           n != null
-                              ? 'Rs. ${n.toStringAsFixed(2)}'
+                              ? ((e.value['label'] ?? '').toLowerCase().contains('count') || (e.value['label'] ?? '').toLowerCase().contains('quantity') || (e.value['label'] ?? '').toLowerCase().contains('percent')
+                                  ? (n % 1 == 0 ? n.toInt().toString() : n.toStringAsFixed(2))
+                                  : '₹${n.toStringAsFixed(2)}')
                               : (e.value['value'] ?? ''),
                           style: TextStyle(
                               fontSize: 17,
@@ -2217,7 +2241,15 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     color: Colors.grey[400],
                     fontStyle: FontStyle.italic)))
       ];
-    return items.asMap().entries.map<Widget>(
+
+    final filtered = items.where((i) {
+      if (i is! Map) return false;
+      final amt = double.tryParse(i['amount']?.toString() ?? '0') ?? 0;
+      return amt != 0;
+    }).toList();
+    if (filtered.isEmpty) return [];
+
+    return filtered.asMap().entries.map<Widget>(
       (e) {
         final item = e.value as Map;
         final accountName = item['accountName']?.toString() ?? '';
@@ -2236,7 +2268,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                   const SizedBox(width: 4),
                   Icon(Icons.open_in_new, size: 10, color: Colors.grey[400]),
                 ])),
-                Text('Rs. ${_fmtNum(amount)}',
+                Text('${_fmtNum(amount)}',
                     style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
@@ -2272,7 +2304,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF374151)))),
-                Text('Rs. ${_fmtNum(grp['total'])}',
+                Text('${_fmtNum(grp['total'])}',
                     style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
@@ -2296,7 +2328,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF374151)))),
-        Text('Rs. ${_fmtNum(val)}',
+        Text('${_fmtNum(val)}',
             style: const TextStyle(
                 fontSize: 17, fontWeight: FontWeight.bold, color: _navy)),
       ]));
@@ -2314,7 +2346,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF374151)))),
-        Text('Rs. ${_fmtNum(val)}',
+        Text('${_fmtNum(val)}',
             style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -2331,7 +2363,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             child: Text(label,
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold, color: _navy))),
-        Text('Rs. ${_fmtNum(val)}',
+        Text('${_fmtNum(val)}',
             style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -2345,7 +2377,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
             child: Text(label,
                 style:
                     const TextStyle(fontSize: 14, color: Color(0xFF374151)))),
-        Text('Rs. ${_fmtNum(val)}',
+        Text('${_fmtNum(val)}',
             style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
@@ -2482,9 +2514,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           'Amount': ''
         });
         for (final i in (s['items'] as List? ?? [])) {
+          final amt = double.tryParse((i as Map)['amount']?.toString() ?? '0') ?? 0;
+          if (amt == 0) continue;
           rows.add({
             'Section': '',
-            'Account': (i as Map)['accountName'],
+            'Account': i['accountName'],
             'Amount': i['amount']
           });
         }
@@ -2711,6 +2745,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     }
                     if (isAccountRow && h != 'accountName')
                       return SizedBox(width: colW);
+                    if (hl == 'links') {
+                      return SizedBox(
+                          width: colW,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: _buildLinksCell(r),
+                          ));
+                    }
                     return SizedBox(
                         width: colW,
                         child: Text(_displayVal(h, v),
@@ -2948,13 +2990,15 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                                     width: colW,
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                                      child: h.toLowerCase() == 'status'
-                                        ? _statusBadge(v?.toString() ?? '')
-                                        : Text(_displayVal(h, v),
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: isAmt
-                                                ? TextAlign.right
-                                                : TextAlign.left,
+                                      child: hl == 'links'
+                                        ? _buildLinksCell(r)
+                                        : hl == 'status'
+                                          ? _statusBadge(v?.toString() ?? '')
+                                          : Text(_displayVal(h, v),
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: isAmt
+                                                  ? TextAlign.right
+                                                  : TextAlign.left,
                                             style: _cellStyle(h, v) ??
                                                 const TextStyle(
                                                     fontSize: 14,
@@ -2974,6 +3018,61 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           ),
         ),
       ]),
+    );
+  }
+
+  Widget _buildLinksCell(Map<String, dynamic> r) {
+    final btId = r['btId']?.toString();
+    final atId = r['atId']?.toString();
+    final bAcctId = r['bankAccountId']?.toString();
+    
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        if (btId != null && bAcctId != null)
+          InkWell(
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => AccountDetailPage(
+                accountId: bAcctId,
+                accountName: 'Bank Account',
+                accountType: 'bank',
+                highlightTransactionId: btId,
+              )));
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(4), border: Border.all(color: const Color(0xFF90CAF9))),
+              child: const Text('BT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+            ),
+          ),
+        if (btId != null && atId != null) const SizedBox(width: 6),
+        if (atId != null)
+          InkWell(
+            onTap: () {
+              final type = r['atType']?.toString() ?? 'Expense';
+              Widget? page;
+              switch (type) {
+                case 'Expense': page = NewExpensePage(expenseId: atId, showAppBar: true); break;
+                case 'Invoice': page = NewInvoiceScreen(invoiceId: atId); break;
+                case 'Bill': page = NewBillScreen(billId: atId); break;
+                case 'CreditNote': page = NewCreditNoteScreen(creditNoteId: atId); break;
+                case 'PaymentReceived': page = NewPaymentPage(paymentId: atId, showAppBar: true); break;
+                case 'PaymentMade': page = NewPaymentMadeScreen(paymentId: atId); break;
+                case 'JournalEntry': page = NewManualJournalPage(journalId: atId); break;
+              }
+              if (page != null) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(4), border: Border.all(color: const Color(0xFFFFCC80))),
+              child: const Text('AT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFE65100))),
+            ),
+          ),
+        if (btId == null && atId == null)
+          const Text('—', style: TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
     );
   }
 
@@ -4037,18 +4136,18 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
 
     const agingCols = [
       'Current',
-      '1-30 Days',
-      '31-60 Days',
-      '61-90 Days',
-      '>90 Days',
+      '1-15 Days',
+      '16-30 Days',
+      '31-45 Days',
+      '> 45 Days',
       'Total'
     ];
     const agingKeys = [
       'current',
-      'days1_30',
-      'days31_60',
-      'days61_90',
-      'days91Plus',
+      'days1_15',
+      'days16_30',
+      'days31_45',
+      'days45Plus',
       'total'
     ];
 
@@ -4122,10 +4221,10 @@ class _AgingTableWidgetState extends State<_AgingTableWidget> {
                       final val =
                           double.tryParse(r[ak]?.toString() ?? '') ?? 0.0;
                       Color c = const Color(0xFF374151);
-                      if (ak == 'days31_60' && val > 0)
+                      if (ak == 'days16_30' && val > 0)
                         c = _orange.withOpacity(0.8);
-                      if (ak == 'days61_90' && val > 0) c = _orange;
-                      if (ak == 'days91Plus' && val > 0) c = _red;
+                      if (ak == 'days31_45' && val > 0) c = _orange;
+                      if (ak == 'days45Plus' && val > 0) c = _red;
                       if (ak == 'total') c = _navy;
                       return SizedBox(
                           width: 110,
@@ -4257,6 +4356,7 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
       } catch (_) {}
     }
     final hl = h.toLowerCase();
+    if (hl.contains('day') || hl.contains('bucket')) return s; // Prevent formatting 'Days Overdue' as currency
     if (hl.contains('debit') ||
         hl.contains('credit') ||
         hl.contains('balance') ||
@@ -4519,10 +4619,10 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
     if (widget.headers.isEmpty) return const SizedBox.shrink();
 
     final colW = widget.headers.length <= 4
-        ? 180.0
+        ? 240.0
         : widget.headers.length <= 7
-            ? 155.0
-            : 130.0;
+            ? 200.0
+            : 170.0;
     final tableW = widget.headers.length * colW + 28;
 
     return Container(
@@ -4579,7 +4679,11 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                           hl.contains('total') ||
                           hl.contains('balance') ||
                           hl.contains('due') ||
-                          hl.contains('paid');
+                          hl.contains('paid') ||
+                          hl.contains('1-15') ||
+                          hl.contains('16-30') ||
+                          hl.contains('31-45') ||
+                          hl.contains('45 days');
                       return SizedBox(
                           width: colW,
                           child: Padding(
@@ -4647,7 +4751,11 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                       hl.contains('due') ||
                                       hl.contains('paid') ||
                                       hl.contains('debit') ||
-                                      hl.contains('credit');
+                                      hl.contains('credit') ||
+                                      hl.contains('1-15') ||
+                                      hl.contains('16-30') ||
+                                      hl.contains('31-45') ||
+                                      hl.contains('45 days');
                                   if (isAccountHeader) {
                                     if (h == 'accountName') {
                                       return SizedBox(
@@ -4697,19 +4805,22 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                   }
                                   return SizedBox(
                                       width: colW,
-                                      child: h.toLowerCase() == 'status'
-                                          ? widget
-                                              .statusBadge(v?.toString() ?? '')
-                                          : Text(widget.displayVal(h, v),
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: isAmt
-                                                  ? TextAlign.right
-                                                  : TextAlign.left,
-                                              style: widget.cellStyle(h, v) ??
-                                                  const TextStyle(
-                                                      fontSize: 14,
-                                                      color:
-                                                          Color(0xFF374151))));
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        child: h.toLowerCase() == 'status'
+                                            ? Align(
+                                                alignment: isAmt ? Alignment.centerRight : Alignment.centerLeft,
+                                                child: widget.statusBadge(v?.toString() ?? ''))
+                                            : Text(widget.displayVal(h, v),
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: isAmt
+                                                    ? TextAlign.right
+                                                    : TextAlign.left,
+                                                style: widget.cellStyle(h, v) ??
+                                                    const TextStyle(
+                                                        fontSize: 14,
+                                                        color: Color(0xFF374151))),
+                                      ));
                                 }),
                                 const SizedBox(width: 14),
                               ]),

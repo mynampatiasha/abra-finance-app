@@ -7,6 +7,7 @@ import 'package:abra_finance/core/utils/app_snackbar.dart';
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/budget_service.dart';
@@ -117,6 +118,7 @@ class NewBudgetScreen extends StatefulWidget {
 
 class _NewBudgetScreenState extends State<NewBudgetScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _hScroll = ScrollController();
   bool _isLoading = false;
   bool _isSaving = false;
 
@@ -177,9 +179,14 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
 
   @override
   void dispose() {
+    _hScroll.dispose();
     _nameCtrl.dispose();
     _notesCtrl.dispose();
-    for (final l in _lines) l.dispose();
+    for (var l in _lines) {
+      for (var c in l.controllers) {
+        c.dispose();
+      }
+    }
     super.dispose();
   }
 
@@ -550,7 +557,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                       style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 12))),
+                          fontSize: 13))),
               const SizedBox(width: 16),
               ..._currentPeriodLabels.map((m) => SizedBox(
                   width: 80,
@@ -558,7 +565,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                       style: const TextStyle(
                           color: Colors.white70,
                           fontWeight: FontWeight.bold,
-                          fontSize: 10),
+                          fontSize: 12),
                       textAlign: TextAlign.center))),
               const SizedBox(width: 16),
               const SizedBox(
@@ -567,7 +574,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                       style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 10),
+                          fontSize: 12),
                       textAlign: TextAlign.right)),
               const SizedBox(width: 48),
             ]);
@@ -613,19 +620,39 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                   itemBuilder: (_, i) => _buildLineMobile(i),
                 );
               }
-              return Scrollbar(
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: List.generate(
-                        _lines.length,
-                        (i) => Column(children: [
-                              _buildLineDesktop(i),
-                              if (i < _lines.length - 1)
-                                Divider(color: Colors.grey.shade100, height: 1),
-                            ])),
+              return Listener(
+                onPointerSignal: (pointerSignal) {
+                  if (pointerSignal is PointerScrollEvent) {
+                    final offset = pointerSignal.scrollDelta.dy;
+                    if (offset != 0) {
+                      _hScroll.jumpTo(
+                        (_hScroll.offset + offset).clamp(
+                            0.0, _hScroll.position.maxScrollExtent),
+                      );
+                    }
+                  }
+                },
+                child: Scrollbar(
+                  controller: _hScroll,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  thickness: 6,
+                  child: ScrollConfiguration(
+                    behavior: _MouseDragScrollBehavior(),
+                    child: SingleChildScrollView(
+                      controller: _hScroll,
+                      scrollDirection: Axis.horizontal,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: List.generate(
+                            _lines.length,
+                            (i) => Column(children: [
+                                  _buildLineDesktop(i),
+                                  if (i < _lines.length - 1)
+                                    Divider(color: Colors.grey.shade100, height: 1),
+                                ])),
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -718,7 +745,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
                         FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))
                       ],
                       textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 12),
+                      style: const TextStyle(fontSize: 13),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
@@ -730,7 +757,7 @@ class _NewBudgetScreenState extends State<NewBudgetScreen> {
           child: Text(
             NumberFormat('#,##0.00').format(line.total),
             style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 13, color: _navyDark),
+                fontWeight: FontWeight.bold, fontSize: 14, color: _navyDark),
             textAlign: TextAlign.right,
           ),
         ),
@@ -1166,4 +1193,15 @@ class _AccountDropdown extends StatelessWidget {
               )),
     );
   }
+}
+
+// ── Mouse-drag scroll behavior (enables cursor drag on web) ──────────────────
+class _MouseDragScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
 }

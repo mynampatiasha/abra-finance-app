@@ -184,9 +184,15 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Map<String, String> get _detailParams {
     final params = Map<String, String>.from(widget.periodParams);
-    params['period'] = _periodKey;
-    if (_fromDate != null) params['fromDate'] = _fromDate!.toIso8601String().split('T')[0];
-    if (_toDate != null) params['toDate'] = _toDate!.toIso8601String().split('T')[0];
+    if (_periodKey != 'custom') {
+      params['period'] = _periodKey;
+      params.remove('fromDate');
+      params.remove('toDate');
+    } else {
+      params.remove('period');
+      if (_fromDate != null) params['fromDate'] = _fromDate!.toIso8601String();
+      if (_toDate != null) params['toDate'] = _toDate!.toIso8601String();
+    }
     
     final r = widget.rowData;
     final pk = widget.parentReport.key;
@@ -195,13 +201,29 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     if (pk.contains('sales-by-customer') ||
         pk.contains('customer-balance') ||
         pk.contains('ar-aging')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['customerId'] = rawId;
+      if (rawId != null && rawId.isNotEmpty && rawId != 'null') {
+        if (RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(rawId)) {
+          params['customerId'] = rawId;
+        } else {
+          params['customerName'] = rawId;
+        }
+      }
+      if (r['customerName'] != null) {
+        params['customerName'] = r['customerName'].toString();
+      }
     } else if (pk.contains('vendor-balance') ||
         pk.contains('purchases-by-vendor') ||
         pk.contains('ap-aging')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['vendorId'] = rawId;
+      if (rawId != null && rawId.isNotEmpty && rawId != 'null') {
+        if (RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(rawId)) {
+          params['vendorId'] = rawId;
+        } else {
+          params['vendorName'] = rawId;
+        }
+      }
+      if (r['vendorName'] != null) {
+        params['vendorName'] = r['vendorName'].toString();
+      }
     } else if (pk.contains('sales-by-salesperson')) {
       if (rawId != null && rawId.isNotEmpty && rawId != 'null')
         params['salesperson'] = rawId;
@@ -253,7 +275,11 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   @override
   void initState() {
     super.initState();
-    _periodKey = widget.periodParams['period'] ?? 'this_fy';
+    if (widget.periodParams['fromDate'] != null || widget.periodParams['toDate'] != null) {
+      _periodKey = 'custom';
+    } else {
+      _periodKey = widget.periodParams['period'] ?? 'this_fy';
+    }
     if (widget.periodParams['fromDate'] != null) {
       _fromDate = DateTime.tryParse(widget.periodParams['fromDate']!);
     }
@@ -1142,6 +1168,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                         controller: _tableVScroll,
                         scrollDirection: Axis.vertical,
                         child: DataTable(
+                          showCheckboxColumn: false,
                           headingRowColor:
                               WidgetStateProperty.all(const Color(0xFF0D1B3E)),
                           headingTextStyle: const TextStyle(

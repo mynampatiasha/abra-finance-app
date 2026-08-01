@@ -286,8 +286,8 @@ class _NewQuoteScreenState extends State<NewQuoteScreen> {
       'customerEmail': _selectedCustomerEmail,
       'customerPhone': _selectedCustomerPhone, // ✅ ADD THIS
       'referenceNumber': _referenceNumberController.text.trim(),
-      'quoteDate': _quoteDate.toIso8601String(),
-      'expiryDate': _expiryDate.toIso8601String(),
+      'quoteDate': DateFormat('yyyy-MM-dd').format(_quoteDate),
+      'expiryDate': DateFormat('yyyy-MM-dd').format(_expiryDate),
       'salesperson': _salespersonController.text.trim(),
       'projectName': _projectNameController.text.trim(),
       'subject': _subjectController.text.trim(),

@@ -255,9 +255,9 @@ class _NewDeliveryChallanScreenState extends State<NewDeliveryChallanScreen> {
       'customerPhone': _selectedCustomerPhone,
       if (_deliveryAddress != null)
         'deliveryAddress': _deliveryAddress!.toJson(),
-      'challanDate': _challanDate.toIso8601String(),
+      'challanDate': DateFormat('yyyy-MM-dd').format(_challanDate),
       if (_expectedDeliveryDate != null)
-        'expectedDeliveryDate': _expectedDeliveryDate!.toIso8601String(),
+        'expectedDeliveryDate': DateFormat('yyyy-MM-dd').format(_expectedDeliveryDate!),
       'referenceNumber': _referenceNumberController.text.trim(),
       'orderNumber': _orderNumberController.text.trim(),
       'purpose': _selectedPurpose,

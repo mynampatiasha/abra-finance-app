@@ -257,10 +257,29 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
       final end = DateTime(_stagingEndDate.year, _stagingEndDate.month,
           _stagingEndDate.day, 23, 59, 59);
 
+      bool inRange(DateTime dt) =>
+          dt.isAfter(start.subtract(const Duration(seconds: 1))) &&
+          dt.isBefore(end.add(const Duration(seconds: 1)));
+
+      // A draft can bundle shipments from many different dates, so its own
+      // single invoiceDate isn't reliable for filtering — match by each
+      // shipment item's own date (embedded as "Date: YYYY-MM-DD" in
+      // itemDetails) instead, same as the Shipment Processing summary count.
+      final dateLineRegex = RegExp(r'Date:\s*(\d{4}-\d{2}-\d{2})');
+
       final filtered = d.where((inv) {
-        return inv.invoiceDate
-                .isAfter(start.subtract(const Duration(seconds: 1))) &&
-            inv.invoiceDate.isBefore(end.add(const Duration(seconds: 1)));
+        final itemDates = inv.items
+            .map((item) => dateLineRegex.firstMatch(item.itemDetails))
+            .whereType<RegExpMatch>()
+            .map((m) => DateTime.tryParse(m.group(1)!))
+            .whereType<DateTime>()
+            .toList();
+
+        if (itemDates.isNotEmpty) {
+          return itemDates.any(inRange);
+        }
+        // Fallback for drafts with no parseable shipment dates (e.g. manual drafts)
+        return inRange(inv.invoiceDate);
       }).toList();
 
       setState(() {

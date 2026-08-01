@@ -101,6 +101,9 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
   // Controllers
   final _referenceNumberController = TextEditingController();
   final _reasonDescriptionController = TextEditingController();
+  final _invoiceDiscountController = TextEditingController();
+  final _shippingChargesController = TextEditingController();
+  final _adjustmentController = TextEditingController();
   final _customerNotesController = TextEditingController();
   final _internalNotesController = TextEditingController();
   final List<TextEditingController> _descControllers = [];
@@ -120,6 +123,7 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
   String? _selectedInvoiceNumber;
 
   // Credit note details
+  String? _originalStatus;
   DateTime _creditNoteDate = DateTime.now();
   String _selectedReason = 'Product Returned';
   String _placeOfSupply = '';
@@ -156,6 +160,14 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
   double _tcsAmount = 0;
   double _totalAmount = 0;
   int _totalQuantity = 0;
+
+  // Adjustments
+  double _invoiceLevelDiscount = 0;
+  String _invoiceLevelDiscountType = 'percentage';
+  double _invoiceDiscountAmount = 0;
+  double _shippingCharges = 0;
+  double _adjustment = 0;
+  bool _autoRoundOff = false;
 
   // Available items
   List<Map<String, dynamic>> _availableItems = [];
@@ -267,17 +279,60 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       }
 
       _taxableTotal = _subTotal;
-      _totalTax = double.parse(
-          (_totalCGST + _totalSGST + _totalIGST).toStringAsFixed(2));
+
+      // 1. Invoice-level discount calculation
+      _invoiceLevelDiscount = double.tryParse(_invoiceDiscountController.text) ?? 0;
+      _invoiceDiscountAmount = 0;
+      if (_invoiceLevelDiscount > 0) {
+        _invoiceDiscountAmount = _invoiceLevelDiscountType == 'percentage'
+            ? double.parse((_subTotal * _invoiceLevelDiscount / 100).toStringAsFixed(2))
+            : (_invoiceLevelDiscount < _subTotal ? _invoiceLevelDiscount : _subTotal);
+      }
+      _taxableTotal = double.parse((_subTotal - _invoiceDiscountAmount).toStringAsFixed(2));
+
+      // 2. Adjust GST for invoice-level discount
+      final discountRatio = _subTotal > 0 ? (_taxableTotal / _subTotal) : 1.0;
+      _totalCGST = 0;
+      _totalSGST = 0;
+      _totalIGST = 0;
+
+      for (final item in _items) {
+        if (item.quantity <= 0 || item.rate <= 0) continue;
+        final adjTaxable = double.parse((item.taxableAmount * discountRatio).toStringAsFixed(2));
+        final gst = item.itemGstRate;
+        if (_isInterState) {
+          item.igstAmount = double.parse((adjTaxable * gst / 100).toStringAsFixed(2));
+          _totalIGST += item.igstAmount;
+        } else {
+          item.cgstAmount = double.parse((adjTaxable * (gst / 2) / 100).toStringAsFixed(2));
+          item.sgstAmount = item.cgstAmount;
+          _totalCGST += item.cgstAmount;
+          _totalSGST += item.sgstAmount;
+        }
+      }
+
+      _totalTax = double.parse((_totalCGST + _totalSGST + _totalIGST).toStringAsFixed(2));
       _tdsAmount = _enableTDS
           ? double.parse((_taxableTotal * _tdsRate / 100).toStringAsFixed(2))
           : 0;
       _tcsAmount = _enableTCS
           ? double.parse((_taxableTotal * _tcsRate / 100).toStringAsFixed(2))
           : 0;
-      _totalAmount = double.parse(
-          (_taxableTotal + _totalTax - _tdsAmount + _tcsAmount)
-              .toStringAsFixed(2));
+
+      // 3. Raw Total
+      _shippingCharges = double.tryParse(_shippingChargesController.text) ?? 0;
+      double rawTotal = _taxableTotal + _totalTax - _tdsAmount + _tcsAmount + _shippingCharges;
+
+      // 4. Auto Round Off
+      if (_autoRoundOff) {
+        double roundedTotal = rawTotal.roundToDouble();
+        _adjustment = double.parse((roundedTotal - rawTotal).toStringAsFixed(2));
+        _adjustmentController.text = _adjustment.toStringAsFixed(2);
+      } else {
+        _adjustment = double.tryParse(_adjustmentController.text) ?? 0;
+      }
+
+      _totalAmount = double.parse((rawTotal + _adjustment).toStringAsFixed(2));
     });
   }
 
@@ -306,6 +361,7 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       _descControllers.clear();
       setState(() {
         _selectedCustomerId = cn.customerId;
+        _originalStatus = cn.status;
         _selectedCustomerName = cn.customerName;
         _selectedCustomerEmail = cn.customerEmail;
         _selectedCustomerPhone = cn.customerPhone;
@@ -325,6 +381,18 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
         _enableTCS = cn.tcsRate > 0;
         _tcsRate = cn.tcsRate;
         _enableGST = cn.gstRate > 0;
+
+        if ((cn.invoiceLevelDiscount ?? 0) > 0) {
+          _invoiceDiscountController.text = cn.invoiceLevelDiscount.toString();
+          _invoiceLevelDiscountType = cn.invoiceLevelDiscountType ?? 'percentage';
+        }
+        if ((cn.shippingCharges ?? 0) > 0) {
+          _shippingChargesController.text = cn.shippingCharges.toString();
+        }
+        if ((cn.adjustment ?? 0) != 0) {
+          _adjustmentController.text = cn.adjustment.toString();
+        }
+
         _items = cn.items
             .map((i) => CreditNoteItemRow(
                   itemDetails: i.itemDetails,
@@ -375,6 +443,18 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
         _enableTCS = invoice.tcsRate > 0;
         _tcsRate = invoice.tcsRate;
         _placeOfSupply = invoice.placeOfSupply;
+
+        if (invoice.invoiceLevelDiscount > 0) {
+          _invoiceDiscountController.text = invoice.invoiceLevelDiscount.toString();
+          _invoiceLevelDiscountType = invoice.invoiceLevelDiscountType;
+        }
+        if (invoice.shippingCharges > 0) {
+          _shippingChargesController.text = invoice.shippingCharges.toString();
+        }
+        if (invoice.adjustment != 0) {
+          _adjustmentController.text = invoice.adjustment.toString();
+        }
+
         _items = invoice.items
             .map((i) => CreditNoteItemRow(
                   itemDetails: i.itemDetails,
@@ -431,35 +511,16 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
                         subtitle: Text(
                             'Due: ₹${inv.amountDue.toStringAsFixed(2)} • ${inv.status}'),
                         onTap: () {
-                          for (final c in _descControllers) {
-                            c.dispose();
-                          }
-                          _descControllers.clear();
                           setState(() {
                             _selectedInvoiceId = inv.id;
                             _selectedInvoiceNumber = inv.invoiceNumber;
-                            _items = inv.items
-                                .map((it) => CreditNoteItemRow(
-                                      itemDetails: it.itemDetails,
-                                      quantity: it.quantity,
-                                      rate: it.rate,
-                                      discount: it.discount,
-                                      discountType: it.discountType,
-                                      itemGstRate: it.itemGstRate,
-                                      amount: it.amount,
-                                    ))
-                                .toList();
-                            for (final item in _items) {
-                              _descControllers.add(TextEditingController(
-                                  text: item.itemDetails));
-                            }
                             _placeOfSupply = inv.placeOfSupply;
                             _enableTDS = inv.tdsRate > 0;
                             _tdsRate = inv.tdsRate;
                             _enableTCS = inv.tcsRate > 0;
                             _tcsRate = inv.tcsRate;
                             _updateInterState();
-                            _calculateAmounts();
+                            // Items are NOT auto-populated to match standard behavior
                           });
                           Navigator.pop(context);
                         },
@@ -513,12 +574,16 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       'customerEmail': _selectedCustomerEmail,
       'customerPhone': _selectedCustomerPhone,
       'customerGSTIN': _customerGSTIN,
+      'invoiceLevelDiscount': _invoiceLevelDiscount,
+      'invoiceLevelDiscountType': _invoiceLevelDiscountType,
+      'shippingCharges': _shippingCharges,
+      'adjustment': _adjustment,
       if (_billingAddress != null) 'billingAddress': _billingAddress!.toJson(),
       if (_selectedInvoiceId != null) 'invoiceId': _selectedInvoiceId,
       if (_selectedInvoiceNumber != null)
         'invoiceNumber': _selectedInvoiceNumber,
       'referenceNumber': _referenceNumberController.text.trim(),
-      'creditNoteDate': _creditNoteDate.toIso8601String(),
+      'creditNoteDate': DateFormat('yyyy-MM-dd').format(_creditNoteDate),
       'reason': _selectedReason,
       'reasonDescription': _reasonDescriptionController.text.trim(),
       'items': valid.map((i) => i.toJson()).toList(),
@@ -544,6 +609,21 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
         await CreditNoteService.createCreditNote(data);
       }
       _showSuccess('Credit note saved as draft');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _updateCreditNote() async {
+    if (!_validate()) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = await _buildCreditNoteData(_originalStatus ?? 'DRAFT');
+      await CreditNoteService.updateCreditNote(widget.creditNoteId!, data);
+      _showSuccess('Credit note updated successfully');
       Navigator.pop(context, true);
     } catch (e) {
       _showError(e.toString());
@@ -651,6 +731,8 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
                           child: SingleChildScrollView(
                             padding: const EdgeInsets.all(20),
                             child: Column(children: [
+                              _buildAdjustmentsSection(),
+                              const Divider(height: 28),
                               _buildTaxSettingsSection(),
                               const Divider(height: 28),
                               _buildSummarySection(),
@@ -666,6 +748,8 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
                       color: Colors.white,
                       padding: const EdgeInsets.all(20),
                       child: Column(children: [
+                        _buildAdjustmentsSection(),
+                        const Divider(height: 28),
                         _buildTaxSettingsSection(),
                         const Divider(height: 28),
                         _buildSummarySection(),
@@ -1613,6 +1697,93 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
     ]));
   }
 
+  // ── Adjustments (sidebar) ──────────────────────────────────────────────────
+  Widget _buildAdjustmentsSection() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _sectionTitle('Adjustments', Icons.tune),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(
+            child: TextFormField(
+          controller: _invoiceDiscountController,
+          decoration: InputDecoration(
+              labelText: 'Invoice Discount',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: (_) => _calculateAmounts(),
+        )),
+        const SizedBox(width: 8),
+        PopupMenuButton<String>(
+          initialValue: _invoiceLevelDiscountType,
+          icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Text(_invoiceLevelDiscountType == 'percentage' ? '%' : '₹',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: _navyAccent))),
+          onSelected: (v) => setState(() {
+            _invoiceLevelDiscountType = v;
+            _calculateAmounts();
+          }),
+          itemBuilder: (_) => [
+            const PopupMenuItem(
+                value: 'percentage', child: Text('% Percentage')),
+            const PopupMenuItem(value: 'amount', child: Text('₹ Flat Amount')),
+          ],
+        ),
+      ]),
+      const SizedBox(height: 12),
+      TextFormField(
+          controller: _shippingChargesController,
+          decoration: InputDecoration(
+              labelText: 'Shipping Charges',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              prefixText: '₹ ',
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: (_) => _calculateAmounts()),
+      const SizedBox(height: 12),
+      TextFormField(
+          controller: _adjustmentController,
+          decoration: InputDecoration(
+              labelText: 'Adjustment (+ or -)',
+              hintText: 'e.g. -50 or +100',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+          keyboardType: const TextInputType.numberWithOptions(
+              decimal: true, signed: true),
+          onChanged: (_) => _calculateAmounts()),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: Checkbox(
+              value: _autoRoundOff,
+              onChanged: (v) {
+                setState(() => _autoRoundOff = v ?? false);
+                _calculateAmounts();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('Auto Round Off',
+              style: TextStyle(fontSize: 13, color: Colors.black87)),
+        ],
+      ),
+    ]);
+  }
+
   // ── Tax Settings (sidebar) ─────────────────────────────────────────────────
   Widget _buildTaxSettingsSection() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1689,6 +1860,13 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       const SizedBox(height: 16),
       _summaryRow('Sub Total', _subTotal),
       const SizedBox(height: 6),
+      if (_invoiceDiscountAmount > 0) ...[
+        _summaryRow(
+            'Discount (${_invoiceLevelDiscountType == 'percentage' ? '$_invoiceLevelDiscount%' : '₹$_invoiceLevelDiscount'})',
+            -_invoiceDiscountAmount,
+            color: Colors.red[700]),
+        const SizedBox(height: 6),
+      ],
       if (_isInterState) ...[
         if (_totalIGST > 0) ...[
           _summaryRow('IGST', _totalIGST),
@@ -1715,6 +1893,14 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
       ],
       if (_enableTCS && _tcsAmount > 0) ...[
         _summaryRow('TCS (${_tcsRate.toStringAsFixed(1)}%)', _tcsAmount),
+        const SizedBox(height: 6),
+      ],
+      if (_shippingCharges > 0) ...[
+        _summaryRow('Shipping', _shippingCharges),
+        const SizedBox(height: 6),
+      ],
+      if (_adjustment != 0) ...[
+        _summaryRow('Adjustment', _adjustment),
         const SizedBox(height: 6),
       ],
       const Divider(thickness: 2),
@@ -1752,6 +1938,29 @@ class _NewCreditNoteScreenState extends State<NewCreditNoteScreen> {
         ]),
       ),
       const SizedBox(height: 20),
+      if (widget.creditNoteId != null && _originalStatus != 'DRAFT') ...[
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _isSaving ? null : _updateCreditNote,
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.update, size: 16),
+            label: Text(_isSaving ? 'Updating...' : 'Update Credit Note'),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue[700],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8))),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
       SizedBox(
         width: double.infinity,
         child: ElevatedButton.icon(
@@ -2008,3 +2217,4 @@ class CreditNoteItemRow {
         'amount': amount,
       };
 }
+

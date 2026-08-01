@@ -198,7 +198,7 @@ class _HomeBillingState extends State<HomeBilling> {
       if (categoryName != 'Others') {
         params['expenseAccount'] = categoryName;
       }
-      params['period'] = _periodTopExpenses;
+      params['period'] = _mapPeriod(_periodTopExpenses);
 
       Navigator.push(
           context,
@@ -316,7 +316,7 @@ class _HomeBillingState extends State<HomeBilling> {
                               orgName: _orgName,
                               initialParams: {
                                 'expenseAccount': catName,
-                                'period': _periodTopExpenses,
+                                'period': _mapPeriod(_periodTopExpenses),
                               },
                             ),
                           ),
@@ -876,12 +876,8 @@ class _HomeBillingState extends State<HomeBilling> {
                           flex: 7,
                           child: SizedBox(
                             height: 220,
-                            child: GestureDetector(
-                              onTap: () => _goToReport(
-                                  'cash-flow', 'Cash Flow Statement', initialParams: {'period': _mapPeriod(_periodCashFlow)}),
-                              child: _buildCashFlowChart(
-                                  spots, monthly, chartMinY, chartMaxY),
-                            ),
+                            child: _buildCashFlowChart(
+                                spots, monthly, chartMinY, chartMaxY),
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -895,12 +891,8 @@ class _HomeBillingState extends State<HomeBilling> {
                 return Column(children: [
                   SizedBox(
                     height: 200,
-                    child: GestureDetector(
-                      onTap: () =>
-                          _goToReport('cash-flow', 'Cash Flow Statement', initialParams: {'period': _mapPeriod(_periodCashFlow)}),
-                      child: _buildCashFlowChart(
-                          spots, monthly, chartMinY, chartMaxY),
-                    ),
+                    child: _buildCashFlowChart(
+                        spots, monthly, chartMinY, chartMaxY),
                   ),
                   const SizedBox(height: 12),
                   _buildCashFlowLegendRow(opening, incoming, outgoing, ending),
@@ -960,7 +952,41 @@ class _HomeBillingState extends State<HomeBilling> {
         rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       lineTouchData: LineTouchData(
+        handleBuiltInTouches: true,
+        touchCallback: (FlTouchEvent event, LineTouchResponse? touchResponse) {
+          if (event is FlTapUpEvent) {
+            if (touchResponse != null && touchResponse.lineBarSpots != null && touchResponse.lineBarSpots!.isNotEmpty) {
+              final spot = touchResponse.lineBarSpots!.first;
+              final i = spot.x.toInt();
+              if (i >= 0 && i < monthly.length) {
+                final m = monthly[i];
+                if (m['date'] != null) {
+                  final parts = m['date'].toString().split('-');
+                  if (parts.length >= 2) {
+                    final year = int.tryParse(parts[0]);
+                    final month = int.tryParse(parts[1]);
+                    if (year != null && month != null) {
+                      final fromStr = '$year-${month.toString().padLeft(2, '0')}-01';
+                      final lastDay = DateTime(year, month + 1, 0).day;
+                      final toStr = '$year-${month.toString().padLeft(2, '0')}-${lastDay.toString().padLeft(2, '0')}';
+                      // Use exact same param names as P&L
+                      _goToReport('cash-flow', 'Cash Flow Statement', initialParams: {
+                        'period': 'custom',
+                        'fromDate': DateTime(year, month, 1).toIso8601String(),
+                        'toDate': DateTime(year, month + 1, 0).toIso8601String(),
+                      });
+                      return;
+                    }
+                  }
+                }
+              }
+            }
+            // Fallback: clicked on chart but not on a dot
+            _goToReport('cash-flow', 'Cash Flow Statement', initialParams: {'period': _mapPeriod(_periodCashFlow)});
+          }
+        },
         touchTooltipData: LineTouchTooltipData(
+          tooltipPadding: const EdgeInsets.all(14),
           tooltipBgColor: Colors.white,
           tooltipRoundedRadius: 8,
           tooltipBorder: const BorderSide(color: _kBorder),
@@ -972,13 +998,33 @@ class _HomeBillingState extends State<HomeBilling> {
             final m = monthly[i];
             final inc = _toDouble(m['incoming']);
             final out = _toDouble(m['outgoing']);
+            final openBal = spots[i].y; // spots array is 1-indexed relative to monthly
             return LineTooltipItem(
-              '${m['month']}\nIncoming  ${_fmt(inc)}\nOutgoing  ${_fmt(out)}\nBalance   ${_fmt(s.y)}',
+              '${m['month']}\n',
               const TextStyle(
                   color: _kNavyDark,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  height: 1.7),
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  height: 1.5),
+              textAlign: TextAlign.right,
+              children: [
+                TextSpan(
+                  text: 'Opening Balance   ${_fmt(openBal)}\n',
+                  style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal, fontSize: 14),
+                ),
+                TextSpan(
+                  text: 'Incoming   ${_fmt(inc)}\n',
+                  style: const TextStyle(color: _kGreen, fontWeight: FontWeight.normal, fontSize: 14),
+                ),
+                TextSpan(
+                  text: 'Outgoing   ${_fmt(out)}\n',
+                  style: const TextStyle(color: _kRed, fontWeight: FontWeight.normal, fontSize: 14),
+                ),
+                TextSpan(
+                  text: 'Ending Balance   ${_fmt(s.y)}',
+                  style: const TextStyle(color: _kBlueAccent, fontWeight: FontWeight.normal, fontSize: 14),
+                ),
+              ],
             );
           }).toList(),
         ),
@@ -1132,17 +1178,17 @@ class _HomeBillingState extends State<HomeBilling> {
       _cardTitle('Income and Expense',
           onTap: () => _goToReport('profit-loss', 'Profit and Loss', initialParams: {'period': _mapPeriod(_periodIncomeExp)}),
           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-            // Container(
-            //   height: 32,
-            //   decoration: BoxDecoration(
-            //       border: Border.all(color: _kBorder),
-            //       borderRadius: BorderRadius.circular(8)),
-            //   child: Row(mainAxisSize: MainAxisSize.min, children: [
-            //     _basisBtn('Accrual'),
-            //     _basisBtn('Cash'),
-            //   ]),
-            // ),
-            // const SizedBox(width: 8),
+            Container(
+              height: 32,
+              decoration: BoxDecoration(
+                  border: Border.all(color: _kBorder),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _basisBtn('Accrual'),
+                _basisBtn('Cash'),
+              ]),
+            ),
+            const SizedBox(width: 8),
             _periodDrop(_periodIncomeExp, (v) {
               setState(() => _periodIncomeExp = v!);
               _loadIE();
@@ -1271,7 +1317,8 @@ class _HomeBillingState extends State<HomeBilling> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                 child: Text(
-                    '* Income and expense values displayed are exclusive of taxes.',
+                    '* Income and expense values displayed are exclusive of taxes. '
+                    'Figures are on an accrual basis (billed/incurred) for both Accrual and Cash.',
                     style: TextStyle(
                         fontSize: 10,
                         color: Colors.grey[500],

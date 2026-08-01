@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // QUOTES BACKEND API - Complete CRUD Operations with Bulk Import
 // ============================================================================
 // File: backend/routes/quotes.js
@@ -101,6 +101,10 @@ const quoteItemSchema = new mongoose.Schema({
     type: String,
     enum: ['percentage', 'amount'],
     default: 'percentage',
+  },
+  itemGstRate: {
+    type: Number,
+    default: 0
   },
   amount: {
     type: Number,
@@ -418,11 +422,25 @@ const calculateQuoteTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18) => 
   // Calculate TCS
   const tcsAmount = parseFloat((subTotal * tcsRate / 100).toFixed(2));
   
-  // Calculate GST base
-  const gstBase = subTotal - tdsAmount + tcsAmount;
+  // Calculate GST dynamically
+  let totalGst = 0;
+  const hasItemGst = items.some(item => typeof item.itemGstRate === 'number');
   
-  // Calculate GST (split into CGST and SGST)
-  const totalGst = parseFloat((gstBase * gstRate / 100).toFixed(2));
+  if (hasItemGst) {
+    items.forEach(item => {
+      const itemProportion = subTotal > 0 ? (item.amount / subTotal) : 0;
+      const itemTds = tdsAmount * itemProportion;
+      const itemTcs = tcsAmount * itemProportion;
+      const itemGstBase = item.amount - itemTds + itemTcs;
+      const itemTax = (itemGstBase * (item.itemGstRate || 0)) / 100;
+      totalGst += itemTax;
+    });
+  } else {
+    const gstBase = subTotal - tdsAmount + tcsAmount;
+    totalGst = (gstBase * gstRate) / 100;
+  }
+  
+  totalGst = parseFloat(totalGst.toFixed(2));
   const cgst = parseFloat((totalGst / 2).toFixed(2));
   const sgst = parseFloat((totalGst / 2).toFixed(2));
   
@@ -484,24 +502,33 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       const pageW = 515;
 
       // -- HEADER - plain white background like invoices.js -----------------
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getLogoPath(orgId);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getLogoPath(orgId);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
       let logoLoaded = false;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY  = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH = 55;
-      const logoY = logoCenterY - (logoH / 2);
-      const textX = logoPath ? 126 : 50;
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
+      const textX = logoData ? 166 : 50;
 
-      if (logoPath) {
+      if (logoData) {
         try {
-          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
@@ -653,7 +680,7 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
           : '�';
 
         // Calculate GST for display (quotes use single gstRate, always intra-state CGST+SGST)
-        const gstRate  = item.itemGstRate || quote.gstRate || 18;
+        const gstRate  = item.itemGstRate !== undefined ? item.itemGstRate : (quote.gstRate || 18);
         const taxable  = item.taxableAmount || item.amount || 0;
         const cgstAmt  = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
         const sgstAmt  = cgstAmt;
@@ -695,8 +722,8 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       };
 
       tRow('Subtotal:', `Rs. ${(quote.subTotal || 0).toFixed(2)}`);
-      if (quote.cgst > 0)      tRow(`CGST (${quote.gstRate / 2}%):`, `Rs. ${quote.cgst.toFixed(2)}`);
-      if (quote.sgst > 0)      tRow(`SGST (${quote.gstRate / 2}%):`, `Rs. ${quote.sgst.toFixed(2)}`);
+      if (quote.cgst > 0)      tRow('CGST:', `Rs. ${quote.cgst.toFixed(2)}`);
+      if (quote.sgst > 0)      tRow('SGST:', `Rs. ${quote.sgst.toFixed(2)}`);
       if (quote.igst > 0)      tRow(`IGST (${quote.gstRate}%):`,     `Rs. ${quote.igst.toFixed(2)}`);
       if (quote.tdsAmount > 0) tRow('TDS Deducted:',                  `- Rs. ${quote.tdsAmount.toFixed(2)}`);
       if (quote.tcsAmount > 0) tRow('TCS Collected:',                 `Rs. ${quote.tcsAmount.toFixed(2)}`);
@@ -759,28 +786,37 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       const _qSigRelPath = orgData?.digitalSignaturePath;
       const _qSigSize    = 200;
       let   _qActualSigH = _qSigSize;
-      if (_qSigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (_qSigRelPath) {
+        const _qSigAbs = path.join(__dirname, '..', _qSigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(_qSigAbs)) { sigBuf = fs.readFileSync(_qSigAbs); sigExt = path.extname(_qSigAbs).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const _qSigAbs = path.join(__dirname, '..', _qSigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(_qSigAbs)) {
             let _qW = _qSigSize, _qH = _qSigSize;
             try {
-              const _qBuf = fs.readFileSync(_qSigAbs);
-              const _qExt = path.extname(_qSigAbs).toLowerCase();
-              if (_qExt === '.png' && _qBuf.length > 24) { _qW = _qBuf.readUInt32BE(16); _qH = _qBuf.readUInt32BE(20); }
-              else if ((_qExt === '.jpg' || _qExt === '.jpeg') && _qBuf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) { _qW = sigBuf.readUInt32BE(16); _qH = sigBuf.readUInt32BE(20); }
+              else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let _qi = 2;
-                while (_qi < _qBuf.length - 8) {
-                  if (_qBuf[_qi] === 0xFF && _qBuf[_qi+1] >= 0xC0 && _qBuf[_qi+1] <= 0xC3) { _qH = _qBuf.readUInt16BE(_qi+5); _qW = _qBuf.readUInt16BE(_qi+7); break; }
-                  _qi += 2 + _qBuf.readUInt16BE(_qi + 2);
+                while (_qi < sigBuf.length - 8) {
+                  if (sigBuf[_qi] === 0xFF && sigBuf[_qi+1] >= 0xC0 && sigBuf[_qi+1] <= 0xC3) { _qH = sigBuf.readUInt16BE(_qi+5); _qW = sigBuf.readUInt16BE(_qi+7); break; }
+                  _qi += 2 + sigBuf.readUInt16BE(_qi + 2);
                 }
               }
             } catch (_) {}
             const _qScale = Math.min(_qSigSize / _qW, _qSigSize / _qH);
             _qActualSigH  = Math.round(_qH * _qScale);
             const _qActualSigW = Math.round(_qW * _qScale);
-            doc.image(_qSigAbs, authBoxX + (signBoxW - _qActualSigW) / 2, signSectionY + 10, { width: _qActualSigW, height: _qActualSigH });
-          }
+            doc.image(sigBuf, authBoxX + (signBoxW - _qActualSigW) / 2, signSectionY + 10, { width: _qActualSigW, height: _qActualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 
@@ -1489,6 +1525,7 @@ router.put('/:id', [
     // Update quote
     Object.assign(quote, req.body, totals);
     quote.updatedBy = req.user.userId;
+    quote.pdfPath = null; // Force PDF regeneration on edit
     
     await quote.save();
     

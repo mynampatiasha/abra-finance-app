@@ -71,8 +71,8 @@ const commentSchema = new mongoose.Schema({
 // ============================================================================
 
 const vendorSchema = new mongoose.Schema({
-  orgId   : { type: String, index: true, default: null },
-  branchId: { type: String, index: true, default: null },
+  orgId   : { type: String, default: null },
+  branchId: { type: String, default: null },
 
   vendorId: {
     type: String,
@@ -210,6 +210,7 @@ function isValidEmail(email) {
 }
 
 function isValidPhone(phone) {
+  if (!phone || phone.trim() === '') return true;
   return /^[6-9]\d{9}$/.test(phone.replace(/[\s-]/g, ''));
 }
 
@@ -1052,23 +1053,24 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     if (vendorName !== undefined && vendorName.trim() === '') errors.push('Vendor name is required');
     if (email !== undefined) {
-      if (email.trim() === '') errors.push('Email is required');
-      else if (!isValidEmail(email)) errors.push('Invalid email format');
-      else if (email.toLowerCase().trim() !== vendor.email) {
-        const dup = await Vendor.findOne({
-          email: email.toLowerCase().trim(),
-          isDeleted: false,
-          _id: { $ne: vendor._id },
-          ...orgFilter(req),
-        });
-        if (dup) errors.push('A vendor with this email already exists');
+      if (email.trim() !== '') {
+        if (!isValidEmail(email)) errors.push('Invalid email format');
+        else if (email.toLowerCase().trim() !== vendor.email) {
+          const dup = await Vendor.findOne({
+            email: email.toLowerCase().trim(),
+            isDeleted: false,
+            _id: { $ne: vendor._id },
+            ...orgFilter(req),
+          });
+          if (dup) errors.push('A vendor with this email already exists');
+        }
       }
     }
     if (phoneNumber !== undefined && !isValidPhone(phoneNumber)) errors.push('Invalid phone number');
     if (panNumber   && panNumber.trim() && !isValidPAN(panNumber.toUpperCase()))  errors.push('Invalid PAN format');
     if (gstNumber   && gstNumber.trim() && !isValidGSTIN(gstNumber.toUpperCase())) errors.push('Invalid GSTIN format');
 
-    if (errors.length > 0) return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    if (errors.length > 0) return res.status(400).json({ success: false, message: 'Validation failed: ' + errors.join(', '), errors });
 
     // Apply updates
     const set = (field, val, transform) => {

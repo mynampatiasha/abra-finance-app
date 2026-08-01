@@ -413,12 +413,17 @@ class _CreditNoteDetailPageState extends State<CreditNoteDetailPage> {
       ]),
       const SizedBox(height: 16),
       _amtRow('Sub Total', cn.subTotal),
+      if ((cn.invoiceDiscountAmount ?? 0) > 0)
+        _amtRow('Discount (${cn.invoiceLevelDiscountType == 'percentage' ? '${cn.invoiceLevelDiscount}%' : '₹${cn.invoiceLevelDiscount}'})', 
+            -(cn.invoiceDiscountAmount ?? 0), color: Colors.red[700]),
       if (cn.tdsAmount > 0)
         _amtRow('TDS', -cn.tdsAmount, color: Colors.red[700]),
       if (cn.tcsAmount > 0) _amtRow('TCS', cn.tcsAmount),
       if (cn.cgst > 0) _amtRow('CGST', cn.cgst),
       if (cn.sgst > 0) _amtRow('SGST', cn.sgst),
       if (cn.igst > 0) _amtRow('IGST', cn.igst),
+      if ((cn.shippingCharges ?? 0) > 0) _amtRow('Shipping', cn.shippingCharges!),
+      if ((cn.adjustment ?? 0) != 0) _amtRow('Adjustment', cn.adjustment!),
       const Divider(thickness: 2),
       _amtRow('Total Credit', cn.totalAmount, isBold: true, isTotal: true),
       const SizedBox(height: 16),

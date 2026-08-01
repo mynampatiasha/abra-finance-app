@@ -228,56 +228,80 @@ async function calculateCashFlow(orgFilter = {}, period = 'fiscal_year') {
       balance: 0  // ✅ CUMULATIVE BALANCE
     }));
     
-    // ✅ STEP 1: Calculate OPENING BALANCE (payments received BEFORE fiscal year start)
-    const allPayments = await db.collection('payments_received').find({ ...orgFilter,
-      status: { $ne: 'void' }
-    }).toArray();
+    // ✅ STEP 1: Fetch Invoices (Incoming) and Expenses (Outgoing) to match Income & Expense chart
+    const allInvoices = await db.collection('invoices').find({ ...orgFilter }).toArray();
+    console.log(`   📦 Total invoices in database: ${allInvoices.length}`);
     
-    console.log(`   📦 Total payments in database: ${allPayments.length}`);
+    const allExpenses = await db.collection('expenses').find({ ...orgFilter }).toArray();
+    console.log(`   📦 Total expenses in database: ${allExpenses.length}`);
     
     let openingBalance = 0;
     let totalIncoming = 0;
-    let totalOutgoing = 0; // TODO: Add bills/expenses
-    let paymentsInPeriod = 0;
-    let paymentsBeforePeriod = 0;
+    let totalOutgoing = 0;
+    let incomingInPeriod = 0;
+    let outgoingInPeriod = 0;
     
-    // ✅ STEP 2: Categorize payments into BEFORE period and DURING period
-    allPayments.forEach((payment, index) => {
-      const paymentDate = parsePaymentDate(payment.paymentDate);
+    // ✅ STEP 2: Process Invoices (Incoming Cash)
+    allInvoices.forEach((invoice) => {
+      const invoiceDate = parsePaymentDate(invoice.invoiceDate);
+      if (!invoiceDate) return;
       
-      if (!paymentDate) {
-        console.log(`   ⚠️  Payment ${index + 1}: Invalid date format:`, payment.paymentDate);
-        return;
-      }
+      const amount = invoice.totalAmount || 0;
       
-      const amount = payment.amountReceived || 0;
-      
-      // ✅ Payments BEFORE fiscal year = Opening Balance
-      if (paymentDate < startDate) {
+      // Before fiscal year = Opening Balance (Incoming increases balance)
+      if (invoiceDate < startDate) {
         openingBalance += amount;
-        paymentsBeforePeriod++;
       }
-      // ✅ Payments DURING fiscal year = Incoming for this period
-      else if (paymentDate >= startDate && paymentDate <= endDate) {
+      // During fiscal year = Incoming for this period
+      else if (invoiceDate >= startDate && invoiceDate <= endDate) {
         totalIncoming += amount;
-        paymentsInPeriod++;
+        incomingInPeriod++;
         
-        // Find which month this payment belongs to
         const monthIndex = fiscalMonths.findIndex(month => {
-          return paymentDate >= month.startDate && paymentDate <= month.endDate;
+          return invoiceDate >= month.startDate && invoiceDate <= month.endDate;
         });
         
         if (monthIndex !== -1) {
           monthlyData[monthIndex].incoming += amount;
           monthlyData[monthIndex].net = monthlyData[monthIndex].incoming - monthlyData[monthIndex].outgoing;
         }
-        
-        // Log first 5 payments for debugging
-        if (paymentsInPeriod <= 5) {
-          console.log(`   ✅ Payment ${paymentsInPeriod}: ${payment.paymentNumber || 'N/A'} - ${formatCurrency(amount)} on ${paymentDate.toISOString().split('T')[0]}`);
-        }
       }
     });
+
+    // ✅ STEP 3: Process Expenses (Outgoing Cash)
+    for (const expense of allExpenses) {
+      const expenseDate = parsePaymentDate(expense.date);
+      if (!expenseDate) continue;
+      
+      // Verify it's an actual expense account type just like the Income chart does
+      const expAcc = await ChartOfAccount.findOne({
+        accountName: expense.expenseAccount,
+        ...(orgFilter.orgId ? { orgId: orgFilter.orgId } : {}),
+      }).select('accountType').lean();
+      
+      if (expAcc && ['Expense', 'Other Expense', 'Cost Of Goods Sold'].includes(expAcc.accountType)) {
+        const amount = expense.total || 0;
+        
+        // Before fiscal year = Decrease Opening Balance
+        if (expenseDate < startDate) {
+          openingBalance -= amount;
+        }
+        // During fiscal year = Outgoing for this period
+        else if (expenseDate >= startDate && expenseDate <= endDate) {
+          totalOutgoing += amount;
+          outgoingInPeriod++;
+          
+          const monthIndex = fiscalMonths.findIndex(month => {
+            return expenseDate >= month.startDate && expenseDate <= month.endDate;
+          });
+          
+          if (monthIndex !== -1) {
+            monthlyData[monthIndex].outgoing += amount;
+            monthlyData[monthIndex].net = monthlyData[monthIndex].incoming - monthlyData[monthIndex].outgoing;
+          }
+        }
+      }
+    }
     
     // ✅ STEP 3: Calculate CUMULATIVE BALANCE starting from opening balance
     let runningBalance = openingBalance; // ✅ Start with cash before fiscal year
@@ -290,8 +314,8 @@ async function calculateCashFlow(orgFilter = {}, period = 'fiscal_year') {
     
     console.log('─'.repeat(80));
     console.log(`   📊 RESULTS:`);
-    console.log(`      Payments before period: ${paymentsBeforePeriod} (Opening Balance: ${formatCurrency(openingBalance)})`);
-    console.log(`      Payments in period: ${paymentsInPeriod}/${allPayments.length}`);
+    console.log(`      Incoming in period: ${incomingInPeriod}/${allInvoices.length}`);
+    console.log(`      Outgoing in period: ${outgoingInPeriod}/${allExpenses.length}`);
     console.log(`      Total Incoming: ${formatCurrency(totalIncoming)}`);
     console.log(`      Total Outgoing: ${formatCurrency(totalOutgoing)}`);
     console.log(`      Opening Balance: ${formatCurrency(openingBalance)}`);
@@ -553,7 +577,7 @@ router.get('/summary', async (req, res) => {
     
     // Calculate all dashboard components in parallel
     const [receivables, payables, cashFlow, incomeExpense, projects, bankAccounts, watchlist] = 
-      await Promise.all([calculateReceivables(orgFilter),calculatePayables(orgFilter),calculateCashFlow('fiscal_year', orgFilter),calculateIncomeAndExpense('fiscal_year', basis, orgFilter),calculateProjectsSummary(orgFilter),calculateBankAccountsSummary(orgFilter),calculateAccountWatchlist(basis, orgFilter)]);
+      await Promise.all([calculateReceivables(orgFilter),calculatePayables(orgFilter),calculateCashFlow(orgFilter, 'fiscal_year'),calculateIncomeAndExpense(orgFilter, 'fiscal_year', basis),calculateProjectsSummary(orgFilter),calculateBankAccountsSummary(orgFilter),calculateAccountWatchlist(orgFilter, basis)]);
     
     const dashboardData = {
       receivables,

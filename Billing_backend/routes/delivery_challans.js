@@ -372,12 +372,19 @@ async function generateChallanPDF(challan, orgId, branchId = null) {
       const pageW = 515;
 
       // Use branch logo if available, otherwise fall back to org logo
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getLogoPath(orgId);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getLogoPath(orgId);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
 
       // -- Header (white background, invoice style) -------------------------
       let logoLoaded = false;
@@ -386,13 +393,15 @@ async function generateChallanPDF(challan, orgId, branchId = null) {
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY  = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH       = 55;
-      const logoY       = logoCenterY - (logoH / 2);
-      const textX       = logoPath ? 126 : 50;
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
+      const textX = logoData ? 166 : 50;
 
-      if (logoPath) {
+      if (logoData) {
         try {
-          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('Logo load failed:', e.message); }
       }
@@ -548,28 +557,37 @@ async function generateChallanPDF(challan, orgId, branchId = null) {
       const _dcSigRelPath = orgData?.digitalSignaturePath;
       const _dcSigSize    = 200;
       let   _dcActualSigH = _dcSigSize;
-      if (_dcSigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (_dcSigRelPath) {
+        const _dcSigAbs = path.join(__dirname, '..', _dcSigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(_dcSigAbs)) { sigBuf = fs.readFileSync(_dcSigAbs); sigExt = path.extname(_dcSigAbs).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const _dcSigAbs = path.join(__dirname, '..', _dcSigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(_dcSigAbs)) {
             let _dcW = _dcSigSize, _dcH = _dcSigSize;
             try {
-              const _dcBuf = fs.readFileSync(_dcSigAbs);
-              const _dcExt = path.extname(_dcSigAbs).toLowerCase();
-              if (_dcExt === '.png' && _dcBuf.length > 24) { _dcW = _dcBuf.readUInt32BE(16); _dcH = _dcBuf.readUInt32BE(20); }
-              else if ((_dcExt === '.jpg' || _dcExt === '.jpeg') && _dcBuf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) { _dcW = sigBuf.readUInt32BE(16); _dcH = sigBuf.readUInt32BE(20); }
+              else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let _dci = 2;
-                while (_dci < _dcBuf.length - 8) {
-                  if (_dcBuf[_dci] === 0xFF && _dcBuf[_dci+1] >= 0xC0 && _dcBuf[_dci+1] <= 0xC3) { _dcH = _dcBuf.readUInt16BE(_dci+5); _dcW = _dcBuf.readUInt16BE(_dci+7); break; }
-                  _dci += 2 + _dcBuf.readUInt16BE(_dci + 2);
+                while (_dci < sigBuf.length - 8) {
+                  if (sigBuf[_dci] === 0xFF && sigBuf[_dci+1] >= 0xC0 && sigBuf[_dci+1] <= 0xC3) { _dcH = sigBuf.readUInt16BE(_dci+5); _dcW = sigBuf.readUInt16BE(_dci+7); break; }
+                  _dci += 2 + sigBuf.readUInt16BE(_dci + 2);
                 }
               }
             } catch (_) {}
             const _dcScale = Math.min(_dcSigSize / _dcW, _dcSigSize / _dcH);
             _dcActualSigH  = Math.round(_dcH * _dcScale);
             const _dcActualSigW = Math.round(_dcW * _dcScale);
-            doc.image(_dcSigAbs, authBoxX + (signBoxW - _dcActualSigW) / 2, signSectionY + 10, { width: _dcActualSigW, height: _dcActualSigH });
-          }
+            doc.image(sigBuf, authBoxX + (signBoxW - _dcActualSigW) / 2, signSectionY + 10, { width: _dcActualSigW, height: _dcActualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 
@@ -883,6 +901,7 @@ router.put('/:id', async (req, res) => {
     
     const updates = req.body;
     updates.updatedBy = req.user?.email || req.user?.uid || 'system';
+    updates.pdfPath = null; // Force PDF regeneration on edit
     
     Object.assign(challan, updates);
     await challan.save();

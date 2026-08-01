@@ -1,12 +1,61 @@
 {
-  "count": 0,
+  "count": 1,
   "query": {
-    "orgId": "69e85f91899a84339ba749a1",
+    "orgId": "6a05b2c6aef99160d927b0bf",
     "branchId": {
       "$in": [
-        "69eeecb21234dffba797bee4"
+        "6a05b32faef99160d927b0d1"
       ]
     }
   },
-  "expenses": []
+  "expenses": [
+    {
+      "_id": "6a28f22c4c3a43341e94570c",
+      "voucherNumber": "DE0001",
+      "date": "2026-06-10",
+      "amount": 789,
+      "paymentMethod": "",
+      "amountPaidTo": "Asha",
+      "amountInWords": "Seven Hundred and Eighty Nine Rupees Only",
+      "onAccountOf": "again remodified",
+      "expenseCategory": "testing",
+      "receivedBy": "",
+      "proofFiles": [
+        {
+          "filename": "d-exp-1784271800844-470365834.jpeg",
+          "originalName": "WhatsApp Image 2026-06-13 at 8.38.15 AM.jpeg",
+          "path": "uploads\\digital_expenses\\d-exp-1784271800844-470365834.jpeg",
+          "size": 77343,
+          "mimetype": "application/octet-stream"
+        }
+      ],
+      "status": "Response Submitted",
+      "managerReason": "noyt working",
+      "approvedAt": null,
+      "addedBy": "abishek.veeraswamy@abragroup.in",
+      "orgId": "6a05b2c6aef99160d927b0bf",
+      "branchId": "6a05b32faef99160d927b0d1",
+      "createdAt": "2026-06-10T05:12:12.029Z",
+      "updatedAt": "2026-07-17T07:16:04.526Z",
+      "__v": 4,
+      "rebuttalProofFiles": [
+        {
+          "filename": "d-exp-1784272564443-656716281.jpeg",
+          "originalName": "WhatsApp Image 2026-06-13 at 8.38.15 AM.jpeg",
+          "path": "uploads\\digital_expenses\\d-exp-1784272564443-656716281.jpeg",
+          "size": 77343,
+          "mimetype": "application/octet-stream"
+        },
+        {
+          "filename": "d-exp-1784272564449-167794153.jpeg",
+          "originalName": "WhatsApp Image 2026-06-27 at 3.04.14 PM.jpeg",
+          "path": "uploads\\digital_expenses\\d-exp-1784272564449-167794153.jpeg",
+          "size": 56528,
+          "mimetype": "application/octet-stream"
+        }
+      ],
+      "employeeResponse": "i ahve remodified and everything is working fine sir",
+      "employeeResponseAt": "2026-07-17T07:16:04.508Z"
+    }
+  ]
 }

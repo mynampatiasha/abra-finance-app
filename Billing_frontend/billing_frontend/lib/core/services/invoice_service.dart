@@ -558,6 +558,8 @@ class Invoice {
   final String status;
   final double amountPaid;
   final double amountDue;
+  final double totalTdsDeducted;
+  final double totalWriteOff;
   final List<Payment> payments;
   final List<EmailSent> emailsSent;
 
@@ -619,6 +621,8 @@ class Invoice {
     required this.status,
     required this.amountPaid,
     required this.amountDue,
+    this.totalTdsDeducted = 0,
+    this.totalWriteOff = 0,
     required this.payments,
     this.emailsSent = const [],
     this.reminderPaused = false,
@@ -688,6 +692,8 @@ class Invoice {
       status: json['status'] ?? 'DRAFT',
       amountPaid: (json['amountPaid'] ?? 0).toDouble(),
       amountDue: (json['amountDue'] ?? 0).toDouble(),
+      totalTdsDeducted: (json['totalTdsDeducted'] ?? 0).toDouble(),
+      totalWriteOff: (json['totalWriteOff'] ?? 0).toDouble(),
       payments: (json['payments'] as List? ?? [])
           .map((p) => Payment.fromJson(p))
           .toList(),

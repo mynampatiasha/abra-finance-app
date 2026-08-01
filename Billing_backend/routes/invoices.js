@@ -331,6 +331,7 @@ const invoiceSchema = new mongoose.Schema({
   // NEW: shipping + adjustment (Zoho style)
   shippingCharges: { type: Number, default: 0 },
   adjustment:      { type: Number, default: 0 },
+  autoRoundOff:    { type: Boolean, default: false },
 
   totalAmount: { type: Number, default: 0 },
   amountPaid:  { type: Number, default: 0 },
@@ -347,7 +348,7 @@ const invoiceSchema = new mongoose.Schema({
     paymentId:      mongoose.Schema.Types.ObjectId,
     amount:         Number,
     paymentDate:    Date,
-    paymentMethod:  { type: String, enum: ['Cash','Cheque','Bank Transfer','UPI','Card','Online'] },
+    paymentMethod:  { type: String, enum: ['Cash','Cheque','Bank Transfer','UPI','Card','Online','Credit Note','Credits Applied'] },
     referenceNumber:String,
     notes:          String,
     recordedBy:     String,
@@ -473,26 +474,47 @@ invoiceSchema.pre('save', async function () {
   this.tcsAmount = Math.round(this.taxableTotal * (this.tcsRate || 0) / 100 * 100) / 100;
 
   // ── 6. Grand Total = taxableTotal + tax − TDS + TCS + shipping + adjustment ──
-  this.totalAmount = Math.round(
-    (this.taxableTotal + this.totalTax - this.tdsAmount + this.tcsAmount +
-     (this.shippingCharges || 0) + (this.adjustment || 0)) * 100
-  ) / 100;
+  let rawTotal = this.taxableTotal + this.totalTax - this.tdsAmount + this.tcsAmount + (this.shippingCharges || 0);
+  
+  if (this.autoRoundOff) {
+    let roundedTotal = Math.round(rawTotal);
+    this.adjustment = Math.round((roundedTotal - rawTotal) * 100) / 100;
+  }
+  
+  this.totalAmount = Math.round((rawTotal + (this.adjustment || 0)) * 100) / 100;
 
   this.amountDue = Math.round((this.totalAmount - (this.amountPaid || 0)) * 100) / 100;
 
-  // ── 7. Status logic (original) ───────────────────────────────────────────────
-  if (this.amountPaid === 0 && this.status !== 'DRAFT' && this.status !== 'CANCELLED') {
-    this.status = 'UNPAID';
-  } else if (this.amountPaid > 0 && this.amountPaid < this.totalAmount) {
-    this.status = 'PARTIALLY_PAID';
-  } else if (this.totalAmount > 0 && this.amountPaid >= this.totalAmount) {
+  // ── 7. Status logic ─────────────────────────────────────────────────────────
+  // Floating-point safety: treat anything <= 0.005 as fully paid
+  const safeAmountDue = Math.round((this.totalAmount - (this.amountPaid || 0)) * 100) / 100;
+
+  if (safeAmountDue <= 0 && this.totalAmount > 0) {
+    // PAID takes absolute priority — cannot be overridden by anything
     this.status = 'PAID';
-  }
-  if (this.status !== 'PAID' && this.status !== 'DRAFT' &&
-      this.status !== 'CANCELLED' && this.status !== 'SENT') {
+    this.amountDue = 0;
+  } else if ((this.amountPaid || 0) > 0 && safeAmountDue > 0) {
+    // Some cash received, still a balance — PARTIALLY_PAID
+    this.status = 'PARTIALLY_PAID';
+    this.amountDue = safeAmountDue;
+  } else if ((this.amountPaid || 0) === 0 && this.status !== 'DRAFT' && this.status !== 'CANCELLED') {
+    // Nothing paid yet
+    this.status = 'UNPAID';
+    this.amountDue = safeAmountDue;
+    // OVERDUE only applies to invoices with zero payment and a past due date
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    if (this.dueDate < todayStart) {
+    if ((this.status === 'UNPAID' || this.status === 'SENT') && this.dueDate < todayStart) {
+      this.status = 'OVERDUE';
+    }
+  } else {
+    this.amountDue = safeAmountDue;
+  }
+  // SENT invoices that are past due (and have no payments) also go OVERDUE
+  if (this.status === 'SENT') {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    if (this.dueDate < todayStart && (this.amountPaid || 0) === 0) {
       this.status = 'OVERDUE';
     }
   }
@@ -684,6 +706,12 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       } catch (e) { console.warn('⚠️ Could not fetch org details:', e.message); }
 
       const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+      
+      const drawPageOutline = () => {
+        doc.rect(20, 20, 555, 802).lineWidth(1).strokeColor('#000000').stroke();
+      };
+      doc.on('pageAdded', drawPageOutline);
+      drawPageOutline();
       const stream = fs.createWriteStream(filepath);
       doc.pipe(stream);
 
@@ -692,15 +720,22 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // ═══════════════════════════════════════════════════════════════════════
       // HEADER — white background, black text
       // ═══════════════════════════════════════════════════════════════════════
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getOrgLogoPath(orgId || null);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getOrgLogoPath(orgId || null);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
       let logoLoaded = false;
 
-      const textX = logoPath ? 126 : 50;
+      const textX = logoData ? 166 : 50;
 
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail]
         .filter(Boolean);
@@ -708,26 +743,28 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH = 55;
-      const logoY = logoCenterY - (logoH / 2);
+      
+      const logoH = 82; // Increased from 57
+      const logoW = 110; // Increased from 74
+      const logoY = textStartY; // Align top of logo with top of text
 
-      if (logoPath) {
+      if (logoData) {
         try {
-          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
       }
 
-      doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+      doc.fontSize(13).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
       // Measure actual height of org name so subtitle never overlaps a wrapped name
-      doc.fontSize(12).font('Helvetica-Bold');
+      doc.fontSize(13).font('Helvetica-Bold');
       const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
       const subtitleY = textStartY + orgNameH + 2;
-      doc.fontSize(7).fillColor('#444444').font('Helvetica')
+      doc.fontSize(8).fillColor('#444444').font('Helvetica')
          .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
 
-      doc.fontSize(7).fillColor('#000000');
+      doc.fontSize(8).fillColor('#000000');
       let contactY = subtitleY + 12;
       contactLines.forEach(line => {
         doc.text(line, textX, contactY, { width: 240 });
@@ -744,8 +781,6 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
          .text(invoice.invoiceNumber, 380, 52, { width: 170, align: 'right' });
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(invoice.invoiceDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`✓ ${(invoice.status || 'DRAFT').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // ═══════════════════════════════════════════════════════════════════════
       // META GRID — Single row: Bill To | Ship To | Invoice Details
@@ -756,30 +791,30 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       const shipStr    = formatAddress(invoice.shippingAddress);
 
       // Calculate Bill To box height dynamically so nothing gets clipped
-      doc.fontSize(9).font('Helvetica-Bold');
+      doc.fontSize(10).font('Helvetica-Bold');
       const _custNameH = doc.heightOfString(invoice.customerName || 'N/A', { width: colW - 16 });
-      doc.fontSize(7).font('Helvetica');
+      doc.fontSize(8).font('Helvetica');
       const _addrH  = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
       const _gstH   = invoice.customerGSTIN ? 10 : 0;
       const metaH   = Math.max(90, 18 + _custNameH + 2 + _addrH + _gstH + 10);
 
       // ── Col 1: Bill To ──────────────────────────────────────────────────
       const billX = 40;
-      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+      doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text('BILL TO', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
-      doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold')
+      doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold')
          .text(invoice.customerName || 'N/A', billX + 8, metaY + 18, { width: colW - 16 });
       // Measure customer name height so address starts below it, never overlapping
-      doc.fontSize(9).font('Helvetica-Bold');
+      doc.fontSize(10).font('Helvetica-Bold');
       const custNameH = doc.heightOfString(invoice.customerName || 'N/A', { width: colW - 16 });
       const billAddrY = metaY + 18 + custNameH + 2;
       if (billingStr) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+        doc.fontSize(8).fillColor('#000000').font('Helvetica')
            .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
       }
       if (invoice.customerGSTIN) {
-        doc.fontSize(7).font('Helvetica');
+        doc.fontSize(8).font('Helvetica');
         const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
         const gstY  = billAddrY + addrH + 2;
         doc.fillColor('#000000')
@@ -788,21 +823,21 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
 
       // ── Col 2: Ship To ──────────────────────────────────────────────────
       const shipX = 40 + colW;
-      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+      doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text('SHIP TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       if (shipStr) {
-        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+        doc.fontSize(8).fillColor('#000000').font('Helvetica')
            .text(shipStr, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
       } else {
-        doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
+        doc.fontSize(8).fillColor('#000000').font('Helvetica')
            .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
       }
 
       // ── Col 3: Invoice Details ──────────────────────────────────────────
       const detX = 40 + colW * 2;
-      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+      doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
          .text('INVOICE DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Invoice #: ${invoice.invoiceNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
@@ -814,7 +849,7 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       }
 
       // ── Page-break helper ─
-      const PAGE_BOTTOM = 720; // safe bottom margin
+      const PAGE_BOTTOM = 780; // safe bottom margin
       const ensureSpace = (currentY, neededHeight = 20) => {
         if (currentY + neededHeight > PAGE_BOTTOM) {
           doc.addPage();
@@ -833,56 +868,76 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // Column definitions — adaptive for inter/intra state
       const cols = {
         num:     { x: 40,  w: 16  },
-        desc:    { x: 56,  w: 90  },
-        hsn:     { x: 146, w: 44  },
-        unit:    { x: 190, w: 24  },
-        qty:     { x: 214, w: 24  },
-        rate:    { x: 238, w: 36  },
-        disc:    { x: 274, w: 26  },
-        taxable: { x: 300, w: 38  },
-        gst:     { x: 338, w: 24  },
-        tax1:    { x: 362, w: 46  },  // CGST or IGST
-        tax2:    { x: 408, w: 46  },  // SGST
-        amount:  { x: 454, w: 61  },  // ends at 515 relative to page ✅
+        desc:    { x: 56,  w: 96  },
+        hsn:     { x: 152, w: 38  },
+        unit:    { x: 190, w: 32  },  // widened — was overflowing text like "General"
+        qty:     { x: 222, w: 34  },
+        rate:    { x: 256, w: 38  },
+        taxable: { x: 294, w: 50  },  // narrowed to make room for unit
+        gst:     { x: 344, w: 24  },
+        tax1:    { x: 368, w: 44  },  // CGST or IGST
+        tax2:    { x: 412, w: 44  },  // SGST
+        amount:  { x: 456, w: 59  },  // narrowed to make room for unit — still ends at 515 ✅
       };
 
-      // Header row
-      doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
-      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
-      doc.text('#',        cols.num.x  + 2, tableStartY + 7, { width: cols.num.w });
-      doc.text('ITEM',     cols.desc.x + 2, tableStartY + 7, { width: cols.desc.w });
-      doc.text('HSN/SAC',  cols.hsn.x  + 2, tableStartY + 7, { width: cols.hsn.w });
-      doc.text('UNIT',     cols.unit.x + 2, tableStartY + 7, { width: cols.unit.w });
-      doc.text('QTY',      cols.qty.x  + 2, tableStartY + 7, { width: cols.qty.w,     align: 'center' });
-      doc.text('RATE',     cols.rate.x + 2, tableStartY + 7, { width: cols.rate.w,    align: 'right' });
-      doc.text('DISC',     cols.disc.x + 2, tableStartY + 7, { width: cols.disc.w,    align: 'right' });
-      doc.text('TAXABLE',  cols.taxable.x+2,tableStartY + 7, { width: cols.taxable.w, align: 'right' });
-      doc.text('GST%',     cols.gst.x  + 2, tableStartY + 7, { width: cols.gst.w,     align: 'center' });
-      if (isInterState) {
-        doc.text('IGST',   cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
-      } else {
-        doc.text('CGST',   cols.tax1.x + 2, tableStartY + 7, { width: cols.tax1.w, align: 'right' });
-        doc.text('SGST',   cols.tax2.x + 2, tableStartY + 7, { width: cols.tax2.w, align: 'right' });
-      }
-      doc.text('AMOUNT',   cols.amount.x+2, tableStartY + 7, { width: cols.amount.w,  align: 'right' });
+      const drawTableHeader = (startY) => {
+        doc.rect(40, startY, 515, 20).fill('#0f1e3d');
+        doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold');
+        doc.text('#',        cols.num.x  + 2, startY + 7, { width: cols.num.w });
+        doc.text('ITEM',     cols.desc.x + 2, startY + 7, { width: cols.desc.w });
+        doc.text('HSN/SAC',  cols.hsn.x  + 2, startY + 7, { width: cols.hsn.w });
+        doc.text('UNIT',     cols.unit.x + 2, startY + 7, { width: cols.unit.w });
+        doc.text('QTY',      cols.qty.x  + 2, startY + 7, { width: cols.qty.w,     align: 'center' });
+        doc.text('RATE',     cols.rate.x + 2, startY + 7, { width: cols.rate.w,    align: 'center' });
+        doc.text('TAXABLE',  cols.taxable.x+2,startY + 7, { width: cols.taxable.w, align: 'center' });
+        doc.text('GST%',     cols.gst.x  + 2, startY + 7, { width: cols.gst.w,     align: 'center' });
+        if (isInterState) {
+          doc.text('IGST',   cols.tax1.x + 2, startY + 7, { width: cols.tax1.w + cols.tax2.w, align: 'center' });
+        } else {
+          doc.text('CGST',   cols.tax1.x + 2, startY + 7, { width: cols.tax1.w, align: 'center' });
+          doc.text('SGST',   cols.tax2.x + 2, startY + 7, { width: cols.tax2.w, align: 'center' });
+        }
+        doc.text('AMOUNT',   cols.amount.x+2, startY + 7, { width: cols.amount.w,  align: 'center' });
+      };
+
+      // Draw initial Header row
+      drawTableHeader(tableStartY);
 
       let rowY = tableStartY + 20;
       (invoice.items || []).forEach((item, idx) => {
-        const descText   = (item.itemDetails || '').replace(/\n{3,}/g, '\n\n').trim() || 'N/A';
-        const descWidth  = cols.desc.w - 4;
-        const lineHeight = 9;
-        const vPad       = 8; // top + bottom padding
+        const rawDesc    = item.itemDetails || '';
+        const descText   = rawDesc.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || 'N/A';
+        const descWidth  = cols.desc.w - 6; // slightly more inner padding
+        const vPad       = 12; // increased top + bottom padding for cleaner look
 
         // Measure how tall the description will be when wrapped
         doc.font('Helvetica').fontSize(7);
-        const descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1 });
-        const rowH  = Math.max(20, descH + vPad * 2);
+        let descH = doc.heightOfString(descText, { width: descWidth, lineGap: 1.5 });
+        
+        // Failsafe for minimum height based on newlines
+        const numLines = descText.split('\n').length;
+        const minH = numLines * 8; 
+        if (descH < minH) descH = minH;
 
-        rowY = ensureSpace(rowY, rowH);
+        const rowH  = Math.max(24, descH + vPad * 2);
+
+        if (rowY + rowH > PAGE_BOTTOM) {
+          doc.addPage();
+          rowY = 40;
+          drawTableHeader(rowY);
+          rowY += 20;
+        }
 
         const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
         doc.rect(40, rowY, 515, rowH).fill(fill);
-        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+
+        Object.keys(cols).forEach((key) => {
+          if (key !== 'num') {
+            if (isInterState && key === 'tax2') return;
+            doc.moveTo(cols[key].x, rowY).lineTo(cols[key].x, rowY + rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+          }
+        });
 
         doc.fontSize(7).fillColor('#000000');
         const hsnSac = item.hsnCode || item.sacCode || '';
@@ -890,26 +945,27 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
           : '—';
 
-        // vertically center single-line cells relative to rowH
-        const cellY = rowY + vPad;
+        // Multi-line description vertically centered
+        const cellY = rowY + (rowH - descH) / 2;
+        // Single-line text is centered vertically (7pt font is approx 7-8px tall)
+        const singleLineY = rowY + (rowH - 7) / 2;
 
-        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
-        doc.font('Helvetica').text(descText, cols.desc.x + 2, cellY, { width: descWidth, lineGap: 1 });
-        doc.text(hsnSac,                               cols.hsn.x  + 2, cellY, { width: cols.hsn.w - 2,  ellipsis: true });
-        doc.text(item.unit || 'Nos',                   cols.unit.x + 2, cellY, { width: cols.unit.w });
-        doc.text(String(item.quantity || 0),           cols.qty.x  + 2, cellY, { width: cols.qty.w,     align: 'center' });
-        doc.text(`${(item.rate || 0).toFixed(2)}`,  cols.rate.x + 2, cellY, { width: cols.rate.w,    align: 'right' });
-        doc.text(discStr,                              cols.disc.x + 2, cellY, { width: cols.disc.w,    align: 'right' });
-        doc.text(`${(item.taxableAmount || 0).toFixed(2)}`, cols.taxable.x + 2, cellY, { width: cols.taxable.w, align: 'right' });
-        doc.text(`${item.itemGstRate || 0}%`,          cols.gst.x  + 2, cellY, { width: cols.gst.w,     align: 'center' });
+        doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, singleLineY, { width: cols.num.w - 4, align: 'center' });
+        doc.font('Helvetica').text(descText, cols.desc.x + 3, cellY, { width: descWidth, lineGap: 1.5 });
+        doc.text(hsnSac,                               cols.hsn.x  + 2, singleLineY, { width: cols.hsn.w - 2,  ellipsis: true, align: 'center' });
+        doc.text(item.unit || 'Nos',                   cols.unit.x + 2, singleLineY, { width: cols.unit.w, align: 'center' });
+        doc.text(String(item.quantity || 0),           cols.qty.x  + 2, singleLineY, { width: cols.qty.w,     align: 'center' });
+        doc.text(`${(item.rate || 0).toFixed(2)}`,  cols.rate.x + 2, singleLineY, { width: cols.rate.w - 4,    align: 'center' });
+        doc.text(`${(item.taxableAmount || 0).toFixed(2)}`, cols.taxable.x + 2, singleLineY, { width: cols.taxable.w - 4, align: 'center' });
+        doc.text(`${item.itemGstRate || 0}%`,          cols.gst.x  + 2, singleLineY, { width: cols.gst.w,     align: 'center' });
         if (isInterState) {
-          doc.text(`${(item.igstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, cellY, { width: cols.tax1.w + cols.tax2.w, align: 'right' });
+          doc.text(`${(item.igstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, singleLineY, { width: cols.tax1.w + cols.tax2.w - 4, align: 'center' });
         } else {
-          doc.text(`${(item.cgstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, cellY, { width: cols.tax1.w, align: 'right' });
-          doc.text(`${(item.sgstAmount || 0).toFixed(2)}`, cols.tax2.x + 2, cellY, { width: cols.tax2.w, align: 'right' });
+          doc.text(`${(item.cgstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, singleLineY, { width: cols.tax1.w - 4, align: 'center' });
+          doc.text(`${(item.sgstAmount || 0).toFixed(2)}`, cols.tax2.x + 2, singleLineY, { width: cols.tax2.w - 4, align: 'center' });
         }
         doc.font('Helvetica-Bold')
-           .text(`${(item.amount || 0).toFixed(2)}`, cols.amount.x + 2, cellY, { width: cols.amount.w, align: 'right' });
+           .text(`${(item.amount || 0).toFixed(2)}`, cols.amount.x + 2, singleLineY, { width: cols.amount.w - 4, align: 'center' });
         rowY += rowH;
       });
 
@@ -928,12 +984,12 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
 
       const tRow = (label, amount, bold = false) => {
         doc.fontSize(8)
-           .fillColor('#5e6e84').font(bold ? 'Helvetica-Bold' : 'Helvetica')
+           .fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
            .text(label, labelX, totalsY, { width: 140 });
         doc.fillColor('#000000').font(bold ? 'Helvetica-Bold' : 'Helvetica')
            .text(amount, labelX + 140, totalsY, { width: 100, align: 'right' });
         doc.moveTo(labelX, totalsY + 11).lineTo(amountX, totalsY + 11)
-           .lineWidth(0.5).strokeColor('#dde4ef').dash(2, { space: 2 }).stroke().undash();
+           .lineWidth(0.5).strokeColor('#000000').stroke();
         totalsY += 14;
       };
 
@@ -986,15 +1042,15 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       notesY = ensureSpace(notesY, 80);
 
       if (payInfo.bankAccount || payInfo.upiId) {
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+        doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
            .text('PAYMENT DETAILS', 40, notesY, { characterSpacing: 0.8 });
         doc.moveTo(40, notesY + 9).lineTo(555, notesY + 9)
-           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+           .lineWidth(0.5).strokeColor('#000000').stroke();
 
         let py = notesY + 14;
         const payLine = (label, val) => {
           py = ensureSpace(py, 14); // add page if this line would overflow
-          doc.fontSize(7.5).fillColor('#5e6e84').font('Helvetica-Bold')
+          doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
              .text(`${label}:`, 40, py, { continued: true });
           doc.fillColor('#000000').font('Helvetica').text(` ${val}`);
           py += 11;
@@ -1007,38 +1063,46 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
 
         // ── QR Code — same proportional rendering as digital signature ──────
         const qrRelPath = payInfo.qrCodePath;
-        if (qrRelPath) {
+        let qrBuf = null;
+        let qrExt = '.png';
+        if (orgData?.qrBase64) {
+          const match = orgData.qrBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+          if (match) {
+            qrExt = '.' + match[1].replace('jpeg', 'jpg');
+            qrBuf = Buffer.from(match[2], 'base64');
+          }
+        } else if (qrRelPath) {
+          const qrAbsPath = path.join(__dirname, '..', qrRelPath.replace(/^\//, ''));
+          try { if (fs.existsSync(qrAbsPath)) { qrBuf = fs.readFileSync(qrAbsPath); qrExt = path.extname(qrAbsPath).toLowerCase(); } } catch (_) {}
+        }
+
+        if (qrBuf) {
           try {
-            const qrAbsPath = path.join(__dirname, '..', qrRelPath.replace(/^\//, ''));
-            if (fs.existsSync(qrAbsPath)) {
               const qrMaxSize = 80; // square cap — same logic as signature
               let qrW = qrMaxSize, qrH = qrMaxSize;
               try {
-                const buf = fs.readFileSync(qrAbsPath);
-                const ext = path.extname(qrAbsPath).toLowerCase();
-                if (ext === '.png' && buf.length > 24) {
-                  qrW = buf.readUInt32BE(16);
-                  qrH = buf.readUInt32BE(20);
-                } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+                if (qrExt === '.png' && qrBuf.length > 24) {
+                  qrW = qrBuf.readUInt32BE(16);
+                  qrH = qrBuf.readUInt32BE(20);
+                } else if ((qrExt === '.jpg' || qrExt === '.jpeg') && qrBuf.length > 4) {
                   let i = 2;
-                  while (i < buf.length - 8) {
-                    if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
-                      qrH = buf.readUInt16BE(i + 5);
-                      qrW = buf.readUInt16BE(i + 7);
+                  while (i < qrBuf.length - 8) {
+                    if (qrBuf[i] === 0xFF && qrBuf[i+1] >= 0xC0 && qrBuf[i+1] <= 0xC3) {
+                      qrH = qrBuf.readUInt16BE(i + 5);
+                      qrW = qrBuf.readUInt16BE(i + 7);
                       break;
                     }
-                    i += 2 + buf.readUInt16BE(i + 2);
+                    i += 2 + qrBuf.readUInt16BE(i + 2);
                   }
                 }
               } catch (_) {}
               const scale       = Math.min(qrMaxSize / qrW, qrMaxSize / qrH);
               const renderedW   = Math.round(qrW * scale);
               const renderedH   = Math.round(qrH * scale);
-              doc.image(qrAbsPath, 40, py, { width: renderedW, height: renderedH });
-              doc.fontSize(6.5).fillColor('#5e6e84').font('Helvetica')
+              doc.image(qrBuf, 40, py, { width: renderedW, height: renderedH });
+              doc.fontSize(6.5).fillColor('#000000').font('Helvetica')
                  .text('Scan to Pay', 40, py + renderedH + 2, { width: renderedW, align: 'center' });
               py += renderedH + 14;
-            }
           } catch (qrErr) {
             console.warn('⚠️ Could not render QR code:', qrErr.message);
           }
@@ -1054,10 +1118,10 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
 
       // Org invoice note — left column only (x: 40, width: 260)
       if (orgData?.invoiceNote) {
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+        doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
            .text('NOTE', 40, bottomSectionY, { characterSpacing: 0.8 });
         doc.moveTo(40, bottomSectionY + 9).lineTo(300, bottomSectionY + 9)
-           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+           .lineWidth(0.5).strokeColor('#000000').stroke();
         doc.fontSize(7.5).fillColor('#374151').font('Helvetica')
            .text(orgData.invoiceNote, 40, bottomSectionY + 14, { width: 260 });
         notesY = bottomSectionY + Math.ceil(orgData.invoiceNote.length / 55) * 10 + 28;
@@ -1066,10 +1130,10 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // Notes (original)
       if (invoice.customerNotes) {
         const nY = notesY;
-        doc.fontSize(7.5).fillColor('#8a9ab5').font('Helvetica-Bold')
+        doc.fontSize(7.5).fillColor('#000000').font('Helvetica-Bold')
            .text('NOTES', 40, nY, { characterSpacing: 0.8 });
         doc.moveTo(40, nY + 9).lineTo(555, nY + 9)
-           .lineWidth(0.5).strokeColor('#dde4ef').stroke();
+           .lineWidth(0.5).strokeColor('#000000').stroke();
         doc.fontSize(8).fillColor('#000000').font('Helvetica')
            .text(invoice.customerNotes, 40, nY + 14, { width: pageW });
         notesY = nY + 40;
@@ -1088,7 +1152,7 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       // ── AUTHORIZED SIGNATORY — always right-aligned at bottomSectionY ────
       const signSectionY = bottomSectionY;
 
-      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+      doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold')
          .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
 
       // Render digital signature image — centered, large square so round stamps show fully
@@ -1096,29 +1160,37 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       const sigImgSize = 200;
       const sigImgX    = authBoxX + (signBoxW - sigImgSize) / 2;
       let actualSigH   = sigImgSize;
-      if (sigRelPath) {
+
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (sigRelPath) {
+        const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(sigAbsPath)) { sigBuf = fs.readFileSync(sigAbsPath); sigExt = path.extname(sigAbsPath).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(sigAbsPath)) {
             // Read image dimensions from buffer to calculate exact rendered height
             let imgW = sigImgSize, imgH = sigImgSize;
             try {
-              const buf = fs.readFileSync(sigAbsPath);
-              // JPEG: dimensions at offset 0xFFD8 marker chain
-              // PNG:  width at bytes 16-19, height at 20-23
-              const ext = path.extname(sigAbsPath).toLowerCase();
-              if (ext === '.png' && buf.length > 24) {
-                imgW = buf.readUInt32BE(16);
-                imgH = buf.readUInt32BE(20);
-              } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) {
+                imgW = sigBuf.readUInt32BE(16);
+                imgH = sigBuf.readUInt32BE(20);
+              } else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let i = 2;
-                while (i < buf.length - 8) {
-                  if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
-                    imgH = buf.readUInt16BE(i + 5);
-                    imgW = buf.readUInt16BE(i + 7);
+                while (i < sigBuf.length - 8) {
+                  if (sigBuf[i] === 0xFF && sigBuf[i+1] >= 0xC0 && sigBuf[i+1] <= 0xC3) {
+                    imgH = sigBuf.readUInt16BE(i + 5);
+                    imgW = sigBuf.readUInt16BE(i + 7);
                     break;
                   }
-                  i += 2 + buf.readUInt16BE(i + 2);
+                  i += 2 + sigBuf.readUInt16BE(i + 2);
                 }
               }
             } catch (_) {}
@@ -1126,11 +1198,10 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
             actualSigH       = Math.round(imgH * scale);
             const actualSigW = Math.round(imgW * scale);
             const centeredX  = authBoxX + (signBoxW - actualSigW) / 2;
-            doc.image(sigAbsPath, centeredX, signSectionY + 10, {
+            doc.image(sigBuf, centeredX, signSectionY + 10, {
               width:  actualSigW,
               height: actualSigH,
             });
-          }
         } catch (sigErr) {
           console.warn('⚠️ Could not render digital signature:', sigErr.message);
         }
@@ -1415,7 +1486,7 @@ async function sendPaymentReceiptEmail(invoice, payment, orgId = null, branchId 
   const orgGST     = orgData?.gstNumber || '';
   const orgPhone   = orgData?.phone     || '';
   const orgEmail   = orgData?.email     || '';
-  const logoBase64 = getOrgLogoBase64(orgId);
+  const logoBase64 = orgData?.logoBase64 || getOrgLogoBase64(orgId);
 
   const emailHtml = `<!DOCTYPE html>
 <html>
@@ -1520,7 +1591,7 @@ router.get('/', async (req, res) => {
     console.log('🔍 orgFilter:', JSON.stringify(req.orgFilter));
     console.log('🔍 query being used:', JSON.stringify({ ...req.orgFilter, ...(req.branchFilter || {}) }));
 
-    const { status, customerId, fromDate, toDate, page = 1, limit = 20 } = req.query;
+    const { status, customerId, fromDate, toDate, search, page = 1, limit = 20 } = req.query;
     const query = { ...req.orgFilter, ...(req.branchFilter || {}) };
     if (status) {
       query.status = status;
@@ -1533,6 +1604,17 @@ router.get('/', async (req, res) => {
       if (fromDate) query.invoiceDate.$gte = new Date(fromDate);
       if (toDate)   query.invoiceDate.$lte = new Date(toDate);
     }
+    
+    // NEW: Universal Search Filter
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      query.$or = [
+        { invoiceNumber: searchRegex },
+        { customerName: searchRegex },
+        { orderNumber: searchRegex }
+      ];
+    }
+
     const skip     = (parseInt(page) - 1) * parseInt(limit);
     const invoices = await Invoice.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)).select('-__v');
     const total    = await Invoice.countDocuments(query);
@@ -1546,8 +1628,20 @@ router.get('/', async (req, res) => {
 // ── GET /stats (original) ─────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
+    const { search } = req.query;
+    const matchQuery = { orgId: req.user?.orgId, status: { $ne: 'AUTOMATION_DRAFT' }, ...(req.branchFilter || {}) };
+    
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      matchQuery.$or = [
+        { invoiceNumber: searchRegex },
+        { customerName: searchRegex },
+        { orderNumber: searchRegex }
+      ];
+    }
+
     const stats = await Invoice.aggregate([
-      { $match: { orgId: req.user?.orgId, status: { $ne: 'AUTOMATION_DRAFT' }, ...(req.branchFilter || {}) } },
+      { $match: matchQuery },
       { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } }
     ]);
     const overallStats = { totalInvoices: 0, totalRevenue: 0, totalPaid: 0, totalDue: 0, byStatus: {} };
@@ -1669,12 +1763,14 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
         // ── COA posting (same as regular create) ─────────────────────────────
         try {
           const currentOrgId = req.user?.orgId || null;
-          const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+          const [arId, salesId, taxId, tdsReceivableId, tcsPayableId, otherChargesId] = await Promise.all([
             getSystemAccountId('Accounts Receivable', currentOrgId),
             getSystemAccountId('Sales',               currentOrgId),
             getSystemAccountId('Tax Payable',          currentOrgId),
             getSystemAccountId('TDS Receivable',       currentOrgId),
             getSystemAccountId('TDS Payable',          currentOrgId),
+          getSystemAccountId('Other Charges',          currentOrgId),
+          getSystemAccountId('Other Charges',          currentOrgId),
           ]);
           const txnDate = new Date(invoice.invoiceDate);
           const desc    = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
@@ -1683,6 +1779,14 @@ router.post('/import/bulk', importUpload.single('file'), async (req, res) => {
           if (taxId    && invoice.totalTax  > 0) await postTransactionToCOA({ accountId: taxId,           orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`,                    referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0,                  credit: invoice.totalTax  });
           if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
           if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        if (otherChargesId && invoice.adjustment) {
+          const adjBranch = req.branchIds?.length > 0 ? req.branchIds[0] : (invoice.branchId || null);
+          if (invoice.adjustment < 0) {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: Math.abs(invoice.adjustment), credit: 0 });
+          } else {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.adjustment });
+          }
+        }
           console.log(`   ✅ COA posted for imported invoice: ${invoice.invoiceNumber}`);
         } catch (coaErr) {
           console.error(`   ⚠️ COA post error (invoice import row ${rowNum}):`, coaErr.message);
@@ -1710,7 +1814,29 @@ router.get('/:id', async (req, res) => {
   try {
     const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
     if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
-    res.json({ success: true, data: invoice });
+    
+    let totalTdsDeducted = 0;
+    let totalWriteOff = 0;
+    
+    // Fetch payments for this invoice to calculate TDS and Write-off totals
+    const payments = await mongoose.connection.db.collection('payments_received').find({
+      [`invoicePayments.${req.params.id}`]: { $exists: true }
+    }).toArray();
+    
+    payments.forEach(p => {
+      if (p.invoiceTds && p.invoiceTds[req.params.id]) {
+        totalTdsDeducted += parseFloat(p.invoiceTds[req.params.id]) || 0;
+      }
+      if (p.invoiceWriteOffs && p.invoiceWriteOffs[req.params.id]) {
+        totalWriteOff += parseFloat(p.invoiceWriteOffs[req.params.id]) || 0;
+      }
+    });
+
+    const invoiceObj = invoice.toObject ? invoice.toObject() : invoice;
+    invoiceObj.totalTdsDeducted = totalTdsDeducted;
+    invoiceObj.totalWriteOff = totalWriteOff;
+
+    res.json({ success: true, data: invoiceObj });
   } catch (error) {
     console.error('Error fetching invoice:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1749,12 +1875,13 @@ router.post('/', async (req, res) => {
       try {
         const currentOrgId = req.user?.orgId || null;
         const branchId = invoice.branchId;
-        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId, otherChargesId] = await Promise.all([
           getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
           getSystemAccountId('Sales',               currentOrgId, branchId),
           getSystemAccountId('Tax Payable',          currentOrgId, branchId),
           getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
           getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+          getSystemAccountId('Other Charges',          currentOrgId, branchId),
         ]);
         const txnDate = new Date(invoice.invoiceDate);
         if (arId)    await postTransactionToCOA({ accountId: arId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.totalAmount, credit: 0 });
@@ -1762,6 +1889,14 @@ router.post('/', async (req, res) => {
         if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
         if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
         if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        if (otherChargesId && invoice.adjustment) {
+          const adjBranch = req.branchIds?.length > 0 ? req.branchIds[0] : (invoice.branchId || null);
+          if (invoice.adjustment < 0) {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: Math.abs(invoice.adjustment), credit: 0 });
+          } else {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.adjustment });
+          }
+        }
         console.log(`✅ COA posted for invoice: ${invoice.invoiceNumber}`);
       } catch (coaErr) { console.error('⚠️ COA post error (invoice create):', coaErr.message); }
     }
@@ -1820,12 +1955,13 @@ router.put('/:id', async (req, res) => {
       
       // 2. Repost the new amounts ONLY IF NOT DRAFT
       if (invoice.status !== 'DRAFT') {
-        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId, otherChargesId] = await Promise.all([
           getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
           getSystemAccountId('Sales',               currentOrgId, branchId),
           getSystemAccountId('Tax Payable',          currentOrgId, branchId),
           getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
           getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+          getSystemAccountId('Other Charges',          currentOrgId, branchId),
         ]);
         
         const txnDate = new Date(invoice.invoiceDate);
@@ -1836,6 +1972,14 @@ router.put('/:id', async (req, res) => {
         if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
         if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
         if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        if (otherChargesId && invoice.adjustment) {
+          const adjBranch = req.branchIds?.length > 0 ? req.branchIds[0] : (invoice.branchId || null);
+          if (invoice.adjustment < 0) {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: Math.abs(invoice.adjustment), credit: 0 });
+          } else {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.adjustment });
+          }
+        }
         
         console.log(`✅ COA updated for edited invoice: ${invoice.invoiceNumber}`);
       } else {
@@ -1890,12 +2034,13 @@ router.post('/:id/send', async (req, res) => {
       try {
         const currentOrgId = req.user?.orgId || null;
         const branchId = invoice.branchId;
-        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId, otherChargesId] = await Promise.all([
           getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
           getSystemAccountId('Sales',               currentOrgId, branchId),
           getSystemAccountId('Tax Payable',          currentOrgId, branchId),
           getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
           getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+          getSystemAccountId('Other Charges',          currentOrgId, branchId),
         ]);
         const txnDate = new Date(invoice.invoiceDate);
         const desc = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
@@ -1904,6 +2049,14 @@ router.post('/:id/send', async (req, res) => {
         if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
         if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
         if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        if (otherChargesId && invoice.adjustment) {
+          const adjBranch = req.branchIds?.length > 0 ? req.branchIds[0] : (invoice.branchId || null);
+          if (invoice.adjustment < 0) {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: Math.abs(invoice.adjustment), credit: 0 });
+          } else {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.adjustment });
+          }
+        }
         console.log(`✅ COA posted for DRAFT -> SENT invoice: ${invoice.invoiceNumber}`);
       } catch (coaErr) { console.error('⚠️ COA post error (mark-as-sent via email):', coaErr.message); }
     }
@@ -1935,12 +2088,13 @@ router.patch('/:id/mark-as-sent', async (req, res) => {
       try {
         const currentOrgId = req.user?.orgId || null;
         const branchId = invoice.branchId;
-        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId] = await Promise.all([
+        const [arId, salesId, taxId, tdsReceivableId, tcsPayableId, otherChargesId] = await Promise.all([
           getSystemAccountId('Accounts Receivable', currentOrgId, branchId),
           getSystemAccountId('Sales',               currentOrgId, branchId),
           getSystemAccountId('Tax Payable',          currentOrgId, branchId),
           getSystemAccountId('TDS Receivable',       currentOrgId, branchId),
           getSystemAccountId('TDS Payable',          currentOrgId, branchId),
+          getSystemAccountId('Other Charges',          currentOrgId, branchId),
         ]);
         const txnDate = new Date(invoice.invoiceDate);
         const desc = `Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`;
@@ -1949,6 +2103,14 @@ router.patch('/:id/mark-as-sent', async (req, res) => {
         if (taxId && invoice.totalTax > 0) await postTransactionToCOA({ accountId: taxId, orgId: currentOrgId, branchId, date: txnDate, description: `GST on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.totalTax });
         if (tdsReceivableId && invoice.tdsAmount > 0) await postTransactionToCOA({ accountId: tdsReceivableId, orgId: currentOrgId, branchId, date: txnDate, description: `TDS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: invoice.tdsAmount, credit: 0 });
         if (tcsPayableId    && invoice.tcsAmount > 0) await postTransactionToCOA({ accountId: tcsPayableId,    orgId: currentOrgId, branchId, date: txnDate, description: `TCS on Invoice ${invoice.invoiceNumber} - ${invoice.customerName}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.tcsAmount });
+        if (otherChargesId && invoice.adjustment) {
+          const adjBranch = req.branchIds?.length > 0 ? req.branchIds[0] : (invoice.branchId || null);
+          if (invoice.adjustment < 0) {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: Math.abs(invoice.adjustment), credit: 0 });
+          } else {
+            await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: adjBranch, date: txnDate, description: `Adjustment on Invoice ${invoice.invoiceNumber}`, referenceType: 'Invoice', referenceId: invoice._id, referenceNumber: invoice.invoiceNumber, debit: 0, credit: invoice.adjustment });
+          }
+        }
         console.log(`✅ COA posted for DRAFT -> SENT invoice: ${invoice.invoiceNumber}`);
       } catch (coaErr) { console.error('⚠️ COA post error (mark-as-sent):', coaErr.message); }
     }

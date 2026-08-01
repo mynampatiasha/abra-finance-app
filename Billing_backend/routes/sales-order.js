@@ -100,6 +100,10 @@ const salesOrderItemSchema = new mongoose.Schema({
     enum: ['percentage', 'amount'],
     default: 'percentage',
   },
+  itemGstRate: {
+    type: Number,
+    default: 0
+  },
   amount: {
     type: Number,
     required: true,
@@ -456,8 +460,26 @@ const calculateSalesOrderTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18
   
   const tdsAmount = parseFloat((subTotal * tdsRate / 100).toFixed(2));
   const tcsAmount = parseFloat((subTotal * tcsRate / 100).toFixed(2));
-  const gstBase = subTotal - tdsAmount + tcsAmount;
-  const totalGst = parseFloat((gstBase * gstRate / 100).toFixed(2));
+  
+  // Calculate GST dynamically
+  let totalGst = 0;
+  const hasItemGst = items.some(item => typeof item.itemGstRate === 'number');
+  
+  if (hasItemGst) {
+    items.forEach(item => {
+      const itemProportion = subTotal > 0 ? (item.amount / subTotal) : 0;
+      const itemTds = tdsAmount * itemProportion;
+      const itemTcs = tcsAmount * itemProportion;
+      const itemGstBase = item.amount - itemTds + itemTcs;
+      const itemTax = (itemGstBase * (item.itemGstRate || 0)) / 100;
+      totalGst += itemTax;
+    });
+  } else {
+    const gstBase = subTotal - tdsAmount + tcsAmount;
+    totalGst = (gstBase * gstRate) / 100;
+  }
+  
+  totalGst = parseFloat(totalGst.toFixed(2));
   const cgst = parseFloat((totalGst / 2).toFixed(2));
   const sgst = parseFloat((totalGst / 2).toFixed(2));
   const totalAmount = parseFloat((subTotal - tdsAmount + tcsAmount + totalGst).toFixed(2));
@@ -512,24 +534,33 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
       const pageW = 515;
 
       // -- HEADER - plain white background like invoices.js -----------------
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getLogoPath(orgId);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getLogoPath(orgId);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
       let logoLoaded = false;
-      const textX = logoPath ? 126 : 50;
+      const textX = logoData ? 166 : 50;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY  = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH = 55;
-      const logoY = logoCenterY - (logoH / 2);
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
 
-      if (logoPath) {
+      if (logoData) {
         try {
-          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
@@ -689,7 +720,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
           : '�';
 
-        const gstRate  = item.itemGstRate || 0;
+        const gstRate  = item.itemGstRate !== undefined ? item.itemGstRate : (salesOrder.gstRate || 18);
         const taxable  = item.taxableAmount || item.amount || 0;
         const cgstAmt  = isInterState ? 0 : Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
         const sgstAmt  = cgstAmt;
@@ -796,28 +827,37 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
       const _soSigRelPath = orgData?.digitalSignaturePath;
       const _soSigSize    = 200;
       let   _soActualSigH = _soSigSize;
-      if (_soSigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (_soSigRelPath) {
+        const _soSigAbs = path.join(__dirname, '..', _soSigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(_soSigAbs)) { sigBuf = fs.readFileSync(_soSigAbs); sigExt = path.extname(_soSigAbs).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const _soSigAbs = path.join(__dirname, '..', _soSigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(_soSigAbs)) {
             let _soW = _soSigSize, _soH = _soSigSize;
             try {
-              const _soBuf = fs.readFileSync(_soSigAbs);
-              const _soExt = path.extname(_soSigAbs).toLowerCase();
-              if (_soExt === '.png' && _soBuf.length > 24) { _soW = _soBuf.readUInt32BE(16); _soH = _soBuf.readUInt32BE(20); }
-              else if ((_soExt === '.jpg' || _soExt === '.jpeg') && _soBuf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) { _soW = sigBuf.readUInt32BE(16); _soH = sigBuf.readUInt32BE(20); }
+              else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let _soi = 2;
-                while (_soi < _soBuf.length - 8) {
-                  if (_soBuf[_soi] === 0xFF && _soBuf[_soi+1] >= 0xC0 && _soBuf[_soi+1] <= 0xC3) { _soH = _soBuf.readUInt16BE(_soi+5); _soW = _soBuf.readUInt16BE(_soi+7); break; }
-                  _soi += 2 + _soBuf.readUInt16BE(_soi + 2);
+                while (_soi < sigBuf.length - 8) {
+                  if (sigBuf[_soi] === 0xFF && sigBuf[_soi+1] >= 0xC0 && sigBuf[_soi+1] <= 0xC3) { _soH = sigBuf.readUInt16BE(_soi+5); _soW = sigBuf.readUInt16BE(_soi+7); break; }
+                  _soi += 2 + sigBuf.readUInt16BE(_soi + 2);
                 }
               }
             } catch (_) {}
             const _soScale = Math.min(_soSigSize / _soW, _soSigSize / _soH);
             _soActualSigH  = Math.round(_soH * _soScale);
             const _soActualSigW = Math.round(_soW * _soScale);
-            doc.image(_soSigAbs, authBoxX + (signBoxW - _soActualSigW) / 2, signSectionY + 10, { width: _soActualSigW, height: _soActualSigH });
-          }
+            doc.image(sigBuf, authBoxX + (signBoxW - _soActualSigW) / 2, signSectionY + 10, { width: _soActualSigW, height: _soActualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 
@@ -1356,6 +1396,7 @@ router.put('/:id', [
     
     Object.assign(salesOrder, req.body, totals);
     salesOrder.updatedBy = req.user.userId;
+    salesOrder.pdfPath = null; // Force PDF regeneration on edit
     
     await salesOrder.save();
     

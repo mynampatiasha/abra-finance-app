@@ -9,6 +9,8 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const multer = require('multer');
+const PDFDocument = require('pdfkit');
+const { getEffectiveOrgData } = require('./branches');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -148,7 +150,7 @@ const billingCustomerSchema = new mongoose.Schema({
 
   // -- Tax Info (Zoho style) -------------------------------------------------
   gstNumber: {
-    type: String, trim: true, uppercase: true, index: true,
+    type: String, trim: true, uppercase: true,
     match: [/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$|^$/, 'Invalid GST format'],
   },
   gstRegistrationType: {
@@ -346,11 +348,19 @@ if (mongoose.models.BillingCustomer) delete mongoose.models.BillingCustomer;
 const BillingCustomer = mongoose.model('BillingCustomer', billingCustomerSchema);
 
 // ============================================================================
-// HELPER � get Invoice model safely
+// HELPER  get Invoice model safely
 // ============================================================================
 function getInvoiceModel() {
   return mongoose.models.Invoice
     || mongoose.model('Invoice', new mongoose.Schema({}, { strict: false }), 'invoices');
+}
+function getCreditNoteModel() {
+  return mongoose.models.CreditNote 
+    || mongoose.model('CreditNote', new mongoose.Schema({}, { strict: false }), 'credit-notes');
+}
+function getPaymentReceivedModel() {
+  return mongoose.models.PaymentReceived 
+    || mongoose.model('PaymentReceived', new mongoose.Schema({}, { strict: false }), 'payments_received');
 }
 
 // ============================================================================
@@ -418,10 +428,65 @@ const getAllCustomers = async (req, res) => {
       // Invoice collection may not exist yet � safe to ignore
     }
 
+    // Unused Credits — computed live from actual unused credit notes + excess
+    // payments (same source the customer Overview page already trusts),
+    // instead of the cached customer.unusedCredits field, which can drift
+    // out of sync with the real records over time.
+    const CreditNote = getCreditNoteModel();
+    const PaymentReceived = getPaymentReceivedModel();
+    let unusedCreditsMap = {};
+    try {
+      const custIdStrs  = customers.map(c => c._id?.toString()).filter(Boolean);
+      const custCodeIds = customers.map(c => c.customerId).filter(Boolean);
+      const allCustIds  = [...new Set([...custIdStrs, ...custCodeIds])];
+
+      const [cnAgg, excessPmtAgg] = await Promise.all([
+        CreditNote.aggregate([
+          {
+            $match: {
+              customerId: { $in: allCustIds },
+              creditBalance: { $gt: 0 },
+              status: { $nin: ['VOID', 'DRAFT'] },
+              ...req.orgFilter,
+              ...(req.branchFilter || {}),
+            },
+          },
+          { $group: { _id: '$customerId', total: { $sum: '$creditBalance' } } },
+        ]),
+        PaymentReceived.aggregate([
+          {
+            $match: {
+              customerId: { $in: allCustIds },
+              amountInExcess: { $gt: 0 },
+              ...req.orgFilter,
+              ...(req.branchFilter || {}),
+            },
+          },
+          { $group: { _id: '$customerId', total: { $sum: '$amountInExcess' } } },
+        ]),
+      ]);
+
+      const addToMap = (agg) => {
+        agg.forEach(r => {
+          const key = r._id?.toString();
+          customers.forEach(c => {
+            if (c._id?.toString() === key || c.customerId === key) {
+              const cid = c._id.toString();
+              unusedCreditsMap[cid] = (unusedCreditsMap[cid] || 0) + r.total;
+            }
+          });
+        });
+      };
+      addToMap(cnAgg);
+      addToMap(excessPmtAgg);
+    } catch (e) {
+      // CreditNote/PaymentReceived collection may not exist yet — safe to ignore
+    }
+
     const customersWithReceivables = customers.map(c => ({
       ...c,
       outstandingReceivables: receivablesMap[c._id?.toString()] || 0,
-      unusedCredits: c.unusedCredits || 0,
+      unusedCredits: unusedCreditsMap[c._id?.toString()] || 0,
     }));
 
     let statistics = { totalCustomers: 0, activeCustomers: 0, inactiveCustomers: 0, blockedCustomers: 0 };
@@ -483,9 +548,15 @@ const getCustomerOverview = async (req, res) => {
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
     const Invoice = getInvoiceModel();
+    const CreditNote = getCreditNoteModel();
+    const PaymentReceived = getPaymentReceivedModel();
+
     let outstandingReceivables = 0;
     let unusedCredits = customer.unusedCredits || 0;
     let monthlyIncome = [];
+    
+    let unpaidInvoicesList = [];
+    let unusedCreditsList = [];
 
     if (Invoice) {
       // Outstanding receivables
@@ -501,17 +572,18 @@ const getCustomerOverview = async (req, res) => {
       ]);
       outstandingReceivables = receivablesAgg[0]?.total || 0;
 
-      // Monthly income - last 6 months
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-      sixMonthsAgo.setDate(1);
-      sixMonthsAgo.setHours(0, 0, 0, 0);
+      // Monthly income - dynamic months
+      const months = parseInt(req.query.months) || 6;
+      const monthsAgo = new Date();
+      monthsAgo.setMonth(monthsAgo.getMonth() - (months - 1));
+      monthsAgo.setDate(1);
+      monthsAgo.setHours(0, 0, 0, 0);
 
       const incomeAgg = await Invoice.aggregate([
         {
           $match: {
             customerId: { $in: [customer._id?.toString(), customer.customerId, customer._id].filter(Boolean) },
-            invoiceDate: { $gte: sixMonthsAgo },
+            invoiceDate: { $gte: monthsAgo },
             status: { $nin: ['CANCELLED', 'VOID'] },
             ...req.orgFilter,
           },
@@ -519,17 +591,17 @@ const getCustomerOverview = async (req, res) => {
         {
           $group: {
             _id: { year: { $year: '$invoiceDate' }, month: { $month: '$invoiceDate' } },
-            total: { $sum: '$totalAmount' },
+            total: { $sum: '$subTotal' },
             count: { $sum: 1 },
           },
         },
         { $sort: { '_id.year': 1, '_id.month': 1 } },
       ]);
 
-      // Build all 6 month slots
+      // Build month slots dynamically
       const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const now = new Date();
-      for (let i = 5; i >= 0; i--) {
+      for (let i = months - 1; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const found = incomeAgg.find(a => a._id.year === d.getFullYear() && a._id.month === d.getMonth() + 1);
         monthlyIncome.push({
@@ -539,6 +611,54 @@ const getCustomerOverview = async (req, res) => {
           count: found?.count || 0,
         });
       }
+
+      // Fetch unpaid invoices list for drilldown
+      unpaidInvoicesList = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId, customer._id].filter(Boolean) },
+        status: { $in: ['SENT', 'UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
+        ...req.orgFilter,
+      }).select('_id invoiceNumber invoiceDate amountDue').sort({ invoiceDate: -1 }).lean();
+    }
+
+    if (CreditNote && PaymentReceived) {
+      const validCustomerObjectIds = [customer._id?.toString(), customer.customerId, customer._id]
+        .filter(id => mongoose.isValidObjectId(id));
+
+      // Fetch unused credit notes
+      const unusedCreditNotes = await CreditNote.find({
+        customerId: { $in: validCustomerObjectIds },
+        creditBalance: { $gt: 0 },
+        status: { $nin: ['VOID', 'DRAFT'] },
+        ...req.orgFilter,
+      }).select('_id creditNoteNumber creditNoteDate creditBalance').sort({ creditNoteDate: -1 }).lean();
+
+      // Fetch unused payments (amountInExcess)
+      const unusedPayments = await PaymentReceived.find({
+        customerId: { $in: validCustomerObjectIds },
+        amountInExcess: { $gt: 0 },
+        ...req.orgFilter,
+      }).select('_id paymentNumber paymentDate amountInExcess paymentMode').sort({ paymentDate: -1 }).lean();
+
+      // Combine them into a single list
+      unusedCreditsList = [
+        ...unusedCreditNotes.map(cn => ({
+          _id: cn._id,
+          type: 'Credit Note',
+          number: cn.creditNoteNumber,
+          date: cn.creditNoteDate,
+          unusedAmount: cn.creditBalance
+        })),
+        ...unusedPayments.map(p => ({
+          _id: p._id,
+          type: 'Excess Payment',
+          number: p.paymentNumber,
+          date: p.paymentDate,
+          unusedAmount: p.amountInExcess
+        }))
+      ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      // Keep the Overview badge in sync with the drilldown list it opens
+      unusedCredits = unusedCreditsList.reduce((sum, c) => sum + (parseFloat(c.unusedAmount) || 0), 0);
     }
 
     res.json({
@@ -549,13 +669,15 @@ const getCustomerOverview = async (req, res) => {
           currency: customer.defaultCurrency || 'INR',
           outstandingReceivables,
           unusedCredits,
+          unpaidInvoicesList,
+          unusedCreditsList,
         },
         monthlyIncome,
       },
     });
   } catch (error) {
     console.error('? getCustomerOverview:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message, stack: String(error.stack) });
   }
 };
 
@@ -711,42 +833,40 @@ const getCustomerStatement = async (req, res) => {
     const Invoice = getInvoiceModel();
     let entries = [];
     let openingBalance = customer.openingBalance || 0;
+    let closingBalance = openingBalance;
     const custIdStr = customer._id?.toString();
     const custId2   = customer.customerId;
 
-    // Helper to parse dates which might be 'DD/MM/YYYY' strings or Date objects
-    const parseCustomDate = (dateVal, timeSource) => {
-      if (!dateVal) return null;
-      let parsed = null;
-      if (dateVal instanceof Date) {
-        parsed = new Date(dateVal);
-      } else {
-        const str = String(dateVal);
-        if (str.includes('/')) {
-          const parts = str.split('/');
-          if (parts.length === 3) {
-            // DD/MM/YYYY
-            parsed = new Date(parts[2], parts[1] - 1, parts[0]);
-          }
-        } else {
-          parsed = new Date(str);
-        }
-      }
-      
-      if (parsed && !isNaN(parsed.getTime())) {
-        if (timeSource) {
-          const tDate = new Date(timeSource);
-          if (!isNaN(tDate.getTime())) {
-            parsed.setHours(tDate.getHours(), tDate.getMinutes(), tDate.getSeconds());
-          }
-        }
-        return parsed;
-      }
-      return null;
-    };
+
 
     if (Invoice) {
-      // ── 1. Fetch all invoices in date range ─────────────────────────────
+      // ── Helper: read the invoice's own paid/due fields (same source the
+      //    Invoice list & edit pages use — avoids re-deriving from payment history) ──
+      const getPaidAndDue = (inv) => {
+        const invoiceAmt = parseFloat(inv.totalAmount || 0);
+        const paidAmt = parseFloat(inv.amountPaid || 0);
+        const dueAmt = (inv.amountDue !== undefined && inv.amountDue !== null)
+          ? parseFloat(inv.amountDue)
+          : (invoiceAmt - paidAmt);
+        return { invoiceAmt, paidAmt, dueAmt };
+      };
+
+      // ── Calculate Dynamic Opening Balance (invoices BEFORE 'from' date) ───
+      let dynamicOpeningBalance = customer.openingBalance || 0;
+      const pastInvoices = await Invoice.find({
+        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
+        invoiceDate: { $lt: from },
+        status: { $nin: ['CANCELLED', 'VOID'] },
+        ...req.orgFilter,
+      }).lean();
+
+      for (const inv of pastInvoices) {
+        const { dueAmt } = getPaidAndDue(inv);
+        dynamicOpeningBalance += dueAmt;
+      }
+      openingBalance = dynamicOpeningBalance;
+
+      // ── Fetch invoices in date range ──────────────────────────────────────
       const invoices = await Invoice.find({
         customerId: { $in: [custIdStr, custId2].filter(Boolean) },
         invoiceDate: { $gte: from, $lte: to },
@@ -754,108 +874,22 @@ const getCustomerStatement = async (req, res) => {
         ...req.orgFilter,
       }).sort({ invoiceDate: 1 }).lean();
 
-      // Add invoice entries
+      // ── Build ONE row per invoice ─────────────────────────────────────────
+      closingBalance = openingBalance;
       for (const inv of invoices) {
+        const { invoiceAmt, paidAmt, dueAmt } = getPaidAndDue(inv);
+        closingBalance += dueAmt;
+
         entries.push({
-          date:     inv.invoiceDate,
-          type:     'Invoice',
-          number:   inv.invoiceNumber,
-          details:  inv.subject || inv.orderNumber || '',
-          invoices: inv.totalAmount,
-          payments: null,
-          balance:  null,
+          date:        inv.invoiceDate,
+          type:        'Invoice',
+          number:      inv.invoiceNumber,
+          details:     inv.subject || inv.orderNumber || '',
+          invoices:    invoiceAmt,
+          payments:    paidAmt > 0 ? paidAmt : null,
+          balance:     dueAmt,
         });
-
-        // ── 2a. Payments embedded inside invoice.payments[] ──────────────
-        for (const p of (inv.payments || [])) {
-          const pDate = parseCustomDate(p.paymentDate || p.recordedAt, p.recordedAt || p.paymentDate);
-          if (!pDate) continue;
-          // include all payments within range
-          if (pDate >= from && pDate <= to) {
-            entries.push({
-              date:     pDate,
-              type:     'Payment',
-              number:   inv.invoiceNumber,
-              details:  p.paymentMethod || p.paymentMode || 'Payment',
-              invoices: null,
-              payments: parseFloat(p.amount || 0),
-              balance:  null,
-            });
-          }
-        }
       }
-
-      // ── 2b. Payments from payments_received collection (account_detail categorizations) ──
-      try {
-        const { getFinanceDb } = require('../config/database');
-        const db = getFinanceDb();
-        // Remove date filter from mongo query because dates are stored as 'DD/MM/YYYY' strings
-        const paymentsReceived = await db.collection('payments_received').find({
-          $or: [{ customerId: custIdStr }, { customerId: custId2 }, { customerId: customer._id }],
-          paymentType: { $ne: 'advance' }, // exclude advance payments from statement
-          ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
-        }).toArray();
-
-        for (const p of paymentsReceived) {
-          const pDate = parseCustomDate(p.paymentDate || p.createdAt, p.createdAt);
-          if (!pDate) continue;
-
-          
-          // Filter by date manually
-          if (pDate >= from && pDate <= to) {
-            // Avoid duplicates — skip if already added via inv.payments[]
-            const alreadyAdded = entries.some(e =>
-              e.type === 'Payment' &&
-              Math.abs(parseFloat(e.payments || 0) - parseFloat(p.amountReceived || p.netAmount || 0)) < 0.01 &&
-              e.date.toDateString() === pDate.toDateString()
-            );
-            if (alreadyAdded) continue;
-
-            // Find the invoice number for this payment
-            let invoiceNum = '';
-            if (p.invoicePayments && typeof p.invoicePayments === 'object') {
-              const invKeys = Object.keys(p.invoicePayments);
-              if (invKeys.length > 0) {
-                const invId = invKeys[0];
-                const foundInv = invoices.find(i => i._id?.toString() === invId);
-                if (foundInv) {
-                  invoiceNum = foundInv.invoiceNumber;
-                } else {
-                  try {
-                    const fetchedInv = await Invoice.findOne({ _id: invId }).select('invoiceNumber').lean();
-                    if (fetchedInv) invoiceNum = fetchedInv.invoiceNumber;
-                  } catch (e) { /* ignore */ }
-                }
-              }
-            }
-            if (!invoiceNum) invoiceNum = p.paymentNumber || 'PMT';
-
-            entries.push({
-              date:     pDate,
-              type:     'Payment',
-              number:   invoiceNum,
-              details:  p.paymentMode || p.paymentMethod || 'Payment',
-              invoices: null,
-              payments: parseFloat(p.amountReceived || p.netAmount || 0),
-              balance:  null,
-            });
-          }
-        }
-      } catch (dbErr) {
-        console.warn('⚠️ Could not fetch payments_received:', dbErr.message);
-        // Non-fatal — continue with invoice-embedded payments only
-      }
-
-      // ── 3. Sort all entries by date ──────────────────────────────────────
-      entries.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      // ── 4. Running balance ───────────────────────────────────────────────
-      let runningBalance = openingBalance;
-      entries = entries.map(e => {
-        if (e.invoices) runningBalance += e.invoices;
-        if (e.payments) runningBalance -= e.payments;
-        return { ...e, balance: runningBalance };
-      });
     }
 
     res.json({
@@ -864,7 +898,7 @@ const getCustomerStatement = async (req, res) => {
         customer: { name: customer.customerDisplayName, email: customer.primaryEmail },
         openingBalance,
         entries,
-        closingBalance: entries.length > 0 ? entries[entries.length - 1].balance : openingBalance,
+        closingBalance,
         fromDate: from,
         toDate:   to,
       },
@@ -1115,6 +1149,8 @@ router.get('/:id/overview',       getCustomerOverview);
 router.get('/:id/transactions',   getCustomerTransactions);
 router.get('/:id/mails',          getCustomerMails);
 router.get('/:id/statement',      getCustomerStatement);
+router.get('/:id/statement/pdf',  getCustomerStatementPDF);
+router.get('/:id/transactions/pdf', getCustomerTransactionsPDF);
 router.post('/:id/comments',      addComment);
 router.delete('/:id/comments/:commentId', deleteComment);
 
@@ -1196,7 +1232,7 @@ router.get('/:id/advance-register', async (req, res) => {
         summary: {
           totalAdvanced,
           totalUtilized,
-          availableBalance: customer.unusedCredits || 0,
+          availableBalance: totalAdvanced - totalUtilized,
         },
         advances: advanceList,
         utilizationHistory: normalPayments.map(p => ({
@@ -1217,8 +1253,522 @@ router.get('/:id/advance-register', async (req, res) => {
 // Document upload
 router.post('/:id/upload-documents', upload.array('documents', 10), uploadDocuments);
 
+
+// GET /:id/statement/pdf
+async function getCustomerStatementPDF(req, res) {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const { fromDate, toDate, transactionsOnly } = req.query;
+    const isTxnOnly = transactionsOnly === 'true';
+    const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    const to   = toDate   ? new Date(toDate)   : new Date();
+    to.setHours(23, 59, 59, 999);
+    from.setHours(0, 0, 0, 0);
+
+    const Invoice = getInvoiceModel();
+    let entries = [];
+    let openingBalance = customer.openingBalance || 0;
+    let closingBalance = openingBalance;
+    const custIdStr = customer._id?.toString();
+    const custId2   = customer.customerId;
+
+    if (Invoice) {
+
+      // ── Helper: read the invoice's own paid/due fields (same source the
+      //    Invoice list & edit pages use — avoids re-deriving from payment history) ──
+      const getPaidAndDue = (inv) => {
+        const invoiceAmt = parseFloat(inv.totalAmount || 0);
+        const paidAmt = parseFloat(inv.amountPaid || 0);
+        const dueAmt = (inv.amountDue !== undefined && inv.amountDue !== null)
+          ? parseFloat(inv.amountDue)
+          : (invoiceAmt - paidAmt);
+        return { invoiceAmt, paidAmt, dueAmt };
+      };
+
+      // ── Dynamic Opening Balance (invoices before 'from' date) ────────────
+      let dynamicOpeningBalance = customer.openingBalance || 0;
+      const pastInvoices = await Invoice.find({
+        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
+        invoiceDate: { $lt: from },
+        status: { $nin: ['CANCELLED', 'VOID'] },
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      }).lean();
+      for (const inv of pastInvoices) {
+        const { dueAmt } = getPaidAndDue(inv);
+        dynamicOpeningBalance += dueAmt;
+      }
+      openingBalance = dynamicOpeningBalance;
+
+      // ── Fetch invoices in date range ──────────────────────────────────────
+      const invoices = await Invoice.find({
+        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
+        invoiceDate: { $gte: from, $lte: to },
+        status: { $nin: ['CANCELLED', 'VOID'] },
+        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
+      }).sort({ invoiceDate: 1 }).lean();
+
+      // ── Build ONE row per invoice ─────────────────────────────────────────
+      closingBalance = openingBalance;
+      for (const inv of invoices) {
+        const { invoiceAmt, paidAmt, dueAmt } = getPaidAndDue(inv);
+        closingBalance += dueAmt;
+        entries.push({
+          date:     inv.invoiceDate,
+          type:     'Invoice',
+          number:   inv.invoiceNumber,
+          details:  inv.subject || inv.orderNumber || '',
+          invoices: invoiceAmt,
+          payments: paidAmt > 0 ? paidAmt : null,
+          balance:  dueAmt,
+        });
+      }
+    }
+
+
+    // Now generate PDF
+    let orgName  = 'Your Company';
+    let orgGST   = '';
+    let orgAddr  = '';
+    let orgEmail = '';
+    let orgPhone = '';
+    let orgData  = null;
+    try {
+      orgData  = await getEffectiveOrgData(req.user?.orgId, req.branchFilter?.branchId || null, mongoose.connection.db);
+      if (orgData) {
+        orgName  = orgData.orgName  || orgName;
+        orgGST   = orgData.gstNumber || '';
+        orgAddr  = orgData.address  || '';
+        orgEmail = orgData.email    || '';
+        orgPhone = orgData.phone    || '';
+      }
+    } catch (e) {}
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Statement_' + customer.customerDisplayName.replace(/\s+/g, '_') + '.pdf"');
+    doc.pipe(res);
+
+    const pageW = 515;
+
+    // Header
+    let logoData = null;
+    if (orgData?.logoBase64) {
+      const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgData?.logoUrl) {
+      const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+
+    const textX = logoData ? 166 : 50;
+    const contactLines = [orgAddr, orgGST ? 'GSTIN: ' + orgGST : '', orgPhone, orgEmail].filter(Boolean);
+    const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+    const textStartY = 35;
+    const logoCenterY = textStartY + (textBlockHeight / 2);
+    
+    const logoH = 82;
+    const logoW = 110;
+    const logoY = logoCenterY - (logoH / 2);
+
+    if (logoData) {
+      try {
+        doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
+      } catch (e) {}
+    }
+
+    doc.fontSize(13).fillColor('#000000').font('Helvetica-Bold')
+       .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+    const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+    const subtitleY = textStartY + orgNameH + 2;
+    doc.fontSize(8).fillColor('#444444').font('Helvetica')
+       .text(isTxnOnly ? 'TRANSACTION HISTORY' : 'STATEMENT OF ACCOUNTS', textX, subtitleY, { width: 200, characterSpacing: 1 });
+
+    doc.fontSize(8).fillColor('#000000');
+    let contactY = subtitleY + 12;
+    contactLines.forEach(line => {
+      doc.text(line, textX, contactY, { width: 240 });
+      const lineH = doc.heightOfString(line, { width: 240 });
+      contactY += Math.max(lineH, 9) + 1;
+    });
+
+    doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+       .text(isTxnOnly ? 'TRANSACTIONS' : 'STATEMENT', 380, 52, { width: 170, align: 'right' });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text('From: ' + from.toLocaleDateString('en-IN') + ' To: ' + to.toLocaleDateString('en-IN'), 380, 76, { width: 170, align: 'right' });
+
+    const metaY = Math.max(132, contactY + 8);
+    const colW = pageW / 2;
+    
+    const billX = 40;
+    doc.rect(billX, metaY, colW - 10, 80).fillAndStroke('#f7f9fc', '#dde4ef');
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+       .text('TO', billX + 8, metaY + 7, { width: colW - 26, characterSpacing: 0.8 });
+    doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold')
+         .text(customer.customerDisplayName || 'N/A', billX + 8, metaY + 18, { width: colW - 26 });
+
+      let custAddr = '';
+      if (customer.billingAddress && customer.billingAddress.street) {
+        custAddr = [
+          customer.billingAddress.street,
+          customer.billingAddress.city ? customer.billingAddress.city + ' - ' + (customer.billingAddress.zip || '') : '',
+          customer.billingAddress.state,
+          customer.billingAddress.country
+        ].filter(Boolean).join('\n');
+      } else {
+        custAddr = [
+          customer.addressLine1,
+          customer.city ? customer.city + ' - ' + (customer.postalCode || '') : '',
+          customer.state,
+          customer.country
+        ].filter(Boolean).join('\n');
+      }
+      if (custAddr) {
+        doc.fontSize(8).font('Helvetica').fillColor('#555555')
+           .text(custAddr, billX + 8, metaY + 32, { width: colW - 26 });
+      }
+    
+    if (!isTxnOnly) {
+      const summX = 40 + colW + 10;
+      doc.rect(summX, metaY, colW - 10, 80).fillAndStroke('#f7f9fc', '#dde4ef');
+      doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+         .text('ACCOUNT SUMMARY', summX + 8, metaY + 7, { width: colW - 26, characterSpacing: 0.8 });
+      
+      doc.fontSize(10).fillColor('#000000').font('Helvetica')
+         .text('Opening Balance:', summX + 8, metaY + 20)
+         .text('Rs ' + openingBalance.toFixed(2), summX + 8, metaY + 20, { align: 'right', width: colW - 24 });
+      
+      let totalInvoiced = 0, totalPaid = 0;
+      entries.forEach(e => {
+         if (e.invoices) totalInvoiced += e.invoices;
+         if (e.payments) totalPaid += e.payments;
+      });
+
+      doc.text('Invoiced Amount:', summX + 8, metaY + 35)
+         .text('Rs ' + totalInvoiced.toFixed(2), summX + 8, metaY + 35, { align: 'right', width: colW - 24 });
+      doc.text('Amount Paid:', summX + 8, metaY + 50)
+         .text('Rs ' + totalPaid.toFixed(2), summX + 8, metaY + 50, { align: 'right', width: colW - 24 });
+      
+      doc.font('Helvetica-Bold').text('Balance Due:', summX + 8, metaY + 65)
+         .text('Rs ' + closingBalance.toFixed(2), summX + 8, metaY + 65, { align: 'right', width: colW - 24 });
+    }
+
+    const ensureSpace = (currentY, neededHeight = 20) => {
+      if (currentY + neededHeight > 780) {
+        doc.addPage();
+        return 40;
+      }
+      return currentY;
+    };
+
+    let tableStartY = ensureSpace(metaY + 95, 40);
+
+    const cols = {
+      date:    { x: 40,  w: 60  },
+      details: { x: 100, w: 220 },
+      amount:  { x: 320, w: 75  },
+      paid:    { x: 395, w: 75  },
+      balance: { x: 470, w: 85  },
+    };
+
+    doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+    doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
+    doc.text('DATE',       cols.date.x + 4, tableStartY + 6, { width: cols.date.w });
+    doc.text('DETAILS',    cols.details.x + 4, tableStartY + 6, { width: cols.details.w });
+    doc.text('INVOICE AMOUNT', cols.amount.x + 4, tableStartY + 6, { width: cols.amount.w - 8, align: 'right' });
+    doc.text('PAID',       cols.paid.x + 4, tableStartY + 6, { width: cols.paid.w - 8, align: 'right' });
+    doc.text('BALANCE',    cols.balance.x + 4, tableStartY + 6, { width: cols.balance.w - 8, align: 'right' });
+
+    let rowY = tableStartY + 20;
+
+    if (!isTxnOnly) {
+      rowY = ensureSpace(rowY, 24);
+      doc.rect(40, rowY, 515, 24).fill('#ffffff');
+      doc.rect(40, rowY, 515, 24).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+      doc.fontSize(8).fillColor('#000000').font('Helvetica');
+      doc.text(from.toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 8);
+      doc.text('Opening Balance', cols.details.x + 4, rowY + 8);
+      doc.font('Helvetica-Bold').text(openingBalance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+      rowY += 24;
+    }
+
+    entries.forEach((e, i) => {
+      const rowH = 24;
+      rowY = ensureSpace(rowY, rowH);
+      const fill = i % 2 === 0 ? '#f7f9fc' : '#ffffff';
+      doc.rect(40, rowY, 515, rowH).fill(fill);
+      doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+      doc.fontSize(8).fillColor('#000000').font('Helvetica');
+      doc.text(new Date(e.date).toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 8);
+      
+      const details = e.number + (e.details ? ' - ' + e.details : '');
+      doc.text(details, cols.details.x + 4, rowY + 8, { width: cols.details.w - 8, ellipsis: true });
+      
+      if (e.invoices) doc.text(e.invoices.toFixed(2), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
+      if (e.payments) doc.text(e.payments.toFixed(2), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
+      
+      doc.font('Helvetica-Bold').text(e.balance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+
+      rowY += rowH;
+    });
+
+    // ── TOTALS row ────────────────────────────────────────────────────────
+    if (!isTxnOnly && entries.length > 0) {
+      let totalInvoiced = 0, totalPaid = 0;
+      entries.forEach(e => {
+        if (e.invoices) totalInvoiced += e.invoices;
+        if (e.payments) totalPaid += e.payments;
+      });
+      const rowH = 24;
+      rowY = ensureSpace(rowY, rowH);
+      doc.rect(40, rowY, 515, rowH).fill('#e8edf5');
+      doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+      doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold');
+      doc.text('TOTAL', cols.details.x + 4, rowY + 8, { width: cols.details.w - 8 });
+      doc.text(totalInvoiced.toFixed(2), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
+      doc.text(totalPaid.toFixed(2), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
+      doc.text(closingBalance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+      rowY += rowH;
+    }
+
+    doc.end();
+
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    res.status(500).send('Error generating PDF');
+  }
+};
+
+// GET /:id/transactions/pdf — exports exactly what the Transactions tab shows
+// (DATE / NUMBER / TYPE / STATUS / AMOUNT / BALANCE, per-row — not a running statement)
+async function getCustomerTransactionsPDF(req, res) {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const { fromDate, toDate } = req.query;
+    const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    const to   = toDate   ? new Date(toDate)   : new Date();
+    to.setHours(23, 59, 59, 999);
+    from.setHours(0, 0, 0, 0);
+
+    const Invoice = getInvoiceModel();
+    let transactions = [];
+
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        ...req.orgFilter,
+      }).lean();
+
+      transactions = invoices.map(inv => ({
+        type:    'Invoice',
+        number:  inv.invoiceNumber,
+        date:    inv.invoiceDate,
+        status:  inv.status,
+        amount:  parseFloat(inv.totalAmount || 0),
+        balance: parseFloat(inv.amountDue || 0),
+      }));
+
+      for (const inv of invoices) {
+        for (const p of (inv.payments || [])) {
+          transactions.push({
+            type:    'Payment',
+            number:  inv.invoiceNumber,
+            date:    p.paymentDate || p.recordedAt,
+            status:  'PAID',
+            amount:  parseFloat(p.amount || 0),
+            balance: 0,
+          });
+        }
+      }
+    }
+
+    transactions = transactions.filter(t => {
+      const d = new Date(t.date);
+      return d >= from && d <= to;
+    });
+    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    let orgName  = 'Your Company';
+    let orgGST   = '';
+    let orgAddr  = '';
+    let orgEmail = '';
+    let orgPhone = '';
+    let orgData  = null;
+    try {
+      orgData  = await getEffectiveOrgData(req.user?.orgId, req.branchFilter?.branchId || null, mongoose.connection.db);
+      if (orgData) {
+        orgName  = orgData.orgName  || orgName;
+        orgGST   = orgData.gstNumber || '';
+        orgAddr  = orgData.address  || '';
+        orgEmail = orgData.email    || '';
+        orgPhone = orgData.phone    || '';
+      }
+    } catch (e) {}
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Transactions_' + customer.customerDisplayName.replace(/\s+/g, '_') + '.pdf"');
+    doc.pipe(res);
+
+    const pageW = 515;
+
+    let logoData = null;
+    if (orgData?.logoBase64) {
+      const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgData?.logoUrl) {
+      const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+
+    const textX = logoData ? 166 : 50;
+    const contactLines = [orgAddr, orgGST ? 'GSTIN: ' + orgGST : '', orgPhone, orgEmail].filter(Boolean);
+    const textBlockHeight = 14 + 12 + (contactLines.length * 9);
+    const textStartY = 35;
+    const logoCenterY = textStartY + (textBlockHeight / 2);
+
+    const logoH = 82;
+    const logoW = 110;
+    const logoY = logoCenterY - (logoH / 2);
+
+    if (logoData) {
+      try {
+        doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
+      } catch (e) {}
+    }
+
+    doc.fontSize(13).fillColor('#000000').font('Helvetica-Bold')
+       .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+    const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+    const subtitleY = textStartY + orgNameH + 2;
+    doc.fontSize(8).fillColor('#444444').font('Helvetica')
+       .text('TRANSACTION HISTORY', textX, subtitleY, { width: 200, characterSpacing: 1 });
+
+    doc.fontSize(8).fillColor('#000000');
+    let contactY = subtitleY + 12;
+    contactLines.forEach(line => {
+      doc.text(line, textX, contactY, { width: 240 });
+      const lineH = doc.heightOfString(line, { width: 240 });
+      contactY += Math.max(lineH, 9) + 1;
+    });
+
+    doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+       .text('TRANSACTIONS', 380, 52, { width: 170, align: 'right' });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text('From: ' + from.toLocaleDateString('en-IN') + ' To: ' + to.toLocaleDateString('en-IN'), 380, 76, { width: 170, align: 'right' });
+
+    const metaY = Math.max(132, contactY + 8);
+    const colW = pageW / 2;
+
+    const billX = 40;
+    doc.rect(billX, metaY, colW - 10, 80).fillAndStroke('#f7f9fc', '#dde4ef');
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+       .text('TO', billX + 8, metaY + 7, { width: colW - 26, characterSpacing: 0.8 });
+    doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold')
+         .text(customer.customerDisplayName || 'N/A', billX + 8, metaY + 18, { width: colW - 26 });
+
+    let custAddr = '';
+    if (customer.billingAddress && customer.billingAddress.street) {
+      custAddr = [
+        customer.billingAddress.street,
+        customer.billingAddress.city ? customer.billingAddress.city + ' - ' + (customer.billingAddress.zip || '') : '',
+        customer.billingAddress.state,
+        customer.billingAddress.country
+      ].filter(Boolean).join('\n');
+    } else {
+      custAddr = [
+        customer.addressLine1,
+        customer.city ? customer.city + ' - ' + (customer.postalCode || '') : '',
+        customer.state,
+        customer.country
+      ].filter(Boolean).join('\n');
+    }
+    if (custAddr) {
+      doc.fontSize(8).font('Helvetica').fillColor('#555555')
+         .text(custAddr, billX + 8, metaY + 32, { width: colW - 26 });
+    }
+
+    const summX = 40 + colW + 10;
+    doc.rect(summX, metaY, colW - 10, 80).fillAndStroke('#f7f9fc', '#dde4ef');
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+       .text('SUMMARY', summX + 8, metaY + 7, { width: colW - 26, characterSpacing: 0.8 });
+    doc.fontSize(10).fillColor('#000000').font('Helvetica')
+       .text('Transactions:', summX + 8, metaY + 20)
+       .text(String(transactions.length), summX + 8, metaY + 20, { align: 'right', width: colW - 24 });
+    const totalOutstanding = transactions.reduce((sum, t) => sum + (t.balance || 0), 0);
+    doc.font('Helvetica-Bold').text('Total Outstanding:', summX + 8, metaY + 35)
+       .text('Rs ' + totalOutstanding.toFixed(2), summX + 8, metaY + 35, { align: 'right', width: colW - 24 });
+
+    const ensureSpace = (currentY, neededHeight = 20) => {
+      if (currentY + neededHeight > 780) {
+        doc.addPage();
+        return 40;
+      }
+      return currentY;
+    };
+
+    let tableStartY = ensureSpace(metaY + 95, 40);
+
+    const cols = {
+      date:    { x: 40,  w: 60  },
+      number:  { x: 100, w: 100 },
+      type:    { x: 200, w: 65  },
+      status:  { x: 265, w: 90  },
+      amount:  { x: 355, w: 95  },
+      balance: { x: 450, w: 105 },
+    };
+
+    doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
+    doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
+    doc.text('DATE',    cols.date.x + 4,   tableStartY + 6, { width: cols.date.w });
+    doc.text('NUMBER',  cols.number.x + 4, tableStartY + 6, { width: cols.number.w });
+    doc.text('TYPE',    cols.type.x + 4,   tableStartY + 6, { width: cols.type.w });
+    doc.text('STATUS',  cols.status.x + 4, tableStartY + 6, { width: cols.status.w });
+    doc.text('AMOUNT',  cols.amount.x + 4, tableStartY + 6, { width: cols.amount.w - 8, align: 'right' });
+    doc.text('BALANCE', cols.balance.x + 4, tableStartY + 6, { width: cols.balance.w - 8, align: 'right' });
+
+    let rowY = tableStartY + 20;
+
+    transactions.forEach((t, i) => {
+      const rowH = 22;
+      rowY = ensureSpace(rowY, rowH);
+      const fill = i % 2 === 0 ? '#f7f9fc' : '#ffffff';
+      doc.rect(40, rowY, 515, rowH).fill(fill);
+      doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+      doc.fontSize(8).fillColor('#000000').font('Helvetica');
+      doc.text(new Date(t.date).toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 7, { width: cols.date.w });
+      doc.fillColor('#1d4ed8').text(t.number || '', cols.number.x + 4, rowY + 7, { width: cols.number.w - 8, ellipsis: true });
+      doc.fillColor('#000000').text(t.type || '', cols.type.x + 4, rowY + 7, { width: cols.type.w });
+      doc.text(String(t.status || '').replace(/_/g, ' '), cols.status.x + 4, rowY + 7, { width: cols.status.w });
+      doc.text((t.amount || 0).toFixed(2), cols.amount.x + 4, rowY + 7, { width: cols.amount.w - 8, align: 'right' });
+      doc.font('Helvetica-Bold')
+         .fillColor(t.balance > 0 ? '#dc2626' : '#6b7280')
+         .text(t.balance > 0 ? (t.balance).toFixed(2) : '-', cols.balance.x + 4, rowY + 7, { width: cols.balance.w - 8, align: 'right' });
+
+      rowY += rowH;
+    });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('Error generating transactions PDF:', error);
+    res.status(500).send('Error generating PDF');
+  }
+};
+
+
 module.exports = router;
 module.exports.BillingCustomer = BillingCustomer;
 module.exports.INDIAN_STATES   = INDIAN_STATES;
 
 console.log('? Billing Customers module loaded (Zoho Books style)');      
+
+
+

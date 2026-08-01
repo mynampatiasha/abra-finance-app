@@ -92,12 +92,48 @@ router.get('/unbilled-shipments', async (req, res) => {
 
     // EXCLUSION LOGIC: Filter out shipments that are already in a staging draft
     const drafts = await AutomationDraft.find({ orgId }).lean();
+    // Global — every staged item, regardless of date. MUST stay unscoped: this is what
+    // keeps an already-staged shipment from reappearing as "available" just because a
+    // different date range is being viewed (would risk double-billing it).
     const draftedTrackingNos = new Set();
+    // Date-scoped subset of the same items — used ONLY for the "X in Staging" display
+    // count, so it matches the selected range the same way the Billed count does.
+    const draftedInRangeTrackingNos = new Set();
+
+    // Matches an AL/tracking number sitting on its own first line, e.g. "AL-1005699"
+    const TRACKING_NO_LINE = /^([A-Za-z]{1,6}-[A-Za-z0-9-]+)\s*$/;
+    // Matches the "Date: YYYY-MM-DD" line saved alongside the tracking number
+    const ITEM_DATE_LINE = /Date:\s*(\d{4}-\d{2}-\d{2})/;
+
+    const rangeStart = startDate ? new Date(startDate) : null;
+    const rangeEnd = endDate ? new Date(endDate) : null;
+    if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999);
+
     for (const d of drafts) {
       if (d.items && Array.isArray(d.items)) {
         for (const item of d.items) {
-          if (item.shipmentTrackingNumber) draftedTrackingNos.add(item.shipmentTrackingNumber);
-          if (item.expenseId) draftedTrackingNos.add(item.expenseId);
+          let trackingNo = item.shipmentTrackingNumber || item.expenseId || null;
+          let itemDate = null;
+          if (item.itemDetails) {
+            const text = String(item.itemDetails);
+            // Fallback for legacy/broken drafts that never saved shipmentTrackingNumber:
+            // the AL number is still recoverable — it's always the first line of itemDetails.
+            if (!trackingNo) {
+              const firstLine = text.split('\n')[0].trim();
+              const m = firstLine.match(TRACKING_NO_LINE);
+              if (m) trackingNo = m[1];
+            }
+            const dm = text.match(ITEM_DATE_LINE);
+            if (dm) itemDate = new Date(dm[1]);
+          }
+          if (!trackingNo) continue;
+
+          draftedTrackingNos.add(trackingNo);
+
+          const inRange = !!itemDate &&
+            (!rangeStart || itemDate >= rangeStart) &&
+            (!rangeEnd || itemDate <= rangeEnd);
+          if (inRange) draftedInRangeTrackingNos.add(trackingNo);
         }
       }
     }
@@ -106,7 +142,7 @@ router.get('/unbilled-shipments', async (req, res) => {
     const billed = await BilledShipment.find({ orgId }).lean();
     const billedTrackingNos = new Set(billed.map(b => b.trackingNo));
 
-    // Combined exclusion set
+    // Combined exclusion set — always uses the unscoped global set, never the date-scoped one
     const excludedSet = new Set([...draftedTrackingNos, ...billedTrackingNos]);
 
     const filteredShipments = shipments.filter(s => {
@@ -118,8 +154,8 @@ router.get('/unbilled-shipments', async (req, res) => {
       success: true,
       count: filteredShipments.length,
       totalCount: shipments.length,
-      draftCount: draftedTrackingNos.size,    // staging only
-      billedCount: billedTrackingNos.size,    // billed only
+      draftCount: draftedInRangeTrackingNos.size,   // staging only, scoped to selected dates
+      billedCount: billedTrackingNos.size,          // billed only
       shipments: filteredShipments
     });
 

@@ -627,8 +627,261 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
 
   // ── Monthly Breakdown ─────────────────────────────────────────────────────
 
+  // Column widths
+  static const double _acctColW = 220.0;
+  static const double _monthColW = 130.0;
+  static const double _annualColW = 150.0;
+
   Widget _buildMonthlyBreakdown(Budget b) {
     if (b.accountLines.isEmpty) return const SizedBox.shrink();
+
+    final border = TableBorder.all(
+      color: const Color(0xFFDDE3ED),
+      width: 1,
+    );
+    const headerBg = Color(0xFF1A3A6B);
+    const rowEven = Colors.white;
+    const rowOdd = Color(0xFFF7F9FC);
+    const totalBg = Color(0xFFEEF2FF);
+
+    // Build header row
+    TableRow _headerRow() => TableRow(
+          decoration: const BoxDecoration(color: headerBg),
+          children: [
+            _thCell('ACCOUNT', align: TextAlign.left),
+            ..._monthLabels.map((m) => _thCell(m)),
+            _thCell('ANNUAL', align: TextAlign.right),
+          ],
+        );
+
+    // Build data rows
+    List<TableRow> _dataRows() => b.accountLines.asMap().entries.map((e) {
+          final idx = e.key;
+          final line = e.value;
+          final bg = idx.isEven ? rowEven : rowOdd;
+          return TableRow(
+            decoration: BoxDecoration(color: bg),
+            children: [
+              // Account name cell
+              TableCell(
+                verticalAlignment: TableCellVerticalAlignment.middle,
+                child: Container(
+                  width: _acctColW,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                  child: Text(
+                    line.accountName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: _navyDark),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                ),
+              ),
+              // 12 month cells
+              ...List.generate(12, (m) {
+                final budgRaw = m < line.monthlyAmounts.length
+                    ? line.monthlyAmounts[m]
+                    : 0.0;
+                final actRaw = m < line.actualMonthly.length
+                    ? line.actualMonthly[m]
+                    : 0.0;
+                final budg = double.parse(budgRaw.toStringAsFixed(2));
+                final act = double.parse(actRaw.toStringAsFixed(2));
+                final over = act > budg && budg > 0;
+                return TableCell(
+                  verticalAlignment: TableCellVerticalAlignment.middle,
+                  child: Container(
+                    width: _monthColW,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _fmt(budg),
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _navyDark),
+                          textAlign: TextAlign.right,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _fmt(act),
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: over
+                                  ? Colors.red.shade600
+                                  : const Color(0xFF00796B)),
+                          textAlign: TextAlign.right,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              // Annual total cell
+              TableCell(
+                verticalAlignment: TableCellVerticalAlignment.fill,
+                child: Container(
+                  width: _annualColW,
+                  decoration: BoxDecoration(
+                    color: idx.isEven ? const Color(0xFFEBF1F8) : const Color(0xFFE1E8F2),
+                    border: const Border(
+                      left: BorderSide(color: Color(0xFFC5D3E8), width: 1.5),
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _fmt(line.totalBudgeted),
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: _navyDark),
+                        textAlign: TextAlign.right,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _fmt(line.totalActual),
+                        style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF00796B)),
+                        textAlign: TextAlign.right,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }).toList();
+
+    // Build TOTAL row
+    TableRow _totalRow() {
+      final totalBudg = b.accountLines.fold(0.0, (s, l) => s + l.totalBudgeted);
+      final totalAct = b.accountLines.fold(0.0, (s, l) => s + l.totalActual);
+      final monthTotals = List.generate(12, (m) {
+        final budg = b.accountLines.fold(
+            0.0,
+            (s, l) =>
+                s +
+                (m < l.monthlyAmounts.length ? l.monthlyAmounts[m] : 0.0));
+        final act = b.accountLines.fold(
+            0.0,
+            (s, l) =>
+                s + (m < l.actualMonthly.length ? l.actualMonthly[m] : 0.0));
+        return (budg, act);
+      });
+      return TableRow(
+        decoration: const BoxDecoration(color: totalBg),
+        children: [
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.middle,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              child: const Text('TOTAL',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: _navyDark)),
+            ),
+          ),
+          ...monthTotals.map((t) {
+            final budg = double.parse(t.$1.toStringAsFixed(2));
+            final act = double.parse(t.$2.toStringAsFixed(2));
+            final over = act > budg && budg > 0;
+            return TableCell(
+              verticalAlignment: TableCellVerticalAlignment.middle,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _fmt(budg),
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: _navyDark),
+                      textAlign: TextAlign.right,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _fmt(act),
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: over
+                              ? Colors.red.shade600
+                              : const Color(0xFF00796B)),
+                      textAlign: TextAlign.right,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          TableCell(
+            verticalAlignment: TableCellVerticalAlignment.fill,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFFD6E4F5),
+                border: Border(
+                  left: BorderSide(color: Color(0xFFB0C4DE), width: 1.5),
+                ),
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _fmt(totalBudg),
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _navyDark),
+                    textAlign: TextAlign.right,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _fmt(totalAct),
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF00796B)),
+                    textAlign: TextAlign.right,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final tableWidget = Table(
+      border: border,
+      defaultColumnWidth:
+          const IntrinsicColumnWidth(),
+      children: [
+        _headerRow(),
+        ..._dataRows(),
+        _totalRow(),
+      ],
+    );
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -659,129 +912,57 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                     fontSize: 15)),
           ]),
         ),
-        LayoutBuilder(builder: (context, constraints) {
-          return Scrollbar(
+        Listener(
+          onPointerSignal: (pointerSignal) {
+            if (pointerSignal is PointerScrollEvent) {
+              final offset = pointerSignal.scrollDelta.dy;
+              if (offset != 0) {
+                _hScroll.jumpTo(
+                  (_hScroll.offset + offset).clamp(
+                      0.0, _hScroll.position.maxScrollExtent),
+                );
+              }
+            }
+          },
+          child: Scrollbar(
+            controller: _hScroll,
             thumbVisibility: true,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                child: DataTable(
-                  headingRowColor:
-                      WidgetStateProperty.all(const Color(0xFFF8F9FA)),
-                  headingTextStyle: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: _navyDark),
-                  headingRowHeight: 48,
-                  dataRowMinHeight: 60,
-                  dataTextStyle: const TextStyle(fontSize: 13),
-                  dividerThickness: 0.8,
-                  columnSpacing: 16,
-                  horizontalMargin: 16,
-                  columns: [
-                    const DataColumn(
-                        label: SizedBox(width: 200, child: Text('ACCOUNT'))),
-                    ...List.generate(
-                        12,
-                        (i) => DataColumn(
-                              label: SizedBox(
-                                width: 85,
-                                child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(_monthLabels[i],
-                                          style: const TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold)),
-                                    ]),
-                              ),
-                              numeric: true,
-                            )),
-                    const DataColumn(
-                        label: SizedBox(
-                            width: 120,
-                            child: Text('ANNUAL', textAlign: TextAlign.right)),
-                        numeric: true),
-                  ],
-                  rows: b.accountLines
-                      .map((line) => DataRow(cells: [
-                            DataCell(SizedBox(
-                                width: 200,
-                                child: Text(line.accountName,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14),
-                                    overflow: TextOverflow.ellipsis))),
-                            ...List.generate(12, (m) {
-                              final budgRaw = m < line.monthlyAmounts.length
-                                  ? line.monthlyAmounts[m]
-                                  : 0.0;
-                              final actRaw = m < line.actualMonthly.length
-                                  ? line.actualMonthly[m]
-                                  : 0.0;
-                              final budg =
-                                  double.parse(budgRaw.toStringAsFixed(2));
-                              final act =
-                                  double.parse(actRaw.toStringAsFixed(2));
-                              final over = act > budg && budg > 0;
-                              return DataCell(SizedBox(
-                                  width: 75,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(_fmtShort(budg),
-                                          style: const TextStyle(
-                                              fontSize: 11, color: _navyDark)),
-                                      const SizedBox(height: 4),
-                                      Text(_fmtShort(act),
-                                          style: TextStyle(
-                                              fontSize: 10,
-                                              color: over
-                                                  ? Colors.red
-                                                  : Colors.teal.shade700)),
-                                    ],
-                                  )));
-                            }),
-                            DataCell(SizedBox(
-                                width: 110,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(_fmt(line.totalBudgeted),
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: _navyDark)),
-                                    const SizedBox(height: 4),
-                                    Text(_fmt(line.totalActual),
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.teal.shade700)),
-                                  ],
-                                ))),
-                          ]))
-                      .toList(),
-                ),
+            trackVisibility: true,
+            thickness: 8,
+            child: ScrollConfiguration(
+              behavior: _MouseDragScrollBehavior(),
+              child: SingleChildScrollView(
+                controller: _hScroll,
+                scrollDirection: Axis.horizontal,
+                child: tableWidget,
               ),
             ),
-          );
-        }),
+          ),
+        ),
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(children: [
-            _legendDot(Colors.teal.shade700),
+            Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                    color: Color(0xFF00796B), shape: BoxShape.circle)),
             const SizedBox(width: 4),
             const Text('Actual', style: TextStyle(fontSize: 11)),
             const SizedBox(width: 12),
-            _legendDot(_navyDark),
+            Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                    color: _navyDark, shape: BoxShape.circle)),
             const SizedBox(width: 4),
             const Text('Budgeted', style: TextStyle(fontSize: 11)),
             const SizedBox(width: 12),
-            _legendDot(Colors.red),
+            Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                    color: Colors.red.shade600, shape: BoxShape.circle)),
             const SizedBox(width: 4),
             const Text('Over budget', style: TextStyle(fontSize: 11)),
           ]),
@@ -860,6 +1041,34 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
     if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
     return v.toStringAsFixed(0);
   }
+}
+
+// ── Table header cell helper ─────────────────────────────────────────────────
+Widget _thCell(String text, {TextAlign align = TextAlign.right}) => TableCell(
+      verticalAlignment: TableCellVerticalAlignment.middle,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+        child: Text(
+          text,
+          style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              letterSpacing: 0.4),
+          textAlign: align,
+        ),
+      ),
+    );
+
+// ── Proper mouse-drag scroll behavior for Flutter web ────────────────────────
+class _MouseDragScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
 }
 
 class _CardData {

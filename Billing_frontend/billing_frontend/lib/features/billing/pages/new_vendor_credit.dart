@@ -414,7 +414,7 @@ class _NewVendorCreditScreenState extends State<NewVendorCreditScreen> {
           _sameAsBilling ? _billingAddress.toJson() : _shippingAddress.toJson(),
       'placeOfSupply': _placeOfSupply,
       'isInterState': _isInterState,
-      'creditDate': _creditDate.toIso8601String(),
+      'creditDate': DateFormat('yyyy-MM-dd').format(_creditDate),
       'billId': _linkedBillId,
       'billNumber': _linkedBillNumber,
       'reason': _reasonController.text.trim(),

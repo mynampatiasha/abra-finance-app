@@ -101,7 +101,10 @@ async function getEffectiveOrgData(orgId, branchId, db) {
 
       // Files — branch overrides
       logoUrl:              pick(branch.logoUrl,              org.logoUrl),
+      logoBase64:           pick(branch.logoBase64,           org.logoBase64),
       digitalSignaturePath: pick(branch.digitalSignaturePath, org.digitalSignaturePath),
+      signatureBase64:      pick(branch.signatureBase64,      org.signatureBase64),
+      qrBase64:             pick(branch.qrBase64,             org.qrBase64),
 
       // SMTP — branch overrides
       smtpHost:        pick(branch.smtpHost,        org.smtpHost),
@@ -140,20 +143,8 @@ function resolveLogoFilePath(logoUrl) {
 // ============================================================================
 // MULTER — Branch Logo Upload
 // ============================================================================
-const branchLogoStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'branch-logos');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const branchId = req.params.branchId || 'unknown';
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `branch-${branchId}-${Date.now()}${ext}`);
-  },
-});
 const branchLogoUpload = multer({
-  storage: branchLogoStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = /jpeg|jpg|png|webp/.test(path.extname(file.originalname).toLowerCase());
@@ -164,20 +155,8 @@ const branchLogoUpload = multer({
 // ============================================================================
 // MULTER — Branch Signature Upload
 // ============================================================================
-const branchSigStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'branch-signatures');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const branchId = req.params.branchId || 'unknown';
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `bsig-${branchId}-${Date.now()}${ext}`);
-  },
-});
 const branchSigUpload = multer({
-  storage: branchSigStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = /jpeg|jpg|png|webp/.test(path.extname(file.originalname).toLowerCase());
@@ -442,18 +421,12 @@ router.post(
       const branch = await db.collection('branches').findOne({ branchId, orgId });
       if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-      // Delete old branch logo file if exists
-      if (branch.logoUrl) {
-        try {
-          const old = path.join(__dirname, '..', branch.logoUrl.replace(/^\//, ''));
-          if (fs.existsSync(old)) fs.unlinkSync(old);
-        } catch (_) {}
-      }
+      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const logoUrl = `/api/finance/auth/images/logo/${branchId}?t=${Date.now()}`;
 
-      const logoUrl = `/uploads/branch-logos/${req.file.filename}`;
       await db.collection('branches').updateOne(
         { branchId, orgId },
-        { $set: { logoUrl, logoUpdatedAt: new Date(), updatedAt: new Date() } }
+        { $set: { logoUrl, logoBase64: base64Data, logoUpdatedAt: new Date(), updatedAt: new Date() } }
       );
 
       return res.json({ success: true, message: 'Branch logo uploaded', data: { branchId, logoUrl } });
@@ -473,16 +446,9 @@ router.delete('/:branchId/delete-logo', verifyFinanceJWT, async (req, res) => {
     const branch = await db.collection('branches').findOne({ branchId, orgId });
     if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-    if (branch.logoUrl) {
-      try {
-        const fp = path.join(__dirname, '..', branch.logoUrl.replace(/^\//, ''));
-        if (fs.existsSync(fp)) fs.unlinkSync(fp);
-      } catch (_) {}
-    }
-
     await db.collection('branches').updateOne(
       { branchId, orgId },
-      { $set: { logoUrl: null, updatedAt: new Date() } }
+      { $set: { logoUrl: null, logoBase64: null, updatedAt: new Date() } }
     );
 
     return res.json({ success: true, message: 'Branch logo removed', data: { branchId, logoUrl: null } });
@@ -494,20 +460,8 @@ router.delete('/:branchId/delete-logo', verifyFinanceJWT, async (req, res) => {
 // ============================================================================
 // MULTER — Branch QR Code Upload
 // ============================================================================
-const branchQrStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'branch-qr');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const branchId = req.params.branchId || 'unknown';
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `bqr-${branchId}-${Date.now()}${ext}`);
-  },
-});
 const branchQrUpload = multer({
-  storage: branchQrStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = /jpeg|jpg|png|webp/.test(path.extname(file.originalname).toLowerCase());
@@ -530,18 +484,12 @@ router.post(
       const branch = await db.collection('branches').findOne({ branchId, orgId });
       if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-      // Delete old QR file if exists
-      if (branch.qrCodePath) {
-        try {
-          const old = path.join(__dirname, '..', branch.qrCodePath.replace(/^\//, ''));
-          if (fs.existsSync(old)) fs.unlinkSync(old);
-        } catch (_) {}
-      }
+      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const qrCodePath = `/api/finance/auth/images/qr/${branchId}?t=${Date.now()}`;
 
-      const qrCodePath = `/uploads/branch-qr/${req.file.filename}`;
       await db.collection('branches').updateOne(
         { branchId, orgId },
-        { $set: { qrCodePath, qrUpdatedAt: new Date(), updatedAt: new Date() } }
+        { $set: { qrCodePath, qrBase64: base64Data, qrUpdatedAt: new Date(), updatedAt: new Date() } }
       );
 
       return res.json({
@@ -565,16 +513,9 @@ router.delete('/:branchId/delete-qr', verifyFinanceJWT, async (req, res) => {
     const branch = await db.collection('branches').findOne({ branchId, orgId });
     if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-    if (branch.qrCodePath) {
-      try {
-        const fp = path.join(__dirname, '..', branch.qrCodePath.replace(/^\//, ''));
-        if (fs.existsSync(fp)) fs.unlinkSync(fp);
-      } catch (_) {}
-    }
-
     await db.collection('branches').updateOne(
       { branchId, orgId },
-      { $set: { qrCodePath: null, updatedAt: new Date() } }
+      { $set: { qrCodePath: null, qrBase64: null, updatedAt: new Date() } }
     );
 
     return res.json({
@@ -602,18 +543,12 @@ router.post(
       const branch = await db.collection('branches').findOne({ branchId, orgId });
       if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-      // Delete old signature file if exists
-      if (branch.digitalSignaturePath) {
-        try {
-          const old = path.join(__dirname, '..', branch.digitalSignaturePath.replace(/^\//, ''));
-          if (fs.existsSync(old)) fs.unlinkSync(old);
-        } catch (_) {}
-      }
+      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const digitalSignaturePath = `/api/finance/auth/images/signature/${branchId}?t=${Date.now()}`;
 
-      const digitalSignaturePath = `/uploads/branch-signatures/${req.file.filename}`;
       await db.collection('branches').updateOne(
         { branchId, orgId },
-        { $set: { digitalSignaturePath, signatureUpdatedAt: new Date(), updatedAt: new Date() } }
+        { $set: { digitalSignaturePath, signatureBase64: base64Data, signatureUpdatedAt: new Date(), updatedAt: new Date() } }
       );
 
       return res.json({
@@ -637,16 +572,9 @@ router.delete('/:branchId/delete-signature', verifyFinanceJWT, async (req, res) 
     const branch = await db.collection('branches').findOne({ branchId, orgId });
     if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-    if (branch.digitalSignaturePath) {
-      try {
-        const fp = path.join(__dirname, '..', branch.digitalSignaturePath.replace(/^\//, ''));
-        if (fs.existsSync(fp)) fs.unlinkSync(fp);
-      } catch (_) {}
-    }
-
     await db.collection('branches').updateOne(
       { branchId, orgId },
-      { $set: { digitalSignaturePath: null, updatedAt: new Date() } }
+      { $set: { digitalSignaturePath: null, signatureBase64: null, updatedAt: new Date() } }
     );
 
     return res.json({

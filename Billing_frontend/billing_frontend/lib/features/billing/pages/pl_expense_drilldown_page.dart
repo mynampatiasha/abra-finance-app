@@ -11,6 +11,14 @@ import 'package:intl/intl.dart';
 import '../../../../core/services/bank_transaction_service.dart';
 import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
+import 'account_detail_page.dart';
+import 'new_expenses.dart';
+import 'new_invoice.dart';
+import 'new_bill.dart';
+import 'new_credit_note.dart';
+import 'new_payment_page.dart';
+import 'new_payment_made.dart';
+import 'new_manual_journal.dart';
 
 const _navy = Color(0xFF1E3A8A);
 const _green = Color(0xFF27AE60);
@@ -124,6 +132,25 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
     return s;
   }
 
+  // The pdf package's base font has no glyph for ₹ (U+20B9) or the em dash
+  // (—), so they render as broken boxes in exported PDFs. Use ASCII-only
+  // equivalents here; the on-screen UI keeps ₹/— via _fmt().
+  String _fmtPdf(dynamic v, String key) {
+    if (v == null) return '-';
+    final s = v.toString();
+    if (s == 'null' || s.isEmpty) return '-';
+    if (key == 'date') {
+      try {
+        return DateFormat('dd MMM yyyy').format(DateTime.parse(s));
+      } catch (_) {}
+    }
+    if (key == 'amount') {
+      final n = double.tryParse(s);
+      if (n != null) return 'Rs.${NumberFormat('#,##,##0.00').format(n)}';
+    }
+    return s;
+  }
+
   Future<void> _exportExcel() async {
     if (_rows.isEmpty) return;
     setState(() => _exporting = true);
@@ -165,7 +192,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
     setState(() => _exporting = true);
     try {
       await ExportHelper.exportToPDF(
-        title: '${widget.orgName}\n${widget.accountName} — Bank Transactions',
+        title: '${widget.orgName}\n${widget.accountName} - Bank Transactions',
         headers: [
           'Date',
           'Bank Account',
@@ -176,12 +203,12 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
         ],
         data: _rows
             .map((r) => [
-                  _fmt(r['date'], 'date'),
-                  r['bankAccount']?.toString() ?? '—',
-                  r['description']?.toString() ?? '—',
-                  r['payee']?.toString() ?? '—',
-                  r['referenceNumber']?.toString() ?? '—',
-                  _fmt(r['amount'], 'amount'),
+                  _fmtPdf(r['date'], 'date'),
+                  r['bankAccount']?.toString() ?? '-',
+                  r['description']?.toString() ?? '-',
+                  r['payee']?.toString() ?? '-',
+                  r['referenceNumber']?.toString() ?? '-',
+                  _fmtPdf(r['amount'], 'amount'),
                 ])
             .toList(),
         filename: '${widget.accountName.replaceAll(' ', '_')}_transactions',
@@ -347,8 +374,13 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
 
   Widget _buildSummaryCards(List<Map<String, dynamic>> rows) {
     final count = rows.length;
+    // Sum all amounts positively — matches Zoho Books behaviour.
+    // Individual rows already show green (Deposit) / red (Withdrawal) to indicate direction.
     final total = rows.fold(
         0.0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
+    // Use green for income (all deposits) and red when mixed/withdrawals dominate
+    final hasWithdrawal = rows.any((r) => r['type']?.toString() == 'Withdrawal');
+    final totalColor = hasWithdrawal ? _red : _green;
     return Container(
       color: const Color(0xFFF0F4F8),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
@@ -359,7 +391,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
         _summaryCard(
             'Total Amount',
             '₹${NumberFormat('#,##,##0.00').format(total)}',
-            _red,
+            totalColor,
             Icons.currency_rupee),
         if (widget.startDate != null) ...[
           const SizedBox(width: 12),
@@ -447,6 +479,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
       'payee',
       'referenceNumber',
       'type',
+      'actions',
       'amount'
     ];
     const labels = [
@@ -456,9 +489,42 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
       'Payee',
       'Ref No.',
       'Type',
+      'Links',
       'Amount'
     ];
-    const colW = 155.0;
+    const colW = 145.0;
+
+    void _onRowTapped(Map<String, dynamic> row) {
+      final type = row['referenceType']?.toString();
+      final refId = row['referenceId']?.toString();
+      final bankAccountId = row['bankAccountId']?.toString();
+      final bankAccountName = row['bankAccount']?.toString();
+
+      if (refId == null || refId.isEmpty) return;
+
+      if (type == 'ProviderTransaction' && bankAccountId != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AccountDetailPage(
+              accountId: bankAccountId,
+              accountName: bankAccountName ?? 'Bank Account',
+              accountType: 'bank',
+            ),
+          ),
+        );
+      } else if (type == 'Expense') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => NewExpensePage(
+              expenseId: refId,
+              showAppBar: true,
+            ),
+          ),
+        );
+      }
+    }
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -575,6 +641,74 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
                                                     isDebit ? _red : _green)),
                                       ),
                                     );
+                                  } else if (h == 'actions') {
+                                    final btId = r['btId']?.toString();
+                                    final atId = r['atId']?.toString();
+                                    final bAcctId = r['bankAccountId']?.toString();
+                                    final bAcctName = r['bankAccount']?.toString();
+                                    
+                                    cell = Row(
+                                      mainAxisAlignment: MainAxisAlignment.start,
+                                      children: [
+                                        if (btId != null && bAcctId != null)
+                                          InkWell(
+                                            onTap: () {
+                                              Navigator.push(context, MaterialPageRoute(builder: (_) => AccountDetailPage(
+                                                accountId: bAcctId,
+                                                accountName: bAcctName ?? 'Bank Account',
+                                                accountType: 'bank',
+                                                highlightTransactionId: btId,
+                                              )));
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                              decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(4), border: Border.all(color: const Color(0xFF90CAF9))),
+                                              child: const Text('BT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                                            ),
+                                          ),
+                                        if (btId != null && atId != null) const SizedBox(width: 6),
+                                        if (atId != null)
+                                          InkWell(
+                                            onTap: () {
+                                              final type = r['atType']?.toString() ?? 'Expense';
+                                              Widget? page;
+                                              switch (type) {
+                                                case 'Expense':
+                                                  page = NewExpensePage(expenseId: atId, showAppBar: true);
+                                                  break;
+                                                case 'Invoice':
+                                                  page = NewInvoiceScreen(invoiceId: atId);
+                                                  break;
+                                                case 'Bill':
+                                                  page = NewBillScreen(billId: atId);
+                                                  break;
+                                                case 'CreditNote':
+                                                  page = NewCreditNoteScreen(creditNoteId: atId);
+                                                  break;
+                                                case 'PaymentReceived':
+                                                  page = NewPaymentPage(paymentId: atId, showAppBar: true);
+                                                  break;
+                                                case 'PaymentMade':
+                                                  page = NewPaymentMadeScreen(paymentId: atId);
+                                                  break;
+                                                case 'JournalEntry':
+                                                  page = NewManualJournalPage(journalId: atId);
+                                                  break;
+                                              }
+                                              if (page != null) {
+                                                Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
+                                              }
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(4), border: Border.all(color: const Color(0xFFFFCC80))),
+                                              child: const Text('AT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFE65100))),
+                                            ),
+                                          ),
+                                        if (btId == null && atId == null)
+                                          const Text('—', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                                      ],
+                                    );
                                   } else {
                                     cell = Text(
                                       _fmt(v, h),
@@ -623,16 +757,22 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
                         SizedBox(
                             width: colW * (headers.length - 2),
                             child: const SizedBox()),
-                        SizedBox(
-                            width: colW,
-                            child: Text(
-                              '₹${NumberFormat('#,##,##0.00').format(rows.fold(0.0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0)))}',
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: _red),
-                            )),
+                        Builder(builder: (_) {
+                          final footerTotal = rows.fold(
+                              0.0,
+                              (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
+                          final hasWd = rows.any((r) => r['type']?.toString() == 'Withdrawal');
+                          return SizedBox(
+                              width: colW,
+                              child: Text(
+                                '₹${NumberFormat('#,##,##0.00').format(footerTotal)}',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: hasWd ? _red : _green),
+                              ));
+                        }),
                         const SizedBox(width: 14),
                       ]),
                     ),

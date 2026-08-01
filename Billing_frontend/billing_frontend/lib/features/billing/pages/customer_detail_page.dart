@@ -777,36 +777,28 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                   textAlign: TextAlign.right)),
         ]),
         const Divider(height: 12),
-        Row(children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           Expanded(
               child: Text(
             '${_overview?.currency ?? 'INR'} - Indian Rupee',
             style: const TextStyle(fontSize: 13, color: _navyDark),
           )),
           const SizedBox(width: 8),
-          SizedBox(
-              width: 90,
-              child: Text(
-                '₹${(_overview?.outstandingReceivables ?? 0).toStringAsFixed(2)}',
-                style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _navyDark),
-                textAlign: TextAlign.right,
-              )),
+          _statPill(
+            width: 100,
+            amount: _overview?.outstandingReceivables ?? 0,
+            color: _red,
+            clickable: _overview?.unpaidInvoicesList.isNotEmpty ?? false,
+            onTap: _showOutstandingReceivablesDialog,
+          ),
           const SizedBox(width: 8),
-          SizedBox(
-              width: 80,
-              child: Text(
-                '₹${(_overview?.unusedCredits ?? 0).toStringAsFixed(2)}',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: (_overview?.unusedCredits ?? 0) > 0
-                        ? _navyAccent
-                        : _navyDark),
-                textAlign: TextAlign.right,
-              )),
+          _statPill(
+            width: 90,
+            amount: _overview?.unusedCredits ?? 0,
+            color: _green,
+            clickable: _overview?.unusedCreditsList.isNotEmpty ?? false,
+            onTap: _showUnusedCreditsDialog,
+          ),
         ]),
         const SizedBox(height: 12),
         GestureDetector(
@@ -822,6 +814,186 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
         ),
       ],
     ]));
+  }
+
+  void _showOutstandingReceivablesDialog() {
+    if (_overview == null || _overview!.unpaidInvoicesList.isEmpty) return;
+    final items = _overview!.unpaidInvoicesList;
+    final total = items.fold<double>(
+        0, (s, inv) => s + (double.tryParse('${inv['amountDue'] ?? 0}') ?? 0));
+
+    _showStatDialog(
+      title: 'Outstanding Receivables',
+      icon: Icons.receipt_long_rounded,
+      accent: _red,
+      itemCount: items.length,
+      totalAmount: total,
+      itemBuilder: (context, index) {
+        final inv = items[index];
+        final date = DateTime.tryParse(inv['invoiceDate']?.toString() ?? '');
+        final dateStr = date != null ? DateFormat('dd MMM yyyy').format(date) : '';
+        return _statDialogRow(
+          icon: Icons.description_outlined,
+          color: _red,
+          title: inv['invoiceNumber']?.toString() ?? 'Unknown Invoice',
+          subtitle: dateStr,
+          amountText: '₹${(double.tryParse('${inv['amountDue'] ?? 0}') ?? 0).toStringAsFixed(2)}',
+        );
+      },
+    );
+  }
+
+  void _showUnusedCreditsDialog() {
+    if (_overview == null || _overview!.unusedCreditsList.isEmpty) return;
+    final items = _overview!.unusedCreditsList;
+    final total = items.fold<double>(0,
+        (s, c) => s + (double.tryParse('${c['unusedAmount'] ?? 0}') ?? 0));
+
+    _showStatDialog(
+      title: 'Unused Credits',
+      icon: Icons.account_balance_wallet_outlined,
+      accent: _green,
+      itemCount: items.length,
+      totalAmount: total,
+      itemBuilder: (context, index) {
+        final credit = items[index];
+        final date = DateTime.tryParse(credit['date']?.toString() ?? '');
+        final dateStr = date != null ? DateFormat('dd MMM yyyy').format(date) : '';
+        return _statDialogRow(
+          icon: Icons.card_giftcard_outlined,
+          color: _green,
+          title: '${credit['type']} - ${credit['number']}',
+          subtitle: dateStr,
+          amountText: '₹${(double.tryParse('${credit['unusedAmount'] ?? 0}') ?? 0).toStringAsFixed(2)}',
+        );
+      },
+    );
+  }
+
+  void _showStatDialog({
+    required String title,
+    required IconData icon,
+    required Color accent,
+    required int itemCount,
+    required double totalAmount,
+    required Widget Function(BuildContext, int) itemBuilder,
+  }) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [accent.withOpacity(0.14), accent.withOpacity(0.02)]),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: Row(children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration:
+                        BoxDecoration(color: accent.withOpacity(0.16), shape: BoxShape.circle),
+                    child: Icon(icon, color: accent, size: 20),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(title,
+                            style: const TextStyle(
+                                color: _navyDark,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 3),
+                        Text(
+                            '$itemCount item${itemCount == 1 ? '' : 's'}  ·  ₹${totalAmount.toStringAsFixed(2)}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      ])),
+                  InkWell(
+                    onTap: () => Navigator.pop(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.close, size: 18, color: Colors.grey[500]),
+                    ),
+                  ),
+                ]),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  itemCount: itemCount,
+                  separatorBuilder: (_, __) =>
+                      Divider(height: 1, color: Colors.grey.withOpacity(0.12)),
+                  itemBuilder: itemBuilder,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyDark,
+                      side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _statDialogRow({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required String amountText,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(9)),
+          child: Icon(icon, size: 17, color: color),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+              Text(title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 14, color: _navyDark)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            ])),
+        Text(amountText,
+            style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
+      ]),
+    );
   }
 
   Widget _incomeChartCard() {
@@ -870,6 +1042,47 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
               () => _hoveredBarIndex = _hoveredBarIndex == i ? null : i),
         ),
     ]));
+  }
+
+  Widget _statPill({
+    required double width,
+    required double amount,
+    required Color color,
+    required bool clickable,
+    required VoidCallback onTap,
+  }) {
+    final active = clickable && amount > 0;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: active ? onTap : null,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: width),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? color.withOpacity(0.1) : Colors.grey.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: active ? color.withOpacity(0.25) : Colors.transparent),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              '₹${amount.toStringAsFixed(2)}',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: active ? color : _navyDark),
+              textAlign: TextAlign.right,
+              softWrap: false,
+            ),
+            if (active) ...[
+              const SizedBox(width: 2),
+              Icon(Icons.chevron_right, size: 14, color: color),
+            ],
+          ]),
+        ),
+      ),
+    );
   }
 
   Widget _chipBtn(String label) {
@@ -1023,7 +1236,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
         final token = prefs.getString('jwt_token') ?? '';
         final branchHdr = await FinanceSecureStorage.getBranchHeader();
         final String baseUrl = ApiConfig.baseUrl + '/api';
-      String url = '$baseUrl/finance/customers/${widget.customerId}/statement/pdf?token=$token&branchIds=$branchHdr';
+      String url = '$baseUrl/finance/customers/${widget.customerId}/transactions/pdf?token=$token&branchIds=$branchHdr';
       url += '&fromDate=${_txnFrom.toIso8601String()}';
       url += '&toDate=${_txnTo.toIso8601String()}';
       
@@ -2074,7 +2287,8 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                 DataColumn(
                                     label: Text('BALANCE'), numeric: true),
                               ],
-                              rows: _statement!.entries
+                              rows: [
+                                ..._statement!.entries
                                   .asMap()
                                   .entries
                                   .map((entry) {
@@ -2144,6 +2358,39 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                   ],
                                 );
                               }).toList(),
+                                DataRow(
+                                  color: WidgetStateProperty.all(
+                                      _navyDark.withOpacity(0.08)),
+                                  cells: [
+                                    const DataCell(SizedBox(width: _txnColDate)),
+                                    const DataCell(Text('TOTAL',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _navyDark))),
+                                    DataCell(Text(
+                                        '₹${_statement!.entries.fold<double>(0, (s, e) => s + (e.invoices ?? 0)).toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _navyDark))),
+                                    DataCell(Text(
+                                        '₹${_statement!.entries.fold<double>(0, (s, e) => s + (e.payments ?? 0)).toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _green))),
+                                    DataCell(Text(
+                                        '₹${_statement!.closingBalance.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _statement!.closingBalance >= 0
+                                                ? _navyDark
+                                                : _red))),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -2210,15 +2457,16 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
 
   Widget _card({required Widget child}) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.withOpacity(0.08)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
+              color: _navyDark.withOpacity(0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 4))
         ],
       ),
       child: child,
@@ -2792,76 +3040,113 @@ class _IncomeBarChart extends StatelessWidget {
     }
 
     final maxVal = data.map((d) => d.total).reduce(math.max);
+    final totalIncome = data.fold<double>(0, (s, d) => s + d.total);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // Tooltip
-      if (hoveredIndex != null && hoveredIndex! < data.length)
-        Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: Colors.grey[200]!),
-            borderRadius: BorderRadius.circular(6),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2))
-            ],
-          ),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('₹${data[hoveredIndex!].total.toStringAsFixed(2)}',
+      // Summary + tooltip row
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('₹${totalIncome.toStringAsFixed(2)}',
                 style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: _navyDark)),
-            Text('${data[hoveredIndex!].month} ${data[hoveredIndex!].year}',
-                style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    fontSize: 20, fontWeight: FontWeight.bold, color: _navyDark)),
+            Text('Total for the period',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500])),
           ]),
         ),
-      // Bars
+        if (hoveredIndex != null && hoveredIndex! < data.length)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                _navyAccent.withOpacity(0.1),
+                _navyAccent.withOpacity(0.02)
+              ]),
+              border: Border.all(color: _navyAccent.withOpacity(0.2)),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('₹${data[hoveredIndex!].total.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: _navyAccent)),
+              Text('${data[hoveredIndex!].month} ${data[hoveredIndex!].year}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            ]),
+          ),
+      ]),
+      const SizedBox(height: 18),
+      // Bars with a baseline grid
       SizedBox(
         height: 100,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: data.asMap().entries.map((e) {
-            final i = e.key;
-            final d = e.value;
-            final ratio = maxVal > 0 ? d.total / maxVal : 0.0;
-            final isHovered = hoveredIndex == i;
-            return Expanded(
+        child: Stack(children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(height: 1, color: Colors.grey.withOpacity(0.15)),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: data.asMap().entries.map((e) {
+              final i = e.key;
+              final d = e.value;
+              final ratio = maxVal > 0 ? d.total / maxVal : 0.0;
+              final isHovered = hoveredIndex == i;
+              return Expanded(
+                  child: MouseRegion(
+                cursor: SystemMouseCursors.click,
                 child: GestureDetector(
-              onTap: () => onBarTap(i),
-              child:
-                  Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  height: (ratio * 80).clamp(2.0, 80.0),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: isHovered
-                        ? _navyAccent
-                        : (d.total > 0
-                            ? _green.withOpacity(0.75)
-                            : Colors.grey[200]),
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(4)),
-                  ),
+                  onTap: () => onBarTap(i),
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOut,
+                          height: (ratio * 80).clamp(2.0, 80.0),
+                          margin: const EdgeInsets.symmetric(horizontal: 5),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: isHovered
+                                  ? [_navyAccent, _navyMid]
+                                  : (d.total > 0
+                                      ? [_green.withOpacity(0.85), _green.withOpacity(0.55)]
+                                      : [Colors.grey[200]!, Colors.grey[200]!]),
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                            boxShadow: isHovered
+                                ? [
+                                    BoxShadow(
+                                        color: _navyAccent.withOpacity(0.35),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3))
+                                  ]
+                                : null,
+                          ),
+                        ),
+                      ]),
                 ),
-              ]),
-            ));
-          }).toList(),
-        ),
+              ));
+            }).toList(),
+          ),
+        ]),
       ),
-      const SizedBox(height: 6),
+      const SizedBox(height: 8),
       // Month labels
       Row(
           children: data.asMap().entries.map((e) {
+        final isHovered = hoveredIndex == e.key;
         return Expanded(
             child: Text(e.value.month,
-                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: isHovered ? FontWeight.w700 : FontWeight.normal,
+                    color: isHovered ? _navyAccent : Colors.grey[500]),
                 textAlign: TextAlign.center));
       }).toList()),
     ]);

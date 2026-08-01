@@ -23,25 +23,13 @@ function makeOrgId() {
 }
 
 // ============================================================================
-// MULTER — Org Logo Upload
-// Saves to: uploads/org-logos/<orgId>-<timestamp>.<ext>
+// MULTER — Org Logo Upload (Memory Storage for Base64)
 // ============================================================================
-const orgLogoStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'org-logos');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const orgId = req.user?.orgId || 'unknown';
-    const ext   = path.extname(file.originalname).toLowerCase();
-    cb(null, `org-${orgId}-${Date.now()}${ext}`);
-  },
-});
+const orgLogoStorage = multer.memoryStorage();
 
 const orgLogoUpload = multer({
   storage: orgLogoStorage,
-  limits:  { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits:  { fileSize: 2 * 1024 * 1024 }, // 2 MB limit to keep MongoDB document small
   fileFilter: (req, file, cb) => {
     const allowed = /jpeg|jpg|png|webp/;
     const okExt  = allowed.test(path.extname(file.originalname).toLowerCase());
@@ -390,13 +378,14 @@ router.post(
         }
       }
 
-      // ── Build relative URL (served by express.static) ─────────────────────
-      const logoUrl = `/uploads/org-logos/${req.file.filename}`;
+      // ── Build route URL (served by our new GET endpoint) ──────────────────
+      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const logoUrl = `/api/finance/auth/images/logo/${orgId}?t=${Date.now()}`;
 
       // ── Persist in organizations collection ───────────────────────────────
       await db.collection('organizations').updateOne(
         { orgId },
-        { $set: { logoUrl, logoUpdatedAt: new Date() } }
+        { $set: { logoUrl, logoBase64: base64Data, logoUpdatedAt: new Date() } }
       );
 
       console.log(`✅ Logo uploaded for org ${orgId}: ${logoUrl}`);
@@ -450,7 +439,7 @@ router.delete('/delete-org-logo', verifyFinanceJWT, async (req, res) => {
 
     await db.collection('organizations').updateOne(
       { orgId },
-      { $set: { logoUrl: null, logoUpdatedAt: new Date() } }
+      { $set: { logoUrl: null, logoBase64: null, logoUpdatedAt: new Date() } }
     );
 
     console.log(`✅ Logo deleted for org ${orgId}`);
@@ -766,18 +755,7 @@ router.put('/update-org-profile', verifyFinanceJWT, async (req, res) => {
 // ─── POST /api/finance/auth/upload-org-qr ────────────────────────────────────
 // Uploads a QR code image for the org's payment section
 // ═══════════════════════════════════════════════════════════════════════════════
-const orgQrStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'org-qr');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const orgId = req.user?.orgId || 'unknown';
-    const ext   = path.extname(file.originalname).toLowerCase();
-    cb(null, `qr-${orgId}-${Date.now()}${ext}`);
-  },
-});
+const orgQrStorage = multer.memoryStorage();
 const orgQrUpload = multer({
   storage: orgQrStorage,
   limits: { fileSize: 2 * 1024 * 1024 },
@@ -802,8 +780,9 @@ router.post('/upload-org-qr', verifyFinanceJWT, orgQrUpload.single('qr'), async 
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       } catch (_) {}
     }
-    const qrCodePath = `/uploads/org-qr/${req.file.filename}`;
-    await db.collection('organizations').updateOne({ orgId }, { $set: { qrCodePath, updatedAt: new Date() } });
+    const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    const qrCodePath = `/api/finance/auth/images/qr/${orgId}?t=${Date.now()}`;
+    await db.collection('organizations').updateOne({ orgId }, { $set: { qrCodePath, qrBase64: base64Data, updatedAt: new Date() } });
     return res.json({ success: true, message: 'QR code uploaded', data: { orgId, qrCodePath } });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -883,18 +862,7 @@ router.delete('/org-document/:docId', verifyFinanceJWT, async (req, res) => {
 // ─── POST /api/finance/auth/upload-digital-signature ─────────────────────────
 // Uploads a digital signature image for the org (used in all PDFs)
 // ═══════════════════════════════════════════════════════════════════════════════
-const orgSignatureStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'org-signatures');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const orgId = req.user?.orgId || 'unknown';
-    const ext   = path.extname(file.originalname).toLowerCase();
-    cb(null, `sig-${orgId}-${Date.now()}${ext}`);
-  },
-});
+const orgSignatureStorage = multer.memoryStorage();
 const orgSignatureUpload = multer({
   storage: orgSignatureStorage,
   limits:  { fileSize: 3 * 1024 * 1024 }, // 3 MB
@@ -945,10 +913,11 @@ router.post(
           if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         } catch (_) {}
       }
-      const digitalSignaturePath = `/uploads/org-signatures/${req.file.filename}`;
+      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      const digitalSignaturePath = `/api/finance/auth/images/signature/${orgId}?t=${Date.now()}`;
       await db.collection('organizations').updateOne(
         { orgId },
-        { $set: { digitalSignaturePath, signatureUpdatedAt: new Date() } }
+        { $set: { digitalSignaturePath, signatureBase64: base64Data, signatureUpdatedAt: new Date() } }
       );
       console.log(`✅ Digital signature uploaded for org ${orgId}: ${digitalSignaturePath}`);
       return res.json({
@@ -981,7 +950,7 @@ router.delete('/delete-digital-signature', verifyFinanceJWT, async (req, res) =>
     } catch (_) {}
     await db.collection('organizations').updateOne(
       { orgId },
-      { $set: { digitalSignaturePath: null, signatureUpdatedAt: new Date() } }
+      { $set: { digitalSignaturePath: null, signatureBase64: null, signatureUpdatedAt: new Date() } }
     );
     console.log(`✅ Digital signature deleted for org ${orgId}`);
     return res.json({ success: true, message: 'Digital signature removed', data: { orgId, digitalSignaturePath: null } });
@@ -1507,6 +1476,48 @@ router.get('/whatsapp-templates', verifyFinanceJWT, async (req, res) => {
   } catch (err) {
     console.error('❌ whatsapp-templates error:', err.message);
     return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── GET /api/finance/auth/images/:type/:id ───────────────────────────────
+// Serves Base64 images directly from MongoDB (Logo, Signature, QR Code)
+// ═══════════════════════════════════════════════════════════════════════════════
+router.get('/images/:type/:id', async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const db = req.db;
+    
+    let record = await db.collection('organizations').findOne({ orgId: id });
+    if (!record) {
+      record = await db.collection('branches').findOne({ branchId: id });
+    }
+
+    if (!record) return res.status(404).send('Organisation or Branch not found');
+
+    let base64Data = null;
+    let mimeType = 'image/png';
+
+    if (type === 'logo' && record.logoBase64) base64Data = record.logoBase64;
+    else if (type === 'signature' && record.signatureBase64) base64Data = record.signatureBase64;
+    else if (type === 'qr' && record.qrBase64) base64Data = record.qrBase64;
+
+    if (!base64Data) {
+      return res.status(404).send('Image not found');
+    }
+
+    const match = base64Data.match(/^data:(image\/\w+);base64,(.*)$/);
+    if (match) {
+      mimeType = match[1];
+      base64Data = match[2];
+    }
+
+    const imgBuffer = Buffer.from(base64Data, 'base64');
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(imgBuffer);
+  } catch (err) {
+    res.status(500).send('Error loading image');
   }
 });
 

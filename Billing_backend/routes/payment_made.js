@@ -72,7 +72,6 @@ const paymentMadeSchema = new mongoose.Schema(
       type: String,
       enum: ['DRAFT', 'RECORDED', 'APPLIED', 'PARTIALLY_APPLIED', 'REFUNDED', 'VOIDED'],
       default: 'RECORDED',
-      index: true,
     },
 
     billsApplied: [
@@ -257,7 +256,6 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
   const orgPhone   = orgData?.phone      || '';
   const orgEmail   = orgData?.email      || '';
   const orgAddress = orgData?.address    || '';
-  const logoPath   = getPmOrgLogoPath(orgId, orgData?.logoUrl);
 
   return new Promise((resolve, reject) => {
     try {
@@ -274,18 +272,35 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
       // ═══════════════════════════════════════════════════════════════════════
       // HEADER — white background with logo (invoice.js style)
       // ═══════════════════════════════════════════════════════════════════════
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
+      }
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getPmOrgLogoPath(orgId, null);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
 
       const contactLines = [orgAddress, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY  = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH = 55;
-      const logoY = logoCenterY - (logoH / 2);
-      const textX = logoPath ? 126 : 50;
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
 
-      if (logoPath) {
-        try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+      if (logoData) {
+        try {
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
+        } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
+      const textX = logoData ? 166 : 50;
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
          .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
@@ -468,26 +483,36 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
       const sigRelPath = orgData?.digitalSignaturePath;
       const sigImgSize = 200;
       let   actualSigH = sigImgSize;
-      if (sigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (sigRelPath) {
+        const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(sigAbsPath)) { sigBuf = fs.readFileSync(sigAbsPath); sigExt = path.extname(sigAbsPath).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const sigAbsPath = path.join(__dirname, '..', sigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(sigAbsPath)) {
             let imgW = sigImgSize, imgH = sigImgSize;
             try {
-              const buf = fs.readFileSync(sigAbsPath);
-              const ext = path.extname(sigAbsPath).toLowerCase();
-              if (ext === '.png' && buf.length > 24) {
-                imgW = buf.readUInt32BE(16);
-                imgH = buf.readUInt32BE(20);
-              } else if ((ext === '.jpg' || ext === '.jpeg') && buf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) {
+                imgW = sigBuf.readUInt32BE(16);
+                imgH = sigBuf.readUInt32BE(20);
+              } else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let i = 2;
-                while (i < buf.length - 8) {
-                  if (buf[i] === 0xFF && buf[i+1] >= 0xC0 && buf[i+1] <= 0xC3) {
-                    imgH = buf.readUInt16BE(i + 5);
-                    imgW = buf.readUInt16BE(i + 7);
+                while (i < sigBuf.length - 8) {
+                  if (sigBuf[i] === 0xFF && sigBuf[i+1] >= 0xC0 && sigBuf[i+1] <= 0xC3) {
+                    imgH = sigBuf.readUInt16BE(i + 5);
+                    imgW = sigBuf.readUInt16BE(i + 7);
                     break;
                   }
-                  i += 2 + buf.readUInt16BE(i + 2);
+                  i += 2 + sigBuf.readUInt16BE(i + 2);
                 }
               }
             } catch (_) {}
@@ -495,8 +520,7 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
             actualSigH       = Math.round(imgH * scale);
             const actualSigW = Math.round(imgW * scale);
             const centeredX  = authBoxX + (signBoxW - actualSigW) / 2;
-            doc.image(sigAbsPath, centeredX, signSectionY + 10, { width: actualSigW, height: actualSigH });
-          }
+            doc.image(sigBuf, centeredX, signSectionY + 10, { width: actualSigW, height: actualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 

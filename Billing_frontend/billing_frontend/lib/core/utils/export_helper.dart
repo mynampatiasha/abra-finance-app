@@ -89,6 +89,8 @@ class ExportHelper {
     String? orgAddress,
     String? orgPhone,
     String? orgGst,
+    String? customerName,
+    String? customerAddress,
   }) async {
     try {
       print('📤 Starting PDF export: $filename');
@@ -175,6 +177,45 @@ class ExportHelper {
               ),
               pw.Divider(color: PdfColors.grey400),
               pw.SizedBox(height: 16),
+              
+              if (customerName != null && customerName.isNotEmpty) ...[
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(12),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.grey100,
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'TO',
+                        style: pw.TextStyle(
+                          fontSize: 10,
+                          color: PdfColors.grey600,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        customerName,
+                        style: pw.TextStyle(
+                          fontSize: 12,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      if (customerAddress != null && customerAddress.isNotEmpty) ...[
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          customerAddress,
+                          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 16),
+              ],
             ] else ...[
               // Fallback basic header
               pw.Header(

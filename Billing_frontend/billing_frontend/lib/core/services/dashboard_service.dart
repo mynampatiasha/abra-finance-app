@@ -549,146 +549,47 @@ class DashboardService {
   }
 
   // ── 4. Income & Expense ────────────────────────────────────────────────────
+  // Always accrual-basis → /reports/profit-loss-monthly (ledger-based, same
+  // source as P&L). A true cash-basis view (money actually received/paid, not
+  // billed/incurred) is not implemented — the "Cash" toggle currently shows
+  // this same accrual data rather than a separate, less reliable calculation.
+  // See home_billing.dart's income/expense note, which discloses this.
   Future<Map<String, dynamic>> fetchIncomeExpense(
       String period, String basis) async {
+    final dates = getPeriodDates(period);
+    return _fetchIncomeExpenseAccrual(dates);
+  }
+
+  Future<Map<String, dynamic>> _fetchIncomeExpenseAccrual(
+      Map<String, String> dates) async {
     try {
-      final dates = getPeriodDates(period);
-      // Use the monthly endpoint — reads from AccountTransaction (same as P&L)
-      // so categorized bank transactions are included correctly
       final res = await _api.get(
         '/api/finance/reports/profit-loss-monthly?period=${dates['period']}',
       );
       final payload = _unwrap(res);
-      if (payload != null) {
-        final rawMonthly = (payload['monthly'] as List?)?.cast<Map>() ?? [];
-        if (rawMonthly.isNotEmpty) {
-          final List<Map<String, dynamic>> monthly = rawMonthly
-              .map<Map<String, dynamic>>((m) => {
-                    'month': m['month']?.toString() ?? '',
-                    'year': m['year'],
-                    'monthNum': m['monthNum'],
-                    'income': _toDouble(m['income']),
-                    'expense': _toDouble(m['expense']),
-                  })
-              .toList();
-          return {
-            'totalIncome': _toDouble(payload['totalIncome']),
-            'totalExpense': _toDouble(payload['totalExpense']),
-            'monthly': monthly,
-          };
-        }
+      final rawMonthly = (payload?['monthly'] as List?)?.cast<Map>() ?? [];
+      if (rawMonthly.isNotEmpty) {
+        final monthly = rawMonthly
+            .map<Map<String, dynamic>>((m) => {
+                  'month': m['month']?.toString() ?? '',
+                  'year': m['year'],
+                  'monthNum': m['monthNum'],
+                  'income': _toDouble(m['income']),
+                  'expense': _toDouble(m['expense']),
+                })
+            .toList();
+        return {
+          'totalIncome': _toDouble(payload?['totalIncome']),
+          'totalExpense': _toDouble(payload?['totalExpense']),
+          'monthly': monthly,
+        };
       }
     } catch (_) {}
-
-    // Fallback: build from raw collections
-    return _buildIncomeExpMonthly(period, 0, 0);
-  }
-
-  Future<Map<String, dynamic>> _buildIncomeExpMonthly(
-      String period, double knownIncome, double knownExpense) async {
-    try {
-      final dates = getPeriodDates(period);
-      final fyStart = DateTime.parse(dates['fromDate']!);
-
-      final months = List.generate(
-          12, (i) => DateTime(fyStart.year, fyStart.month + i, 1));
-
-      final Map<String, double> incomeMap = {};
-      final Map<String, double> expenseMap = {};
-      for (final m in months) {
-        final k = '${m.year}-${m.month.toString().padLeft(2, '0')}';
-        incomeMap[k] = 0;
-        expenseMap[k] = 0;
-      }
-
-      // Build income from invoices
-      try {
-        final invRes = await _api.get('/api/finance/invoices?limit=1000');
-        final invList = _unwrapList(invRes);
-        for (final inv in invList) {
-          // invoiceDate field — may be ISO string or Date object
-          final dateStr =
-              (inv['invoiceDate'] ?? inv['date'] ?? inv['createdAt'])
-                  ?.toString();
-          if (dateStr == null) continue;
-          final d = _parseDate(dateStr);
-          if (d == null) continue;
-          final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-          if (incomeMap.containsKey(key)) {
-            incomeMap[key] = incomeMap[key]! +
-                _toDouble(inv['subTotal'] ?? inv['totalAmount']);
-          }
-        }
-      } catch (_) {}
-
-      // Build expense from expenses
-      try {
-        final expRes = await _api.get('/api/finance/expenses?limit=1000');
-        final expList = _unwrapList(expRes);
-        for (final exp in expList) {
-          final dateStr =
-              (exp['date'] ?? exp['expenseDate'] ?? exp['createdAt'])
-                  ?.toString();
-          if (dateStr == null) continue;
-          final d = _parseDate(dateStr);
-          if (d == null) continue;
-          final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-          if (expenseMap.containsKey(key)) {
-            expenseMap[key] =
-                expenseMap[key]! + _toDouble(exp['total'] ?? exp['amount']);
-          }
-        }
-      } catch (_) {}
-
-      const abbr = [
-        '',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-        'Jan',
-        'Feb',
-        'Mar',
-      ];
-
-      double totalIncome = incomeMap.values.fold(0, (a, b) => a + b);
-      double totalExpense = expenseMap.values.fold(0, (a, b) => a + b);
-
-      // Always use raw aggregated totals so header matches bar chart exactly
-      // (P&L totals use a different calculation basis and will mismatch)
-      // if (knownIncome > totalIncome)   totalIncome  = knownIncome;
-      // if (knownExpense > totalExpense) totalExpense = knownExpense;
-
-      final List<Map<String, dynamic>> monthly = [];
-      for (int i = 0; i < months.length; i++) {
-        final m = months[i];
-        final key = '${m.year}-${m.month.toString().padLeft(2, '0')}';
-        monthly.add({
-          'month': abbr[i + 1],
-          'year': m.year,
-          'monthNum': m.month,
-          'income': incomeMap[key] ?? 0,
-          'expense': expenseMap[key] ?? 0,
-        });
-      }
-
-      return {
-        'totalIncome': totalIncome,
-        'totalExpense': totalExpense,
-        'monthly': monthly,
-      };
-    } catch (_) {
-      return {
-        'totalIncome': knownIncome,
-        'totalExpense': knownExpense,
-        'monthly': <Map<String, dynamic>>[],
-      };
-    }
+    return {
+      'totalIncome': 0.0,
+      'totalExpense': 0.0,
+      'monthly': <Map<String, dynamic>>[],
+    };
   }
 
   // ── 5. Top Expenses (donut chart) ──────────────────────────────────────────

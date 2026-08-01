@@ -220,7 +220,7 @@ router.get('/stats', authenticate, async (req, res) => {
       Budget.countDocuments(scopedFilter),
       Budget.countDocuments({ ...scopedFilter, isActive: true }),
       Budget.countDocuments({ ...scopedFilter, isActive: false }),
-      Budget.find(scopedFilter, { accountLines: 1 }).lean(),
+      Budget.find(scopedFilter, { accountLines: 1, financialYear: 1 }).lean(),
     ]);
 
     let totalBudgeted = 0;

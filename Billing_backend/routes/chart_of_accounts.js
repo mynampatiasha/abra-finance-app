@@ -224,6 +224,7 @@ async function seedSystemAccounts(orgId = null, branchId = null) {
     { accountCode: '1410', accountName: 'Advance to Vendor',           accountType: 'Other Current Asset',     accountSubType: 'Other Current Asset',     isSystemAccount: true, description: 'Advance payments made to vendors' },
     { accountCode: '2400', accountName: 'Advance from Customer',       accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true, description: 'Advance payments received from customers' },
     { accountCode: '2310', accountName: 'TDS Payable',                 accountType: 'Other Current Liability', accountSubType: 'Other Current Liability', isSystemAccount: true },
+    { accountCode: '4020', accountName: 'Other Charges',               accountType: 'Income',                  accountSubType: 'Income',                  isSystemAccount: true, description: 'Invoice adjustments and rounding off' },
   ];
 
   let created = 0;

@@ -158,6 +158,13 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   double _shippingCharges = 0;
   double _adjustment = 0;
   double _totalAmount = 0;
+  double _amountPaid = 0;
+  double _amountDue = 0;
+  double _totalTdsDeducted = 0;
+  double _totalWriteOff = 0;
+  
+  bool _autoRoundOff = false;
+  String? _originalStatus;
   List<TaxSlab> _taxSlabs = [];
 
   final List<String> _currencies = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
@@ -309,14 +316,18 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
           : 0;
 
       _shippingCharges = double.tryParse(_shippingChargesController.text) ?? 0;
-      _adjustment = double.tryParse(_adjustmentController.text) ?? 0;
-      _totalAmount = double.parse((_taxableTotal +
-              _totalTax -
-              _tdsAmount +
-              _tcsAmount +
-              _shippingCharges +
-              _adjustment)
-          .toStringAsFixed(2));
+      
+      double rawTotal = _taxableTotal + _totalTax - _tdsAmount + _tcsAmount + _shippingCharges;
+      
+      if (_autoRoundOff) {
+        double roundedTotal = rawTotal.roundToDouble();
+        _adjustment = double.parse((roundedTotal - rawTotal).toStringAsFixed(2));
+        _adjustmentController.text = _adjustment.toStringAsFixed(2);
+      } else {
+        _adjustment = double.tryParse(_adjustmentController.text) ?? 0;
+      }
+      
+      _totalAmount = double.parse((rawTotal + _adjustment).toStringAsFixed(2));
     });
   }
 
@@ -398,6 +409,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
             : '';
         _adjustmentController.text =
             invoice.adjustment != 0 ? invoice.adjustment.toString() : '';
+        _originalStatus = invoice.status;
         _tdsRate = invoice.tdsRate;
         _tcsRate = invoice.tcsRate;
         _enableTDS = invoice.tdsRate > 0;
@@ -420,6 +432,12 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   amount: item.amount,
                 ))
             .toList();
+        
+        _amountPaid = invoice.amountPaid;
+        _amountDue = invoice.amountDue;
+        _totalTdsDeducted = invoice.totalTdsDeducted;
+        _totalWriteOff = invoice.totalWriteOff;
+        
         // Create a desc controller per loaded item
         for (final item in _items) {
           _descControllers.add(TextEditingController(text: item.itemDetails));
@@ -546,6 +564,21 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
     }
   }
 
+  Future<void> _updateInvoice() async {
+    if (!_validate()) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = await _buildInvoiceData(_originalStatus ?? 'DRAFT');
+      await InvoiceService.updateInvoice(widget.invoiceId!, data);
+      _showSuccess('Invoice updated successfully');
+      Navigator.pop(context, true);
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _saveAndSend() async {
     if (!_validate()) return;
     if (_selectedCustomerEmail == null || _selectedCustomerEmail!.isEmpty) {
@@ -659,6 +692,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       'invoiceLevelDiscountType': _invoiceLevelDiscountType,
       'shippingCharges': _shippingCharges,
       'adjustment': _adjustment,
+      'autoRoundOff': _autoRoundOff,
       'tdsRate': _enableTDS ? _tdsRate : 0,
       'tcsRate': _enableTCS ? _tcsRate : 0,
       'status': status,
@@ -2157,6 +2191,25 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
           keyboardType: const TextInputType.numberWithOptions(
               decimal: true, signed: true),
           onChanged: (_) => _calculateAmounts()),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: Checkbox(
+              value: _autoRoundOff,
+              onChanged: (v) {
+                setState(() => _autoRoundOff = v ?? false);
+                _calculateAmounts();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('Auto Round Off',
+              style: TextStyle(fontSize: 13, color: Colors.black87)),
+        ],
+      ),
     ]);
   }
 
@@ -2279,6 +2332,24 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       const Divider(thickness: 2),
       const SizedBox(height: 6),
       _summaryRow('Total Amount', _totalAmount, isBold: true, isTotal: true),
+      if (widget.invoiceId != null && _originalStatus != 'DRAFT') ...[
+        if (_totalTdsDeducted > 0) ...[
+          const SizedBox(height: 6),
+          _summaryRow('TDS Deducted', -_totalTdsDeducted, color: Colors.green[700]),
+        ],
+        if (_totalWriteOff != 0) ...[
+          const SizedBox(height: 6),
+          _summaryRow('Write Off', -_totalWriteOff, color: Colors.blue[700]),
+        ],
+        if (_amountPaid > 0) ...[
+          const SizedBox(height: 6),
+          _summaryRow('Amount Paid', -_amountPaid, color: Colors.green[700]),
+        ],
+        const SizedBox(height: 6),
+        const Divider(),
+        const SizedBox(height: 6),
+        _summaryRow('Balance Due', _amountDue, isBold: true, color: _amountDue > 0 ? Colors.red[700] : Colors.green[700]),
+      ],
       const SizedBox(height: 24),
       SizedBox(
           width: double.infinity,
@@ -2299,6 +2370,27 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8))))),
       const SizedBox(height: 10),
+      if (widget.invoiceId != null && _originalStatus != 'DRAFT') ...[
+        SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+                onPressed: _isSaving ? null : _updateInvoice,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.update),
+                label: Text(_isSaving ? 'Updating...' : 'Update Invoice'),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[700],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8))))),
+        const SizedBox(height: 10),
+      ],
       SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(

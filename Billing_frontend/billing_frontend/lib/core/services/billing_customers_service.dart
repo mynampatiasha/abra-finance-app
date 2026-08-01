@@ -694,6 +694,8 @@ class CustomerOverviewData {
   final double outstandingReceivables;
   final double unusedCredits;
   final String currency;
+  final List<Map<String, dynamic>> unpaidInvoicesList;
+  final List<Map<String, dynamic>> unusedCreditsList;
   final List<MonthlyIncome> monthlyIncome;
 
   const CustomerOverviewData({
@@ -701,6 +703,8 @@ class CustomerOverviewData {
     required this.outstandingReceivables,
     required this.unusedCredits,
     required this.currency,
+    this.unpaidInvoicesList = const [],
+    this.unusedCreditsList = const [],
     required this.monthlyIncome,
   });
 
@@ -711,6 +715,8 @@ class CustomerOverviewData {
       outstandingReceivables: (r['outstandingReceivables'] ?? 0).toDouble(),
       unusedCredits: (r['unusedCredits'] ?? 0).toDouble(),
       currency: r['currency'] ?? 'INR',
+      unpaidInvoicesList: List<Map<String, dynamic>>.from(r['unpaidInvoicesList'] ?? []),
+      unusedCreditsList: List<Map<String, dynamic>>.from(r['unusedCreditsList'] ?? []),
       monthlyIncome: (json['monthlyIncome'] as List? ?? [])
           .map((m) => MonthlyIncome.fromJson(m))
           .toList(),

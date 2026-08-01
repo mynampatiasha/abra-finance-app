@@ -436,9 +436,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
       'vendorEmail': _selectedVendorEmail,
       'vendorGSTIN': _selectedVendorGSTIN,
       'purchaseOrderNumber': _purchaseOrderController.text.trim(),
-      'billDate': _billDate.toIso8601String(),
+      'billDate': DateFormat('yyyy-MM-dd').format(_billDate),
       'paymentTerms': _selectedPaymentTerms,
-      'dueDate': _dueDate?.toIso8601String(),
+      'dueDate': _dueDate != null ? DateFormat('yyyy-MM-dd').format(_dueDate!) : null,
       'subject': _subjectController.text.trim(),
       'notes': _notesController.text.trim(),
       'termsAndConditions': _termsConditionsController.text.trim(),
@@ -566,8 +566,8 @@ class _NewBillScreenState extends State<NewBillScreen> {
         'vendorEmail': bill.vendorEmail,
         'repeatEvery': int.tryParse(_repeatEvery) ?? 1,
         'repeatUnit': _repeatUnit,
-        'startDate': (_recurringStartDate ?? DateTime.now()).toIso8601String(),
-        'endDate': _recurringEndDate?.toIso8601String(),
+        'startDate': DateFormat('yyyy-MM-dd').format(_recurringStartDate ?? DateTime.now()),
+        'endDate': _recurringEndDate != null ? DateFormat('yyyy-MM-dd').format(_recurringEndDate!) : null,
         'billTemplate': {
           'items': _items
               .where((i) => i.itemDetails.isNotEmpty)
@@ -582,7 +582,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
         },
         'status': 'ACTIVE',
         'nextBillDate':
-            (_recurringStartDate ?? DateTime.now()).toIso8601String(),
+            DateFormat('yyyy-MM-dd').format(_recurringStartDate ?? DateTime.now()),
       });
     } catch (e) {
       print('Failed to create recurring profile: $e');

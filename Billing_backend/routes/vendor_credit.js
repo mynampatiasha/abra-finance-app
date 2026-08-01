@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // VENDOR CREDIT BACKEND
 // ============================================================================
 // File: routes/vendor_credit.js
@@ -778,6 +778,7 @@ router.put('/:id', async (req, res) => {
     );
 
     Object.assign(credit, updates);
+    credit.pdfPath = null; // Force PDF regeneration on edit
 
     // Recalculate balance
     const applied = credit.applications.reduce((s, a) => s + a.amount, 0);

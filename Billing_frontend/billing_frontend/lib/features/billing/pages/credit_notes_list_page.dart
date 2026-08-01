@@ -30,6 +30,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../../core/services/invoice_service.dart' as invoice_svc;
 import '../../../../core/services/credit_note_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
@@ -265,9 +266,59 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
       _snackError('Only OPEN credit notes can be applied to an invoice');
       return;
     }
-    if (cn.invoiceId == null || cn.invoiceId!.isEmpty) {
-      _snackError('No invoice linked to this credit note');
-      return;
+    String finalInvoiceId = cn.invoiceId ?? '';
+    String finalInvoiceNumber = cn.invoiceNumber ?? '';
+
+    if (finalInvoiceId.isEmpty) {
+      _snackSuccess('Fetching available invoices...');
+      try {
+        final response = await invoice_svc.InvoiceService.getInvoices(customerId: cn.customerId);
+        final unpaid = response.invoices
+            .where((inv) => ['SENT', 'UNPAID', 'OVERDUE', 'PARTIALLY_PAID'].contains(inv.status))
+            .toList();
+
+        if (unpaid.isEmpty) {
+          _snackError('No unpaid invoices found for this customer');
+          return;
+        }
+
+        if (!mounted) return;
+        final selectedInvoice = await showDialog<invoice_svc.Invoice>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Select Invoice to Apply Credit'),
+            content: SizedBox(
+              width: 500,
+              height: 400,
+              child: ListView.builder(
+                itemCount: unpaid.length,
+                itemBuilder: (_, i) {
+                  final inv = unpaid[i];
+                  return ListTile(
+                    leading: const Icon(Icons.receipt, color: Color(0xFFE74C3C)),
+                    title: Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('Due: ₹${inv.amountDue.toStringAsFixed(2)} • ${inv.status}'),
+                    onTap: () => Navigator.pop(context, inv),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, null),
+                child: const Text('Cancel'),
+              )
+            ],
+          ),
+        );
+
+        if (selectedInvoice == null) return; // User cancelled
+        finalInvoiceId = selectedInvoice.id;
+        finalInvoiceNumber = selectedInvoice.invoiceNumber;
+      } catch (e) {
+        _snackError('Failed to fetch invoices: $e');
+        return;
+      }
     }
 
     final amountController = TextEditingController(
@@ -302,7 +353,7 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 4),
-                  Text('Invoice      : ${cn.invoiceNumber ?? '-'}',
+                  Text('Invoice      : $finalInvoiceNumber',
                       style: TextStyle(fontSize: 13, color: Colors.grey[600])),
                   const SizedBox(height: 4),
                   Text(
@@ -378,13 +429,13 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
         await CreditNoteService.applyCredit(
           cn.id,
           {
-            'invoiceId': cn.invoiceId,
-            'invoiceNumber': cn.invoiceNumber ?? '',
+            'invoiceId': finalInvoiceId,
+            'invoiceNumber': finalInvoiceNumber,
             'amount': amount,
           },
         );
         _snackSuccess(
-            '✅ ₹${amount.toStringAsFixed(2)} applied to ${cn.invoiceNumber}');
+            '✔ ₹${amount.toStringAsFixed(2)} applied to $finalInvoiceNumber');
         _refreshData();
       } catch (e) {
         _snackError('Failed to apply credit: $e');
@@ -2887,4 +2938,5 @@ class _CreditNoteRaiseTicketOverlayState
     );
   }
 }
+
 

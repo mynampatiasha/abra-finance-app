@@ -110,6 +110,10 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
   List<BillingCustomer> customers = [];
   List<Invoice> unpaidInvoices = [];
   Map<String, double> invoicePayments = {}; // invoiceId → payment amount
+  Map<String, double> invoiceTds = {}; // invoiceId → TDS deducted
+  Map<String, double> invoiceWriteOffs = {}; // invoiceId → Rounding/Write Off
+  List<dynamic> clearedInvoices = [];
+  Map<String, dynamic> invoicePaymentsResolved = {};
   bool isLoading = true;
   bool isLoadingInvoices = false;
 
@@ -261,6 +265,23 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
                   MapEntry(k.toString(), double.tryParse(v.toString()) ?? 0.0),
             ),
           );
+        }
+        if (p['invoiceTds'] is Map) {
+          invoiceTds = Map<String, double>.from(
+            (p['invoiceTds'] as Map).map(
+              (k, v) => MapEntry(k.toString(), double.tryParse(v.toString()) ?? 0.0),
+            ),
+          );
+        }
+        if (p['invoiceWriteOffs'] is Map) {
+          invoiceWriteOffs = Map<String, double>.from(
+            (p['invoiceWriteOffs'] as Map).map(
+              (k, v) => MapEntry(k.toString(), double.tryParse(v.toString()) ?? 0.0),
+            ),
+          );
+        }
+        if (p['clearedInvoices'] is List) {
+           clearedInvoices = p['clearedInvoices'] as List;
         }
       });
       // Load unpaid invoices for the customer
@@ -623,6 +644,9 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
         'notes': _notesController.text,
         'sendThankYouNote': sendThankYouNote,
         'invoicePayments': widget.isAdvance ? {} : invoicePayments,
+        // The backend assumes these are zero if not sent. Include them so invoices aren't left partially unpaid.
+        'invoiceTds': widget.isAdvance ? {} : invoiceTds,
+        'invoiceWriteOffs': widget.isAdvance ? {} : invoiceWriteOffs,
         'creditsApplied': widget.isAdvance ? 0.0 : _creditsToApply,
         'paymentType': widget.isAdvance
             ? 'advance'
@@ -1611,7 +1635,25 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
                           textAlign: TextAlign.right)),
                   SizedBox(width: 8),
                   SizedBox(
-                      width: 120,
+                      width: 80,
+                      child: Text('TDS',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12),
+                          textAlign: TextAlign.center)),
+                  SizedBox(width: 8),
+                  SizedBox(
+                      width: 80,
+                      child: Text('W.OFF',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12),
+                          textAlign: TextAlign.center)),
+                  SizedBox(width: 8),
+                  SizedBox(
+                      width: 100,
                       child: Text('PAYMENT',
                           style: TextStyle(
                               color: Colors.white,
@@ -1630,7 +1672,36 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
               itemBuilder: (_, i) => _buildInvoiceRow(i),
             ),
             const SizedBox(height: 12),
-            // Allocated total chip
+            if (clearedInvoices.isNotEmpty) ...[
+              const Text('Already Paid Invoices (Settled by this payment)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: Colors.green.shade200), borderRadius: BorderRadius.circular(8)),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: clearedInvoices.length,
+                  itemBuilder: (_, i) {
+                    final inv = clearedInvoices[i];
+                    final invId = inv['_id']?.toString() ?? '';
+                    final payAmt = invoicePayments[invId] ?? 0.0;
+                    final tdsAmt = invoiceTds[invId] ?? 0.0;
+                    final woffAmt = invoiceWriteOffs[invId] ?? 0.0;
+                    return Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(child: Text(inv['invoiceNumber']?.toString() ?? '', style: TextStyle(fontWeight: FontWeight.bold))),
+                          Text('TDS: ₹${tdsAmt.toStringAsFixed(2)} | W.Off: ₹${woffAmt.toStringAsFixed(2)} | Paid: ₹${payAmt.toStringAsFixed(2)}')
+                        ],
+                      ),
+                    );
+                  }
+                )
+              ),
+              const SizedBox(height: 12),
+            ],            // Allocated total chip
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
@@ -1815,6 +1886,48 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
                       color: Colors.red)),
             ]),
             const SizedBox(height: 8),
+            // Row(
+            //   children: [
+            //     Expanded(
+            //       child: TextFormField(
+            //         initialValue: invoiceTds[invoice.id]?.toStringAsFixed(2) ?? '',
+            //         decoration: InputDecoration(
+            //           labelText: 'TDS',
+            //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            //           isDense: true,
+            //         ),
+            //         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            //         onChanged: (v) {
+            //           final val = double.tryParse(v) ?? 0;
+            //           setState(() {
+            //             if (val > 0) invoiceTds[invoice.id] = val;
+            //             else invoiceTds.remove(invoice.id);
+            //           });
+            //         },
+            //       ),
+            //     ),
+            //     const SizedBox(width: 8),
+            //     Expanded(
+            //       child: TextFormField(
+            //         initialValue: invoiceWriteOffs[invoice.id]?.toStringAsFixed(2) ?? '',
+            //         decoration: InputDecoration(
+            //           labelText: 'Write Off',
+            //           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            //           isDense: true,
+            //         ),
+            //         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            //         onChanged: (v) {
+            //           final val = double.tryParse(v) ?? 0;
+            //           setState(() {
+            //             if (val != 0) invoiceWriteOffs[invoice.id] = val;
+            //             else invoiceWriteOffs.remove(invoice.id);
+            //           });
+            //         },
+            //       ),
+            //     ),
+            //   ],
+            // ),
+            // const SizedBox(height: 8),
             TextFormField(
               initialValue:
                   paymentAmount > 0 ? paymentAmount.toStringAsFixed(2) : '',
@@ -1885,7 +1998,49 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
               )),
           const SizedBox(width: 8),
           SizedBox(
-              width: 120,
+              width: 70,
+              child: TextFormField(
+                initialValue: invoiceTds[invoice.id]?.toStringAsFixed(2) ?? '',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  hintText: '0.00',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                ),
+                onChanged: (v) {
+                  final val = double.tryParse(v) ?? 0.0;
+                  setState(() {
+                    if (val > 0) invoiceTds[invoice.id] = val;
+                    else invoiceTds.remove(invoice.id);
+                  });
+                },
+              )),
+          const SizedBox(width: 8),
+          SizedBox(
+              width: 70,
+              child: TextFormField(
+                initialValue: invoiceWriteOffs[invoice.id]?.toStringAsFixed(2) ?? '',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  hintText: '0.00',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                ),
+                onChanged: (v) {
+                  final val = double.tryParse(v) ?? 0.0;
+                  setState(() {
+                    if (val != 0) invoiceWriteOffs[invoice.id] = val;
+                    else invoiceWriteOffs.remove(invoice.id);
+                  });
+                },
+              )),
+          const SizedBox(width: 8),
+          SizedBox(
+              width: 100,
               child: TextFormField(
                 initialValue:
                     paymentAmount > 0 ? paymentAmount.toStringAsFixed(2) : '',

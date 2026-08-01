@@ -351,7 +351,7 @@ purchaseOrderSchema.pre('save', async function () {
     item.taxableAmount = taxable;
     subTotal += taxable;
 
-    const gstRate = item.itemGstRate || 0;
+    const gstRate = item.itemGstRate !== undefined ? item.itemGstRate : (this.gstRate || 0);
     if (this.isInterState) {
       item.igstAmount = Math.round(taxable * gstRate / 100 * 100) / 100;
       item.cgstAmount = 0;
@@ -514,26 +514,36 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
       doc.pipe(stream);
       const pageW = 515;
 
-      // -- Header (white background, invoice style) ----------------------------
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      // -- HEADER - plain white background like invoices.js -----------------
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getLogoPath(orgId);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getLogoPath(orgId);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
       let logoLoaded = false;
-
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY  = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH       = 55;
-      const logoY       = logoCenterY - (logoH / 2);
-      const textX       = logoPath ? 126 : 50;
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
+      const textX = logoData ? 166 : 50;
 
-      if (logoPath) {
-        try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); logoLoaded = true; }
-        catch (e) { console.warn('?? Logo load failed:', e.message); }
+      if (logoData) {
+        try {
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
+          logoLoaded = true;
+        } catch (e) { console.warn('?? Logo load failed:', e.message); }
       }
 
       doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
@@ -680,7 +690,7 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
           : '�';
         const taxable = item.taxableAmount || 0;
-        const gstRate = item.itemGstRate || 0;
+        const gstRate = item.itemGstRate !== undefined ? item.itemGstRate : (po.gstRate || 0);
         const cellY   = rowY + vPad;
 
         doc.fontSize(7).fillColor('#000000');
@@ -752,28 +762,37 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
       const _poSigRelPath = orgData?.digitalSignaturePath;
       const _poSigSize    = 200;
       let   _poActualSigH = _poSigSize;
-      if (_poSigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (_poSigRelPath) {
+        const _poSigAbs = path.join(__dirname, '..', _poSigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(_poSigAbs)) { sigBuf = fs.readFileSync(_poSigAbs); sigExt = path.extname(_poSigAbs).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const _poSigAbs = path.join(__dirname, '..', _poSigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(_poSigAbs)) {
             let _poW = _poSigSize, _poH = _poSigSize;
             try {
-              const _poBuf = fs.readFileSync(_poSigAbs);
-              const _poExt = path.extname(_poSigAbs).toLowerCase();
-              if (_poExt === '.png' && _poBuf.length > 24) { _poW = _poBuf.readUInt32BE(16); _poH = _poBuf.readUInt32BE(20); }
-              else if ((_poExt === '.jpg' || _poExt === '.jpeg') && _poBuf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) { _poW = sigBuf.readUInt32BE(16); _poH = sigBuf.readUInt32BE(20); }
+              else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let _poi = 2;
-                while (_poi < _poBuf.length - 8) {
-                  if (_poBuf[_poi] === 0xFF && _poBuf[_poi+1] >= 0xC0 && _poBuf[_poi+1] <= 0xC3) { _poH = _poBuf.readUInt16BE(_poi+5); _poW = _poBuf.readUInt16BE(_poi+7); break; }
-                  _poi += 2 + _poBuf.readUInt16BE(_poi + 2);
+                while (_poi < sigBuf.length - 8) {
+                  if (sigBuf[_poi] === 0xFF && sigBuf[_poi+1] >= 0xC0 && sigBuf[_poi+1] <= 0xC3) { _poH = sigBuf.readUInt16BE(_poi+5); _poW = sigBuf.readUInt16BE(_poi+7); break; }
+                  _poi += 2 + sigBuf.readUInt16BE(_poi + 2);
                 }
               }
             } catch (_) {}
             const _poScale = Math.min(_poSigSize / _poW, _poSigSize / _poH);
             _poActualSigH  = Math.round(_poH * _poScale);
             const _poActualSigW = Math.round(_poW * _poScale);
-            doc.image(_poSigAbs, authBoxX + (signBoxW - _poActualSigW) / 2, signSectionY + 10, { width: _poActualSigW, height: _poActualSigH });
-          }
+            doc.image(sigBuf, authBoxX + (signBoxW - _poActualSigW) / 2, signSectionY + 10, { width: _poActualSigW, height: _poActualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 
@@ -1278,6 +1297,7 @@ router.put('/:id', async (req, res) => {
     }
 
     updates.updatedBy = getCreator(req);
+    updates.pdfPath = null; // Force PDF regeneration on edit
     Object.assign(po, updates);
     await po.save();
 

@@ -66,6 +66,19 @@ function orgFilter(req) {
   };
 }
 
+// Same as orgFilter but also matches shared/org-level COA docs (branchId: null)
+// when the request is branch-scoped — mirrors coaScope() in reports.js so P&L
+// totals and this account's drill-down totals are computed from the same set
+// of ChartOfAccount documents.
+function coaScope(req) {
+  const scope = orgFilter(req);
+  if (scope.branchId) {
+    scope.$or = [{ branchId: scope.branchId }, { branchId: null }];
+    delete scope.branchId;
+  }
+  return scope;
+}
+
 // Find the COA account linked to a PaymentAccount by name or ID
 // branchId is required for branch-level isolation — each branch has its own COA set
 async function resolveBankCOA(accountId, orgId = null, branchId = null) {
@@ -249,7 +262,11 @@ router.get('/stats/:accountId', async (req, res) => {
         }},
         { $group: { _id: null, totalDebit: { $sum: '$debit' }, totalCredit: { $sum: '$credit' } } },
       ]);
-      bankCOABalance = (balAgg[0]?.totalDebit || 0) - (balAgg[0]?.totalCredit || 0);
+      const openingBalance = account?.openingBalance || 0;
+      bankCOABalance = openingBalance + (balAgg[0]?.totalDebit || 0) - (balAgg[0]?.totalCredit || 0);
+      if (bankCOA && String(bankCOA.accountType || '').toUpperCase().includes('LIABILITY')) {
+        bankCOABalance = -bankCOABalance;
+      }
     } catch (_) {}
 
     res.json({
@@ -258,7 +275,7 @@ router.get('/stats/:accountId', async (req, res) => {
         uncategorized,
         categorized,
         total: uncategorized + categorized,
-        currentBalance: account?.currentBalance ?? 0,
+        currentBalance: bankCOABalance,
         bankCOABalance,
         openingBalance: account?.openingBalance ?? 0,
       },
@@ -329,23 +346,29 @@ router.get('/by-category-label', async (req, res) => {
     const { categoryLabel, startDate, endDate } = req.query;
     if (!categoryLabel) return res.status(400).json({ success: false, message: 'categoryLabel is required' });
 
-    const coa = await ChartOfAccount.findOne({ accountName: categoryLabel, ...orgFilter(req) }).lean();
-    if (!coa) {
+    const coas = await ChartOfAccount.find({ accountName: categoryLabel, ...coaScope(req) }).lean();
+    if (coas.length === 0) {
       return res.json({ success: true, total: 0, totalAmount: 0, data: [] });
     }
+    const coaIds = coas.map(c => c._id);
 
     const filter = {
-      accountId: coa._id,
+      accountId: { $in: coaIds },
       ...orgFilter(req),
     };
 
+    // Boundary construction mirrors parseDateRange()'s custom-range branch in
+    // reports.js exactly (new Date(from) / new Date(to).setHours(23,59,59)) —
+    // using hardcoded UTC 'Z' boundaries here instead made this route bucket
+    // day-boundary transactions into a different day than the P&L report does
+    // for the same account/date-range, causing the two totals to disagree.
     if (startDate || endDate) {
       filter.date = {};
       if (startDate) {
-        filter.date.$gte = new Date(startDate.split('T')[0] + 'T00:00:00.000Z');
+        filter.date.$gte = new Date(startDate);
       }
       if (endDate) {
-        filter.date.$lte = new Date(endDate.split('T')[0] + 'T23:59:59.999Z');
+        filter.date.$lte = new Date(new Date(endDate).setHours(23, 59, 59));
       }
     }
 
@@ -357,13 +380,19 @@ router.get('/by-category-label', async (req, res) => {
 
     const expIds = txns.filter(t => t.referenceType === 'Expense').map(t => t.referenceId);
     const billIds = txns.filter(t => t.referenceType === 'Bill').map(t => t.referenceId);
-    const provTxnIds = txns.filter(t => t.referenceType === 'ProviderTransaction').map(t => t.referenceId);
 
-    const [expenses, bills, provTxns] = await Promise.all([
-      expIds.length ? Expense.find({ _id: { $in: expIds } }).lean() : [],
-      billIds.length ? Bill.find({ _id: { $in: billIds } }).lean() : [],
-      provTxnIds.length ? ProviderTransaction.find({ _id: { $in: provTxnIds } }).lean() : [],
-    ]);
+    const expenses = expIds.length ? await Expense.find({ _id: { $in: expIds } }).lean() : [];
+    const bills = billIds.length ? await Bill.find({ _id: { $in: billIds } }).lean() : [];
+
+    // Combine explicit ProviderTransactions + ones linked via Expenses
+    // (also candidate-check anything not Expense/Bill — reconciliation entries are
+    // sometimes posted with referenceType 'Payment' instead of 'ProviderTransaction',
+    // but still point at a real bank record via referenceId)
+    const directProvIds = txns.filter(t => t.referenceType !== 'Expense' && t.referenceType !== 'Bill').map(t => t.referenceId).filter(Boolean);
+    const linkedProvIds = expenses.filter(e => e.providerTransactionId).map(e => e.providerTransactionId);
+    const provTxnIds = [...new Set([...directProvIds, ...linkedProvIds])];
+
+    const provTxns = provTxnIds.length ? await ProviderTransaction.find({ _id: { $in: provTxnIds } }).lean() : [];
 
     const expMap = {}; expenses.forEach(e => { expMap[e._id.toString()] = e; });
     const billMap = {}; bills.forEach(b => { billMap[b._id.toString()] = b; });
@@ -383,31 +412,117 @@ router.get('/by-category-label', async (req, res) => {
       let payee = '—';
       let bankAccount = '—';
       let desc = t.description || '';
+      let refNo = t.referenceNumber || '';
       
-      // Attempt to extract from description first
+      // Attempt to extract from description first — but descriptions like
+      // "Other Income | BNK-2026-06282" reuse this entry's own journal
+      // reference after the pipe, not a real payee name. Don't mistake that
+      // for a payee; leave it as '—' so real payee data (if found below) or
+      // an honest blank (if none exists) shows instead.
       if (desc.includes('|')) {
         const parts = desc.split('|');
-        payee = parts[1].trim();
+        const guessedPayee = parts[1].trim();
+        if (guessedPayee !== (t.referenceNumber || '').trim()) {
+          payee = guessedPayee;
+        }
         desc = parts[0].trim();
       }
+
+      let bankAccountId = null;
+      let btId = null;
+      let atId = null;
+      let atType = null;
 
       if (t.referenceType === 'Expense') {
         const exp = expMap[t.referenceId?.toString()];
         if (exp) {
+          atId = exp._id.toString();
+          atType = 'Expense';
+          if (exp.providerTransactionId) {
+             btId = exp.providerTransactionId.toString();
+             const prov = provTxnMap[btId];
+             if (prov && prov.accountId) {
+                bankAccountId = prov.accountId.toString();
+                // We don't overwrite bankAccount name here if it already exists from paidThrough, 
+                // but we need it to ensure the frontend has the ID to navigate.
+             }
+          }
+
           if (exp.vendor) payee = exp.vendor;
           if (exp.paidThrough) bankAccount = exp.paidThrough;
+          if (exp.expenseNumber) refNo = exp.expenseNumber;
+          else if (exp.referenceNumber) refNo = exp.referenceNumber;
         }
       } else if (t.referenceType === 'Bill') {
         const bill = billMap[t.referenceId?.toString()];
         if (bill) {
+          atId = bill._id.toString();
+          atType = 'Bill';
+
           if (bill.vendorName) payee = bill.vendorName;
-          // Bills are usually Accrued, so bank account is Accounts Payable initially
+          if (bill.billNumber) refNo = bill.billNumber;
         }
       } else if (t.referenceType === 'ProviderTransaction') {
         const prov = provTxnMap[t.referenceId?.toString()];
         if (prov) {
+          btId = prov._id.toString();
+
           if (prov.payee || prov.vendorName || prov.customerName) payee = prov.payee || prov.vendorName || prov.customerName;
-          if (prov.accountId) bankAccount = accMap[prov.accountId.toString()] || prov.accountId.toString();
+          if (prov.accountId) {
+             bankAccountId = prov.accountId.toString();
+             bankAccount = accMap[prov.accountId.toString()] || prov.accountId.toString();
+          }
+          if (prov.referenceNumber) refNo = prov.referenceNumber;
+        }
+      } else if (t.referenceType) {
+        // Catch-all for Invoices, CreditNotes, Journals, etc.
+        atId = t.referenceId?.toString();
+        atType = t.referenceType;
+      }
+
+      // Fallback: entry wasn't recognized above as Expense/Bill/ProviderTransaction
+      // (bankAccount still unset — that field is never touched by the description-split
+      // guess above, so it's a reliable signal nothing real enriched this row yet), but
+      // its referenceId resolves to a real bank record anyway — e.g. reconciliation
+      // entries posted with referenceType 'Payment'. Pull the real payee/bank
+      // account/reference number from that record, replacing any wrong guess.
+      if (bankAccount === '—') {
+        const prov = provTxnMap[t.referenceId?.toString()];
+        if (prov) {
+          if (!btId) btId = prov._id.toString();
+          if (prov.payee || prov.vendorName || prov.customerName) payee = prov.payee || prov.vendorName || prov.customerName;
+          if (prov.accountId) {
+            bankAccountId = prov.accountId.toString();
+            bankAccount = accMap[prov.accountId.toString()] || prov.accountId.toString();
+          }
+          if (prov.referenceNumber) refNo = prov.referenceNumber;
+        }
+      }
+
+      // If it STILL looks like a raw Mongo ObjectId (24 char hex), just hide it to avoid ugly UI
+      if (/^[0-9a-fA-F]{24}$/.test(refNo)) {
+         refNo = '—';
+      }
+
+      // Adjustment rows show an unsigned debit/credit amount (e.g. "Deposit ₹12.00"),
+      // which doesn't match the signed value (-12) the user actually typed on the
+      // invoice/credit note. Append the original signed value to the description so
+      // it reads clearly, without touching the underlying debit/credit posting itself
+      // (that direction is required for the ledger to balance — see Invoice vs Credit
+      // Note being mirror-image postings).
+      if (/^Adjustment/i.test(desc)) {
+        let signedAdjustment;
+        if (t.referenceType === 'Invoice') {
+          signedAdjustment = t.debit > 0 ? -t.debit : t.credit;
+        } else if (t.referenceType === 'Credit Note') {
+          signedAdjustment = t.credit > 0 ? -t.credit : t.debit;
+        }
+        if (signedAdjustment !== undefined && signedAdjustment !== 0) {
+          const sign = signedAdjustment >= 0 ? '+' : '-';
+          // Use "Rs." instead of the ₹ glyph — the PDF export font has no glyph for
+          // U+20B9, so ₹ renders as a broken box in downloaded PDFs (same reason
+          // credit-notes.js uses "Rs." in its PDF text instead of ₹).
+          desc = `${desc} (${sign}Rs.${Math.abs(signedAdjustment).toFixed(2)})`;
         }
       }
 
@@ -418,9 +533,15 @@ router.get('/by-category-label', async (req, res) => {
         bankAccount:      bankAccount,
         description:      desc,
         payee:            payee,
-        referenceNumber:  t.referenceNumber || '',
+        referenceNumber:  refNo,
         type:             t.debit > 0 ? 'Withdrawal' : 'Deposit',
         amount:           amount,
+        referenceType:    t.referenceType,
+        referenceId:      t.referenceId,
+        bankAccountId:    bankAccountId,
+        btId:             btId,
+        atId:             atId,
+        atType:           atType,
       };
     });
 
@@ -1655,8 +1776,17 @@ router.post('/import', upload.single('file'), async (req, res) => {
         const description   = row['Description']      || row['description']      || '';
         const payee         = row['Payee']            || row['payee']            || row['Payee Name'] || row['Vendor'] || row['Customer'] || '';
         const referenceNum  = row['Reference Number'] || row['reference_number'] || row['Reference'] || '';
-        const depositStr    = row['Deposit']          || row['deposit']          || row['Credit']    || '';
-        const withdrawalStr = row['Withdrawal']       || row['withdrawal']       || row['Debit']     || '';
+        let depositStr = '';
+        let withdrawalStr = '';
+        for (const key of Object.keys(row)) {
+          const lowerKey = key.toLowerCase().trim();
+          if (lowerKey.includes('deposit') || lowerKey.includes('credit')) {
+            depositStr = row[key];
+          }
+          if (lowerKey.includes('withdraw') || lowerKey.includes('debit')) {
+            withdrawalStr = row[key];
+          }
+        }
         const balanceStr    = row['Balance']          || row['balance']          || '';
 
         if (!rawDate) {
@@ -1667,8 +1797,16 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         let parsedDate;
         if (rawDate.includes('/')) {
-          const [day, month, year] = rawDate.split('/');
-          parsedDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+          const parts = rawDate.split('/');
+          let day, month, year;
+          if (parts.length === 3) {
+            // Force MM/DD/YYYY based on user preference
+            month = parts[0]; day = parts[1]; year = parts[2];
+            if (year.length === 2) year = `20${year}`;
+            parsedDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+          } else {
+            parsedDate = new Date(rawDate);
+          }
         } else {
           parsedDate = new Date(rawDate);
         }
@@ -1678,13 +1816,14 @@ router.post('/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
-        const deposit    = parseFloat(depositStr.replace(/,/g, ''))    || 0;
-        const withdrawal = parseFloat(withdrawalStr.replace(/,/g, '')) || 0;
-        const balance    = parseFloat(balanceStr.replace(/,/g, ''))    || 0;
+        const deposit    = parseFloat(String(depositStr).replace(/[^\d.-]/g, ''))    || 0;
+        const withdrawal = parseFloat(String(withdrawalStr).replace(/[^\d.-]/g, '')) || 0;
+        const balance    = parseFloat(String(balanceStr).replace(/[^\d.-]/g, ''))    || 0;
 
         if (deposit === 0 && withdrawal === 0) {
-          results.errors++;
-          results.errorDetails.push({ row: rowNum, error: 'Both Deposit and Withdrawal are empty or zero' });
+          // Bank statements often have empty informational rows. 
+          // We will gracefully skip them instead of throwing a big red error.
+          results.skipped++;
           continue;
         }
 
@@ -1873,6 +2012,35 @@ router.get('/all-transactions', async (req, res) => {
       totalPages: Math.ceil(total / parseInt(limit)),
       data:       txns,
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// ROUTE — GET /transaction/:id
+// Fetch a single transaction directly by ID, regardless of which page of the
+// account's transaction list it would fall on. Used by BT deep-links (e.g.
+// from the P&L expense drilldown) so they don't depend on the transaction
+// being present in the first page of /all-transactions.
+// ============================================================================
+router.get('/transaction/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid transaction id' });
+    }
+
+    const txn = await ProviderTransaction.findOne({
+      _id: id,
+      ...orgFilter(req),
+    }).lean();
+
+    if (!txn) {
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+
+    res.json({ success: true, data: txn });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2786,6 +2954,22 @@ router.post('/uncategorize/:id', async (req, res) => {
         }
       }
 
+      // ── NEW FALLBACK: If linkedRecordType was missing entirely, explicitly check PaymentReceived ──
+      if (!linkedObjId) {
+        try {
+          const PaymentReceived = mongoose.models.PaymentReceived
+            || mongoose.model('PaymentReceived', new mongoose.Schema({}, { strict: false }), 'payments_received');
+          const orphanedPayment = await PaymentReceived.findOne({ providerTransactionId: txn._id, ...(orgId ? { orgId } : {}) }).lean();
+          if (orphanedPayment) {
+            linkedObjId = orphanedPayment._id;
+            txn.linkedRecordType = 'PaymentReceived';
+            console.log(`[uncategorize] Case B Emergency Fallback: Found orphaned PaymentReceived → ${linkedObjId}`);
+          }
+        } catch (e) {
+          console.error('[uncategorize] Case B Emergency Fallback lookup error:', e.message);
+        }
+      }
+
       // Now delete COA entries — try all available keys
       let entries = [];
 
@@ -3161,13 +3345,21 @@ async function deleteLinkedRecord(txn, req, { skipCOAReversal = false } = {}) {
         const Invoice = mongoose.models.Invoice
           || mongoose.model('Invoice', new mongoose.Schema({}, { strict: false }), 'invoices');
 
+        const invoiceTds = payment.invoiceTds || {};
+        const invoiceWriteOffs = payment.invoiceWriteOffs || {};
+
         for (const [invoiceId, amount] of Object.entries(invoicePayments)) {
           if (!mongoose.Types.ObjectId.isValid(invoiceId)) continue;
           const invoice = await Invoice.findById(invoiceId).lean();
           if (!invoice) continue;
 
-          const amt = parseFloat(amount) || 0;
-          const restoredAmountPaid = Math.max(0, (invoice.amountPaid || 0) - amt);
+          const cashAmt = parseFloat(amount) || 0;
+          const tdsAmt = invoiceTds[invoiceId] ? parseFloat(invoiceTds[invoiceId]) : 0;
+          const woffAmt = invoiceWriteOffs[invoiceId] ? parseFloat(invoiceWriteOffs[invoiceId]) : 0;
+          
+          const totalClearedAmt = cashAmt + tdsAmt + woffAmt;
+          
+          const restoredAmountPaid = Math.max(0, (invoice.amountPaid || 0) - totalClearedAmt);
           const restoredAmountDue  = Math.max(0, (invoice.totalAmount || 0) - restoredAmountPaid);
 
           let newStatus;

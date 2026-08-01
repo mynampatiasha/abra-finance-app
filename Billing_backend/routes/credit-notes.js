@@ -30,6 +30,21 @@ const { sendMail } = require('../utils/mailer');
 const Invoice = mongoose.models.Invoice ||
   (() => { throw new Error('Invoice model not loaded. Ensure invoices.js is required before credit-notes.js'); })();
 
+// Resolve a system Chart-of-Accounts id, preferring the branch-specific record
+// (orgs can have one "Sales"/"AR"/"Other Charges"/etc. account per branch),
+// falling back to an org-wide (branchId: null) record if no branch match exists.
+// Without the branchId match, findOne() could return any branch's account,
+// silently posting a branch's transactions onto a different branch's ledger.
+async function resolveSystemAccountId(ChartOfAccount, accountName, orgId, branchId) {
+  const query = { accountName, isSystemAccount: true, orgId };
+  if (branchId) {
+    const branchAcc = await ChartOfAccount.findOne({ ...query, branchId }).select('_id').lean();
+    if (branchAcc) return branchAcc._id;
+  }
+  const orgAcc = await ChartOfAccount.findOne({ ...query, branchId: null }).select('_id').lean();
+  return orgAcc?._id || null;
+}
+
 // ============================================================================
 // MONGOOSE MODEL - CREDIT NOTE SCHEMA
 // ============================================================================
@@ -114,6 +129,10 @@ const creditNoteSchema = new mongoose.Schema({
       enum: ['percentage', 'amount'],
       default: 'percentage'
     },
+    itemGstRate: {
+      type: Number,
+      default: 0
+    },
     amount: {
       type: Number,
       required: true
@@ -130,6 +149,16 @@ const creditNoteSchema = new mongoose.Schema({
     required: true,
     default: 0
   },
+  
+  // NEW: Adjustments
+  invoiceLevelDiscount: { type: Number, default: 0 },
+  invoiceLevelDiscountType: { type: String, enum: ['percentage', 'amount'], default: 'percentage' },
+  invoiceDiscountAmount: { type: Number, default: 0 }, // calculated
+  taxableTotal: { type: Number, default: 0 }, // calculated (subtotal - discount)
+  
+  shippingCharges: { type: Number, default: 0 },
+  adjustment: { type: Number, default: 0 },
+  
   tdsRate: {
     type: Number,
     default: 0,
@@ -266,22 +295,55 @@ creditNoteSchema.pre('save', function() {
   // Calculate subtotal
   this.subTotal = this.items.reduce((sum, item) => sum + item.amount, 0);
   
+  // Invoice-level discount calculation
+  let invoiceDiscountAmount = 0;
+  if (this.invoiceLevelDiscount > 0) {
+    invoiceDiscountAmount = this.invoiceLevelDiscountType === 'percentage'
+      ? Math.round(this.subTotal * this.invoiceLevelDiscount / 100 * 100) / 100
+      : Math.min(this.invoiceLevelDiscount, this.subTotal);
+  }
+  this.invoiceDiscountAmount = invoiceDiscountAmount;
+  this.taxableTotal = Math.round((this.subTotal - invoiceDiscountAmount) * 100) / 100;
+  
+  // Apportion discount ratio for tax calculation
+  const discountRatio = this.subTotal > 0 ? (this.taxableTotal / this.subTotal) : 1;
+  
   // Calculate TDS
-  this.tdsAmount = (this.subTotal * this.tdsRate) / 100;
+  this.tdsAmount = (this.taxableTotal * this.tdsRate) / 100;
   
   // Calculate TCS
-  this.tcsAmount = (this.subTotal * this.tcsRate) / 100;
+  this.tcsAmount = (this.taxableTotal * this.tcsRate) / 100;
   
-  // Calculate GST
-  const gstBase = this.subTotal - this.tdsAmount + this.tcsAmount;
-  const gstAmount = (gstBase * this.gstRate) / 100;
+  // Calculate GST dynamically from items
+  let totalGstAmount = 0;
+  const hasItemGst = this.items.some(item => typeof item.itemGstRate === 'number');
   
-  this.cgst = gstAmount / 2;
-  this.sgst = gstAmount / 2;
+  if (hasItemGst) {
+    // Calculate per item
+    this.items.forEach(item => {
+      // Apportion TDS and TCS to this item's amount proportionally to subtotal
+      const itemProportion = this.subTotal > 0 ? (item.amount / this.subTotal) : 0;
+      const itemTds = this.tdsAmount * itemProportion;
+      const itemTcs = this.tcsAmount * itemProportion;
+      
+      const adjTaxable = Math.round(item.amount * discountRatio * 100) / 100;
+      const itemGstBase = adjTaxable - itemTds + itemTcs;
+      const itemTax = (itemGstBase * (item.itemGstRate || 0)) / 100;
+      totalGstAmount += itemTax;
+    });
+  } else {
+    // Fallback to global for old documents
+    const gstBase = this.taxableTotal - this.tdsAmount + this.tcsAmount;
+    totalGstAmount = (gstBase * (this.gstRate || 18)) / 100;
+  }
+  
+  this.cgst = totalGstAmount / 2;
+  this.sgst = totalGstAmount / 2;
   this.igst = 0;
   
   // Calculate total
-  this.totalAmount = this.subTotal - this.tdsAmount + this.tcsAmount + gstAmount;
+  let rawTotal = this.taxableTotal + totalGstAmount - this.tdsAmount + this.tcsAmount + (this.shippingCharges || 0);
+  this.totalAmount = Math.round((rawTotal + (this.adjustment || 0)) * 100) / 100;
   
   // Calculate credit balance
   const totalRefunded = this.refunds.reduce((sum, refund) => sum + refund.amount, 0);
@@ -435,27 +497,35 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
       const pageW = 515;
 
       // ── Header (plain white background, like invoices.js) ──────────────────────
-      // Use branch logo if available, otherwise fall back to org logo
-      let logoPath = null;
-      if (orgData?.logoUrl) {
-        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
-        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoPath = lp; } catch (_) {}
+      let logoData = null;
+      if (orgData?.logoBase64) {
+        const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+        if (match) logoData = Buffer.from(match[2], 'base64');
       }
-      if (!logoPath) logoPath = getLogoPath(orgId);
+      if (!logoData && orgData?.logoUrl) {
+        const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
+      if (!logoData) {
+        const lp = getLogoPath(orgId);
+        try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+      }
       let logoLoaded = false;
 
-      const textX = logoPath ? 126 : 50;
+      const textX = logoData ? 166 : 50;
       const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
 
       const textBlockHeight = 14 + 12 + (contactLines.length * 9);
       const textStartY = 35;
       const logoCenterY = textStartY + (textBlockHeight / 2);
-      const logoH = 55;
-      const logoY = logoCenterY - (logoH / 2);
+      
+      const logoH = 82; // Increased to match invoice
+      const logoW = 110; // Increased to match invoice
+      const logoY = textStartY; // Align top of logo with top of text
 
-      if (logoPath) {
+      if (logoData) {
         try {
-          doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] });
+          doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] });
           logoLoaded = true;
         } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
       }
@@ -546,10 +616,18 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
          .text(`CN #: ${creditNote.creditNoteNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
       doc.fontSize(7).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`, detX + 8, metaY + 29, { width: colW - 16 });
+      let currentDetY = metaY + 29;
       if (creditNote.invoiceNumber) {
-        doc.text(`Invoice Ref: ${creditNote.invoiceNumber}`, detX + 8, metaY + 39, { width: colW - 16 });
+        currentDetY += 10;
+        doc.text(`Invoice Ref: ${creditNote.invoiceNumber}`, detX + 8, currentDetY, { width: colW - 16 });
       }
-      doc.text(`Reason: ${creditNote.reason || 'N/A'}`, detX + 8, metaY + 49, { width: colW - 16, ellipsis: true });
+      currentDetY += 10;
+      doc.text(`Reason: ${creditNote.reason || 'N/A'}`, detX + 8, currentDetY, { width: colW - 16, ellipsis: true });
+      if (creditNote.reasonDescription) {
+        currentDetY += 10;
+        doc.fillColor('#666666').text(creditNote.reasonDescription, detX + 8, currentDetY, { width: colW - 16, ellipsis: true });
+        doc.fillColor('#000000');
+      }
 
       let tableStartY = metaY + metaH + 12;
 
@@ -605,7 +683,7 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
           : '—';
 
-        const gstRate  = item.gstRate || 18;
+        const gstRate  = item.itemGstRate !== undefined ? item.itemGstRate : (item.gstRate || 18);
         const taxable  = item.amount || 0;
         const cgstAmt  = Math.round(taxable * (gstRate / 2) / 100 * 100) / 100;
         const sgstAmt  = cgstAmt;
@@ -648,10 +726,18 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
       };
 
       tRow('Subtotal:', `Rs. ${(creditNote.subTotal || 0).toFixed(2)}`);
+      if ((creditNote.invoiceDiscountAmount || 0) > 0) {
+        tRow(`Discount (${creditNote.invoiceLevelDiscountType === 'percentage' ? creditNote.invoiceLevelDiscount + '%' : 'Rs.' + creditNote.invoiceLevelDiscount}):`, `-Rs. ${creditNote.invoiceDiscountAmount.toFixed(2)}`);
+      }
       if (creditNote.cgst > 0) tRow(`CGST (${creditNote.gstRate / 2}%):`, `Rs. ${creditNote.cgst.toFixed(2)}`);
       if (creditNote.sgst > 0) tRow(`SGST (${creditNote.gstRate / 2}%):`, `Rs. ${creditNote.sgst.toFixed(2)}`);
       if (creditNote.igst > 0) tRow(`IGST (${creditNote.gstRate}%):`,     `Rs. ${creditNote.igst.toFixed(2)}`);
       if (creditNote.tdsAmount > 0) tRow('TDS Deducted:', `- Rs. ${creditNote.tdsAmount.toFixed(2)}`);
+
+      if ((creditNote.shippingCharges || 0) > 0) tRow('Shipping:', `Rs. ${creditNote.shippingCharges.toFixed(2)}`);
+      if (creditNote.adjustment && creditNote.adjustment !== 0) {
+        tRow('Adjustment:', `${creditNote.adjustment > 0 ? '+' : ''}Rs. ${creditNote.adjustment.toFixed(2)}`);
+      }
 
       totalsY += 4;
       doc.rect(labelX, totalsY, totalsW, 24).fill('#0f1e3d');
@@ -707,28 +793,37 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
       const _cnSigRelPath = orgData?.digitalSignaturePath;
       const _cnSigSize    = 200;
       let   _cnActualSigH = _cnSigSize;
-      if (_cnSigRelPath) {
+      
+      let sigBuf = null;
+      let sigExt = '.png';
+      if (orgData?.signatureBase64) {
+        const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+        if (match) {
+          sigExt = '.' + match[1].replace('jpeg', 'jpg');
+          sigBuf = Buffer.from(match[2], 'base64');
+        }
+      } else if (_cnSigRelPath) {
+        const _cnSigAbs = path.join(__dirname, '..', _cnSigRelPath.replace(/^\//, ''));
+        try { if (fs.existsSync(_cnSigAbs)) { sigBuf = fs.readFileSync(_cnSigAbs); sigExt = path.extname(_cnSigAbs).toLowerCase(); } } catch (_) {}
+      }
+
+      if (sigBuf) {
         try {
-          const _cnSigAbs = path.join(__dirname, '..', _cnSigRelPath.replace(/^\//, ''));
-          if (fs.existsSync(_cnSigAbs)) {
             let _cnW = _cnSigSize, _cnH = _cnSigSize;
             try {
-              const _cnBuf = fs.readFileSync(_cnSigAbs);
-              const _cnExt = path.extname(_cnSigAbs).toLowerCase();
-              if (_cnExt === '.png' && _cnBuf.length > 24) { _cnW = _cnBuf.readUInt32BE(16); _cnH = _cnBuf.readUInt32BE(20); }
-              else if ((_cnExt === '.jpg' || _cnExt === '.jpeg') && _cnBuf.length > 4) {
+              if (sigExt === '.png' && sigBuf.length > 24) { _cnW = sigBuf.readUInt32BE(16); _cnH = sigBuf.readUInt32BE(20); }
+              else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
                 let _cni = 2;
-                while (_cni < _cnBuf.length - 8) {
-                  if (_cnBuf[_cni] === 0xFF && _cnBuf[_cni+1] >= 0xC0 && _cnBuf[_cni+1] <= 0xC3) { _cnH = _cnBuf.readUInt16BE(_cni+5); _cnW = _cnBuf.readUInt16BE(_cni+7); break; }
-                  _cni += 2 + _cnBuf.readUInt16BE(_cni + 2);
+                while (_cni < sigBuf.length - 8) {
+                  if (sigBuf[_cni] === 0xFF && sigBuf[_cni+1] >= 0xC0 && sigBuf[_cni+1] <= 0xC3) { _cnH = sigBuf.readUInt16BE(_cni+5); _cnW = sigBuf.readUInt16BE(_cni+7); break; }
+                  _cni += 2 + sigBuf.readUInt16BE(_cni + 2);
                 }
               }
             } catch (_) {}
             const _cnScale = Math.min(_cnSigSize / _cnW, _cnSigSize / _cnH);
             _cnActualSigH  = Math.round(_cnH * _cnScale);
             const _cnActualSigW = Math.round(_cnW * _cnScale);
-            doc.image(_cnSigAbs, authBoxX + (signBoxW - _cnActualSigW) / 2, signSectionY + 10, { width: _cnActualSigW, height: _cnActualSigH });
-          }
+            doc.image(sigBuf, authBoxX + (signBoxW - _cnActualSigW) / 2, signSectionY + 10, { width: _cnActualSigW, height: _cnActualSigH });
         } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
       }
 
@@ -821,8 +916,11 @@ async function sendCreditNoteEmail(creditNote, pdfPath, orgId, branchId = null) 
     <div class="section-title">Amount Summary</div>
     <table class="detail">
       <tr><td>Subtotal</td><td>Rs.${(creditNote.subTotal || 0).toFixed(2)}</td></tr>
+      ${(creditNote.invoiceDiscountAmount || 0) > 0 ? `<tr><td>Discount</td><td>-Rs.${creditNote.invoiceDiscountAmount.toFixed(2)}</td></tr>` : ''}
       ${creditNote.cgst > 0 ? `<tr><td>CGST</td><td>Rs.${creditNote.cgst.toFixed(2)}</td></tr>` : ''}
       ${creditNote.sgst > 0 ? `<tr><td>SGST</td><td>Rs.${creditNote.sgst.toFixed(2)}</td></tr>` : ''}
+      ${(creditNote.shippingCharges || 0) > 0 ? `<tr><td>Shipping</td><td>Rs.${creditNote.shippingCharges.toFixed(2)}</td></tr>` : ''}
+      ${creditNote.adjustment && creditNote.adjustment !== 0 ? `<tr><td>Adjustment</td><td>${creditNote.adjustment > 0 ? '+' : ''}Rs.${creditNote.adjustment.toFixed(2)}</td></tr>` : ''}
       <tr class="total-row"><td>Credit Amount</td><td>Rs.${(creditNote.totalAmount || 0).toFixed(2)}</td></tr>
       ${(creditNote.creditBalance || 0) > 0 ? `<tr><td>Available Balance</td><td style="color:#27ae60;">Rs.${creditNote.creditBalance.toFixed(2)}</td></tr>` : ''}
     </table>
@@ -1029,15 +1127,16 @@ router.post('/', async (req, res) => {
     // Credit Note = reverse of invoice
     // Debit: Sales (reverse revenue)
     // Credit: Accounts Receivable (reduce what customer owes)
+    if (creditNote.status !== 'DRAFT') {
     try {
       const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
 
       const currentOrgId = req.user?.orgId || null;
-      const [salesId, arId] = await Promise.all([
-        ChartOfAccount.findOne({ accountName: 'Sales', isSystemAccount: true, orgId: currentOrgId })
-          .select('_id').lean().then(a => a?._id),
-        ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true, orgId: currentOrgId })
-          .select('_id').lean().then(a => a?._id),
+      const currentBranchId = creditNote.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+      const [salesId, arId, otherChargesId] = await Promise.all([
+        resolveSystemAccountId(ChartOfAccount, 'Sales', currentOrgId, currentBranchId),
+        resolveSystemAccountId(ChartOfAccount, 'Accounts Receivable', currentOrgId, currentBranchId),
+        resolveSystemAccountId(ChartOfAccount, 'Other Charges', currentOrgId, currentBranchId),
       ]);
 
       const txnDate = new Date(creditNote.creditNoteDate);
@@ -1046,7 +1145,7 @@ router.post('/', async (req, res) => {
       if (salesId) await postTransactionToCOA({
         accountId:       salesId,
         orgId: currentOrgId,
-        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
+        branchId:        currentBranchId,
         date:            txnDate,
         description:     `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
         referenceType:   'Credit Note',
@@ -1060,7 +1159,7 @@ router.post('/', async (req, res) => {
       if (arId) await postTransactionToCOA({
         accountId:       arId,
         orgId: currentOrgId,
-        branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
+        branchId:        currentBranchId,
         date:            txnDate,
         description:     `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
         referenceType:   'Credit Note',
@@ -1070,18 +1169,47 @@ router.post('/', async (req, res) => {
         credit:          creditNote.totalAmount,
       });
 
+      // Reverse Adjustments if any
+      if (otherChargesId && creditNote.adjustment) {
+        if (creditNote.adjustment < 0) {
+          // Negative adjustment on CN = Credit
+          await postTransactionToCOA({
+            accountId:       otherChargesId,
+            orgId: currentOrgId,
+            branchId:        currentBranchId,
+            date:            txnDate,
+            description:     `Adjustment Reversal - Credit Note ${creditNote.creditNoteNumber}`,
+            referenceType:   'Credit Note',
+            referenceId:     creditNote._id,
+            referenceNumber: creditNote.creditNoteNumber,
+            debit:           0,
+            credit:          Math.abs(creditNote.adjustment),
+          });
+        } else {
+          // Positive adjustment on CN = Debit
+          await postTransactionToCOA({
+            accountId:       otherChargesId,
+            orgId: currentOrgId,
+            branchId:        currentBranchId,
+            date:            txnDate,
+            description:     `Adjustment Reversal - Credit Note ${creditNote.creditNoteNumber}`,
+            referenceType:   'Credit Note',
+            referenceId:     creditNote._id,
+            referenceNumber: creditNote.creditNoteNumber,
+            debit:           creditNote.adjustment,
+            credit:          0,
+          });
+        }
+      }
+
       // Also reverse Tax Payable if GST exists
       if (creditNote.cgst + creditNote.sgst > 0) {
-        const taxId = await ChartOfAccount.findOne({
-          accountName: 'Tax Payable',
-          isSystemAccount: true,
-          orgId: currentOrgId
-        }).select('_id').lean().then(a => a?._id);
+        const taxId = await resolveSystemAccountId(ChartOfAccount, 'Tax Payable', currentOrgId, currentBranchId);
 
         if (taxId) await postTransactionToCOA({
           accountId:       taxId,
           orgId: currentOrgId,
-          branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          branchId:        currentBranchId,
           date:            txnDate,
           description:     `GST Reversal - Credit Note ${creditNote.creditNoteNumber}`,
           referenceType:   'Credit Note',
@@ -1097,6 +1225,7 @@ router.post('/', async (req, res) => {
       console.error('⚠️ COA post error (credit note):', coaErr.message);
       // Non-critical — credit note already saved
     }
+    } // End if not DRAFT
 
     // ── Update Customer Profile ──────────────────────────────────────────────
     // Add the credit note amount to customer's unusedCredits ONLY if status is OPEN
@@ -1193,8 +1322,68 @@ router.put('/:id', async (req, res) => {
     
     updates.updatedBy = req.user?.email || req.user?.uid || 'system';
     
+    // Force PDF regeneration on edit so new data like Reason Description reflects
+    updates.pdfPath = null;
+    
     Object.assign(creditNote, updates);
     await creditNote.save();
+
+    // 🔸 COA Reversal & Re-posting on Edit
+    try {
+      const { postTransactionToCOA, ChartOfAccount, AccountTransaction } = require('./chart_of_accounts');
+      const currentOrgId = req.user?.orgId || null;
+      const branchId = creditNote.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
+      
+      // 1. Delete old COA entries for this credit note
+      await AccountTransaction.deleteMany({
+        referenceType: 'Credit Note',
+        referenceId: creditNote._id,
+        ...(currentOrgId ? { orgId: currentOrgId } : {})
+      });
+      
+      // 2. Repost the new amounts ONLY IF NOT DRAFT
+      if (creditNote.status !== 'DRAFT') {
+        const [salesId, arId, otherChargesId, taxId] = await Promise.all([
+          resolveSystemAccountId(ChartOfAccount, 'Sales', currentOrgId, branchId),
+          resolveSystemAccountId(ChartOfAccount, 'Accounts Receivable', currentOrgId, branchId),
+          resolveSystemAccountId(ChartOfAccount, 'Other Charges', currentOrgId, branchId),
+          resolveSystemAccountId(ChartOfAccount, 'Tax Payable', currentOrgId, branchId),
+        ]);
+        const txnDate = new Date(creditNote.creditNoteDate);
+        
+        if (salesId) await postTransactionToCOA({
+          accountId: salesId, orgId: currentOrgId, branchId,
+          date: txnDate, description: `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
+          referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+          debit: creditNote.subTotal, credit: 0,
+        });
+        if (arId) await postTransactionToCOA({
+          accountId: arId, orgId: currentOrgId, branchId,
+          date: txnDate, description: `Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`,
+          referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+          debit: 0, credit: creditNote.totalAmount,
+        });
+        if (otherChargesId && creditNote.adjustment) {
+          await postTransactionToCOA({
+            accountId: otherChargesId, orgId: currentOrgId, branchId,
+            date: txnDate, description: `Adjustment Reversal - Credit Note ${creditNote.creditNoteNumber}`,
+            referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+            debit: creditNote.adjustment > 0 ? creditNote.adjustment : 0, credit: creditNote.adjustment < 0 ? Math.abs(creditNote.adjustment) : 0,
+          });
+        }
+        if (taxId && (creditNote.cgst + creditNote.sgst + (creditNote.igst || 0)) > 0) {
+          await postTransactionToCOA({
+            accountId: taxId, orgId: currentOrgId, branchId,
+            date: txnDate, description: `GST Reversal - Credit Note ${creditNote.creditNoteNumber}`,
+            referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
+            debit: creditNote.cgst + creditNote.sgst + (creditNote.igst || 0), credit: 0,
+          });
+        }
+        console.log(`✅ COA reversed & posted for credit note edit: ${creditNote.creditNoteNumber}`);
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA post error (credit note edit):', coaErr.message);
+    }
     
     console.log(`✅ Credit Note updated: ${creditNote.creditNoteNumber}`);
     
@@ -1233,6 +1422,7 @@ router.put('/:id', async (req, res) => {
         console.error('❌ [CN Update] ERROR updating customer unusedCredits:', custErr.message);
         console.error('   Stack:', custErr.stack);
       }
+      
       console.log('═══════════════════════════════════════════════════════════════════\n');
     }
     // ── Handle Amount Change for OPEN Credit Notes ────────────────────────────
@@ -2171,8 +2361,11 @@ router.get('/:id/email-preview', async (req, res) => {
     <div class="section-title">Amount Summary</div>
     <table class="detail">
       <tr><td>Subtotal</td><td>Rs.${(creditNote.subTotal || 0).toFixed(2)}</td></tr>
+      ${(creditNote.invoiceDiscountAmount || 0) > 0 ? `<tr><td>Discount</td><td>-Rs.${creditNote.invoiceDiscountAmount.toFixed(2)}</td></tr>` : ''}
       ${creditNote.cgst > 0 ? `<tr><td>CGST</td><td>Rs.${creditNote.cgst.toFixed(2)}</td></tr>` : ''}
       ${creditNote.sgst > 0 ? `<tr><td>SGST</td><td>Rs.${creditNote.sgst.toFixed(2)}</td></tr>` : ''}
+      ${(creditNote.shippingCharges || 0) > 0 ? `<tr><td>Shipping</td><td>Rs.${creditNote.shippingCharges.toFixed(2)}</td></tr>` : ''}
+      ${creditNote.adjustment && creditNote.adjustment !== 0 ? `<tr><td>Adjustment</td><td>${creditNote.adjustment > 0 ? '+' : ''}Rs.${creditNote.adjustment.toFixed(2)}</td></tr>` : ''}
       <tr class="total-row"><td>Credit Amount</td><td>Rs.${(creditNote.totalAmount || 0).toFixed(2)}</td></tr>
       ${(creditNote.creditBalance || 0) > 0 ? `<tr><td>Available Balance</td><td style="color:#27ae60;">Rs.${creditNote.creditBalance.toFixed(2)}</td></tr>` : ''}
     </table>
@@ -2249,34 +2442,46 @@ router.delete('/:id', async (req, res) => {
     try {
       const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
       const currentOrgId = req.user?.orgId || null;
+      const currentBranchId = creditNote.branchId || (req.branchIds?.length > 0 ? req.branchIds[0] : null);
       const txnDate      = new Date(creditNote.creditNoteDate);
       const desc         = `REVERSAL - Credit Note ${creditNote.creditNoteNumber} - ${creditNote.customerName}`;
 
-      const [salesId, arId] = await Promise.all([
-        ChartOfAccount.findOne({ accountName: 'Sales', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
-        ChartOfAccount.findOne({ accountName: 'Accounts Receivable', isSystemAccount: true, orgId: currentOrgId }).select('_id').lean().then(a => a?._id),
+      const [salesId, arId, otherChargesId] = await Promise.all([
+        resolveSystemAccountId(ChartOfAccount, 'Sales', currentOrgId, currentBranchId),
+        resolveSystemAccountId(ChartOfAccount, 'Accounts Receivable', currentOrgId, currentBranchId),
+        resolveSystemAccountId(ChartOfAccount, 'Other Charges', currentOrgId, currentBranchId),
       ]);
 
       // Cr Sales (reverses the Dr posted at creation)
       if (salesId) await postTransactionToCOA({
-        accountId: salesId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
+        accountId: salesId, orgId: currentOrgId, branchId: currentBranchId, date: txnDate, description: desc,
         referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
         debit: 0, credit: creditNote.subTotal,
       });
 
       // Dr Accounts Receivable (reverses the Cr posted at creation)
       if (arId) await postTransactionToCOA({
-        accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
+        accountId: arId, orgId: currentOrgId, branchId: currentBranchId, date: txnDate, description: desc,
         referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
         debit: creditNote.totalAmount, credit: 0,
       });
 
+      // Reverse Adjustment if any (Reverse of Create COA)
+      if (otherChargesId && creditNote.adjustment) {
+        if (creditNote.adjustment < 0) {
+          // Reverses Credit posted at creation = Debit
+          await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: currentBranchId, date: txnDate, description: desc, referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber, debit: Math.abs(creditNote.adjustment), credit: 0 });
+        } else {
+          // Reverses Debit posted at creation = Credit
+          await postTransactionToCOA({ accountId: otherChargesId, orgId: currentOrgId, branchId: currentBranchId, date: txnDate, description: desc, referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber, debit: 0, credit: creditNote.adjustment });
+        }
+      }
+
       // Cr Tax Payable (reverses the Dr posted at creation, if GST existed)
       if ((creditNote.cgst || 0) + (creditNote.sgst || 0) > 0) {
-        const taxId = await ChartOfAccount.findOne({ accountName: 'Tax Payable', isSystemAccount: true, orgId: currentOrgId })
-          .select('_id').lean().then(a => a?._id);
+        const taxId = await resolveSystemAccountId(ChartOfAccount, 'Tax Payable', currentOrgId, currentBranchId);
         if (taxId) await postTransactionToCOA({
-          accountId: taxId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate, description: desc,
+          accountId: taxId, orgId: currentOrgId, branchId: currentBranchId, date: txnDate, description: desc,
           referenceType: 'Credit Note', referenceId: creditNote._id, referenceNumber: creditNote.creditNoteNumber,
           debit: 0, credit: (creditNote.cgst || 0) + (creditNote.sgst || 0),
         });

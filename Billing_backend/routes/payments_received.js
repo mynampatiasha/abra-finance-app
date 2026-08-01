@@ -82,11 +82,11 @@ async function sendPaymentReceiptEmail(payment, invoice, proofPaths) {  // Fetch
     if (db) {
       orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
     }
-  } catch (_) {}
-  const orgName  = orgData?.orgName   || 'Billing Team';
-  const orgGST   = orgData?.gstNumber || '';
-  const orgPhone = orgData?.phone     || '';
-  const orgEmail = orgData?.email     || '';
+  } catch (_) { }
+  const orgName = orgData?.orgName || 'Billing Team';
+  const orgGST = orgData?.gstNumber || '';
+  const orgPhone = orgData?.phone || '';
+  const orgEmail = orgData?.email || '';
 
   try {
     const emailHtml = `
@@ -197,7 +197,7 @@ async function sendPaymentReceiptEmail(payment, invoice, proofPaths) {  // Fetch
     `;
 
     const attachments = [];
-    
+
     // Attach payment proof files
     if (proofPaths && proofPaths.length > 0) {
       proofPaths.forEach((proofPath, index) => {
@@ -219,12 +219,12 @@ async function sendPaymentReceiptEmail(payment, invoice, proofPaths) {  // Fetch
     };
 
     await sendMail({
-      orgId:       payment.orgId,
-      branchId:    payment.branchId || null,
-      db:          require('mongoose').connection.db,
-      to:          mailOptions.to,
-      subject:     mailOptions.subject,
-      html:        mailOptions.html,
+      orgId: payment.orgId,
+      branchId: payment.branchId || null,
+      db: require('mongoose').connection.db,
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
       attachments: mailOptions.attachments,
     });
     console.log(`📧 Payment receipt email sent to ${payment.customerEmail || invoice?.customerEmail}`);
@@ -240,11 +240,11 @@ async function sendPaymentReceiptEmail(payment, invoice, proofPaths) {  // Fetch
 
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { filter, sortBy, sortOrder = 'desc' } = req.query;
-    
+    const { filter, sortBy, sortOrder = 'desc', search } = req.query;
+
     let query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
-    
+
     // Apply filters
     if (filter && filter !== 'All Payments') {
       switch (filter) {
@@ -260,6 +260,17 @@ router.get('/', verifyToken, async (req, res) => {
       }
     }
 
+    // NEW: Universal Search Filter
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      query.$or = [
+        { paymentNumber: searchRegex },
+        { customerName: searchRegex },
+        { reference: searchRegex },
+        { invoiceNumber: searchRegex }
+      ];
+    }
+
     // Build sort object
     let sort = { createdAt: -1 }; // Default sort by creation date
     if (sortBy) {
@@ -272,22 +283,56 @@ router.get('/', verifyToken, async (req, res) => {
       .sort(sort)
       .toArray();
 
+    // Batch fetch invoice numbers
+    const invoiceIdsToFetch = new Set();
+    payments.forEach(payment => {
+      if (payment.invoicePayments) {
+        Object.keys(payment.invoicePayments).forEach(id => {
+          if (ObjectId.isValid(id)) invoiceIdsToFetch.add(id);
+        });
+      }
+    });
+
+    const invoiceIdToNumberMap = {};
+    if (invoiceIdsToFetch.size > 0) {
+      const uniqueInvoiceIds = Array.from(invoiceIdsToFetch).map(id => new ObjectId(id));
+      const invoices = await db.collection('invoices')
+        .find({ _id: { $in: uniqueInvoiceIds } })
+        .project({ invoiceNumber: 1 })
+        .toArray();
+      invoices.forEach(inv => {
+        invoiceIdToNumberMap[inv._id.toString()] = inv.invoiceNumber;
+      });
+    }
+
     // Format payments for frontend
-    const formattedPayments = payments.map(payment => ({
-      id: payment._id,
-      date: payment.paymentDate,
-      paymentNumber: payment.paymentNumber,
-      referenceNumber: payment.reference || '',
-      customerName: payment.customerName,
-      invoiceNumber: payment.invoiceNumber || '',
-      mode: payment.paymentMode,
-      amount: payment.amountReceived,
-      status: payment.status || 'paid',
-      hasProofs: payment.paymentProofs && payment.paymentProofs.length > 0,
-      proofsCount: payment.paymentProofs ? payment.paymentProofs.length : 0,
-      createdAt: payment.createdAt,
-      updatedAt: payment.updatedAt
-    }));
+    const formattedPayments = payments.map(payment => {
+      let linkedInvoiceNumbers = payment.invoiceNumber || '';
+      if (payment.invoicePayments && Object.keys(payment.invoicePayments).length > 0) {
+        const numbers = Object.keys(payment.invoicePayments)
+          .map(id => invoiceIdToNumberMap[id])
+          .filter(Boolean);
+        if (numbers.length > 0) {
+          linkedInvoiceNumbers = numbers.join(', ');
+        }
+      }
+
+      return {
+        id: payment._id,
+        date: payment.paymentDate,
+        paymentNumber: payment.paymentNumber,
+        referenceNumber: payment.reference || '',
+        customerName: payment.customerName,
+        invoiceNumber: linkedInvoiceNumbers,
+        mode: payment.paymentMode,
+        amount: payment.amountReceived,
+        status: payment.status || 'paid',
+        hasProofs: payment.paymentProofs && payment.paymentProofs.length > 0,
+        proofsCount: payment.paymentProofs ? payment.paymentProofs.length : 0,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt
+      };
+    });
 
     res.json({
       success: true,
@@ -340,11 +385,11 @@ router.get('/next-payment-number', verifyToken, async (req, res) => {
 
 router.get('/stats/summary', verifyToken, async (req, res) => {
   try {
-    const { startDate, endDate, customerName } = req.query;
+    const { startDate, endDate, customerName, search } = req.query;
 
     let matchQuery = {};
     if (req.user?.orgId) matchQuery.orgId = req.user.orgId; Object.assign(matchQuery, req.branchFilter || {});
-    
+
     if (startDate && endDate) {
       matchQuery.paymentDate = {
         $gte: startDate,
@@ -354,6 +399,17 @@ router.get('/stats/summary', verifyToken, async (req, res) => {
 
     if (customerName) {
       matchQuery.customerName = customerName;
+    }
+
+    // NEW: Universal Search Filter
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      matchQuery.$or = [
+        { paymentNumber: searchRegex },
+        { customerName: searchRegex },
+        { reference: searchRegex },
+        { invoiceNumber: searchRegex }
+      ];
     }
 
     const stats = await db.collection('payments_received').aggregate([
@@ -408,10 +464,10 @@ router.get('/stats/summary', verifyToken, async (req, res) => {
 router.get('/export/csv', verifyToken, async (req, res) => {
   try {
     const { filter, startDate, endDate } = req.query;
-    
+
     let query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
-    
+
     if (filter && filter !== 'All Payments') {
       switch (filter) {
         case 'Draft':
@@ -485,7 +541,7 @@ router.get('/export/csv', verifyToken, async (req, res) => {
       error: error.message
     });
   }
-});router.get('/customer/:customerId/unpaid-invoices', verifyToken, async (req, res) => {
+}); router.get('/customer/:customerId/unpaid-invoices', verifyToken, async (req, res) => {
   try {
     const { customerId } = req.params;
     const { startDate, endDate } = req.query;
@@ -527,7 +583,7 @@ router.get('/export/csv', verifyToken, async (req, res) => {
       .find(query)
       .sort({ invoiceDate: -1 })
       .toArray();
-    
+
     console.log(`✅ Found ${unpaidInvoices.length} unpaid invoices`);
 
     // Log each invoice found
@@ -558,14 +614,10 @@ router.get('/customer/:customerId/unused-credits', verifyToken, async (req, res)
   try {
     const { customerId } = req.params;
 
-    const mongoose = require('mongoose');
-    const BillingCustomerModel = mongoose.models.BillingCustomer
-      || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
-
     const custId = ObjectId.isValid(customerId) ? new ObjectId(customerId) : customerId;
 
     const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
-    const customer = await BillingCustomerModel.findOne(
+    const customer = await db.collection('billing-customers').findOne(
       { _id: custId, ...orgFilter },
       { unusedCredits: 1, customerDisplayName: 1 }
     ).lean();
@@ -595,7 +647,7 @@ router.get('/customer/:customerId/unused-credits', verifyToken, async (req, res)
 router.get('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -624,24 +676,26 @@ router.get('/:id', verifyToken, async (req, res) => {
           { projection: { accountName: 1 } }
         );
         if (acct?.accountName) depositToName = acct.accountName;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // ── Resolve invoicePayments { invoiceId: amount } → { invoiceNumber: amount } ──
     let resolvedInvoicePayments = {};
+    let clearedInvoices = [];
     if (payment.invoicePayments && typeof payment.invoicePayments === 'object') {
-      for (const [key, amount] of Object.entries(payment.invoicePayments)) {
-        let label = key;
-        if (ObjectId.isValid(key)) {
-          try {
-            const inv = await db.collection('invoices').findOne(
-              { _id: new ObjectId(key) },
-              { projection: { invoiceNumber: 1 } }
-            );
-            if (inv?.invoiceNumber) label = inv.invoiceNumber;
-          } catch (_) {}
-        }
-        resolvedInvoicePayments[label] = amount;
+      const invoiceIds = Object.keys(payment.invoicePayments)
+        .filter(id => ObjectId.isValid(id))
+        .map(id => new ObjectId(id));
+      
+      if (invoiceIds.length > 0) {
+        clearedInvoices = await db.collection('invoices')
+          .find({ _id: { $in: invoiceIds } })
+          .toArray();
+
+        // Build the resolved map
+        clearedInvoices.forEach(inv => {
+          resolvedInvoicePayments[inv.invoiceNumber] = payment.invoicePayments[inv._id.toString()];
+        });
       }
     }
 
@@ -651,6 +705,7 @@ router.get('/:id', verifyToken, async (req, res) => {
         ...payment,
         depositToName,
         invoicePaymentsResolved: resolvedInvoicePayments,
+        clearedInvoices: clearedInvoices
       }
     });
 
@@ -673,7 +728,7 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
     console.log('\n' + '💰'.repeat(50));
     console.log('ZOHO BOOKS WORKFLOW: RECORD PAYMENT WITH PROOFS');
     console.log('💰'.repeat(50));
-    
+
     // Parse payment data from form field
     let paymentData;
     try {
@@ -699,6 +754,8 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       notes = '',
       sendThankYouNote = false,
       invoicePayments = {},
+      invoiceTds = {},       // TDS deducted per-invoice: { invoiceId: amount }
+      invoiceWriteOffs = {}, // Rounding/Write-off per-invoice: { invoiceId: amount }
       status = 'paid',
       providerTransactionId = null,
       creditsApplied = 0,
@@ -799,13 +856,13 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       notes,
       sendThankYouNote,
       status,
-      
+
       // Payment type — 'payment' (against invoices) | 'advance' (no invoice, full amount → unusedCredits)
       paymentType,
 
       // Invoice payments
       invoicePayments,
-      
+
       // Calculated fields
       netAmount,
       amountUsedForPayments: totalInvoicePayments,
@@ -814,10 +871,10 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       creditsApplied: parseFloat(creditsApplied) || 0,
       orgId: req.user?.orgId || null,
       branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            providerTransactionId: providerTransactionId ? (ObjectId.isValid(providerTransactionId) ? new ObjectId(providerTransactionId) : providerTransactionId) : null,
+      providerTransactionId: providerTransactionId ? (ObjectId.isValid(providerTransactionId) ? new ObjectId(providerTransactionId) : providerTransactionId) : null,
       // Payment proofs
       paymentProofs,
-      
+
       // Metadata
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -831,10 +888,9 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
 
     // ── UPDATE CUSTOMER UNUSED CREDITS ──────────────────────────────────────
     // For ADVANCE: entire netAmount goes to unusedCredits (no invoice linkage)
-    // For PAYMENT: excess (netAmount - invoiceTotal - creditsApplied) goes to unusedCredits
-    //              creditsApplied reduces existing unusedCredits
+    // For PAYMENT: change in credits is (netAmount - totalInvoicePayments)
     try {
-      const isAdvance      = paymentType === 'advance';
+      const isAdvance = paymentType === 'advance';
       const creditsAppliedAmt = parseFloat(paymentData.creditsApplied || 0);
       let creditDelta;
 
@@ -842,9 +898,8 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
         // Full net amount becomes a new credit on the customer
         creditDelta = netAmount;
       } else {
-        const newExcess = netAmount - totalInvoicePayments;
-        // newExcess: new credits added; creditsApplied: existing credits consumed
-        creditDelta = newExcess - creditsAppliedAmt;
+        // Cash received minus cash applied to invoices equals the change in unused credits.
+        creditDelta = netAmount - totalInvoicePayments;
       }
 
       console.log(`🔍 [UNUSED CREDITS DEBUG]`);
@@ -857,25 +912,21 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       console.log(`   creditDelta: ${creditDelta}`);
 
       if (creditDelta !== 0 && customerId) {
-        const mongoose = require('mongoose');
-        const BillingCustomerModel = mongoose.models.BillingCustomer
-          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
-
         const custId = ObjectId.isValid(customerId) ? new ObjectId(customerId) : customerId;
         console.log(`   custId (converted): ${custId}`);
-        
-        const updateResult = await BillingCustomerModel.findOneAndUpdate(
+
+        const updateResult = await db.collection('billing-customers').findOneAndUpdate(
           { _id: custId },
           { $inc: { unusedCredits: creditDelta } },
-          { new: true }
+          { returnDocument: 'after' }
         );
         console.log(`   Update result: ${updateResult ? 'SUCCESS' : 'NOT FOUND'}`);
         if (updateResult) {
           console.log(`   New unusedCredits value: ${updateResult.unusedCredits}`);
         }
-        
+
         // Ensure it never goes below 0
-        await BillingCustomerModel.findOneAndUpdate(
+        await db.collection('billing-customers').updateMany(
           { _id: custId, unusedCredits: { $lt: 0 } },
           { $set: { unusedCredits: 0 } }
         );
@@ -894,21 +945,32 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
     let updatedInvoices = [];
     if (Object.keys(invoicePayments).length > 0) {
       console.log('🔗 Updating linked invoices...');
-      
+
       for (const [invoiceId, amount] of Object.entries(invoicePayments)) {
         if (parseFloat(amount) > 0) {
           try {
             // Convert invoiceId to ObjectId if needed
             const invoiceObjectId = ObjectId.isValid(invoiceId) ? new ObjectId(invoiceId) : invoiceId;
-            
+
             // Find invoice
             const invoice = await db.collection('invoices').findOne({ _id: invoiceObjectId });
-            
+
             if (invoice) {
+              // Get per-invoice TDS and write-off (Zoho Books workflow)
+              const invoiceTdsAmt = parseFloat(invoiceTds[invoiceId] || 0);
+              const invoiceWriteOffAmt = parseFloat(invoiceWriteOffs[invoiceId] || 0);
+              const cashPaid = parseFloat(amount);
+              const totalCleared = cashPaid + invoiceTdsAmt + invoiceWriteOffAmt;
+
+              console.log(`  📋 Invoice ${invoice.invoiceNumber}: cash=${cashPaid}, tds=${invoiceTdsAmt}, writeOff=${invoiceWriteOffAmt}, totalCleared=${totalCleared}`);
+
               // Prepare payment record for invoice
               const paymentRecord = {
                 paymentId: result.insertedId.toString(),
-                amount: parseFloat(amount),
+                amount: cashPaid,
+                tdsAmount: invoiceTdsAmt,
+                writeOffAmount: invoiceWriteOffAmt,
+                totalCleared,
                 paymentDate: new Date(paymentDate),
                 paymentMethod: paymentMode,
                 referenceNumber: reference,
@@ -916,11 +978,11 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
                 recordedBy: req.user?.email || req.user?.uid || 'system',
                 recordedAt: new Date()
               };
-              
-              // Calculate new amounts
-              const newAmountPaid = (invoice.amountPaid || 0) + parseFloat(amount);
-              const newAmountDue = invoice.totalAmount - newAmountPaid;
-              
+
+              // Calculate new amounts — cash + TDS + writeOff all clear the receivable
+              const newAmountPaid = (invoice.amountPaid || 0) + totalCleared;
+              const newAmountDue = Math.max(0, parseFloat((invoice.totalAmount - newAmountPaid).toFixed(2)));
+
               // Determine new status
               let newStatus = invoice.status;
               if (newAmountDue <= 0) {
@@ -928,7 +990,7 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
               } else if (newAmountPaid > 0 && newAmountDue > 0) {
                 newStatus = 'PARTIALLY_PAID';
               }
-              
+
               // Update invoice
               await db.collection('invoices').updateOne(
                 { _id: invoiceObjectId },
@@ -942,11 +1004,11 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
                   }
                 }
               );
-              
+
               // Get updated invoice for response
               const updatedInvoice = await db.collection('invoices').findOne({ _id: invoiceObjectId });
               updatedInvoices.push(updatedInvoice);
-              
+
               console.log(`   ✅ Updated invoice ${invoice.invoiceNumber} (+₹${amount}) - Status: ${newStatus}`);
             } else {
               console.log(`   ⚠️  Invoice ${invoiceId} not found`);
@@ -958,223 +1020,243 @@ router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
       }
     }
 
-// ============================================================================
+    // ============================================================================
     // UPDATE ACCOUNT BALANCE - CREDIT RECEIVED AMOUNT
     // ============================================================================
     // credit_application = pure journal entry (no cash moved) — skip bank balance
     if (paymentType !== 'credit_application') {
-    try {
-      const PaymentAccount = db.collection('paymentaccounts');
-      const depositAccountId = depositTo;
-      let balanceCredited = false;
-      const creditAmount = parseFloat(amountReceived);
+      try {
+        const PaymentAccount = db.collection('paymentaccounts');
+        const depositAccountId = depositTo;
+        let balanceCredited = false;
+        const creditAmount = parseFloat(amountReceived);
 
-      // Only credit bank balance immediately for non-cash/cheque payments
-      // Cash/Cheque goes to Undeposited Funds first
-      const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
+        // Only credit bank balance immediately for non-cash/cheque payments
+        // Cash/Cheque goes to Undeposited Funds first
+        const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
 
-      if (creditImmediately) {
-        if (ObjectId.isValid(depositAccountId)) {
-          await PaymentAccount.findOneAndUpdate(
-            { _id: new ObjectId(depositAccountId) },
-            { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
-            { returnDocument: 'after' }
-          );
-          balanceCredited = true;
-          console.log(`✅ Balance credited to account ID ${depositAccountId}: +₹${creditAmount}`);
-        }
-
-        // If ObjectId lookup failed, try by account name
-        if (!balanceCredited) {
-          const updateResult = await PaymentAccount.findOneAndUpdate(
-            { accountName: depositAccountId },
-            { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
-            { returnDocument: 'after' }
-          );
-          if (updateResult) {
+        if (creditImmediately) {
+          if (ObjectId.isValid(depositAccountId)) {
+            await PaymentAccount.findOneAndUpdate(
+              { _id: new ObjectId(depositAccountId) },
+              { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
             balanceCredited = true;
-            console.log(`✅ Balance credited to account name "${depositAccountId}": +₹${creditAmount}`);
+            console.log(`✅ Balance credited to account ID ${depositAccountId}: +₹${creditAmount}`);
           }
-        }
 
-        if (!balanceCredited) {
-          console.warn(`⚠️ BALANCE WARNING: Could not find deposit account "${depositAccountId}" to credit ₹${creditAmount}. Payment saved but balance NOT updated.`);
+          // If ObjectId lookup failed, try by account name
+          if (!balanceCredited) {
+            const updateResult = await PaymentAccount.findOneAndUpdate(
+              { accountName: depositAccountId },
+              { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            if (updateResult) {
+              balanceCredited = true;
+              console.log(`✅ Balance credited to account name "${depositAccountId}": +₹${creditAmount}`);
+            }
+          }
+
+          if (!balanceCredited) {
+            console.warn(`⚠️ BALANCE WARNING: Could not find deposit account "${depositAccountId}" to credit ₹${creditAmount}. Payment saved but balance NOT updated.`);
+          }
+        } else {
+          // For Cash/Cheque — balance will be credited when Record Deposit is done
+          console.log(`ℹ️ Cash/Cheque payment — balance will be credited on Record Deposit`);
         }
-      } else {
-        // For Cash/Cheque — balance will be credited when Record Deposit is done
-        console.log(`ℹ️ Cash/Cheque payment — balance will be credited on Record Deposit`);
+      } catch (balanceErr) {
+        console.error(`⚠️ BALANCE ERROR: Failed to credit balance for payment ${result.insertedId}:`, balanceErr.message);
       }
-    } catch (balanceErr) {
-      console.error(`⚠️ BALANCE ERROR: Failed to credit balance for payment ${result.insertedId}:`, balanceErr.message);
-    }
     } else {
       console.log(`ℹ️ credit_application — skipping bank balance update (no cash moved)`);
     }
 
-// ✅ COA: Debit deposit account + Credit Accounts Receivable
-const currentOrgId = req.user?.orgId || null;
-try {
-  // Parse payment date — supports DD/MM/YYYY and ISO formats
-  let txnDate;
-  if (paymentDate && typeof paymentDate === 'string' && paymentDate.includes('/')) {
-    const [day, month, year] = paymentDate.split('/');
-    txnDate = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`);
-  } else {
-    txnDate = new Date(paymentDate);
-  }
-  if (isNaN(txnDate)) txnDate = new Date();
-
-  const branchIdForCOA = req.branchIds?.length > 0 ? req.branchIds[0] : null;
-
-  // ── CREDIT APPLICATION: Dr Advance from Customer → Cr Accounts Receivable ──
-  // No cash moves — pure liability-to-receivable journal entry
-  if (paymentType === 'credit_application') {
-    const creditsAppliedAmt = parseFloat(creditsApplied) || 0;
-    if (creditsAppliedAmt > 0) {
-      const [advanceAccId, arAccId] = await Promise.all([
-        getSystemAccountId('Advance from Customer', currentOrgId),
-        getSystemAccountId('Accounts Receivable', currentOrgId),
-      ]);
-      if (advanceAccId) {
-        await postTransactionToCOA({
-          accountId: advanceAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
-          description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
-          referenceType: 'CreditApplication', referenceId: result.insertedId,
-          referenceNumber: paymentNumber,
-          debit: creditsAppliedAmt, credit: 0,
-        });
-        console.log(`✅ COA Dr Advance from Customer: ${creditsAppliedAmt}`);
-      }
-      if (arAccId) {
-        await postTransactionToCOA({
-          accountId: arAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
-          description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
-          referenceType: 'CreditApplication', referenceId: result.insertedId,
-          referenceNumber: paymentNumber,
-          debit: 0, credit: creditsAppliedAmt,
-        });
-        console.log(`✅ COA Cr Accounts Receivable: ${creditsAppliedAmt}`);
-      }
-    }
-    console.log(`✅ [COA] credit_application journal entry complete for: ${paymentNumber}`);
-  } else {
-    // ── NORMAL PAYMENT / ADVANCE: existing cash-flow COA logic ──────────────
-    // Resolve deposit account name
-    let cleanDepositName = 'Undeposited Funds';
+    // ✅ COA: Debit deposit account + Credit Accounts Receivable
+    const currentOrgId = req.user?.orgId || null;
     try {
-      const PaymentAccountCol = db.collection('paymentaccounts');
-      if (ObjectId.isValid(depositTo)) {
-        const depositAccount = await PaymentAccountCol.findOne({ _id: new ObjectId(depositTo) });
-        if (depositAccount) {
-          cleanDepositName = depositAccount.accountName;
-          console.log(`💰 Resolved deposit account name: "${cleanDepositName}"`);
+      // Parse payment date — supports DD/MM/YYYY and ISO formats
+      let txnDate;
+      if (paymentDate && typeof paymentDate === 'string' && paymentDate.includes('/')) {
+        const [day, month, year] = paymentDate.split('/');
+        txnDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+      } else {
+        txnDate = new Date(paymentDate);
+      }
+      if (isNaN(txnDate)) txnDate = new Date();
+
+      const branchIdForCOA = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+      // ── CREDIT APPLICATION: Dr Advance from Customer → Cr Accounts Receivable ──
+      // No cash moves — pure liability-to-receivable journal entry
+      if (paymentType === 'credit_application') {
+        const creditsAppliedAmt = parseFloat(creditsApplied) || 0;
+        if (creditsAppliedAmt > 0) {
+          const [advanceAccId, arAccId] = await Promise.all([
+            getSystemAccountId('Advance from Customer', currentOrgId),
+            getSystemAccountId('Accounts Receivable', currentOrgId),
+          ]);
+          if (advanceAccId) {
+            await postTransactionToCOA({
+              accountId: advanceAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
+              referenceType: 'CreditApplication', referenceId: result.insertedId,
+              referenceNumber: paymentNumber,
+              debit: creditsAppliedAmt, credit: 0,
+            });
+            console.log(`✅ COA Dr Advance from Customer: ${creditsAppliedAmt}`);
+          }
+          if (arAccId) {
+            await postTransactionToCOA({
+              accountId: arAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
+              referenceType: 'CreditApplication', referenceId: result.insertedId,
+              referenceNumber: paymentNumber,
+              debit: 0, credit: creditsAppliedAmt,
+            });
+            console.log(`✅ COA Cr Accounts Receivable: ${creditsAppliedAmt}`);
+          }
         }
+        console.log(`✅ [COA] credit_application journal entry complete for: ${paymentNumber}`);
+      } else {
+        // ── NORMAL PAYMENT / ADVANCE: existing cash-flow COA logic ──────────────
+        // Resolve deposit account name
+        let cleanDepositName = 'Undeposited Funds';
+        try {
+          const PaymentAccountCol = db.collection('paymentaccounts');
+          if (ObjectId.isValid(depositTo)) {
+            const depositAccount = await PaymentAccountCol.findOne({ _id: new ObjectId(depositTo) });
+            if (depositAccount) {
+              cleanDepositName = depositAccount.accountName;
+              console.log(`💰 Resolved deposit account name: "${cleanDepositName}"`);
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not resolve deposit account name:', e.message);
+        }
+
+        // Look up COA IDs
+        const [cashId, arId] = await Promise.all([
+          ChartOfAccount.findOne({
+            accountName: { $regex: new RegExp(`^${cleanDepositName}`, 'i') },
+            ...(currentOrgId ? { orgId: currentOrgId } : {})
+          }).select('_id').lean().then(acc => {
+            if (acc) return acc._id;
+            console.log(`⚠️ COA not found for "${cleanDepositName}", trying Undeposited Funds`);
+            return getSystemAccountId('Undeposited Funds', currentOrgId);
+          }),
+          getSystemAccountId('Accounts Receivable', currentOrgId),
+        ]);
+
+        const paymentAmount = parseFloat(amountReceived);
+
+        console.log(`💰 Posting COA for payment ${paymentNumber}:`);
+        console.log(`   cashId (${cleanDepositName}): ${cashId}`);
+        console.log(`   arId (Accounts Receivable): ${arId}`);
+        console.log(`   amount: ${paymentAmount}`);
+        console.log(`   orgId: ${currentOrgId}`);
+
+        // For Cash/Cheque → Dr Undeposited Funds (not the bank yet)
+        // For others → Dr Bank directly
+        const depositCOAId = ['Cash', 'Cheque'].includes(paymentMode)
+          ? await getSystemAccountId('Undeposited Funds', currentOrgId)
+          : cashId;
+
+        if (depositCOAId) {
+          await postTransactionToCOA({
+            accountId: depositCOAId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+            description: `Payment received - ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: result.insertedId,
+            referenceNumber: paymentNumber,
+            debit: paymentAmount, credit: 0
+          });
+          console.log(`✅ COA Debit posted to: ${['Cash', 'Cheque'].includes(paymentMode) ? 'Undeposited Funds' : cleanDepositName}`);
+        } else {
+          console.warn(`⚠️ COA depositCOAId not found for "${cleanDepositName}" — debit NOT posted`);
+        }
+
+        // ── TDS Receivable — Debit for TDS deducted across all invoices ─────────
+        const totalTdsDeducted = Object.values(invoiceTds).reduce((s, v) => s + parseFloat(v || 0), 0);
+        if (totalTdsDeducted > 0) {
+          const tdsReceivableId = await getSystemAccountId('TDS Receivable', currentOrgId);
+          if (tdsReceivableId) {
+            await postTransactionToCOA({
+              accountId: tdsReceivableId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `TDS deducted on payment ${paymentNumber} - ${customerName}`,
+              referenceType: 'Payment', referenceId: result.insertedId, referenceNumber: paymentNumber,
+              debit: totalTdsDeducted, credit: 0,
+            });
+            console.log(`✅ COA Dr TDS Receivable: ₹${totalTdsDeducted}`);
+          } else {
+            console.warn(`⚠️ TDS Receivable account not found — TDS COA NOT posted`);
+          }
+        }
+
+        // ── Write Off / Rounding Expense — Debit for write-offs across invoices ──
+        const totalWriteOff = Object.values(invoiceWriteOffs).reduce((s, v) => s + parseFloat(v || 0), 0);
+        if (totalWriteOff !== 0) {
+          const writeOffId = await getSystemAccountId('Rounding Off', currentOrgId)
+            || await getSystemAccountId('Other Expense', currentOrgId)
+            || await getSystemAccountId('Other Expenses', currentOrgId);
+          if (writeOffId) {
+            // Positive write-off = expense (Dr); negative write-off = income credit (Cr)
+            await postTransactionToCOA({
+              accountId: writeOffId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Rounding write-off on payment ${paymentNumber} - ${customerName}`,
+              referenceType: 'Payment', referenceId: result.insertedId, referenceNumber: paymentNumber,
+              debit: totalWriteOff > 0 ? totalWriteOff : 0,
+              credit: totalWriteOff < 0 ? Math.abs(totalWriteOff) : 0,
+            });
+            console.log(`✅ COA Write-Off posted: ₹${totalWriteOff}`);
+          } else {
+            console.warn(`⚠️ Rounding/Write-Off account not found — write-off COA NOT posted`);
+          }
+        }
+
+        // For ADVANCE — credit Advance from Customer (Liability)
+        // For normal payment — credit Accounts Receivable for the FULL cleared amount
+        // (cash + TDS + write-off — the entire receivable balance is settled)
+        const totalClearedAllInvoices = parseFloat(amountReceived) + totalTdsDeducted + totalWriteOff;
+        const creditAmount = paymentType === 'advance' ? paymentAmount : totalClearedAllInvoices;
+
+        let creditAccountId;
+        if (paymentType === 'advance') {
+          creditAccountId = await getSystemAccountId('Advance from Customer', currentOrgId);
+          if (!creditAccountId) {
+            const advAcc = await ChartOfAccount.findOne({
+              accountName: { $regex: /^Advance from Customer$/i },
+            }).select('_id').lean();
+            creditAccountId = advAcc?._id || null;
+          }
+        } else {
+          creditAccountId = arId;
+        }
+
+        if (creditAccountId) {
+          await postTransactionToCOA({
+            accountId: creditAccountId,
+            orgId: currentOrgId,
+            branchId: branchIdForCOA,
+            date: txnDate,
+            description: `Payment received - ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: result.insertedId,
+            referenceNumber: paymentNumber,
+            debit: 0,
+            credit: creditAmount
+          });
+          console.log(`✅ COA Credit posted to: ${paymentType === 'advance' ? 'Advance from Customer' : 'Accounts Receivable'} — ₹${creditAmount}`);
+        } else {
+          console.warn(`⚠️ COA creditAccountId not found — credit NOT posted`);
+        }
+
+        console.log(`✅ [COA] Full COA posting complete for payment: ${paymentNumber}`);
       }
-    } catch (e) {
-      console.warn('⚠️ Could not resolve deposit account name:', e.message);
+    } catch (coaErr) {
+      console.error('⚠️ COA post error (payment received):', coaErr.message);
     }
-
-    // Look up COA IDs
-    const [cashId, arId] = await Promise.all([
-      ChartOfAccount.findOne({
-        accountName: { $regex: new RegExp(`^${cleanDepositName}`, 'i') },
-        ...(currentOrgId ? { orgId: currentOrgId } : {})
-      }).select('_id').lean().then(acc => {
-        if (acc) return acc._id;
-        console.log(`⚠️ COA not found for "${cleanDepositName}", trying Undeposited Funds`);
-        return getSystemAccountId('Undeposited Funds', currentOrgId);
-      }),
-      getSystemAccountId('Accounts Receivable', currentOrgId),
-    ]);
-
-    const paymentAmount = parseFloat(amountReceived);
-
-    console.log(`💰 Posting COA for payment ${paymentNumber}:`);
-    console.log(`   cashId (${cleanDepositName}): ${cashId}`);
-    console.log(`   arId (Accounts Receivable): ${arId}`);
-    console.log(`   amount: ${paymentAmount}`);
-    console.log(`   orgId: ${currentOrgId}`);
-
-    // For Cash/Cheque → Dr Undeposited Funds (not the bank yet)
-    // For others → Dr Bank directly
-    const depositCOAId = ['Cash', 'Cheque'].includes(paymentMode)
-      ? await getSystemAccountId('Undeposited Funds', currentOrgId)
-      : cashId;
-
-    if (depositCOAId) {
-      await postTransactionToCOA({
-        accountId: depositCOAId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
-        description: `Payment received - ${paymentNumber} - ${customerName}`,
-        referenceType: 'Payment',
-        referenceId: result.insertedId,
-        referenceNumber: paymentNumber,
-        debit: paymentAmount, credit: 0
-      });
-      console.log(`✅ COA Debit posted to: ${['Cash', 'Cheque'].includes(paymentMode) ? 'Undeposited Funds' : cleanDepositName}`);
-    } else {
-      console.warn(`⚠️ COA depositCOAId not found for "${cleanDepositName}" — debit NOT posted`);
-    }
-
-    // For ADVANCE — credit Advance from Customer (Liability)
-    // For normal payment — credit Accounts Receivable
-    console.log(`\n🔍 [COA DEBUG] paymentType = "${paymentType}"`);
-    console.log(`🔍 [COA DEBUG] currentOrgId = ${currentOrgId}`);
-
-    let creditAccountId;
-    if (paymentType === 'advance') {
-      console.log(`🔍 [COA DEBUG] Looking up "Advance from Customer" via getSystemAccountId...`);
-      creditAccountId = await getSystemAccountId('Advance from Customer', currentOrgId);
-      console.log(`🔍 [COA DEBUG] getSystemAccountId result: ${creditAccountId}`);
-
-      if (!creditAccountId) {
-        console.warn(`⚠️ [COA DEBUG] System account lookup failed — trying fallback findOne by name...`);
-        const advAcc = await ChartOfAccount.findOne({
-          accountName: { $regex: /^Advance from Customer$/i },
-        }).select('_id accountName orgId isSystemAccount').lean();
-        console.log(`🔍 [COA DEBUG] Fallback findOne result:`, advAcc);
-        creditAccountId = advAcc?._id || null;
-      }
-
-      if (!creditAccountId) {
-        // Last resort: list all liability accounts to help diagnose
-        const allLiab = await ChartOfAccount.find({
-          accountType: { $in: ['Other Current Liability', 'Liability'] },
-          ...(currentOrgId ? { orgId: currentOrgId } : {}),
-        }).select('accountName accountCode isSystemAccount orgId').lean();
-        console.warn(`⚠️ [COA DEBUG] "Advance from Customer" NOT FOUND. All liability accounts for orgId=${currentOrgId}:`);
-        allLiab.forEach(a => console.warn(`   - ${a.accountCode} | ${a.accountName} | system=${a.isSystemAccount} | org=${a.orgId}`));
-      }
-    } else {
-      creditAccountId = arId;
-      console.log(`🔍 [COA DEBUG] Normal payment — using arId: ${arId}`);
-    }
-
-    console.log(`🔍 [COA DEBUG] Final creditAccountId: ${creditAccountId}`);
-
-    if (creditAccountId) {
-      console.log(`🔍 [COA DEBUG] Posting credit entry → accountId=${creditAccountId}, amount=${paymentAmount}, date=${txnDate}`);
-      await postTransactionToCOA({
-        accountId: creditAccountId,
-        orgId: currentOrgId,
-        branchId: branchIdForCOA,
-        date: txnDate,
-        description: `Payment received - ${paymentNumber} - ${customerName}`,
-        referenceType: 'Payment',
-        referenceId: result.insertedId,
-        referenceNumber: paymentNumber,
-        debit: 0,
-        credit: paymentAmount
-      });
-      console.log(`✅ COA Credit posted to: ${paymentType === 'advance' ? 'Advance from Customer' : 'Accounts Receivable'}`);
-    } else {
-      console.warn(`⚠️ COA creditAccountId not found for "${paymentType === 'advance' ? 'Advance from Customer' : 'Accounts Receivable'}" — credit NOT posted`);
-    }
-
-    console.log(`✅ [COA DEBUG] Full COA posting complete for payment: ${paymentNumber}`);
-  }
-} catch (coaErr) {
-  console.error('⚠️ COA post error (payment received):', coaErr.message);
-}
 
     // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
     // Skip if this payment was created from the banking categorization flow
@@ -1186,32 +1268,32 @@ try {
       const mongoose = require('mongoose');
       const ProviderTransaction = mongoose.models.ProviderTransaction
         || mongoose.model('ProviderTransaction',
-            new mongoose.Schema({}, { strict: false }),
-            'providertransactions');
+          new mongoose.Schema({}, { strict: false }),
+          'providertransactions');
 
       // Only create for non-Cash/Cheque (those go through Record Deposit)
       const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
       if (creditImmediately && depositTo && mongoose.Types.ObjectId.isValid(depositTo)
-          && !providerTransactionId
-          && paymentType !== 'credit_application') {
+        && !providerTransactionId
+        && paymentType !== 'credit_application') {
         await ProviderTransaction.create({
-          accountId:            new mongoose.Types.ObjectId(depositTo),
-          orgId:                req.user?.orgId || null,
-          branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
-          transactionDate:      new Date(paymentDate),
-          description:          `Customer Payment: ${customerName}`,
-          amount:               parseFloat(amountReceived),
-          transactionType:      'CREDIT',
+          accountId: new mongoose.Types.ObjectId(depositTo),
+          orgId: req.user?.orgId || null,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          transactionDate: new Date(paymentDate),
+          description: `Customer Payment: ${customerName}`,
+          amount: parseFloat(amountReceived),
+          transactionType: 'CREDIT',
           reconciliationStatus: 'CATEGORIZED',
-          categoryLabel:        'Customer Payment',
-          source:               'SYSTEM_ENTRY',
-          linkedRecordId:       result.insertedId,
-          linkedRecordType:     'PaymentReceived',
-          journalRef:           paymentNumber,
-          categorizedAt:        new Date(),
-          categorizedBy:        req.user?.email || 'system',
-          importedAt:           new Date(),
-          importedBy:           req.user?.email || 'system',
+          categoryLabel: 'Customer Payment',
+          source: 'SYSTEM_ENTRY',
+          linkedRecordId: result.insertedId,
+          linkedRecordType: 'PaymentReceived',
+          journalRef: paymentNumber,
+          categorizedAt: new Date(),
+          categorizedBy: req.user?.email || 'system',
+          importedAt: new Date(),
+          importedBy: req.user?.email || 'system',
         });
         console.log(`✅ ProviderTransaction created for payment received: ${paymentNumber}`);
       }
@@ -1232,13 +1314,13 @@ try {
           updatedInvoices[0], // Primary invoice
           proofPaths
         );
-        
+
         // Update payment record
         await db.collection('payments_received').updateOne(
           { _id: result.insertedId },
           { $set: { emailSent: true, emailSentAt: new Date() } }
         );
-        
+
         emailSent = true;
         console.log('✅ Payment receipt email sent successfully');
       } catch (emailError) {
@@ -1264,7 +1346,7 @@ try {
 
   } catch (error) {
     console.error('❌ Error creating payment:', error);
-    
+
     // Clean up uploaded files on error
     if (req.files && req.files.length > 0) {
       req.files.forEach(file => {
@@ -1275,7 +1357,7 @@ try {
         }
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Error creating payment',
@@ -1312,7 +1394,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       });
     }
 
-    const oldAmount    = parseFloat(oldPayment.amountReceived || 0);
+    const oldAmount = parseFloat(oldPayment.amountReceived || 0);
     const oldDepositTo = oldPayment.depositTo;
 
     const updateData = {
@@ -1339,7 +1421,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ── BALANCE ADJUSTMENT ON UPDATE ─────────────────────────────────────────
     try {
-      const newAmount    = parseFloat(req.body.amountReceived || oldAmount);
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
       const newDepositTo = req.body.depositTo || oldDepositTo;
       const depositChanged = req.body.depositTo && req.body.depositTo !== oldDepositTo;
       const PaymentAccountCol = db.collection('paymentaccounts');
@@ -1429,7 +1511,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     // ── COA ADJUSTMENT ON UPDATE ─────────────────────────────────────────────
     try {
       const currentOrgId = req.user?.orgId || null;
-      const newAmount    = parseFloat(req.body.amountReceived || oldAmount);
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
       const newDepositTo = req.body.depositTo || oldDepositTo;
       const depositChanged = req.body.depositTo && req.body.depositTo !== oldDepositTo;
 
@@ -1520,7 +1602,7 @@ router.put('/:id', verifyToken, async (req, res) => {
             description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
             referenceType: 'Payment', referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:  difference > 0 ? difference : 0,
+            debit: difference > 0 ? difference : 0,
             credit: difference < 0 ? Math.abs(difference) : 0
           });
           if (arId) await postTransactionToCOA({
@@ -1528,7 +1610,7 @@ router.put('/:id', verifyToken, async (req, res) => {
             description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
             referenceType: 'Payment', referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:  difference < 0 ? Math.abs(difference) : 0,
+            debit: difference < 0 ? Math.abs(difference) : 0,
             credit: difference > 0 ? difference : 0
           });
         } else {
@@ -1544,18 +1626,13 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ── ADJUST CUSTOMER UNUSED CREDITS ON UPDATE ─────────────────────────────
     try {
-      const mongoose = require('mongoose');
-      const BillingCustomerModel = mongoose.models.BillingCustomer
-        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
+      const newBankCharges = parseFloat(req.body.bankCharges || oldPayment.bankCharges || 0);
+      const newInvoicePayments = req.body.invoicePayments || oldPayment.invoicePayments || {};
+      const isAdvance = (req.body.paymentType || oldPayment.paymentType) === 'advance';
 
-      const newAmount         = parseFloat(req.body.amountReceived || oldAmount);
-      const newBankCharges    = parseFloat(req.body.bankCharges    || oldPayment.bankCharges || 0);
-      const newInvoicePayments= req.body.invoicePayments || oldPayment.invoicePayments || {};
-      const newCreditsApplied = parseFloat(req.body.creditsApplied || oldPayment.creditsApplied || 0);
-      const isAdvance         = (req.body.paymentType || oldPayment.paymentType) === 'advance';
-
-      const oldNetAmount      = parseFloat(oldPayment.netAmount || 0);
-      const newNetAmount      = newAmount - newBankCharges;
+      const oldNetAmount = parseFloat(oldPayment.netAmount || 0);
+      const newNetAmount = newAmount - newBankCharges;
 
       let oldCreditContrib, newCreditContrib;
 
@@ -1564,13 +1641,11 @@ router.put('/:id', verifyToken, async (req, res) => {
         oldCreditContrib = oldNetAmount;
         newCreditContrib = newNetAmount;
       } else {
-        const oldInvoiceTotal   = Object.values(oldPayment.invoicePayments || {}).reduce((s, v) => s + parseFloat(v), 0);
-        const oldCreditsApplied = parseFloat(oldPayment.creditsApplied || 0);
-        oldCreditContrib  = (oldNetAmount - oldInvoiceTotal) - oldCreditsApplied;
+        const oldInvoiceTotal = Object.values(oldPayment.invoicePayments || {}).reduce((s, v) => s + parseFloat(v), 0);
+        oldCreditContrib = oldNetAmount - oldInvoiceTotal;
 
-        const newInvoiceTotal   = Object.values(newInvoicePayments).reduce((s, v) => s + parseFloat(v), 0);
-        const newExcess         = newNetAmount - newInvoiceTotal;
-        newCreditContrib  = newExcess - newCreditsApplied;
+        const newInvoiceTotal = Object.values(newInvoicePayments).reduce((s, v) => s + parseFloat(v), 0);
+        newCreditContrib = newNetAmount - newInvoiceTotal;
       }
 
       const creditDelta = newCreditContrib - oldCreditContrib;
@@ -1578,11 +1653,12 @@ router.put('/:id', verifyToken, async (req, res) => {
       if (creditDelta !== 0 && oldPayment.customerId) {
         const custId = ObjectId.isValid(oldPayment.customerId)
           ? new ObjectId(oldPayment.customerId) : oldPayment.customerId;
-        await BillingCustomerModel.findOneAndUpdate(
+        await db.collection('billing-customers').findOneAndUpdate(
           { _id: custId },
-          { $inc: { unusedCredits: creditDelta } }
+          { $inc: { unusedCredits: creditDelta } },
+          { returnDocument: 'after' }
         );
-        await BillingCustomerModel.findOneAndUpdate(
+        await db.collection('billing-customers').updateMany(
           { _id: custId, unusedCredits: { $lt: 0 } },
           { $set: { unusedCredits: 0 } }
         );
@@ -1615,7 +1691,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -1671,7 +1747,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
           if (!invoice) continue;
 
           const reversedAmountPaid = (invoice.amountPaid || 0) - parseFloat(amount);
-          const reversedAmountDue  = invoice.totalAmount - reversedAmountPaid;
+          const reversedAmountDue = invoice.totalAmount - reversedAmountPaid;
 
           let newStatus = invoice.status;
           if (reversedAmountPaid <= 0) {
@@ -1686,9 +1762,9 @@ router.delete('/:id', verifyToken, async (req, res) => {
               $pull: { payments: { paymentId: id } },
               $set: {
                 amountPaid: Math.max(0, reversedAmountPaid),
-                amountDue:  Math.max(0, reversedAmountDue),
-                status:     newStatus,
-                updatedAt:  new Date()
+                amountDue: Math.max(0, reversedAmountDue),
+                status: newStatus,
+                updatedAt: new Date()
               }
             }
           );
@@ -1751,17 +1827,17 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // ── COA REVERSAL ON DELETE ───────────────────────────────────────────────
     try {
-      const currentOrgId  = req.user?.orgId || null;
-      const deleteAmount  = parseFloat(payment.amountReceived);
-      const paymentMode   = payment.paymentMode;
+      const currentOrgId = req.user?.orgId || null;
+      const deleteAmount = parseFloat(payment.amountReceived);
+      const paymentMode = payment.paymentMode;
       const paymentNumber = payment.paymentNumber;
-      const customerName  = payment.customerName;
+      const customerName = payment.customerName;
 
       // Parse payment date
       let txnDate;
       if (payment.paymentDate && payment.paymentDate.includes('/')) {
         const [day, month, year] = payment.paymentDate.split('/');
-        txnDate = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`);
+        txnDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
       } else {
         txnDate = new Date(payment.paymentDate);
       }
@@ -1784,10 +1860,10 @@ router.delete('/:id', verifyToken, async (req, res) => {
           ...(currentOrgId ? { orgId: currentOrgId } : {})
         }).select('_id').lean();
         depositCOAId = coaAcc ? coaAcc._id
-                               : await getSystemAccountId('Undeposited Funds', currentOrgId);
+          : await getSystemAccountId('Undeposited Funds', currentOrgId);
       }
 
-      const arId         = await getSystemAccountId('Accounts Receivable', currentOrgId);
+      const arId = await getSystemAccountId('Accounts Receivable', currentOrgId);
       const paymentObjId = new ObjectId(id);
 
       // REVERSE: Cr Undeposited Funds / Bank (was Dr before)
@@ -1798,32 +1874,32 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
         if (advanceAccId) {
           await postTransactionToCOA({
-            accountId:       advanceAccId,
-            orgId:           currentOrgId,
-            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            date:            txnDate,
-            description:     `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
-            referenceType:   'CreditApplication',
-            referenceId:     paymentObjId,
+            accountId: advanceAccId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
+            referenceType: 'CreditApplication',
+            referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:           0,
-            credit:          creditsAmt, // restore liability
+            debit: 0,
+            credit: creditsAmt, // restore liability
           });
           console.log(`✅ COA Reversal: Cr Advance from Customer ₹${creditsAmt}`);
         }
 
         if (arId) {
           await postTransactionToCOA({
-            accountId:       arId,
-            orgId:           currentOrgId,
-            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            date:            txnDate,
-            description:     `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
-            referenceType:   'CreditApplication',
-            referenceId:     paymentObjId,
+            accountId: arId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
+            referenceType: 'CreditApplication',
+            referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:           creditsAmt, // reverse the AR credit
-            credit:          0,
+            debit: creditsAmt, // reverse the AR credit
+            credit: 0,
           });
           console.log(`✅ COA Reversal: Dr Accounts Receivable ₹${creditsAmt}`);
         }
@@ -1831,16 +1907,16 @@ router.delete('/:id', verifyToken, async (req, res) => {
         // Normal payment / advance COA reversal
         if (depositCOAId) {
           await postTransactionToCOA({
-            accountId:       depositCOAId,
+            accountId: depositCOAId,
             orgId: currentOrgId,
-            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            date:            txnDate,
-            description:     `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
-            referenceType:   'Payment',
-            referenceId:     paymentObjId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:           0,
-            credit:          deleteAmount,  // ← reverses the Dr
+            debit: 0,
+            credit: deleteAmount,  // ← reverses the Dr
           });
           console.log(`✅ COA Reversal: Cr Undeposited/Bank ₹${deleteAmount}`);
         }
@@ -1848,16 +1924,16 @@ router.delete('/:id', verifyToken, async (req, res) => {
         // REVERSE: Dr Accounts Receivable (was Cr before)
         if (arId) {
           await postTransactionToCOA({
-            accountId:       arId,
+            accountId: arId,
             orgId: currentOrgId,
-            branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
-            date:            txnDate,
-            description:     `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
-            referenceType:   'Payment',
-            referenceId:     paymentObjId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: paymentObjId,
             referenceNumber: paymentNumber,
-            debit:           deleteAmount,  // ← reverses the Cr
-            credit:          0,
+            debit: deleteAmount,  // ← reverses the Cr
+            credit: 0,
           });
           console.log(`✅ COA Reversal: Dr Accounts Receivable ₹${deleteAmount}`);
         }
@@ -1884,16 +1960,16 @@ router.delete('/:id', verifyToken, async (req, res) => {
           if (bankCOA) {
             // Reverse: Cr Bank (was Dr on deposit)
             await postTransactionToCOA({
-              accountId:       bankCOA._id,
+              accountId: bankCOA._id,
               orgId: req.user?.orgId || null,
-              branchId:        req.branchIds?.length > 0 ? req.branchIds[0] : null,
-              date:            new Date(),
-              description:     `REVERSAL - Deposit for Payment ${payment.paymentNumber}`,
-              referenceType:   'Payment',
-              referenceId:     new ObjectId(id),
+              branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+              date: new Date(),
+              description: `REVERSAL - Deposit for Payment ${payment.paymentNumber}`,
+              referenceType: 'Payment',
+              referenceId: new ObjectId(id),
               referenceNumber: payment.paymentNumber,
-              debit:           0,
-              credit:          parseFloat(payment.amountReceived),
+              debit: 0,
+              credit: parseFloat(payment.amountReceived),
             });
 
             // Reverse PaymentAccount balance
@@ -1916,14 +1992,14 @@ router.delete('/:id', verifyToken, async (req, res) => {
       const mongoose = require('mongoose');
       const ProviderTransaction = mongoose.models.ProviderTransaction
         || mongoose.model('ProviderTransaction',
-            new mongoose.Schema({}, { strict: false }),
-            'providertransactions');
+          new mongoose.Schema({}, { strict: false }),
+          'providertransactions');
 
       // Delete any system-created ProviderTransaction linked to this payment
       await ProviderTransaction.deleteMany({
-        linkedRecordId:   new mongoose.Types.ObjectId(id),
+        linkedRecordId: new mongoose.Types.ObjectId(id),
         linkedRecordType: 'PaymentReceived',
-        source:           'SYSTEM_ENTRY',
+        source: 'SYSTEM_ENTRY',
         ...req.orgFilter,
       });
 
@@ -1933,11 +2009,11 @@ router.delete('/:id', verifyToken, async (req, res) => {
         await ProviderTransaction.findByIdAndUpdate(payment.providerTransactionId, {
           $set: {
             reconciliationStatus: 'UNCATEGORIZED',
-            categorizedAt:    null,
-            categorizedBy:    null,
-            journalRef:       null,
-            categoryLabel:    null,
-            linkedRecordId:   null,
+            categorizedAt: null,
+            categorizedBy: null,
+            journalRef: null,
+            categoryLabel: null,
+            linkedRecordId: null,
             linkedRecordType: null,
           }
         });
@@ -1950,10 +2026,6 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // ── REVERSE CUSTOMER UNUSED CREDITS ON DELETE ────────────────────────────
     try {
-      const mongoose = require('mongoose');
-      const BillingCustomerModel = mongoose.models.BillingCustomer
-        || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
-
       let creditDelta;
       if (payment.paymentType === 'advance') {
         // Advance: full netAmount was added → reverse it fully
@@ -1961,19 +2033,21 @@ router.delete('/:id', verifyToken, async (req, res) => {
       } else if (payment.paymentType === 'credit_application') {
         creditDelta = parseFloat(payment.creditsApplied || 0); // restore credits back
       } else {
-        // Normal payment: amountInExcess was what was added (POST creditDelta = newExcess - creditsApplied)
-        // amountInExcess stored on record = netAmount - invoiceTotal - creditsApplied = POST creditDelta
-        creditDelta = -(parseFloat(payment.amountInExcess || 0));
+        // For normal payment, POST creditDelta was (netAmount - totalInvoicePayments)
+        const oldInvoiceTotal = Object.values(payment.invoicePayments || {}).reduce((s, v) => s + parseFloat(v), 0);
+        const oldCreditAdded = parseFloat(payment.netAmount || 0) - oldInvoiceTotal;
+        creditDelta = -oldCreditAdded;
       }
 
       if (creditDelta !== 0 && payment.customerId) {
         const custId = ObjectId.isValid(payment.customerId)
           ? new ObjectId(payment.customerId) : payment.customerId;
-        await BillingCustomerModel.findOneAndUpdate(
+        await db.collection('billing-customers').findOneAndUpdate(
           { _id: custId },
-          { $inc: { unusedCredits: creditDelta } }
+          { $inc: { unusedCredits: creditDelta } },
+          { returnDocument: 'after' }
         );
-        await BillingCustomerModel.findOneAndUpdate(
+        await db.collection('billing-customers').updateMany(
           { _id: custId, unusedCredits: { $lt: 0 } },
           { $set: { unusedCredits: 0 } }
         );
@@ -2008,11 +2082,11 @@ router.delete('/:id', verifyToken, async (req, res) => {
 router.get('/customer-payments-with-balance/:customerId', verifyToken, async (req, res) => {
   try {
     const { customerId } = req.params;
-    
+
     console.log('\n🔍 [GET PAYMENTS WITH BALANCE]');
     console.log('   customerId:', customerId);
     console.log('   isValid:', ObjectId.isValid(customerId));
-    
+
     if (!ObjectId.isValid(customerId)) {
       return res.status(400).json({ success: false, error: 'Invalid customer ID' });
     }
@@ -2028,28 +2102,28 @@ router.get('/customer-payments-with-balance/:customerId', verifyToken, async (re
     }).sort({ paymentDate: -1 }).toArray();
 
     console.log('   Total payments found:', payments.length);
-    
+
     // Only return payments that have a refundable excess balance
     const withBalance = payments
       .map(p => {
         const amountInExcess = p.amountInExcess != null
           ? p.amountInExcess
           : Math.max(0, (p.amountReceived || 0) - (p.amountUsedForPayments || 0) - (p.amountRefunded || 0));
-        
+
         console.log(`   Payment ${p.paymentNumber}: amountInExcess = ${amountInExcess}`);
-        
+
         return {
-          _id:             p._id,
-          paymentNumber:   p.paymentNumber,
-          paymentDate:     p.paymentDate,
-          paymentMode:     p.paymentMode,
-          paymentType:     p.paymentType,
-          amountReceived:  p.amountReceived || 0,
+          _id: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate,
+          paymentMode: p.paymentMode,
+          paymentType: p.paymentType,
+          amountReceived: p.amountReceived || 0,
           amountInExcess,
-          amountRefunded:  p.amountRefunded || 0,
-          status:          p.status,
+          amountRefunded: p.amountRefunded || 0,
+          status: p.status,
           referenceNumber: p.reference || p.referenceNumber || '',
-          notes:           p.notes || '',
+          notes: p.notes || '',
         };
       })
       .filter(p => p.amountInExcess > 0.001);
@@ -2086,13 +2160,13 @@ router.post('/:id/refund', verifyToken, async (req, res) => {
     }
 
     const { amount, refundMode, referenceNumber, refundDate, notes, providerTransactionId } = req.body;
-    
+
     console.log('\n🔍 [PAYMENT REFUND DEBUG]');
     console.log('   Payment ID:', id);
     console.log('   Amount:', amount);
     console.log('   providerTransactionId:', providerTransactionId);
     console.log('   Has existing bank transaction:', !!providerTransactionId);
-    
+
     if (!amount || amount <= 0) {
       return res.status(400).json({ success: false, error: 'Invalid refund amount' });
     }
@@ -2107,14 +2181,14 @@ router.post('/:id/refund', verifyToken, async (req, res) => {
     }
 
     const refundEntry = {
-      _id:             new ObjectId(),
-      amount:          parseFloat(amount),
-      refundDate:      refundDate ? new Date(refundDate) : new Date(),
-      refundMode:      refundMode || 'Cash',
+      _id: new ObjectId(),
+      amount: parseFloat(amount),
+      refundDate: refundDate ? new Date(refundDate) : new Date(),
+      refundMode: refundMode || 'Cash',
       referenceNumber: referenceNumber || '',
-      notes:           notes || '',
-      refundedBy:      req.user?.email || 'system',
-      refundedAt:      new Date(),
+      notes: notes || '',
+      refundedBy: req.user?.email || 'system',
+      refundedAt: new Date(),
     };
 
     const newAmountRefunded = (payment.amountRefunded || 0) + parseFloat(amount);
@@ -2139,37 +2213,34 @@ router.post('/:id/refund', verifyToken, async (req, res) => {
         console.log('   customerId:', payment.customerId);
         console.log('   refundAmount:', amount);
         console.log('   Decreasing unusedCredits by:', parseFloat(amount));
-        
-        const mongoose = require('mongoose');
-        const BillingCustomerModel = mongoose.models.BillingCustomer
-          || mongoose.model('BillingCustomer', new mongoose.Schema({}, { strict: false }), 'billing-customers');
+
         const custId = ObjectId.isValid(payment.customerId)
           ? new ObjectId(payment.customerId)
           : payment.customerId;
-        
-        const beforeUpdate = await BillingCustomerModel.findOne({ _id: custId });
+
+        const beforeUpdate = await db.collection('billing-customers').findOne({ _id: custId });
         console.log('   unusedCredits BEFORE refund:', beforeUpdate?.unusedCredits || 0);
-        
-        const result = await BillingCustomerModel.findOneAndUpdate(
+
+        const result = await db.collection('billing-customers').findOneAndUpdate(
           { _id: custId },
           { $inc: { unusedCredits: -parseFloat(amount) } },
-          { new: true }
+          { returnDocument: 'after' }
         );
-        
+
         console.log('   unusedCredits AFTER refund:', result?.unusedCredits || 0);
         console.log('   Update result:', result ? 'SUCCESS' : 'FAILED');
-        
+
         // Ensure it never goes below 0
-        const finalResult = await BillingCustomerModel.findOneAndUpdate(
+        const finalResult = await db.collection('billing-customers').findOneAndUpdate(
           { _id: custId, unusedCredits: { $lt: 0 } },
           { $set: { unusedCredits: 0 } },
-          { new: true }
+          { returnDocument: 'after' }
         );
-        
+
         if (finalResult) {
           console.log('   ⚠️ unusedCredits was negative, reset to 0');
         }
-        
+
         console.log('✅ Customer unusedCredits decreased by -₹' + amount);
       } catch (creditErr) {
         console.error('⚠️ Failed to update customer unusedCredits on refund:', creditErr.message);
@@ -2263,18 +2334,18 @@ router.post('/:id/refund', verifyToken, async (req, res) => {
       } else {
         console.log('⚠️ [PAYMENT REFUND] Creating NEW provider transaction (no existing transaction provided)');
         await db.collection('providertransactions').insertOne({
-          orgId:                req.user?.orgId || null,
-          branchId:             req.branchIds?.length > 0 ? req.branchIds[0] : null,
-          transactionType:      'DEBIT',
-          amount:               parseFloat(amount),
-          transactionDate:      refundDate ? new Date(refundDate) : new Date(),
-          description:          `Payment Refund - ${payment.paymentNumber}`,
-          categoryLabel:        'Payment Refund',
-          linkedRecordType:     'PaymentReceived',
-          linkedRecordId:       new ObjectId(id),
-          source:               'SYSTEM_ENTRY',
+          orgId: req.user?.orgId || null,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          transactionType: 'DEBIT',
+          amount: parseFloat(amount),
+          transactionDate: refundDate ? new Date(refundDate) : new Date(),
+          description: `Payment Refund - ${payment.paymentNumber}`,
+          categoryLabel: 'Payment Refund',
+          linkedRecordType: 'PaymentReceived',
+          linkedRecordId: new ObjectId(id),
+          source: 'SYSTEM_ENTRY',
           reconciliationStatus: 'CATEGORIZED',
-          createdAt:            new Date(),
+          createdAt: new Date(),
         });
       }
     } catch (ptErr) {
@@ -2319,7 +2390,7 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
         }
       }
       if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
-    } catch (_) {}
+    } catch (_) { }
 
     // Fetch org details — branch-aware
     let orgData = null;
@@ -2327,12 +2398,12 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       const { getEffectiveOrgData } = require('./branches');
       const db = mongoose.connection.db;
       if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
-    } catch (_) {}
-    const orgName  = orgData?.orgName   || 'Billing Team';
-    const orgGST   = orgData?.gstNumber || '';
-    const orgPhone = orgData?.phone     || '';
-    const orgEmail = orgData?.email     || '';
-    const orgAddr  = orgData?.address   || '';
+    } catch (_) { }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
+    const orgAddr = orgData?.address || '';
 
     // ── Org logo helper (inline, no external dependency) ─────────────────────
     function getOrgLogoPath(orgId) {
@@ -2346,7 +2417,7 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
               const fullPath = path.join(orgLogoDir, match);
               if (fs.existsSync(fullPath) && fs.statSync(fullPath).size > 0) return fullPath;
             }
-          } catch (_) {}
+          } catch (_) { }
         }
       }
       const fallbacks = [
@@ -2358,48 +2429,62 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
         path.join(process.cwd(), 'assets', 'abra.png'),
       ];
       for (const p of fallbacks) {
-        try { if (fs.existsSync(p) && fs.statSync(p).size > 0) return p; } catch (_) {}
+        try { if (fs.existsSync(p) && fs.statSync(p).size > 0) return p; } catch (_) { }
       }
       return null;
     }
 
     const PDFDocument = require('pdfkit');
-    const uploadsDir  = path.join(__dirname, '..', 'uploads', 'payments');
+    const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
     const filename = `payment-${payment.paymentNumber}.pdf`;
     const filepath = path.join(uploadsDir, filename);
 
-    const doc    = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
     const stream = fs.createWriteStream(filepath);
     doc.pipe(stream);
 
     const pageW = 515;
     const amountReceived = parseFloat(payment.amountReceived || 0);
-    const bankCharges    = parseFloat(payment.bankCharges    || 0);
-    const amountDue      = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const amountDue = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
 
     // ── Logo ──────────────────────────────────────────────────────────────────
-    const logoPath = getOrgLogoPath ? getOrgLogoPath(payment.orgId) : null;
-    const textX    = logoPath ? 126 : 50;
+    let logoData = null;
+    if (orgData?.logoBase64) {
+      const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgData?.logoUrl) {
+      const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    if (!logoData) {
+      const lp = getOrgLogoPath ? getOrgLogoPath(payment.orgId) : null;
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    const textX = logoData ? 166 : 50;
     const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-    const textBlockH   = 14 + 12 + contactLines.length * 9;
-    const textStartY   = 35;
-    const logoCenterY  = textStartY + textBlockH / 2;
-    const logoH = 55;
-    const logoY = logoCenterY - logoH / 2;
+    const textBlockH = 14 + 12 + contactLines.length * 9;
+    const textStartY = 35;
+    const logoCenterY = textStartY + textBlockH / 2;
+    
+    const logoH = 82; // Increased to match invoice
+    const logoW = 110; // Increased to match invoice
+    const logoY = textStartY; // Align top of logo with top of text
 
-    if (logoPath) {
-      try { doc.image(logoPath, 44, logoY, { width: 72, height: logoH, fit: [72, logoH] }); } catch (_) {}
+    if (logoData) {
+      try { doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] }); } catch (_) { }
     }
 
     doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
-       .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+      .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
     doc.fontSize(12).font('Helvetica-Bold');
     const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
     const subtitleY = textStartY + orgNameH + 2;
     doc.fontSize(7).fillColor('#444444').font('Helvetica')
-       .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
+      .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
     doc.fontSize(7).fillColor('#000000');
     let cy = subtitleY + 12;
     contactLines.forEach(l => {
@@ -2409,11 +2494,11 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     });
 
     doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
-       .text(payment.paymentType === 'advance' ? 'ADVANCE RECEIPT' : 'PAYMENT RECEIPT', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+      .text(payment.paymentType === 'advance' ? 'ADVANCE RECEIPT' : 'PAYMENT RECEIPT', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
     doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
-       .text(payment.paymentNumber, 380, 52, { width: 170, align: 'right' });
+      .text(payment.paymentNumber, 380, 52, { width: 170, align: 'right' });
     doc.fontSize(8).fillColor('#000000').font('Helvetica')
-       .text(`Date: ${payment.paymentDate}`, 380, 74, { width: 170, align: 'right' });
+      .text(`Date: ${payment.paymentDate}`, 380, 74, { width: 170, align: 'right' });
 
     // ── Divider ───────────────────────────────────────────────────────────────
     const headerBottom = Math.max(cy + 4, 90);
@@ -2436,9 +2521,9 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     y += 12;
 
     const rows = [
-      ['Payment Number',  payment.paymentNumber],
-      ['Payment Date',    payment.paymentDate],
-      ['Payment Mode',    payment.paymentMode],
+      ['Payment Number', payment.paymentNumber],
+      ['Payment Date', payment.paymentDate],
+      ['Payment Mode', payment.paymentMode],
       payment.reference ? ['Reference Number', payment.reference] : null,
       bankCharges > 0 ? ['Bank Charges', `Rs.${bankCharges.toFixed(2)}`] : null,
     ].filter(Boolean);
@@ -2455,7 +2540,7 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
 
     // ── Amount received ───────────────────────────────────────────────────────
     doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold')
-       .text(payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received', 40, y, { width: 300 });
+      .text(payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received', 40, y, { width: 300 });
     doc.fontSize(14).fillColor('#27AE60').font('Helvetica-Bold').text(`Rs.${amountReceived.toFixed(2)}`, 250, y - 2, { width: 305, align: 'right' });
     y += 20;
 
@@ -2464,9 +2549,9 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       y += 8;
       doc.rect(40, y, 515, 36).fill('#E8F5E9');
       doc.fontSize(9).fillColor('#1B5E20').font('Helvetica-Bold')
-         .text('This amount has been recorded as an advance credit on your account.', 50, y + 6, { width: 505 });
+        .text('This amount has been recorded as an advance credit on your account.', 50, y + 6, { width: 505 });
       doc.fontSize(9).fillColor('#1B5E20').font('Helvetica')
-         .text('It will be automatically applied when invoices are raised against your account.', 50, y + 19, { width: 505 });
+        .text('It will be automatically applied when invoices are raised against your account.', 50, y + 19, { width: 505 });
       y += 44;
     }
 
@@ -2479,27 +2564,27 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       // Table header
       doc.rect(40, y, 515, 18).fill('#0D1B3E');
       doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold')
-         .text('INVOICE #',    44, y + 5, { width: 120 })
-         .text('INVOICE DATE', 170, y + 5, { width: 100 })
-         .text('INVOICE AMT',  275, y + 5, { width: 100, align: 'right' })
-         .text('APPLIED',      380, y + 5, { width: 90, align: 'right' })
-         .text('BALANCE DUE',  475, y + 5, { width: 75, align: 'right' });
+        .text('INVOICE #', 44, y + 5, { width: 120 })
+        .text('INVOICE DATE', 170, y + 5, { width: 100 })
+        .text('INVOICE AMT', 275, y + 5, { width: 100, align: 'right' })
+        .text('APPLIED', 380, y + 5, { width: 90, align: 'right' })
+        .text('BALANCE DUE', 475, y + 5, { width: 75, align: 'right' });
       y += 20;
 
       linkedInvoices.forEach((inv, idx) => {
         const rowBg = idx % 2 === 0 ? '#F8F9FA' : '#FFFFFF';
         doc.rect(40, y, 515, 16).fill(rowBg);
         const invTotal = parseFloat(inv.totalAmount || 0);
-        const invDue   = parseFloat(inv.amountDue   || 0);
-        const applied  = inv._appliedAmount || 0;
+        const invDue = parseFloat(inv.amountDue || 0);
+        const applied = inv._appliedAmount || 0;
         doc.fontSize(8).fillColor('#000000').font('Helvetica')
-           .text(inv.invoiceNumber || '-',                    44, y + 4, { width: 120 })
-           .text(inv.invoiceDate   ? String(inv.invoiceDate).slice(0,10) : '-', 170, y + 4, { width: 100 })
-           .text(`Rs.${invTotal.toFixed(2)}`,                 275, y + 4, { width: 100, align: 'right' })
-           .text(`Rs.${applied.toFixed(2)}`,                  380, y + 4, { width: 90,  align: 'right' });
+          .text(inv.invoiceNumber || '-', 44, y + 4, { width: 120 })
+          .text(inv.invoiceDate ? String(inv.invoiceDate).slice(0, 10) : '-', 170, y + 4, { width: 100 })
+          .text(`Rs.${invTotal.toFixed(2)}`, 275, y + 4, { width: 100, align: 'right' })
+          .text(`Rs.${applied.toFixed(2)}`, 380, y + 4, { width: 90, align: 'right' });
         const dueColor = invDue > 0 ? '#DC2626' : '#27AE60';
         doc.fontSize(8).fillColor(dueColor).font('Helvetica-Bold')
-           .text(`Rs.${invDue.toFixed(2)}`, 475, y + 4, { width: 75, align: 'right' });
+          .text(`Rs.${invDue.toFixed(2)}`, 475, y + 4, { width: 75, align: 'right' });
         y += 18;
       });
 
@@ -2507,8 +2592,8 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       const totalApplied = linkedInvoices.reduce((s, inv) => s + (inv._appliedAmount || 0), 0);
       doc.rect(40, y, 515, 18).fill('#E8F5E9');
       doc.fontSize(8.5).fillColor('#1B5E20').font('Helvetica-Bold')
-         .text('Total Applied to Invoices', 44, y + 5, { width: 330 })
-         .text(`Rs.${totalApplied.toFixed(2)}`, 380, y + 5, { width: 90, align: 'right' });
+        .text('Total Applied to Invoices', 44, y + 5, { width: 330 })
+        .text(`Rs.${totalApplied.toFixed(2)}`, 380, y + 5, { width: 90, align: 'right' });
       y += 22;
     }
 
@@ -2535,60 +2620,69 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     // ── Authorized Signatory ──────────────────────────────────────────────────
     // Footer is fixed at y=760. Signature sits centered in the gap between
     // content end (y) and the footer, aligned to the right.
-    const footerY  = 760;
+    const footerY = 760;
     const signBoxW = 220;
     const authBoxX = 555 - signBoxW;
 
     // Available vertical space between content and footer
-    const gapTop    = y + 10;          // 10px padding below last content line
+    const gapTop = y + 10;          // 10px padding below last content line
     const gapBottom = footerY - 10;    // 10px above footer line
     const sigBlockH = 10 + 200 + 14 + 12; // "For ORG" label + sig image (200px) + gap + "Authorized Signatory"
     // Center the block in the gap
     const signSectionY = Math.max(gapTop, Math.round((gapTop + gapBottom - sigBlockH) / 2));
 
     doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
-       .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+      .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
 
     const _prSigRelPath = orgData?.digitalSignaturePath;
-    const _prSigSize    = 200; // large square so round stamps show fully (matches invoices.js)
-    let   _prActualSigH = _prSigSize;
-    if (_prSigRelPath) {
+    const _prSigSize = 200; // large square so round stamps show fully (matches invoices.js)
+    let _prActualSigH = _prSigSize;
+    
+    let sigBuf = null;
+    let sigExt = '.png';
+    if (orgData?.signatureBase64) {
+      const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+      if (match) {
+        sigExt = '.' + match[1].replace('jpeg', 'jpg');
+        sigBuf = Buffer.from(match[2], 'base64');
+      }
+    } else if (_prSigRelPath) {
+      const _prSigAbs = path.join(__dirname, '..', _prSigRelPath.replace(/^\//, ''));
+      try { if (fs.existsSync(_prSigAbs)) { sigBuf = fs.readFileSync(_prSigAbs); sigExt = path.extname(_prSigAbs).toLowerCase(); } } catch (_) {}
+    }
+
+    if (sigBuf) {
       try {
-        const _prSigAbs = path.join(__dirname, '..', _prSigRelPath.replace(/^\//, ''));
-        if (fs.existsSync(_prSigAbs)) {
           let _prW = _prSigSize, _prH = _prSigSize;
           try {
-            const _prBuf = fs.readFileSync(_prSigAbs);
-            const _prExt = path.extname(_prSigAbs).toLowerCase();
-            if (_prExt === '.png' && _prBuf.length > 24) { _prW = _prBuf.readUInt32BE(16); _prH = _prBuf.readUInt32BE(20); }
-            else if ((_prExt === '.jpg' || _prExt === '.jpeg') && _prBuf.length > 4) {
+            if (sigExt === '.png' && sigBuf.length > 24) { _prW = sigBuf.readUInt32BE(16); _prH = sigBuf.readUInt32BE(20); }
+            else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
               let _pri = 2;
-              while (_pri < _prBuf.length - 8) {
-                if (_prBuf[_pri] === 0xFF && _prBuf[_pri+1] >= 0xC0 && _prBuf[_pri+1] <= 0xC3) { _prH = _prBuf.readUInt16BE(_pri+5); _prW = _prBuf.readUInt16BE(_pri+7); break; }
-                _pri += 2 + _prBuf.readUInt16BE(_pri + 2);
+              while (_pri < sigBuf.length - 8) {
+                if (sigBuf[_pri] === 0xFF && sigBuf[_pri + 1] >= 0xC0 && sigBuf[_pri + 1] <= 0xC3) { _prH = sigBuf.readUInt16BE(_pri + 5); _prW = sigBuf.readUInt16BE(_pri + 7); break; }
+                _pri += 2 + sigBuf.readUInt16BE(_pri + 2);
               }
             }
-          } catch (_) {}
-          const _prScale      = Math.min(_prSigSize / _prW, _prSigSize / _prH);
-          _prActualSigH       = Math.round(_prH * _prScale);
+          } catch (_) { }
+          const _prScale = Math.min(_prSigSize / _prW, _prSigSize / _prH);
+          _prActualSigH = Math.round(_prH * _prScale);
           const _prActualSigW = Math.round(_prW * _prScale);
-          const _prCenteredX  = authBoxX + (signBoxW - _prActualSigW) / 2;
-          doc.image(_prSigAbs, _prCenteredX, signSectionY + 10, { width: _prActualSigW, height: _prActualSigH });
-        }
+          const _prCenteredX = authBoxX + (signBoxW - _prActualSigW) / 2;
+          doc.image(sigBuf, _prCenteredX, signSectionY + 10, { width: _prActualSigW, height: _prActualSigH });
       } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
     }
 
     // Line sits exactly 14pt below the actual rendered image (matches invoices.js)
     const _prSigLineY = signSectionY + 10 + _prActualSigH + 14;
     doc.moveTo(authBoxX, _prSigLineY).lineTo(authBoxX + signBoxW, _prSigLineY)
-       .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+      .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
     doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
-       .text('Authorized Signatory', authBoxX, _prSigLineY + 3, { width: signBoxW, align: 'center' });
+      .text('Authorized Signatory', authBoxX, _prSigLineY + 3, { width: signBoxW, align: 'center' });
 
     // ── Footer — fixed at bottom of page ─────────────────────────────────────
     doc.moveTo(40, footerY).lineTo(555, footerY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
     doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-       .text(`${orgName}${orgGST ? ' · GSTIN: ' + orgGST : ''} · ${payment.paymentNumber}`, 40, footerY + 6, { width: pageW / 2 });
+      .text(`${orgName}${orgGST ? ' · GSTIN: ' + orgGST : ''} · ${payment.paymentNumber}`, 40, footerY + 6, { width: pageW / 2 });
     doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footerY + 6, { width: pageW, align: 'right' });
 
     doc.end();
@@ -2634,22 +2728,22 @@ router.get('/:id/email-preview', verifyToken, async (req, res) => {
         }
       }
       if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
-    } catch (_) {}
+    } catch (_) { }
 
     let orgData = null;
     try {
       const { getEffectiveOrgData } = require('./branches');
       const db = mongoose.connection.db;
       if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
-    } catch (_) {}
-    const orgName  = orgData?.orgName   || 'Billing Team';
-    const orgGST   = orgData?.gstNumber || '';
-    const orgPhone = orgData?.phone     || '';
-    const orgEmail = orgData?.email     || '';
+    } catch (_) { }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
 
     const amountReceived = parseFloat(payment.amountReceived || 0);
-    const bankCharges    = parseFloat(payment.bankCharges    || 0);
-    const totalDue       = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const totalDue = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
 
     // Build invoices applied table rows
     const invoiceRowsHtml = linkedInvoices.length > 0 ? `
@@ -2823,7 +2917,7 @@ router.post('/:id/send-email', verifyToken, async (req, res) => {
         }
       }
       if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
-    } catch (_) {}
+    } catch (_) { }
 
     // Fetch org details — branch-aware
     let orgData = null;
@@ -2831,15 +2925,15 @@ router.post('/:id/send-email', verifyToken, async (req, res) => {
       const { getEffectiveOrgData } = require('./branches');
       const db = mongoose.connection.db;
       if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
-    } catch (_) {}
-    const orgName  = orgData?.orgName   || 'Billing Team';
-    const orgGST   = orgData?.gstNumber || '';
-    const orgPhone = orgData?.phone     || '';
-    const orgEmail = orgData?.email     || '';
+    } catch (_) { }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
 
     const amountReceived = parseFloat(payment.amountReceived || 0);
-    const bankCharges    = parseFloat(payment.bankCharges    || 0);
-    const totalDue       = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const totalDue = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
 
     // Build invoices applied table rows for email
     const invoiceRowsHtml = linkedInvoices.length > 0 ? `
@@ -2975,12 +3069,12 @@ router.post('/:id/send-email', verifyToken, async (req, res) => {
 </html>`;
 
     await sendMail({
-      orgId:    payment.orgId,
+      orgId: payment.orgId,
       branchId: payment.branchId || null,
-      db:       require('mongoose').connection.db,
-      to:       toEmail,
-      subject:  `${payment.paymentType === 'advance' ? 'Advance Receipt' : 'Payment Receipt'} - ${payment.paymentNumber} - ₹${amountReceived.toFixed(2)}`,
-      html:     emailHtml,
+      db: require('mongoose').connection.db,
+      to: toEmail,
+      subject: `${payment.paymentType === 'advance' ? 'Advance Receipt' : 'Payment Receipt'} - ${payment.paymentNumber} - ₹${amountReceived.toFixed(2)}`,
+      html: emailHtml,
     });
 
     // Update payment record
@@ -3004,7 +3098,7 @@ router.post('/:id/send-email', verifyToken, async (req, res) => {
 router.get('/:id/proofs', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -3044,7 +3138,7 @@ router.get('/:id/proofs', verifyToken, async (req, res) => {
 router.get('/:id/proofs/:proofIndex/download', verifyToken, async (req, res) => {
   try {
     const { id, proofIndex } = req.params;
-    
+
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -3071,7 +3165,7 @@ router.get('/:id/proofs/:proofIndex/download', verifyToken, async (req, res) => 
     }
 
     const proof = payment.paymentProofs[index];
-    
+
     if (!fs.existsSync(proof.filepath)) {
       return res.status(404).json({
         success: false,
@@ -3187,12 +3281,12 @@ router.post('/:id/proofs', verifyToken, uploadPaymentProofs, async (req, res) =>
     }
 
     const newProofs = req.files.map(file => ({
-      filename:     file.filename,
+      filename: file.filename,
       originalName: file.originalname,
-      filepath:     file.path,
-      fileType:     file.mimetype,
-      fileSize:     file.size,
-      uploadedAt:   new Date(),
+      filepath: file.path,
+      fileType: file.mimetype,
+      fileSize: file.size,
+      uploadedAt: new Date(),
     }));
 
     await db.collection('payments_received').updateOne(
@@ -3209,7 +3303,7 @@ router.post('/:id/proofs', verifyToken, uploadPaymentProofs, async (req, res) =>
   } catch (error) {
     console.error('❌ Error adding payment proofs:', error);
     if (req.files) {
-      req.files.forEach(f => { try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {} });
+      req.files.forEach(f => { try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) { } });
     }
     res.status(500).json({ success: false, message: 'Error uploading proofs', error: error.message });
   }

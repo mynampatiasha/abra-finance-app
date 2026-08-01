@@ -52,6 +52,25 @@ app.get('/health', (_, res) => res.json({
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
 app.use('/api/finance/auth',  require('./routes/finance_auth'));
 
+// Proxy for legacy CRM images to bypass CORS without JWT (Protected against SSRF)
+app.get('/api/finance/legacy-image', async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || !url.startsWith('https://crm.abra-logistic.com/')) {
+      return res.status(403).send('Forbidden URL');
+    }
+    const response = await fetch(url);
+    if (!response.ok) return res.status(response.status).send('Image not found');
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    res.set('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).send('Error fetching image');
+  }
+});
+
 // ─── PDF TOKEN PROMOTION ──────────────────────────────────────────────────────
 // For PDF preview routes, the frontend fetches with ?token= in the URL.
 // Promote it to Authorization header so verifyFinanceJWT can validate it.

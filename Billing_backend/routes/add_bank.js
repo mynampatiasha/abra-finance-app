@@ -336,11 +336,36 @@ router.get('/', async (req, res) => {
     }
 
     const accounts = await PaymentAccount.find(filter).sort({ createdAt: -1 });
+    let accountsData = accounts.map(acc => acc.toObject());
+
+    // --- MAP TRUE LEDGER BALANCES ---
+    try {
+      const { ChartOfAccount } = require('./chart_of_accounts');
+      for (let i = 0; i < accountsData.length; i++) {
+        const coaFilter = { accountName: accountsData[i].accountName };
+        if (req.user?.orgId) coaFilter.orgId = req.user.orgId;
+        if (!allBranches && req.branchFilter && req.branchFilter.branchId) {
+          coaFilter.branchId = req.branchFilter.branchId;
+        }
+
+        const coaAcc = await ChartOfAccount.findOne(coaFilter);
+        if (coaAcc) {
+          let bal = coaAcc.closingBalance || 0;
+          if (String(coaAcc.accountType || '').toUpperCase().includes('LIABILITY')) {
+             bal = -bal;
+          }
+          accountsData[i].currentBalance = bal;
+        }
+      }
+    } catch (coaErr) {
+      console.error('Error joining COA balance:', coaErr.message);
+    }
+    // ---------------------------------
 
     res.status(200).json({
       success: true,
-      count: accounts.length,
-      data: accounts,
+      count: accountsData.length,
+      data: accountsData,
     });
   } catch (error) {
     console.error('Error fetching accounts:', error);
@@ -381,9 +406,33 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    let accountData = account.toObject();
+
+    // --- MAP TRUE LEDGER BALANCE ---
+    try {
+      const { ChartOfAccount } = require('./chart_of_accounts');
+      const coaFilter = { accountName: accountData.accountName };
+      if (req.user?.orgId) coaFilter.orgId = req.user.orgId;
+      if (req.branchFilter && req.branchFilter.branchId) {
+        coaFilter.branchId = req.branchFilter.branchId;
+      }
+      
+      const coaAcc = await ChartOfAccount.findOne(coaFilter);
+      if (coaAcc) {
+        let bal = coaAcc.closingBalance || 0;
+        if (String(coaAcc.accountType || '').toUpperCase().includes('LIABILITY')) {
+           bal = -bal;
+        }
+        accountData.currentBalance = bal;
+      }
+    } catch (coaErr) {
+      console.error('Error joining COA balance:', coaErr.message);
+    }
+    // -------------------------------
+
     res.status(200).json({
       success: true,
-      data: account,
+      data: accountData,
     });
   } catch (error) {
     console.error('Error fetching account:', error);

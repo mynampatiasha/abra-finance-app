@@ -41,6 +41,8 @@ import '../../../core/services/vendor_credit_service.dart';
 import '../../../core/services/billing_customers_service.dart';
 import '../../../core/services/payment_service.dart';
 import '../../../core/services/credit_note_service.dart';
+import 'new_vendor.dart';
+import 'new_customer.dart';
 
 const Color _navyDark = Color(0xFF0D1B3E);
 const Color _navy = Color(0xFF1e3a8a);
@@ -112,7 +114,10 @@ class AccountDetailPage extends StatefulWidget {
     required this.accountType,
     this.accountNumber,
     this.initialTab = 0,
+    this.highlightTransactionId,
   }) : super(key: key);
+
+  final String? highlightTransactionId;
 
   @override
   State<AccountDetailPage> createState() => _AccountDetailPageState();
@@ -196,7 +201,32 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     _tabCtrl =
         TabController(length: 3, vsync: this, initialIndex: widget.initialTab);
     _tabCtrl.addListener(() => setState(() {}));
-    _loadAll();
+    _loadAll().then((_) async {
+      final highlightId = widget.highlightTransactionId;
+      if (highlightId != null && mounted) {
+        _tabCtrl.animateTo(2);
+        // Fast path: transaction is already in the loaded page.
+        Map<String, dynamic> txn = _allTxns.firstWhere(
+            (t) => t['_id'] == highlightId,
+            orElse: () => <String, dynamic>{});
+        // Fallback: fetch it directly by ID — it may live outside the
+        // first page of /all-transactions, so a list search alone can miss it.
+        if (txn.isEmpty) {
+          final r = await _svc.getTransactionById(highlightId);
+          if (r['success'] == true && r['data'] != null) {
+            txn = Map<String, dynamic>.from(r['data'] as Map);
+          }
+        }
+        if (txn.isNotEmpty && mounted) {
+          final isCat = txn['reconciliationStatus'] == 'CATEGORIZED';
+          if (isCat) {
+            _openCatPanel(txn);
+          } else {
+            _editTransaction(txn);
+          }
+        }
+      }
+    });
   }
 
   @override
@@ -3444,10 +3474,9 @@ class _VendorCreditRefundPage extends StatefulWidget {
 }
 
 class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
-  // ── vendors ──────────────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _vendors = [];
-  bool _loadingVendors = true;
+  // ── vendor selection ─────────────────────────────────────────────────────
   String? _selectedVendorId;
+  String? _selectedVendorName;
 
   // ── credits for selected vendor ──────────────────────────────────────────
   List<VendorCredit> _credits = [];
@@ -3479,7 +3508,6 @@ class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
     super.initState();
     _refundDate = widget.prefilledDate;
     _refCtrl.text = widget.prefilledReference;
-    _fetchVendors();
   }
 
   @override
@@ -3491,29 +3519,6 @@ class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
   }
 
   // ── loaders ──────────────────────────────────────────────────────────────
-
-  Future<void> _fetchVendors() async {
-    setState(() => _loadingVendors = true);
-    try {
-      final res = await BillingVendorsService.getAllVendors(limit: 1000);
-      if (res['success'] == true) {
-        final raw = res['data'];
-        final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
-        setState(() {
-          _vendors = list
-              .map<Map<String, dynamic>>((v) => {
-                    '_id': v['_id']?.toString() ?? '',
-                    'vendorName': v['vendorName']?.toString() ?? '',
-                  })
-              .toList();
-        });
-      }
-    } catch (e) {
-      debugPrint('Vendor load error: $e');
-    } finally {
-      setState(() => _loadingVendors = false);
-    }
-  }
 
   Future<void> _fetchCredits(String vendorId) async {
     setState(() {
@@ -3612,26 +3617,45 @@ class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
         // ── Vendor ──────────────────────────────────────────────────────────
         _label('Vendor', required: true),
         const SizedBox(height: 6),
-        _loadingVendors
-            ? const LinearProgressIndicator()
-            : DropdownButtonFormField<String>(
-                value: _selectedVendorId,
-                isExpanded: true,
-                decoration: _inputDec(hint: 'Select Vendor'),
-                items: _vendors
-                    .map((v) => DropdownMenuItem(
-                          value: v['_id'] as String,
-                          child: Text(v['vendorName'] as String,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13)),
-                        ))
-                    .toList(),
-                onChanged: (id) {
-                  if (id == null) return;
-                  setState(() => _selectedVendorId = id);
-                  _fetchCredits(id);
-                },
+        InkWell(
+          onTap: () => _showVendorPickerDialog(),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: _selectedVendorId != null
+                      ? _navyAccent
+                      : const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+              color: Colors.white,
+            ),
+            child: Row(children: [
+              Icon(Icons.business_outlined,
+                  size: 16,
+                  color: _selectedVendorId != null
+                      ? _navyAccent
+                      : const Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _selectedVendorName ?? 'Select Vendor',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _selectedVendorName != null
+                        ? const Color(0xFF2C3E50)
+                        : const Color(0xFF9CA3AF),
+                    fontWeight: _selectedVendorName != null
+                        ? FontWeight.w500
+                        : FontWeight.normal,
+                  ),
+                ),
               ),
+              const Icon(Icons.arrow_drop_down,
+                  size: 20, color: Color(0xFF7F8C8D)),
+            ]),
+          ),
+        ),
 
         const SizedBox(height: 14),
 
@@ -3936,6 +3960,194 @@ class _VendorCreditRefundPageState extends State<_VendorCreditRefundPage> {
     );
   }
 
+  // ── vendor picker dialog ──────────────────────────────────────────────────
+  Future<void> _showVendorPickerDialog() async {
+    final TextEditingController searchCtrl = TextEditingController();
+    List<BillingVendor> allVendors = [];
+    List<BillingVendor> filtered = [];
+    bool loading = true;
+    String? errMsg;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          // Load vendors once
+          if (loading && allVendors.isEmpty) {
+            BillingVendorsService.getAllVendors(
+              sortBy: 'vendorName',
+              sortOrder: 'asc',
+              limit: 1000,
+            ).then((result) {
+              if (result['success'] == true) {
+                final data = result['data'];
+                final raw = data is List ? data : (data['vendors'] as List? ?? []);
+                final list = raw
+                    .map<BillingVendor>((j) => BillingVendor.fromJson(j))
+                    .toList();
+                setDlg(() {
+                  allVendors = list;
+                  filtered = list;
+                  loading = false;
+                });
+              } else {
+                setDlg(() {
+                  errMsg = result['message']?.toString() ?? 'Failed to load';
+                  loading = false;
+                });
+              }
+            }).catchError((e) {
+              setDlg(() {
+                errMsg = e.toString();
+                loading = false;
+              });
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Select Vendor'),
+            content: SizedBox(
+              width: 500,
+              height: 420,
+              child: Column(children: [
+                TextField(
+                  controller: searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Search vendors...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onChanged: (val) {
+                    setDlg(() {
+                      filtered = val.isEmpty
+                          ? allVendors
+                          : allVendors
+                              .where((v) =>
+                                  v.vendorName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  v.email
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  (v.companyName
+                                          ?.toLowerCase()
+                                          .contains(val.toLowerCase()) ??
+                                      false))
+                              .toList();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: loading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  _navyAccent)))
+                      : errMsg != null
+                          ? Center(
+                              child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                Icon(Icons.error_outline,
+                                    size: 48, color: Colors.red[400]),
+                                const SizedBox(height: 16),
+                                Text('Error: $errMsg'),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () => setDlg(() {
+                                    loading = true;
+                                    errMsg = null;
+                                    allVendors = [];
+                                  }),
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: _navyAccent,
+                                      foregroundColor: Colors.white),
+                                  child: const Text('Retry'),
+                                ),
+                              ]))
+                          : filtered.isEmpty
+                              ? const Center(
+                                  child: Text('No vendors found',
+                                      style: TextStyle(color: Colors.grey)))
+                              : ListView.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (_, i) {
+                                    final v = filtered[i];
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: _navyAccent,
+                                        child: Text(
+                                            v.vendorName.isNotEmpty
+                                                ? v.vendorName[0].toUpperCase()
+                                                : '?',
+                                            style: const TextStyle(
+                                                color: Colors.white)),
+                                      ),
+                                      title: Text(v.vendorName),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (v.email.isNotEmpty)
+                                            Text(v.email,
+                                                style: const TextStyle(
+                                                    fontSize: 12)),
+                                          if (v.vendorType.isNotEmpty)
+                                            Text(v.vendorType,
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[600])),
+                                        ],
+                                      ),
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedVendorId = v.id;
+                                          _selectedVendorName = v.vendorName;
+                                        });
+                                        _fetchCredits(v.id);
+                                        Navigator.pop(ctx);
+                                      },
+                                    );
+                                  },
+                                ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => NewVendorPage()),
+                      );
+                      // Dialog auto-reloads vendors on next open
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add New Vendor'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyAccent,
+                      side: const BorderSide(color: _navyAccent),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _label(String text, {bool required = false}) => RichText(
         text: TextSpan(
           text: text,
@@ -3993,10 +4205,10 @@ class _CreditNoteRefundPage extends StatefulWidget {
 }
 
 class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
-  // ── customers ─────────────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _customers = [];
-  bool _loadingCustomers = true;
+  // -- customer selection -----------------------------------------------
   String? _selectedCustomerId;
+  String? _selectedCustomerName;
+
 
   // ── credit notes for selected customer ────────────────────────────────────
   List<CreditNote> _creditNotes = [];
@@ -4028,7 +4240,6 @@ class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
     super.initState();
     _refundDate = widget.prefilledDate;
     _refCtrl.text = widget.prefilledReference;
-    _fetchCustomers();
   }
 
   @override
@@ -4040,25 +4251,6 @@ class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
   }
 
   // ── loaders ───────────────────────────────────────────────────────────────
-
-  Future<void> _fetchCustomers() async {
-    setState(() => _loadingCustomers = true);
-    try {
-      final res = await BillingCustomersService.getAllCustomers(limit: 1000);
-      setState(() {
-        _customers = res.customers
-            .map<Map<String, dynamic>>((c) => {
-                  '_id': c.id,
-                  'customerName': c.customerDisplayName,
-                })
-            .toList();
-      });
-    } catch (e) {
-      debugPrint('Customer load error: $e');
-    } finally {
-      setState(() => _loadingCustomers = false);
-    }
-  }
 
   Future<void> _fetchCreditNotes(String customerId) async {
     setState(() {
@@ -4159,26 +4351,45 @@ class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
         // ── Customer ──────────────────────────────────────────────────────
         _label('Customer', required: true),
         const SizedBox(height: 6),
-        _loadingCustomers
-            ? const LinearProgressIndicator()
-            : DropdownButtonFormField<String>(
-                value: _selectedCustomerId,
-                isExpanded: true,
-                decoration: _inputDec(hint: 'Select Customer'),
-                items: _customers
-                    .map((c) => DropdownMenuItem(
-                          value: c['_id'] as String,
-                          child: Text(c['customerName'] as String,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13)),
-                        ))
-                    .toList(),
-                onChanged: (id) {
-                  if (id == null) return;
-                  setState(() => _selectedCustomerId = id);
-                  _fetchCreditNotes(id);
-                },
+        InkWell(
+          onTap: () => _showCustomerPickerDialog(),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: _selectedCustomerId != null
+                      ? _navyAccent
+                      : const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+              color: Colors.white,
+            ),
+            child: Row(children: [
+              Icon(Icons.person_outline,
+                  size: 16,
+                  color: _selectedCustomerId != null
+                      ? _navyAccent
+                      : const Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _selectedCustomerName ?? 'Select Customer',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _selectedCustomerName != null
+                        ? const Color(0xFF2C3E50)
+                        : const Color(0xFF9CA3AF),
+                    fontWeight: _selectedCustomerName != null
+                        ? FontWeight.w500
+                        : FontWeight.normal,
+                  ),
+                ),
               ),
+              const Icon(Icons.arrow_drop_down,
+                  size: 20, color: Color(0xFF7F8C8D)),
+            ]),
+          ),
+        ),
 
         const SizedBox(height: 14),
 
@@ -4483,6 +4694,149 @@ class _CreditNoteRefundPageState extends State<_CreditNoteRefundPage> {
     );
   }
 
+  // -- customer picker dialog (CreditNote) --------------------------------
+  Future<void> _showCustomerPickerDialog() async {
+    final TextEditingController searchCtrl = TextEditingController();
+    List<BillingCustomer> allCustomers = [];
+    List<BillingCustomer> filtered = [];
+    bool loading = true;
+    String? errMsg;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          if (loading && allCustomers.isEmpty) {
+            BillingCustomersService.getAllCustomers(limit: 1000).then((res) {
+              final list = res.customers;
+              setDlg(() {
+                allCustomers = list;
+                filtered = list;
+                loading = false;
+              });
+            }).catchError((e) {
+              setDlg(() {
+                errMsg = e.toString();
+                loading = false;
+              });
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Select Customer'),
+            content: SizedBox(
+              width: 520,
+              height: 440,
+              child: Column(children: [
+                TextField(
+                  controller: searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Search customers...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onChanged: (val) {
+                    setDlg(() {
+                      filtered = val.isEmpty
+                          ? allCustomers
+                          : allCustomers
+                              .where((c) =>
+                                  c.customerDisplayName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  c.primaryEmail
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  c.companyName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()))
+                              .toList();
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: loading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  _navyAccent)))
+                      : errMsg != null
+                          ? Center(child: Text('Error: $errMsg'))
+                          : filtered.isEmpty
+                              ? const Center(
+                                  child: Text('No customers found',
+                                      style: TextStyle(color: Colors.grey)))
+                              : ListView.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (_, i) {
+                                    final c = filtered[i];
+                                    final name = c.customerDisplayName.isNotEmpty
+                                        ? c.customerDisplayName
+                                        : c.companyName;
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: _navyAccent,
+                                        child: Text(
+                                            name.isNotEmpty
+                                                ? name[0].toUpperCase()
+                                                : '?',
+                                            style: const TextStyle(
+                                                color: Colors.white)),
+                                      ),
+                                      title: Text(name,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600)),
+                                      subtitle: c.primaryEmail.isNotEmpty
+                                          ? Text(c.primaryEmail)
+                                          : null,
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedCustomerId = c.id;
+                                          _selectedCustomerName = name;
+                                        });
+                                        _fetchCreditNotes(c.id);
+                                        Navigator.pop(ctx);
+                                      },
+                                    );
+                                  },
+                                ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const NewCustomerPage()),
+                      );
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add New Customer'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyAccent,
+                      side: const BorderSide(color: _navyAccent),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _label(String text, {bool required = false}) => RichText(
         text: TextSpan(
           text: text,
@@ -4538,10 +4892,9 @@ class _VendorPaymentRefundPage extends StatefulWidget {
 }
 
 class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
-  // ── vendors ──────────────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _vendors = [];
-  bool _loadingVendors = true;
+  // ── vendor selection ─────────────────────────────────────────────────────
   String? _selectedVendorId;
+  String? _selectedVendorName;
 
   // ── payments with balance ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _payments = [];
@@ -4573,7 +4926,6 @@ class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
     super.initState();
     _refundDate = widget.prefilledDate;
     _refCtrl.text = widget.prefilledReference;
-    _fetchVendors();
   }
 
   @override
@@ -4585,29 +4937,6 @@ class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
   }
 
   // ── loaders ──────────────────────────────────────────────────────────────
-
-  Future<void> _fetchVendors() async {
-    setState(() => _loadingVendors = true);
-    try {
-      final res = await BillingVendorsService.getAllVendors(limit: 1000);
-      if (res['success'] == true) {
-        final raw = res['data'];
-        final list = raw is List ? raw : (raw['vendors'] as List? ?? []);
-        setState(() {
-          _vendors = list
-              .map<Map<String, dynamic>>((v) => {
-                    '_id': v['_id']?.toString() ?? '',
-                    'vendorName': v['vendorName']?.toString() ?? '',
-                  })
-              .toList();
-        });
-      }
-    } catch (e) {
-      debugPrint('Vendor load error: $e');
-    } finally {
-      setState(() => _loadingVendors = false);
-    }
-  }
 
   Future<void> _fetchPayments(String vendorId) async {
     setState(() {
@@ -4697,26 +5026,45 @@ class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
         // ── Vendor ──────────────────────────────────────────────────────────
         _lbl('Vendor', required: true),
         const SizedBox(height: 6),
-        _loadingVendors
-            ? const LinearProgressIndicator()
-            : DropdownButtonFormField<String>(
-                value: _selectedVendorId,
-                isExpanded: true,
-                decoration: _dec(hint: 'Select Vendor'),
-                items: _vendors
-                    .map((v) => DropdownMenuItem(
-                          value: v['_id'] as String,
-                          child: Text(v['vendorName'] as String,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13)),
-                        ))
-                    .toList(),
-                onChanged: (id) {
-                  if (id == null) return;
-                  setState(() => _selectedVendorId = id);
-                  _fetchPayments(id);
-                },
+        InkWell(
+          onTap: () => _showVendorPickerDialog(),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: _selectedVendorId != null
+                      ? _navyAccent
+                      : const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+              color: Colors.white,
+            ),
+            child: Row(children: [
+              Icon(Icons.business_outlined,
+                  size: 16,
+                  color: _selectedVendorId != null
+                      ? _navyAccent
+                      : const Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _selectedVendorName ?? 'Select Vendor',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _selectedVendorName != null
+                        ? const Color(0xFF2C3E50)
+                        : const Color(0xFF9CA3AF),
+                    fontWeight: _selectedVendorName != null
+                        ? FontWeight.w500
+                        : FontWeight.normal,
+                  ),
+                ),
               ),
+              const Icon(Icons.arrow_drop_down,
+                  size: 20, color: Color(0xFF7F8C8D)),
+            ]),
+          ),
+        ),
 
         const SizedBox(height: 14),
 
@@ -5032,6 +5380,194 @@ class _VendorPaymentRefundPageState extends State<_VendorPaymentRefundPage> {
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
+  // ── vendor picker dialog ──────────────────────────────────────────────────
+  Future<void> _showVendorPickerDialog() async {
+    final TextEditingController searchCtrl = TextEditingController();
+    List<BillingVendor> allVendors = [];
+    List<BillingVendor> filtered = [];
+    bool loading = true;
+    String? errMsg;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          // Load vendors once
+          if (loading && allVendors.isEmpty) {
+            BillingVendorsService.getAllVendors(
+              sortBy: 'vendorName',
+              sortOrder: 'asc',
+              limit: 1000,
+            ).then((result) {
+              if (result['success'] == true) {
+                final data = result['data'];
+                final raw = data is List ? data : (data['vendors'] as List? ?? []);
+                final list = raw
+                    .map<BillingVendor>((j) => BillingVendor.fromJson(j))
+                    .toList();
+                setDlg(() {
+                  allVendors = list;
+                  filtered = list;
+                  loading = false;
+                });
+              } else {
+                setDlg(() {
+                  errMsg = result['message']?.toString() ?? 'Failed to load';
+                  loading = false;
+                });
+              }
+            }).catchError((e) {
+              setDlg(() {
+                errMsg = e.toString();
+                loading = false;
+              });
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Select Vendor'),
+            content: SizedBox(
+              width: 500,
+              height: 420,
+              child: Column(children: [
+                TextField(
+                  controller: searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Search vendors...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onChanged: (val) {
+                    setDlg(() {
+                      filtered = val.isEmpty
+                          ? allVendors
+                          : allVendors
+                              .where((v) =>
+                                  v.vendorName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  v.email
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  (v.companyName
+                                          ?.toLowerCase()
+                                          .contains(val.toLowerCase()) ??
+                                      false))
+                              .toList();
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: loading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  _navyAccent)))
+                      : errMsg != null
+                          ? Center(
+                              child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                Icon(Icons.error_outline,
+                                    size: 48, color: Colors.red[400]),
+                                const SizedBox(height: 16),
+                                Text('Error: $errMsg'),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () => setDlg(() {
+                                    loading = true;
+                                    errMsg = null;
+                                    allVendors = [];
+                                  }),
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: _navyAccent,
+                                      foregroundColor: Colors.white),
+                                  child: const Text('Retry'),
+                                ),
+                              ]))
+                          : filtered.isEmpty
+                              ? const Center(
+                                  child: Text('No vendors found',
+                                      style: TextStyle(color: Colors.grey)))
+                              : ListView.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (_, i) {
+                                    final v = filtered[i];
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: _navyAccent,
+                                        child: Text(
+                                            v.vendorName.isNotEmpty
+                                                ? v.vendorName[0].toUpperCase()
+                                                : '?',
+                                            style: const TextStyle(
+                                                color: Colors.white)),
+                                      ),
+                                      title: Text(v.vendorName),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (v.email.isNotEmpty)
+                                            Text(v.email,
+                                                style: const TextStyle(
+                                                    fontSize: 12)),
+                                          if (v.vendorType.isNotEmpty)
+                                            Text(v.vendorType,
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[600])),
+                                        ],
+                                      ),
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedVendorId = v.id;
+                                          _selectedVendorName = v.vendorName;
+                                        });
+                                        _fetchPayments(v.id);
+                                        Navigator.pop(ctx);
+                                      },
+                                    );
+                                  },
+                                ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => NewVendorPage()),
+                      );
+                      // Dialog auto-reloads vendors on next open
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add New Vendor'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyAccent,
+                      side: const BorderSide(color: _navyAccent),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _lbl(String text, {bool required = false}) => RichText(
         text: TextSpan(
           text: text,
@@ -5090,10 +5626,10 @@ class _CustomerPaymentRefundPage extends StatefulWidget {
 
 class _CustomerPaymentRefundPageState
     extends State<_CustomerPaymentRefundPage> {
-  // ── customers ─────────────────────────────────────────────────────────────
-  List<Map<String, dynamic>> _customers = [];
-  bool _loadingCustomers = true;
+  // -- customer selection -----------------------------------------------
   String? _selectedCustomerId;
+  String? _selectedCustomerName;
+
 
   // ── payments with balance ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _payments = [];
@@ -5125,7 +5661,6 @@ class _CustomerPaymentRefundPageState
     super.initState();
     _refundDate = widget.prefilledDate;
     _refCtrl.text = widget.prefilledReference;
-    _fetchCustomers();
   }
 
   @override
@@ -5137,28 +5672,6 @@ class _CustomerPaymentRefundPageState
   }
 
   // ── loaders ──────────────────────────────────────────────────────────────
-
-  Future<void> _fetchCustomers() async {
-    setState(() => _loadingCustomers = true);
-    try {
-      final res = await BillingCustomersService.getAllCustomers(
-          limit: 1000, skipStats: true);
-      setState(() {
-        _customers = res.customers
-            .map<Map<String, dynamic>>((c) => {
-                  '_id': c.id,
-                  'customerName': c.customerDisplayName.isNotEmpty
-                      ? c.customerDisplayName
-                      : c.companyName,
-                })
-            .toList();
-      });
-    } catch (e) {
-      debugPrint('Customer load error: $e');
-    } finally {
-      setState(() => _loadingCustomers = false);
-    }
-  }
 
   Future<void> _fetchPayments(String customerId) async {
     setState(() {
@@ -5249,26 +5762,45 @@ class _CustomerPaymentRefundPageState
         // ── Customer ────────────────────────────────────────────────────────
         _lbl('Customer', required: true),
         const SizedBox(height: 6),
-        _loadingCustomers
-            ? const LinearProgressIndicator()
-            : DropdownButtonFormField<String>(
-                value: _selectedCustomerId,
-                isExpanded: true,
-                decoration: _dec(hint: 'Select Customer'),
-                items: _customers
-                    .map((c) => DropdownMenuItem(
-                          value: c['_id'] as String,
-                          child: Text(c['customerName'] as String,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13)),
-                        ))
-                    .toList(),
-                onChanged: (id) {
-                  if (id == null) return;
-                  setState(() => _selectedCustomerId = id);
-                  _fetchPayments(id);
-                },
+        InkWell(
+          onTap: () => _showCustomerPickerDialog(),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: _selectedCustomerId != null
+                      ? _navyAccent
+                      : const Color(0xFFCBD5E1)),
+              borderRadius: BorderRadius.circular(6),
+              color: Colors.white,
+            ),
+            child: Row(children: [
+              Icon(Icons.person_outline,
+                  size: 16,
+                  color: _selectedCustomerId != null
+                      ? _navyAccent
+                      : const Color(0xFF7F8C8D)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _selectedCustomerName ?? 'Select Customer',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _selectedCustomerName != null
+                        ? const Color(0xFF2C3E50)
+                        : const Color(0xFF9CA3AF),
+                    fontWeight: _selectedCustomerName != null
+                        ? FontWeight.w500
+                        : FontWeight.normal,
+                  ),
+                ),
               ),
+              const Icon(Icons.arrow_drop_down,
+                  size: 20, color: Color(0xFF7F8C8D)),
+            ]),
+          ),
+        ),
 
         const SizedBox(height: 14),
 
@@ -5575,6 +6107,150 @@ class _CustomerPaymentRefundPageState
           ]);
         }),
       ]),
+    );
+  }
+
+  // -- customer picker dialog (Payment) -----------------------------------
+  Future<void> _showCustomerPickerDialog() async {
+    final TextEditingController searchCtrl = TextEditingController();
+    List<BillingCustomer> allCustomers = [];
+    List<BillingCustomer> filtered = [];
+    bool loading = true;
+    String? errMsg;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          if (loading && allCustomers.isEmpty) {
+            BillingCustomersService.getAllCustomers(limit: 1000, skipStats: true)
+                .then((res) {
+              final list = res.customers;
+              setDlg(() {
+                allCustomers = list;
+                filtered = list;
+                loading = false;
+              });
+            }).catchError((e) {
+              setDlg(() {
+                errMsg = e.toString();
+                loading = false;
+              });
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Select Customer'),
+            content: SizedBox(
+              width: 520,
+              height: 440,
+              child: Column(children: [
+                TextField(
+                  controller: searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Search customers...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onChanged: (val) {
+                    setDlg(() {
+                      filtered = val.isEmpty
+                          ? allCustomers
+                          : allCustomers
+                              .where((c) =>
+                                  c.customerDisplayName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  c.primaryEmail
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()) ||
+                                  c.companyName
+                                      .toLowerCase()
+                                      .contains(val.toLowerCase()))
+                              .toList();
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: loading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  _navyAccent)))
+                      : errMsg != null
+                          ? Center(child: Text('Error: $errMsg'))
+                          : filtered.isEmpty
+                              ? const Center(
+                                  child: Text('No customers found',
+                                      style: TextStyle(color: Colors.grey)))
+                              : ListView.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (_, i) {
+                                    final c = filtered[i];
+                                    final name = c.customerDisplayName.isNotEmpty
+                                        ? c.customerDisplayName
+                                        : c.companyName;
+                                    return ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: _navyAccent,
+                                        child: Text(
+                                            name.isNotEmpty
+                                                ? name[0].toUpperCase()
+                                                : '?',
+                                            style: const TextStyle(
+                                                color: Colors.white)),
+                                      ),
+                                      title: Text(name,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600)),
+                                      subtitle: c.primaryEmail.isNotEmpty
+                                          ? Text(c.primaryEmail)
+                                          : null,
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedCustomerId = c.id;
+                                          _selectedCustomerName = name;
+                                        });
+                                        _fetchPayments(c.id);
+                                        Navigator.pop(ctx);
+                                      },
+                                    );
+                                  },
+                                ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const NewCustomerPage()),
+                      );
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add New Customer'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navyAccent,
+                      side: const BorderSide(color: _navyAccent),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 

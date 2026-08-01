@@ -425,6 +425,11 @@ class CreditNote {
   final String? customerNotes;
   final String? internalNotes;
   final double subTotal;
+  final double? invoiceLevelDiscount;
+  final String? invoiceLevelDiscountType;
+  final double? invoiceDiscountAmount;
+  final double? shippingCharges;
+  final double? adjustment;
   final double tdsRate;
   final double tdsAmount;
   final double tcsRate;
@@ -462,6 +467,11 @@ class CreditNote {
     this.customerNotes,
     this.internalNotes,
     required this.subTotal,
+    this.invoiceLevelDiscount,
+    this.invoiceLevelDiscountType,
+    this.invoiceDiscountAmount,
+    this.shippingCharges,
+    this.adjustment,
     required this.tdsRate,
     required this.tdsAmount,
     required this.tcsRate,
@@ -505,6 +515,11 @@ class CreditNote {
       customerNotes: json['customerNotes'],
       internalNotes: json['internalNotes'],
       subTotal: (json['subTotal'] ?? 0).toDouble(),
+      invoiceLevelDiscount: (json['invoiceLevelDiscount'] ?? 0).toDouble(),
+      invoiceLevelDiscountType: json['invoiceLevelDiscountType'],
+      invoiceDiscountAmount: (json['invoiceDiscountAmount'] ?? 0).toDouble(),
+      shippingCharges: (json['shippingCharges'] ?? 0).toDouble(),
+      adjustment: (json['adjustment'] ?? 0).toDouble(),
       tdsRate: (json['tdsRate'] ?? 0).toDouble(),
       tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
       tcsRate: (json['tcsRate'] ?? 0).toDouble(),
