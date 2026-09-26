@@ -327,8 +327,7 @@ router.get('/', async (req, res) => {
   try {
     const { isActive, allBranches } = req.query;
     
-    const filter = {};
-    if (req.user?.orgId) filter.orgId = req.user.orgId;
+    const filter = { ...(req.orgFilter || {}) };
     // Skip branch filter when caller explicitly needs all org accounts (e.g. transfer dropdowns)
     if (!allBranches && req.branchFilter) Object.assign(filter, req.branchFilter);
     if (isActive !== undefined) {

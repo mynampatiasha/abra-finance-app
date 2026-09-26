@@ -545,7 +545,13 @@ router.get('/by-category-label', async (req, res) => {
       };
     });
 
-    const total = enriched.reduce((s, t) => s + (t.amount || 0), 0);
+    // Deposits add, Withdrawals subtract — each row's own `amount` above is an
+    // unsigned magnitude (fine for the per-row Amount column, paired with its
+    // Type badge), but summing those unsigned values here was adding
+    // Withdrawal/reversal rows instead of netting them out, inflating this
+    // total above what the P&L reports for the same account (which already
+    // nets credit − debit correctly).
+    const total = enriched.reduce((s, t) => s + (t.type === 'Deposit' ? t.amount : -t.amount), 0);
 
     res.json({ success: true, total: txns.length, totalAmount: total, data: enriched });
   } catch (err) {
@@ -1760,6 +1766,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
         columns:          true,
         skip_empty_lines: true,
         trim:             true,
+        // Excel's "CSV UTF-8" save option prepends a BOM character to the
+        // file, which otherwise glues itself onto the first header cell
+        // (turning "Date" into "﻿Date") — every row['Date'] lookup then
+        // returns undefined and the row is rejected as "Missing Date".
+        bom:              true,
       });
     } catch (parseErr) {
       return res.status(400).json({ success: false, message: `CSV parse error: ${parseErr.message}` });
@@ -1800,8 +1811,13 @@ router.post('/import', upload.single('file'), async (req, res) => {
           const parts = rawDate.split('/');
           let day, month, year;
           if (parts.length === 3) {
-            // Force MM/DD/YYYY based on user preference
-            month = parts[0]; day = parts[1]; year = parts[2];
+            // DD/MM/YYYY — matches the CSV template's own sample dates and
+            // its on-screen "Date (DD/MM/YYYY)" instructions in
+            // bulk_import_bank_statement_dialog.dart. The previous MM/DD
+            // reading silently swapped day/month for any date where both
+            // were <=12, and rejected every date above the 12th as
+            // "Invalid date" — that's what the day>12 failures were.
+            day = parts[0]; month = parts[1]; year = parts[2];
             if (year.length === 2) year = `20${year}`;
             parsedDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
           } else {

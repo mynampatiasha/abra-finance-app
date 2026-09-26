@@ -144,6 +144,15 @@ class ApiService {
           debugPrint('❌ Error getting branch header (cache hit): $e');
           headers['x-branch-ids'] = 'ALL';
         }
+        // Inject org header even on cache hit — mirrors the branch header
+        // above. Without this, a multi-org / "All Organizations" selection
+        // never reaches the backend and every request silently falls back
+        // to the single org on the JWT token.
+        try {
+          headers['x-org-ids'] = await FinanceSecureStorage.getOrgHeader();
+        } catch (e) {
+          debugPrint('❌ Error getting org header (cache hit): $e');
+        }
         return headers;
       }
 
@@ -169,6 +178,12 @@ class ApiService {
           debugPrint(
               '❌ Error getting branch header (existing token request): $e');
           headers['x-branch-ids'] = 'ALL';
+        }
+        try {
+          headers['x-org-ids'] = await FinanceSecureStorage.getOrgHeader();
+        } catch (e) {
+          debugPrint(
+              '❌ Error getting org header (existing token request): $e');
         }
         return headers;
       }
@@ -209,6 +224,12 @@ class ApiService {
         debugPrint('Stack trace: $stackTrace');
         debugPrint('🔧 Falling back to ALL');
         headers['x-branch-ids'] = 'ALL';
+      }
+
+      try {
+        headers['x-org-ids'] = await FinanceSecureStorage.getOrgHeader();
+      } catch (e) {
+        debugPrint('❌ Error getting org header: $e');
       }
 
       _tokenRequest = null;

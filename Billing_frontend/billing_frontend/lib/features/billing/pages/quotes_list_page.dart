@@ -31,6 +31,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_quote.dart';
 import 'quote_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ──────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -216,6 +217,9 @@ class _QuotesListPageState extends State<QuotesListPage> {
   }
 
   void _openEdit(String quoteId) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'quotes');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => NewQuoteScreen(quoteId: quoteId)));
     if (ok == true) _refresh();
@@ -391,6 +395,9 @@ class _QuotesListPageState extends State<QuotesListPage> {
   }
 
   Future<void> _deleteQuote(Quote q) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'quotes');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Quote',
       message: 'Delete ${q.quoteNumber}? This cannot be undone.',

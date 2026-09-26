@@ -33,6 +33,7 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/billing_vendors_service.dart';
 import '../../../../core/services/billing_customers_service.dart';
 import '../../../../core/services/tms_service.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_expenses.dart';
 import 'expense_detail_page.dart';
@@ -302,6 +303,9 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   }
 
   void _openEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'expenses');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => NewExpensePage(expenseId: id)));
     if (ok == true) _loadAll();
@@ -322,6 +326,9 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   // ── delete ────────────────────────────────────────────────────────────────
 
   Future<void> _delete(Expense expense) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'expenses');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Expense',
       message:

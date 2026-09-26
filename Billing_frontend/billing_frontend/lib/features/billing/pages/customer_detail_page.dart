@@ -28,6 +28,10 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../../../core/services/billing_customers_service.dart';
 import '../../../../core/services/payment_service.dart';
+import '../../../../core/services/invoice_service.dart' show InvoiceService;
+import '../../../../core/services/quote_service.dart' show QuoteService;
+import '../../../../core/services/sales_order_service.dart' show SalesOrderService;
+import '../../../../core/services/credit_note_service.dart' show CreditNoteService;
 import 'new_customer.dart';
 import 'new_invoice.dart';
 import 'new_quote.dart';
@@ -46,11 +50,6 @@ const Color _orange = Color(0xFFE67E22);
 
 // ── Transaction table column widths (fixed for horizontal scroll) ──────────
 const double _txnColDate = 90.0;
-const double _txnColNum = 160.0;
-const double _txnColType = 110.0;
-const double _txnColStatus = 110.0;
-const double _txnColAmt = 110.0;
-const double _txnColBal = 110.0;
 
 // ── Statement table column widths ─────────────────────────────────────────
 const double _stmColDate = 90.0;
@@ -284,6 +283,43 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Could not launch PDF viewer'),
+              backgroundColor: Colors.red));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _exportStatementExcel() async {
+    if (_statement == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('jwt_token') ?? '';
+        final branchHdr = await FinanceSecureStorage.getBranchHeader();
+        final String baseUrl = ApiConfig.baseUrl + '/api';
+      String url = '$baseUrl/finance/customers/${widget.customerId}/statement/excel?token=$token&branchIds=$branchHdr';
+      if (_statementFrom != null) {
+        url += '&fromDate=${_statementFrom!.toIso8601String()}';
+      }
+      if (_statementTo != null) {
+        url += '&toDate=${_statementTo!.toIso8601String()}';
+      }
+
+      final Uri uri = Uri.parse(url);
+      if (kIsWeb) {
+        html.AnchorElement(href: url)
+          ..setAttribute('download', '')
+          ..click();
+      } else if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Could not launch Excel export'),
               backgroundColor: Colors.red));
         }
       }
@@ -1230,15 +1266,141 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
   // TAB 3 — TRANSACTIONS (horizontal scrollable, no vertical text)
   // ============================================================================
 
-    Future<void> _exportTxnPdf() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
+    Future<void> _exportCustomerSection(
+        BuildContext ctx, String customerId, String section, String format) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
         final token = prefs.getString('jwt_token') ?? '';
         final branchHdr = await FinanceSecureStorage.getBranchHeader();
         final String baseUrl = ApiConfig.baseUrl + '/api';
-      String url = '$baseUrl/finance/customers/${widget.customerId}/transactions/pdf?token=$token&branchIds=$branchHdr';
+        final url =
+            '$baseUrl/finance/customers/$customerId/export/$section?format=$format&token=$token&branchIds=$branchHdr';
+        if (kIsWeb) {
+          html.AnchorElement(href: url)
+            ..setAttribute('download', '')
+            ..click();
+        } else {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else if (ctx.mounted) {
+            ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text('Could not open export'),
+                backgroundColor: Colors.red));
+          }
+        }
+      } catch (e) {
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+              content: Text('Error exporting: $e'),
+              backgroundColor: Colors.red));
+        }
+      }
+    }
+
+  void _showExportDialog() {
+    bool expInvoices = true;
+    bool expPayments = true;
+    bool expCreditNotes = true;
+    bool expSalesOrders = true;
+    bool expQuotes = true;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateSB) {
+            return AlertDialog(
+              title: const Text('Export Transactions', style: TextStyle(color: _navyDark, fontWeight: FontWeight.bold, fontSize: 18)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Select the transaction types you want to include in the export:'),
+                  const SizedBox(height: 16),
+                  CheckboxListTile(
+                    title: const Text('Invoices'),
+                    value: expInvoices,
+                    onChanged: (v) => setStateSB(() => expInvoices = v ?? true),
+                  ),
+                  CheckboxListTile(
+                    title: const Text('Customer Payments'),
+                    value: expPayments,
+                    onChanged: (v) => setStateSB(() => expPayments = v ?? true),
+                  ),
+                  CheckboxListTile(
+                    title: const Text('Credit Notes'),
+                    value: expCreditNotes,
+                    onChanged: (v) => setStateSB(() => expCreditNotes = v ?? true),
+                  ),
+                  CheckboxListTile(
+                    title: const Text('Sales Orders'),
+                    value: expSalesOrders,
+                    onChanged: (v) => setStateSB(() => expSalesOrders = v ?? true),
+                  ),
+                  CheckboxListTile(
+                    title: const Text('Quotes'),
+                    value: expQuotes,
+                    onChanged: (v) => setStateSB(() => expQuotes = v ?? true),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _exportTxn(format: 'pdf', invoices: expInvoices, payments: expPayments, cn: expCreditNotes, so: expSalesOrders, quotes: expQuotes);
+                  },
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                  label: const Text('Export PDF'),
+                  style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _exportTxn(format: 'excel', invoices: expInvoices, payments: expPayments, cn: expCreditNotes, so: expSalesOrders, quotes: expQuotes);
+                  },
+                  icon: const Icon(Icons.grid_on_outlined, size: 16),
+                  label: const Text('Export Excel'),
+                  style: ElevatedButton.styleFrom(backgroundColor: _green, foregroundColor: Colors.white),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
+  }
+
+  Future<void> _exportTxn({required String format, required bool invoices, required bool payments, required bool cn, required bool so, required bool quotes}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt_token') ?? '';
+      final branchHdr = await FinanceSecureStorage.getBranchHeader();
+      final String baseUrl = ApiConfig.baseUrl + '/api';
+      
+      String url = '$baseUrl/finance/customers/${widget.customerId}/transactions/$format?token=$token&branchIds=$branchHdr';
       url += '&fromDate=${_txnFrom.toIso8601String()}';
       url += '&toDate=${_txnTo.toIso8601String()}';
+      
+      List<String> types = [];
+      if (invoices) types.add('invoices');
+      if (payments) types.add('payments');
+      if (cn) types.add('credit-notes');
+      if (so) types.add('sales-orders');
+      if (quotes) types.add('quotes');
+      
+      if (types.isNotEmpty && types.length < 5) {
+        url += '&types=${types.join(',')}';
+      } else if (types.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select at least one type'), backgroundColor: Colors.orange));
+        }
+        return;
+      }
       
       final Uri uri = Uri.parse(url);
       if (kIsWeb) {
@@ -1250,37 +1412,19 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Could not launch PDF viewer'),
+              content: Text('Could not launch export'),
               backgroundColor: Colors.red));
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error generating PDF: $e'),
+            content: Text('Error exporting: $e'),
             backgroundColor: Colors.red));
       }
     }
   }
   Widget _buildTransactionsTab() {
-    if (_loadingTransactions)
-      return const Center(child: CircularProgressIndicator(color: _navyLight));
-    if (_transactions == null) {
-      return _emptyState(Icons.sync, 'Loading transactions...', '',
-          action: ElevatedButton.icon(
-              onPressed: _loadTransactions,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Load')));
-    }
-    if (_transactions!.isEmpty)
-      return _emptyState(Icons.receipt_long, 'No transactions yet',
-          'Transactions will appear here once invoices are created');
-
-    final filteredTxns = _transactions!.where((t) {
-      return t.date.isAfter(_txnFrom.subtract(const Duration(days: 1))) &&
-             t.date.isBefore(_txnTo.add(const Duration(days: 1)));
-    }).toList();
-
     return Column(children: [
       Container(
         width: double.infinity,
@@ -1302,181 +1446,186 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
             _datePicker('To', _txnTo, (d) {
               if (d != null) setState(() => _txnTo = d);
             }),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
-              onPressed: () {
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report filtered successfully'), duration: Duration(seconds: 1)));
-              },
-              icon: const Icon(Icons.filter_list, size: 16),
-              label: const Text('Filter / Run Report', style: TextStyle(fontSize: 12)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _navyMid,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
             const SizedBox(width: 16),
             OutlinedButton.icon(
-              onPressed: _exportTxnPdf,
-              icon: const Icon(Icons.picture_as_pdf_outlined,
-                  size: 16, color: _red),
-              label: const Text('Export PDF',
-                  style: TextStyle(fontSize: 12, color: _red)),
+              onPressed: _showExportDialog,
+              icon: const Icon(Icons.download_outlined,
+                  size: 16, color: _navyAccent),
+              label: const Text('Export',
+                  style: TextStyle(fontSize: 12, color: _navyAccent)),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _red),
+                side: const BorderSide(color: _navyAccent),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
             ),
-            const SizedBox(width: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.grey[200]!)),
-              child: Text(
-                  '${filteredTxns.length} transaction${filteredTxns.length == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, color: _navyDark, fontSize: 12)),
-            ),
           ]),
         ),
       ),
       const Divider(height: 1),
       Expanded(
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3))
-            ],
-          ),
-          child: LayoutBuilder(builder: (context, constraints) {
-            return Scrollbar(
-              controller: _txnVScroll,
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                controller: _txnVScroll,
-                scrollDirection: Axis.vertical,
-                child: Scrollbar(
-                  controller: _txnHScroll,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  thickness: 8,
-                  radius: const Radius.circular(4),
-                  child: ScrollConfiguration(
-                    behavior: ScrollConfiguration.of(context).copyWith(
-                        dragDevices: {
-                          PointerDeviceKind.touch,
-                          PointerDeviceKind.mouse,
-                          PointerDeviceKind.trackpad
-                        }),
-                    child: SingleChildScrollView(
-                      controller: _txnHScroll,
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                        child: DataTable(
-                      headingRowColor: WidgetStateProperty.all(_navyDark),
-                      headingTextStyle: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                          letterSpacing: 0.4),
-                      headingRowHeight: 52,
-                      dataRowMinHeight: 52,
-                      dataRowMaxHeight: 64,
-                      dataTextStyle: const TextStyle(fontSize: 13),
-                      dataRowColor: WidgetStateProperty.resolveWith((s) {
-                        if (s.contains(WidgetState.hovered))
-                          return _navyDark.withOpacity(0.04);
-                        return null;
-                      }),
-                      dividerThickness: 1,
-                      columnSpacing: 16,
-                      horizontalMargin: 14,
-                      columns: const [
-                        DataColumn(label: SizedBox(width: _txnColDate, child: Text('DATE'))),
-                        DataColumn(label: SizedBox(width: _txnColNum, child: Text('NUMBER'))),
-                        DataColumn(label: SizedBox(width: _txnColType, child: Text('TYPE'))),
-                        DataColumn(label: SizedBox(width: _txnColStatus, child: Text('STATUS'))),
-                        DataColumn(label: SizedBox(width: _txnColAmt, child: Align(alignment: Alignment.centerRight, child: Text('AMOUNT'))), numeric: true),
-                        DataColumn(label: SizedBox(width: _txnColBal, child: Align(alignment: Alignment.centerRight, child: Text('BALANCE'))), numeric: true),
-                      ],
-                      rows: filteredTxns.asMap().entries.map((entry) {
-                        final i = entry.key;
-                        final t = entry.value;
-                        final isInvoice = t.type == 'Invoice';
-                        return DataRow(
-                          color: WidgetStateProperty.resolveWith((s) {
-                            if (s.contains(WidgetState.hovered))
-                              return _navyDark.withOpacity(0.04);
-                            return i.isOdd
-                                ? const Color(0xFFF7F9FC)
-                                : Colors.white;
-                          }),
-                          cells: [
-                            DataCell(Text(
-                                DateFormat('dd/MM/yyyy').format(t.date),
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey[700]))),
-                            DataCell(Text(t.number,
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: _navyAccent,
-                                    fontWeight: FontWeight.w600))),
-                            DataCell(
-                                Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(
-                                  isInvoice
-                                      ? Icons.description_outlined
-                                      : Icons.payment,
-                                  size: 14,
-                                  color: isInvoice ? _navyMid : _green),
-                              const SizedBox(width: 4),
-                              Text(t.type,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: isInvoice ? _navyMid : _green,
-                                      fontWeight: FontWeight.w500)),
-                            ])),
-                            DataCell(_txnStatusBadge(t.status)),
-                            DataCell(Text('₹${t.amount.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: _navyDark))),
-                            DataCell(Text(
-                                t.balance > 0
-                                    ? '₹${t.balance.toStringAsFixed(2)}'
-                                    : '—',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: t.balance > 0
-                                        ? _red
-                                        : Colors.grey[500]))),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                    ),
-                  ),
-              ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _TransactionSection(
+              key: ValueKey('inv-${widget.customerId}'),
+              title: 'Invoices',
+              icon: Icons.description_outlined,
+              color: _navyMid,
+              statusOptions: const ['All', 'DRAFT', 'SENT', 'UNPAID', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'],
+              extraColumnLabel: 'Balance Due',
+              onNew: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => NewInvoiceScreen())),
+              onExport: (format) => _exportCustomerSection(
+                  context, widget.customerId, 'invoices', format),
+              fetchPage: (page, status) async {
+                final res = await InvoiceService.getInvoices(
+                  customerId: widget.customerId,
+                  status: status == 'All' ? null : status,
+                  fromDate: _txnFrom,
+                  toDate: _txnTo,
+                  page: page,
+                  limit: 20,
+                );
+                return res.invoices
+                    .map((inv) => _TxnRow(
+                          date: inv.invoiceDate,
+                          number: inv.invoiceNumber,
+                          status: inv.status,
+                          amount: inv.totalAmount,
+                          extraLabel: 'Balance Due',
+                          extra: inv.amountDue,
+                        ))
+                    .toList();
+              },
+              statusBadge: _txnStatusBadge,
             ),
-          ),
-        );
-          }),
+            const SizedBox(height: 12),
+            _TransactionSection(
+              key: ValueKey('pay-${widget.customerId}'),
+              title: 'Customer Payments',
+              icon: Icons.payment,
+              color: _green,
+              statusOptions: const [],
+              onNew: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => NewPaymentPage(
+                          prefilledCustomerName: _customer?.customerDisplayName))),
+              onExport: (format) => _exportCustomerSection(
+                  context, widget.customerId, 'payments', format),
+              fetchPage: (page, status) async {
+                final res = await BillingCustomersService.getCustomerPayments(
+                    widget.customerId, page: page, limit: 20);
+                return res.rows
+                    .map((p) => _TxnRow(
+                          date: p.date,
+                          number: p.number,
+                          status: p.status,
+                          amount: p.amount,
+                          subtitle: p.breakdown.isNotEmpty
+                              ? 'Applied to: ${p.breakdown.map((b) => '${b.invoiceNumber} (₹${b.amount.toStringAsFixed(2)})').join(', ')}'
+                              : (p.excessAmount > 0
+                                  ? 'Unapplied / excess: ₹${p.excessAmount.toStringAsFixed(2)}'
+                                  : null),
+                        ))
+                    .toList();
+              },
+              statusBadge: _txnStatusBadge,
+            ),
+            const SizedBox(height: 12),
+            _TransactionSection(
+              key: ValueKey('cn-${widget.customerId}'),
+              title: 'Credit Notes',
+              icon: Icons.assignment_return_outlined,
+              color: _red,
+              statusOptions: const ['All', 'DRAFT', 'OPEN', 'CLOSED', 'VOID'],
+              extraColumnLabel: 'Credit Balance',
+              onNew: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => NewCreditNoteScreen())),
+              onExport: (format) => _exportCustomerSection(
+                  context, widget.customerId, 'credit-notes', format),
+              fetchPage: (page, status) async {
+                final res = await CreditNoteService.getCreditNotes(
+                  customerId: widget.customerId,
+                  status: status == 'All' ? null : status,
+                  page: page,
+                  limit: 20,
+                );
+                return res.creditNotes
+                    .map((cn) => _TxnRow(
+                          date: cn.creditNoteDate,
+                          number: cn.creditNoteNumber,
+                          status: cn.status,
+                          amount: cn.totalAmount,
+                          extraLabel: 'Credit Balance',
+                          extra: cn.creditBalance,
+                        ))
+                    .toList();
+              },
+              statusBadge: _txnStatusBadge,
+            ),
+            const SizedBox(height: 12),
+            _TransactionSection(
+              key: ValueKey('so-${widget.customerId}'),
+              title: 'Sales Orders',
+              icon: Icons.shopping_cart_outlined,
+              color: _navyLight,
+              statusOptions: const ['All', 'DRAFT', 'OPEN', 'CONFIRMED', 'SHIPPED', 'INVOICED'],
+              onNew: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => NewSalesOrderScreen())),
+              onExport: (format) => _exportCustomerSection(
+                  context, widget.customerId, 'sales-orders', format),
+              fetchPage: (page, status) async {
+                final res = await SalesOrderService.getSalesOrders(
+                  customerId: widget.customerId,
+                  status: status == 'All' ? null : status,
+                  page: page,
+                  limit: 20,
+                );
+                return res.salesOrders
+                    .map((so) => _TxnRow(
+                          date: so.salesOrderDate,
+                          number: so.salesOrderNumber,
+                          status: so.status,
+                          amount: so.totalAmount,
+                        ))
+                    .toList();
+              },
+              statusBadge: _txnStatusBadge,
+            ),
+            const SizedBox(height: 12),
+            _TransactionSection(
+              key: ValueKey('qt-${widget.customerId}'),
+              title: 'Quotes',
+              icon: Icons.request_quote_outlined,
+              color: _orange,
+              statusOptions: const ['All', 'DRAFT', 'SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'CONVERTED'],
+              onNew: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => NewQuoteScreen())),
+              onExport: (format) => _exportCustomerSection(
+                  context, widget.customerId, 'quotes', format),
+              fetchPage: (page, status) async {
+                final res = await QuoteService.getQuotes(
+                  customerId: widget.customerId,
+                  status: status == 'All' ? null : status,
+                  page: page,
+                  limit: 20,
+                );
+                return res.quotes
+                    .map((q) => _TxnRow(
+                          date: q.quoteDate,
+                          number: q.quoteNumber,
+                          status: q.status,
+                          amount: q.totalAmount,
+                        ))
+                    .toList();
+              },
+              statusBadge: _txnStatusBadge,
+            ),
+          ],
         ),
       ),
     ]);
@@ -2181,6 +2330,22 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                       borderRadius: BorderRadius.circular(8)),
                 ),
               ),
+            if (_statement != null) const SizedBox(width: 10),
+            if (_statement != null)
+              OutlinedButton.icon(
+                onPressed: _exportStatementExcel,
+                icon: const Icon(Icons.grid_on_outlined,
+                    size: 16, color: _green),
+                label: const Text('Export Excel',
+                    style: TextStyle(fontSize: 12, color: _green)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: _green),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
           ]),
         ),
       ),
@@ -2266,7 +2431,9 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                   letterSpacing: 0.4),
                               headingRowHeight: 52,
                               dataRowMinHeight: 52,
-                              dataRowMaxHeight: 68,
+                              // Taller cap — Payment rows now list every invoice they
+                              // covered, which can run several lines.
+                              dataRowMaxHeight: 160,
                               dataTextStyle: const TextStyle(fontSize: 13),
                               dataRowColor:
                                   WidgetStateProperty.resolveWith((s) {
@@ -2279,6 +2446,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                               horizontalMargin: 14,
                               columns: const [
                                 DataColumn(label: SizedBox(width: _txnColDate, child: Text('DATE'))),
+                                DataColumn(label: Text('TRANSACTIONS')),
                                 DataColumn(label: Text('DETAILS')),
                                 DataColumn(
                                     label: Text('INVOICES'), numeric: true),
@@ -2308,6 +2476,13 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                         style: TextStyle(
                                             fontSize: 12,
                                             color: Colors.grey[700]))),
+                                    DataCell(Text(
+                                        e.type == 'Payment'
+                                            ? 'Payment Received'
+                                            : 'Invoice',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[700]))),
                                     DataCell(Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -2319,8 +2494,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                                 fontSize: 12,
                                                 color: _navyAccent,
                                                 fontWeight: FontWeight.w500)),
-                                        if (e.details.isNotEmpty &&
-                                            e.type != 'Payment')
+                                        if (e.details.isNotEmpty)
                                           Text(e.details,
                                               style: TextStyle(
                                                   fontSize: 11,
@@ -2363,6 +2537,7 @@ class _CustomerDetailPageState extends State<CustomerDetailPage>
                                       _navyDark.withOpacity(0.08)),
                                   cells: [
                                     const DataCell(SizedBox(width: _txnColDate)),
+                                    const DataCell(SizedBox.shrink()),
                                     const DataCell(Text('TOTAL',
                                         style: TextStyle(
                                             fontSize: 12,
@@ -3149,6 +3324,343 @@ class _IncomeBarChart extends StatelessWidget {
                     color: isHovered ? _navyAccent : Colors.grey[500]),
                 textAlign: TextAlign.center));
       }).toList()),
+    ]);
+  }
+}
+
+// ============================================================================
+// TRANSACTIONS TAB — grouped, collapsible per-type sections (Zoho-style)
+// ============================================================================
+
+class _TxnRow {
+  final DateTime date;
+  final String number;
+  final String status;
+  final double amount;
+  final String extraLabel;
+  final double? extra;
+  final String? subtitle;
+
+  const _TxnRow({
+    required this.date,
+    required this.number,
+    required this.status,
+    required this.amount,
+    this.extraLabel = '',
+    this.extra,
+    this.subtitle,
+  });
+}
+
+class _TransactionSection extends StatefulWidget {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final List<String> statusOptions;
+  final String? extraColumnLabel;
+  final VoidCallback onNew;
+  final void Function(String format) onExport;
+  final Future<List<_TxnRow>> Function(int page, String status) fetchPage;
+  final Widget Function(String status) statusBadge;
+
+  const _TransactionSection({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.statusOptions,
+    this.extraColumnLabel,
+    required this.onNew,
+    required this.onExport,
+    required this.fetchPage,
+    required this.statusBadge,
+  });
+
+  @override
+  State<_TransactionSection> createState() => _TransactionSectionState();
+}
+
+class _TransactionSectionState extends State<_TransactionSection> {
+  bool _expanded = false;
+  bool _loaded = false;
+  bool _loading = false;
+  String? _error;
+  int _page = 1;
+  bool _hasMore = false;
+  String _status = 'All';
+  List<_TxnRow> _rows = [];
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final rows = await widget.fetchPage(_page, _status);
+      setState(() {
+        _rows = rows;
+        _hasMore = rows.length >= 20;
+        _loaded = true;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+        _loaded = true;
+      });
+    }
+  }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    if (_expanded && !_loaded) _load();
+  }
+
+  void _changeStatus(String? s) {
+    if (s == null) return;
+    setState(() {
+      _status = s;
+      _page = 1;
+    });
+    _load();
+  }
+
+  void _changePage(int delta) {
+    setState(() => _page += delta);
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey[200]!),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2))
+        ],
+      ),
+      child: Column(children: [
+        InkWell(
+          onTap: _toggle,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: [
+              Icon(_expanded ? Icons.expand_more : Icons.chevron_right,
+                  color: Colors.grey[500]),
+              const SizedBox(width: 6),
+              Icon(widget.icon, size: 16, color: widget.color),
+              const SizedBox(width: 8),
+              Text(widget.title,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _navyDark)),
+              if (_loaded && !_loading) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: widget.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Text('${_rows.length}',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: widget.color)),
+                ),
+              ],
+              const Spacer(),
+              IconButton(
+                onPressed: () => widget.onExport('pdf'),
+                tooltip: 'Export ${widget.title} to PDF',
+                icon: const Icon(Icons.picture_as_pdf_outlined, size: 18, color: _red),
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
+                onPressed: () => widget.onExport('excel'),
+                tooltip: 'Export ${widget.title} to Excel',
+                icon: const Icon(Icons.grid_on_outlined, size: 18, color: _green),
+                visualDensity: VisualDensity.compact,
+              ),
+              TextButton.icon(
+                onPressed: widget.onNew,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('New', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                    foregroundColor: widget.color,
+                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+              ),
+            ]),
+          ),
+        ),
+        if (_expanded) const Divider(height: 1),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: _buildBody(),
+          ),
+      ]),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+            child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text('Could not load ${widget.title.toLowerCase()}: $_error',
+            style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (widget.statusOptions.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(children: [
+            const Text('Status: ',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            DropdownButton<String>(
+              value: _status,
+              isDense: true,
+              style: const TextStyle(fontSize: 12, color: _navyDark),
+              items: widget.statusOptions
+                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                  .toList(),
+              onChanged: _changeStatus,
+            ),
+          ]),
+        ),
+      if (_rows.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Text('No ${widget.title.toLowerCase()} yet',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+        )
+      else
+        SizedBox(
+          width: double.infinity,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: math.max(640.0, constraints.maxWidth)),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.all(Colors.grey[100]),
+                headingTextStyle: TextStyle(
+                    color: Colors.grey[700],
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    letterSpacing: 0.4),
+                headingRowHeight: 36,
+                dataRowMinHeight: 44,
+                dataRowMaxHeight: 60,
+                columnSpacing: 20,
+                horizontalMargin: 8,
+                dividerThickness: 1,
+                columns: [
+                  const DataColumn(label: SizedBox(width: 80, child: Text('DATE'))),
+                  const DataColumn(label: SizedBox(width: 200, child: Text('NUMBER'))),
+                  const DataColumn(label: SizedBox(width: 110, child: Text('STATUS'))),
+                  DataColumn(
+                      label: SizedBox(
+                          width: 110,
+                          child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text('AMOUNT'))),
+                      numeric: true),
+                  if (widget.extraColumnLabel != null)
+                    DataColumn(
+                        label: SizedBox(
+                            width: 130,
+                            child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(widget.extraColumnLabel!.toUpperCase()))),
+                        numeric: true),
+                ],
+                rows: _rows.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final r = entry.value;
+                  return DataRow(
+                    color: WidgetStateProperty.all(
+                        i.isOdd ? const Color(0xFFF7F9FC) : Colors.white),
+                    cells: [
+                      DataCell(Text(DateFormat('dd/MM/yyyy').format(r.date),
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]))),
+                      DataCell(Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(r.number,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: _navyAccent,
+                                  fontWeight: FontWeight.w600)),
+                          if (r.subtitle != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: SizedBox(
+                                width: 260,
+                                child: Text(r.subtitle!,
+                                    style: TextStyle(fontSize: 10.5, color: Colors.grey[500])),
+                              ),
+                            ),
+                        ],
+                      )),
+                      DataCell(widget.statusBadge(r.status)),
+                      DataCell(Text('₹${r.amount.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _navyDark))),
+                      if (widget.extraColumnLabel != null)
+                        DataCell(Text(
+                            r.extra != null ? '₹${r.extra!.toStringAsFixed(2)}' : '—',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: (r.extra ?? 0) > 0 ? _red : Colors.grey[500]))),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          );
+          }),
+        ),
+      if (_rows.isNotEmpty || _page > 1)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            Text('Page $_page',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            IconButton(
+                iconSize: 18,
+                onPressed: _page > 1 ? () => _changePage(-1) : null,
+                icon: const Icon(Icons.chevron_left)),
+            IconButton(
+                iconSize: 18,
+                onPressed: _hasMore ? () => _changePage(1) : null,
+                icon: const Icon(Icons.chevron_right)),
+          ]),
+        ),
     ]);
   }
 }

@@ -38,9 +38,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
   final _tmsService = TMSService();
   final _searchController = TextEditingController();
   final ScrollController _hScroll = ScrollController();
-  final ScrollController _vScroll = ScrollController();
   final ScrollController _hScroll2 = ScrollController();
-  final ScrollController _vScroll2 = ScrollController();
   bool _isTableView = true;
 
   // ── Design tokens ──────────────────────────────────────────────────────────
@@ -122,9 +120,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
   void dispose() {
     _searchController.dispose();
     _hScroll.dispose();
-    _vScroll.dispose();
     _hScroll2.dispose();
-    _vScroll2.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -884,14 +880,18 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Column(children: [
-        _buildTopBar(),
-        _buildStatCards(),
-        const SizedBox(height: 14),
-        _buildFilterRow(),
-        const SizedBox(height: 10),
-        Expanded(child: _isLoading ? _loader() : _buildBody()),
-      ]),
+      body: _isLoading
+          ? _loader()
+          : SingleChildScrollView(
+              child: Column(children: [
+                _buildTopBar(),
+                _buildStatCards(),
+                const SizedBox(height: 14),
+                _buildFilterRow(),
+                const SizedBox(height: 10),
+                _buildBody(),
+              ]),
+            ),
     );
   }
 
@@ -1264,10 +1264,9 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
 
   Widget _buildBody() {
     return Column(children: [
-      Expanded(
-          child: _isTableView
-              ? (_filtered.isEmpty ? _emptyState() : _buildTable())
-              : _buildTicketListView()),
+      _isTableView
+          ? (_filtered.isEmpty ? _emptyState() : _buildTable())
+          : _buildTicketListView(),
       if (!_isTableView || _filtered.isNotEmpty) _buildPagination(),
     ]);
   }
@@ -1346,6 +1345,8 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
     }
 
     return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       itemCount: tickets.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -1466,7 +1467,6 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
   Widget _buildTable() {
     final isRaised = _activeTab == 1;
     final hScroll = isRaised ? _hScroll2 : _hScroll;
-    final vScroll = isRaised ? _vScroll2 : _vScroll;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
@@ -1484,30 +1484,21 @@ class _MyTicketsScreenState extends State<MyTicketsScreen>
         borderRadius: BorderRadius.circular(14),
         child: Column(children: [
           _tableHeader(isRaised),
-          Expanded(
-              child: Scrollbar(
-            controller: vScroll,
+          Scrollbar(
+            controller: hScroll,
             thumbVisibility: true,
             child: SingleChildScrollView(
-              controller: vScroll,
-              child: Scrollbar(
-                controller: hScroll,
-                thumbVisibility: true,
-                notificationPredicate: (n) => n.depth == 1,
-                child: SingleChildScrollView(
-                  controller: hScroll,
-                  scrollDirection: Axis.horizontal,
-                  child: Column(
-                    children: _paged
-                        .asMap()
-                        .entries
-                        .map((e) => _buildRow(e.value, e.key.isEven, isRaised))
-                        .toList(),
-                  ),
-                ),
+              controller: hScroll,
+              scrollDirection: Axis.horizontal,
+              child: Column(
+                children: _paged
+                    .asMap()
+                    .entries
+                    .map((e) => _buildRow(e.value, e.key.isEven, isRaised))
+                    .toList(),
               ),
             ),
-          )),
+          ),
         ]),
       ),
     );

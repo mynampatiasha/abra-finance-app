@@ -30,7 +30,13 @@ class ExportHelper {
 
       if (kIsWeb) {
         // Web: Use browser download
-        final bytes = utf8.encode(csv);
+        // Excel opens CSV files using the system's ANSI codepage unless a
+        // UTF-8 BOM is present at the start of the file — without it, every
+        // multi-byte UTF-8 character (₹, etc.) gets split into 2-3 mojibake
+        // characters (e.g. "â‚¹"). Prepending the BOM tells Excel to read the
+        // file as UTF-8.
+        const bom = '﻿';
+        final bytes = utf8.encode('$bom$csv');
         final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
         final url = html.Url.createObjectUrlFromBlob(blob);
         final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -79,6 +85,15 @@ class ExportHelper {
   }
 
   /// Export data to PDF format
+  ///
+  /// [rowTypes], when provided (one entry per row in [data], values
+  /// 'header' | 'subtotal' | 'detail'), switches the table from the flat
+  /// grey-header grid to a hierarchy-aware layout: 'header' rows render as
+  /// a full-width section title bar, 'subtotal' rows render bold with a
+  /// divider line above, and 'detail' rows render indented under their
+  /// section — matching how financial statements (P&L, Balance Sheet, Cash
+  /// Flow, Movement of Equity) are structured. Leave null for plain list
+  /// reports to keep the existing flat-table rendering unchanged.
   static Future<String> exportToPDF({
     required String title,
     required List<String> headers,
@@ -91,6 +106,8 @@ class ExportHelper {
     String? orgGst,
     String? customerName,
     String? customerAddress,
+    List<String>? rowTypes,
+    bool portrait = false,
   }) async {
     try {
       print('📤 Starting PDF export: $filename');
@@ -103,7 +120,7 @@ class ExportHelper {
 
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape,
+          pageFormat: portrait ? PdfPageFormat.a4 : PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(32),
           build: (context) => [
             // Company Header
@@ -237,24 +254,27 @@ class ExportHelper {
             ],
 
             // Data table
-            pw.Table.fromTextArray(
-              headers: headers,
-              data: data,
-              headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                fontSize: 10,
+            if (rowTypes != null)
+              _buildStructuredTable(headers, data, rowTypes)
+            else
+              pw.Table.fromTextArray(
+                headers: headers,
+                data: data,
+                headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 10,
+                ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellAlignment: pw.Alignment.centerLeft,
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey300,
+                ),
+                cellHeight: 30,
+                cellAlignments: {
+                  for (var i = 0; i < headers.length; i++)
+                    i: pw.Alignment.centerLeft,
+                },
               ),
-              cellStyle: const pw.TextStyle(fontSize: 9),
-              cellAlignment: pw.Alignment.centerLeft,
-              headerDecoration: const pw.BoxDecoration(
-                color: PdfColors.grey300,
-              ),
-              cellHeight: 30,
-              cellAlignments: {
-                for (var i = 0; i < headers.length; i++)
-                  i: pw.Alignment.centerLeft,
-              },
-            ),
           ],
         ),
       );
@@ -288,5 +308,135 @@ class ExportHelper {
       print('❌ Error exporting to PDF: $e');
       throw Exception('Error exporting to PDF: $e');
     }
+  }
+
+  static bool _looksNumericCell(String s) {
+    final stripped = s
+        .replaceAll('₹', '')
+        .replaceAll('Rs.', '')
+        .replaceAll(',', '')
+        .replaceAll('%', '')
+        .trim();
+    if (stripped.isEmpty) return false;
+    return RegExp(r'^-?\(?\d+(\.\d+)?\)?$').hasMatch(stripped);
+  }
+
+  /// Renders `data` as a hierarchy-aware table: 'header' rows become a
+  /// full-width section title bar, 'subtotal' rows render bold with a top
+  /// divider, 'detail' rows render indented under their section with
+  /// numeric-looking cells right-aligned.
+  // Header/subtotal rows put their label text in whichever column holds the
+  // long descriptive name — for the Section/Account/Amount financial-
+  // statement shape that's always the first column, but Trial Balance and
+  // General Ledger put "Account Code" first and the actual long text in
+  // "Account Name" instead. Detect the real label column by header name
+  // rather than assuming it's always index 0.
+  static bool _isWideColumn(String header) {
+    final h = header.toLowerCase();
+    if (h.contains('code') || h.contains('type')) return false;
+    return h.contains('account') || h.contains('item') || h.contains('description');
+  }
+
+  static pw.Widget _buildStructuredTable(
+    List<String> headers,
+    List<List<dynamic>> data,
+    List<String> rowTypes,
+  ) {
+    int labelCol = headers.indexWhere(_isWideColumn);
+    if (labelCol == -1) labelCol = 0;
+
+    final columnWidths = <int, pw.TableColumnWidth>{
+      for (var i = 0; i < headers.length; i++)
+        i: _isWideColumn(headers[i])
+            ? const pw.FlexColumnWidth(2.4)
+            : const pw.FlexColumnWidth(1),
+    };
+
+    final tableRows = <pw.TableRow>[
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+        children: headers
+            .map((h) => pw.Padding(
+                  padding:
+                      const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  child: pw.Text(
+                    h,
+                    style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                    ),
+                  ),
+                ))
+            .toList(),
+      ),
+    ];
+
+    for (var i = 0; i < data.length; i++) {
+      final cells = data[i];
+      final type = i < rowTypes.length ? rowTypes[i] : 'detail';
+
+      if (type == 'header') {
+        tableRows.add(
+          pw.TableRow(
+            decoration: const pw.BoxDecoration(color: PdfColors.blue50),
+            children: List.generate(headers.length, (ci) {
+              if (ci != labelCol) return pw.Container();
+              return pw.Padding(
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: pw.Text(
+                  ci < cells.length ? cells[ci].toString() : '',
+                  style: pw.TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.blue900,
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+        continue;
+      }
+
+      final isSubtotal = type == 'subtotal';
+      tableRows.add(
+        pw.TableRow(
+          decoration: isSubtotal
+              ? const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                  border: pw.Border(
+                      top: pw.BorderSide(color: PdfColors.grey500, width: 0.75)),
+                )
+              : (i % 2 == 1
+                  ? const pw.BoxDecoration(color: PdfColors.grey50)
+                  : null),
+          children: List.generate(headers.length, (ci) {
+            final val = ci < cells.length ? cells[ci].toString() : '';
+            final numeric = _looksNumericCell(val);
+            return pw.Padding(
+              padding: pw.EdgeInsets.only(
+                left: (ci == labelCol && !isSubtotal) ? 14 : 6,
+                right: 6,
+                top: 5,
+                bottom: 5,
+              ),
+              child: pw.Text(
+                val,
+                textAlign: numeric ? pw.TextAlign.right : pw.TextAlign.left,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: isSubtotal ? pw.FontWeight.bold : pw.FontWeight.normal,
+                  color: isSubtotal ? PdfColors.blue900 : PdfColors.grey900,
+                ),
+              ),
+            );
+          }),
+        ),
+      );
+    }
+
+    return pw.Table(columnWidths: columnWidths, children: tableRows);
   }
 }

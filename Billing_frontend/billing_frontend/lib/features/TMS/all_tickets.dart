@@ -37,7 +37,6 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
   final _tmsService = TMSService();
   final _searchController = TextEditingController();
   final ScrollController _hScroll = ScrollController();
-  final ScrollController _vScroll = ScrollController();
   bool _isTableView = true;
 
   // ── Design Tokens ──────────────────────────────────────────────────────────
@@ -115,7 +114,6 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
   void dispose() {
     _searchController.dispose();
     _hScroll.dispose();
-    _vScroll.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -823,14 +821,18 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: Colors.white,
-        body: Column(children: [
-          _buildTopBar(),
-          _buildStatCards(),
-          const SizedBox(height: 14),
-          _buildFilterRow(),
-          const SizedBox(height: 10),
-          Expanded(child: _isLoading ? _loader() : _buildBody()),
-        ]),
+        body: _isLoading
+            ? _loader()
+            : SingleChildScrollView(
+                child: Column(children: [
+                  _buildTopBar(),
+                  _buildStatCards(),
+                  const SizedBox(height: 14),
+                  _buildFilterRow(),
+                  const SizedBox(height: 10),
+                  _buildBody(),
+                ]),
+              ),
       );
 
   Widget _buildTopBar() => Container(
@@ -1189,10 +1191,9 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
 
   Widget _buildBody() {
     return Column(children: [
-      Expanded(
-          child: _isTableView
-              ? (_filteredTickets.isEmpty ? _emptyState() : _buildTable())
-              : _buildTicketListView()),
+      _isTableView
+          ? (_filteredTickets.isEmpty ? _emptyState() : _buildTable())
+          : _buildTicketListView(),
       if (!_isTableView || _filteredTickets.isNotEmpty) _buildPagination(),
     ]);
   }
@@ -1270,6 +1271,8 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
     }
 
     return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       itemCount: tickets.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -1381,30 +1384,21 @@ class _AllTicketsScreenState extends State<AllTicketsScreen>
           borderRadius: BorderRadius.circular(14),
           child: Column(children: [
             _tableHeader(),
-            Expanded(
-                child: Scrollbar(
-              controller: _vScroll,
+            Scrollbar(
+              controller: _hScroll,
               thumbVisibility: true,
               child: SingleChildScrollView(
-                controller: _vScroll,
-                child: Scrollbar(
-                  controller: _hScroll,
-                  thumbVisibility: true,
-                  notificationPredicate: (n) => n.depth == 1,
-                  child: SingleChildScrollView(
-                    controller: _hScroll,
-                    scrollDirection: Axis.horizontal,
-                    child: Column(
-                      children: _paged
-                          .asMap()
-                          .entries
-                          .map((e) => _buildRow(e.value, e.key.isEven))
-                          .toList(),
-                    ),
-                  ),
+                controller: _hScroll,
+                scrollDirection: Axis.horizontal,
+                child: Column(
+                  children: _paged
+                      .asMap()
+                      .entries
+                      .map((e) => _buildRow(e.value, e.key.isEven))
+                      .toList(),
                 ),
               ),
-            )),
+            ),
           ]),
         ),
       );

@@ -1,0 +1,3560 @@
+// ============================================================================
+// PAYMENTS RECEIVED ROUTES - ZOHO BOOKS EXACT WORKFLOW
+// ============================================================================
+// File: backend/routes/payments-received.js
+// Workflow: Record Payment with Proofs → Update Invoice Status → Send Email with Proofs
+// Email is sent ONLY when payment is recorded with proofs (not on "Mark as Paid")
+// ============================================================================
+
+
+const express = require('express');
+const router = express.Router();
+const { ObjectId } = require('mongodb');
+const { verifyFinanceJWT: verifyToken } = require('../middleware/finance_jwt');
+const { uploadPaymentProofs } = require('../middleware/upload');
+const path = require('path');
+const fs = require('fs');
+
+
+// ✅ COA Helper
+const { postTransactionToCOA, ChartOfAccount } = require('./chart_of_accounts');
+const { sendMail } = require('../utils/mailer');
+
+async function getSystemAccountId(name, orgId = null) {
+  try {
+    const acc = await ChartOfAccount.findOne({
+      accountName: name,
+      $or: [
+        { isSystemAccount: true },
+        { isSystemAccount: { $exists: false } }
+      ],
+      ...(orgId ? { orgId } : {})
+    }).select('_id').lean();
+
+    if (!acc) {
+      // Fallback: try without orgId filter
+      const fallback = await ChartOfAccount.findOne({
+        accountName: name,
+      }).select('_id').lean();
+      return fallback ? fallback._id : null;
+    }
+    return acc._id;
+  } catch (e) {
+    console.error(`COA lookup error for "${name}":`, e.message);
+    return null;
+  }
+}
+// Import nodemailer - use dynamic import or check if it's properly installed
+let nodemailer;
+try {
+  nodemailer = require('nodemailer');
+  if (!nodemailer || !nodemailer.createTransport) {
+    console.warn('⚠️ Nodemailer not properly loaded, email features will be disabled');
+    nodemailer = null;
+  }
+} catch (error) {
+  console.warn('⚠️ Nodemailer not available, email features will be disabled:', error.message);
+  nodemailer = null;
+}
+
+// Use shared Finance DB connection
+const { getFinanceDb } = require('../config/database');
+
+// Lazy db accessor — resolves to the shared Finance DB on first use
+const dbProxy = new Proxy({}, {
+  get(_, prop) {
+    return getFinanceDb()[prop];
+  }
+});
+const db = dbProxy;
+
+// ============================================================================
+// EMAIL SERVICE FOR PAYMENT RECEIPTS
+// ============================================================================
+
+// Send payment receipt email with proofs attached
+async function sendPaymentReceiptEmail(payment, invoice, proofPaths) {  // Fetch org details from DB — branch-aware
+  let orgData = null;
+  try {
+    const mongoose = require('mongoose');
+    const { getEffectiveOrgData } = require('./branches');
+    const db = mongoose.connection.db;
+    if (db) {
+      orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
+    }
+  } catch (_) { }
+  const orgName = orgData?.orgName || 'Billing Team';
+  const orgGST = orgData?.gstNumber || '';
+  const orgPhone = orgData?.phone || '';
+  const orgEmail = orgData?.email || '';
+
+  try {
+    const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+    .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+    .success-badge { background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0; border: 1px solid #c3e6cb; }
+    .payment-box { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #27ae60; }
+    .payment-detail { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ecf0f1; }
+    .footer { text-align: center; color: #95a5a6; font-size: 12px; margin-top: 30px; }
+    .proof-notice { background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Payment Received</h1>
+      <p>Thank you for your payment!</p>
+    </div>
+    <div class="content">
+      <div class="success-badge">
+        <h2 style="margin: 0;">Payment Successful</h2>
+        <p style="margin: 10px 0 0 0;">We have received your payment of ₹${payment.amountReceived.toFixed(2)}</p>
+      </div>
+      
+      <div class="payment-box">
+        <h3 style="margin-top: 0; color: #2c3e50;">Payment Details:</h3>
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Payment Number:</span>
+          <span style="font-weight: bold;">${payment.paymentNumber}</span>
+        </div>
+        ${invoice ? `
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Invoice Number:</span>
+          <span style="font-weight: bold;">${invoice.invoiceNumber}</span>
+        </div>
+        ` : ''}
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Amount Paid:</span>
+          <span style="font-weight: bold; color: #27ae60;">₹${payment.amountReceived.toFixed(2)}</span>
+        </div>
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Payment Date:</span>
+          <span>${payment.paymentDate}</span>
+        </div>
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Payment Mode:</span>
+          <span>${payment.paymentMode}</span>
+        </div>
+        ${payment.reference ? `
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Reference Number:</span>
+          <span>${payment.reference}</span>
+        </div>
+        ` : ''}
+        ${payment.bankCharges > 0 ? `
+        <div class="payment-detail">
+          <span style="color: #7f8c8d;">Bank Charges:</span>
+          <span style="color: #e74c3c;">₹${payment.bankCharges.toFixed(2)}</span>
+        </div>
+        ` : ''}
+        ${invoice ? `
+        <div class="payment-detail" style="border: none; font-weight: bold; font-size: 16px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #27ae60;">
+          <span style="color: #2c3e50;">Remaining Balance:</span>
+          <span style="color: ${invoice.amountDue > 0 ? '#e74c3c' : '#27ae60'};">₹${invoice.amountDue.toFixed(2)}</span>
+        </div>
+        ` : ''}
+      </div>
+      
+      ${proofPaths && proofPaths.length > 0 ? `
+      <div class="proof-notice">
+        <strong>📎 Payment Proofs Attached:</strong><br>
+        We have attached ${proofPaths.length} payment proof document(s) to this email for your records.
+      </div>
+      ` : ''}
+      
+      ${payment.notes ? `
+      <div style="background: white; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <strong style="color: #2c3e50;">Notes:</strong><br>
+        <p style="margin: 10px 0 0 0; color: #7f8c8d;">${payment.notes}</p>
+      </div>
+      ` : ''}
+      
+      <div style="background: white; padding: 20px; border-radius: 8px; margin-top: 20px;">
+        <h3 style="color: #2c3e50; margin-top: 0;">📞 Need Help?</h3>
+        <p>If you have any questions about this payment, please contact us:</p>
+        <ul style="list-style: none; padding: 0;">
+          ${orgEmail ? `<li style="padding: 5px 0;">📧 Email: ${orgEmail}</li>` : ''}
+          ${orgPhone ? `<li style="padding: 5px 0;">📞 Phone: ${orgPhone}</li>` : ''}
+          <li style="padding: 5px 0;">🕐 Business Hours: Mon-Fri, 9 AM - 6 PM IST</li>
+        </ul>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p><strong>${orgName}</strong></p>
+      ${orgGST ? `<p>GST: ${orgGST}</p>` : ''}
+      <p>This is an automated email. Please do not reply to this message.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const attachments = [];
+
+    // Attach payment proof files
+    if (proofPaths && proofPaths.length > 0) {
+      proofPaths.forEach((proofPath, index) => {
+        if (fs.existsSync(proofPath)) {
+          attachments.push({
+            filename: `Payment-Proof-${index + 1}${path.extname(proofPath)}`,
+            path: proofPath
+          });
+        }
+      });
+    }
+
+    const mailOptions = {
+      from: `"${orgName} - Billing" <${process.env.SMTP_USER}>`,
+      to: payment.customerEmail || invoice?.customerEmail,
+      subject: `Payment Receipt - ${payment.paymentNumber} - Rs.${payment.amountReceived.toFixed(2)}`,
+      html: emailHtml,
+      attachments: attachments
+    };
+
+    await sendMail({
+      orgId: payment.orgId,
+      branchId: payment.branchId || null,
+      db: require('mongoose').connection.db,
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      attachments: mailOptions.attachments,
+    });
+    console.log(`📧 Payment receipt email sent to ${payment.customerEmail || invoice?.customerEmail}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to send payment receipt email:', error);
+    throw error;
+  }
+}
+// ============================================================================
+// GET ALL PAYMENTS
+// ============================================================================
+
+router.get('/', verifyToken, async (req, res) => {
+  try {
+    const { filter, sortBy, sortOrder = 'desc', search } = req.query;
+
+    let query = {};
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    // Apply filters
+    if (filter && filter !== 'All Payments') {
+      switch (filter) {
+        case 'Draft':
+          query.status = 'draft';
+          break;
+        case 'Paid':
+          query.status = 'paid';
+          break;
+        case 'Void':
+          query.status = 'void';
+          break;
+      }
+    }
+
+    // NEW: Universal Search Filter
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      query.$or = [
+        { paymentNumber: searchRegex },
+        { customerName: searchRegex },
+        { reference: searchRegex },
+        { invoiceNumber: searchRegex }
+      ];
+    }
+
+    // Build sort object
+    let sort = { createdAt: -1 }; // Default sort by creation date
+    if (sortBy) {
+      sort = {};
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    }
+
+    const payments = await db.collection('payments_received')
+      .find(query)
+      .sort(sort)
+      .toArray();
+
+    // Batch fetch invoice numbers
+    const invoiceIdsToFetch = new Set();
+    payments.forEach(payment => {
+      if (payment.invoicePayments) {
+        Object.keys(payment.invoicePayments).forEach(id => {
+          if (ObjectId.isValid(id)) invoiceIdsToFetch.add(id);
+        });
+      }
+    });
+
+    const invoiceIdToNumberMap = {};
+    if (invoiceIdsToFetch.size > 0) {
+      const uniqueInvoiceIds = Array.from(invoiceIdsToFetch).map(id => new ObjectId(id));
+      const invoices = await db.collection('invoices')
+        .find({ _id: { $in: uniqueInvoiceIds } })
+        .project({ invoiceNumber: 1 })
+        .toArray();
+      invoices.forEach(inv => {
+        invoiceIdToNumberMap[inv._id.toString()] = inv.invoiceNumber;
+      });
+    }
+
+    // Format payments for frontend
+    const formattedPayments = payments.map(payment => {
+      let linkedInvoiceNumbers = payment.invoiceNumber || '';
+      if (payment.invoicePayments && Object.keys(payment.invoicePayments).length > 0) {
+        const numbers = Object.keys(payment.invoicePayments)
+          .map(id => invoiceIdToNumberMap[id])
+          .filter(Boolean);
+        if (numbers.length > 0) {
+          linkedInvoiceNumbers = numbers.join(', ');
+        }
+      }
+
+      return {
+        id: payment._id,
+        date: payment.paymentDate,
+        paymentNumber: payment.paymentNumber,
+        referenceNumber: payment.reference || '',
+        customerName: payment.customerName,
+        invoiceNumber: linkedInvoiceNumbers,
+        mode: payment.paymentMode,
+        amount: payment.amountReceived,
+        status: payment.status || 'paid',
+        hasProofs: payment.paymentProofs && payment.paymentProofs.length > 0,
+        proofsCount: payment.paymentProofs ? payment.paymentProofs.length : 0,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt
+      };
+    });
+
+    res.json({
+      success: true,
+      data: formattedPayments,
+      total: formattedPayments.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching payments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching payments',
+      error: error.message
+    });
+  }
+});
+
+router.get('/next-payment-number', verifyToken, async (req, res) => {
+  try {
+    const orgId = req.user?.orgId || null;
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const orgFilter = { ...(orgId ? { orgId } : {}), ...(branchId ? { branchId } : {}) };
+    const existing = await db.collection('payments_received')
+      .find({ ...orgFilter, paymentNumber: { $regex: '^REC\\d' } }, { projection: { paymentNumber: 1 } })
+      .toArray();
+
+    let max = 0;
+    for (const p of existing) {
+      const n = parseInt((p.paymentNumber || '').slice('REC'.length), 10);
+      if (!isNaN(n) && n > max) max = n;
+    }
+    const nextNumber = `REC${String(max + 1).padStart(6, '0')}`;
+
+    res.json({
+      success: true,
+      data: {
+        nextPaymentNumber: nextNumber
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting next payment number:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting next payment number',
+      error: error.message
+    });
+  }
+});
+
+router.get('/stats/summary', verifyToken, async (req, res) => {
+  try {
+    const { startDate, endDate, customerName, search } = req.query;
+
+    let matchQuery = {};
+    if (req.user?.orgId) matchQuery.orgId = req.user.orgId; Object.assign(matchQuery, req.branchFilter || {});
+
+    if (startDate && endDate) {
+      matchQuery.paymentDate = {
+        $gte: startDate,
+        $lte: endDate
+      };
+    }
+
+    if (customerName) {
+      matchQuery.customerName = customerName;
+    }
+
+    // NEW: Universal Search Filter
+    if (search && search.trim() !== '') {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      matchQuery.$or = [
+        { paymentNumber: searchRegex },
+        { customerName: searchRegex },
+        { reference: searchRegex },
+        { invoiceNumber: searchRegex }
+      ];
+    }
+
+    const stats = await db.collection('payments_received').aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: null,
+          totalPayments: { $sum: 1 },
+          totalAmount: { $sum: '$amountReceived' },
+          totalBankCharges: { $sum: '$bankCharges' },
+          totalNetAmount: { $sum: '$netAmount' },
+          avgPaymentAmount: { $avg: '$amountReceived' },
+        }
+      }
+    ]).toArray();
+
+    const paymentModeStats = await db.collection('payments_received').aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: '$paymentMode',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amountReceived' }
+        }
+      }
+    ]).toArray();
+
+    res.json({
+      success: true,
+      data: {
+        summary: stats[0] || {
+          totalPayments: 0,
+          totalAmount: 0,
+          totalBankCharges: 0,
+          totalNetAmount: 0,
+          avgPaymentAmount: 0
+        },
+        paymentModeBreakdown: paymentModeStats
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching payment statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching payment statistics',
+      error: error.message
+    });
+  }
+});
+
+router.get('/export/csv', verifyToken, async (req, res) => {
+  try {
+    const { filter, startDate, endDate } = req.query;
+
+    let query = {};
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    if (filter && filter !== 'All Payments') {
+      switch (filter) {
+        case 'Draft':
+          query.status = 'draft';
+          break;
+        case 'Paid':
+          query.status = 'paid';
+          break;
+        case 'Void':
+          query.status = 'void';
+          break;
+      }
+    }
+
+    if (startDate && endDate) {
+      query.paymentDate = {
+        $gte: startDate,
+        $lte: endDate
+      };
+    }
+
+    const payments = await db.collection('payments_received')
+      .find(query)
+      .sort({ paymentDate: -1 })
+      .toArray();
+
+    // Generate CSV content
+    const csvHeaders = [
+      'Payment Date',
+      'Payment Number',
+      'Customer Name',
+      'Amount Received',
+      'Bank Charges',
+      'Net Amount',
+      'Payment Mode',
+      'Deposit To',
+      'Reference',
+      'Tax Deduction',
+      'Status',
+      'Has Proofs',
+      'Notes'
+    ].join(',');
+
+    const csvRows = payments.map(payment => [
+      payment.paymentDate,
+      payment.paymentNumber,
+      payment.customerName,
+      payment.amountReceived,
+      payment.bankCharges || 0,
+      payment.netAmount,
+      payment.paymentMode,
+      payment.depositTo,
+      payment.reference || '',
+      payment.taxDeduction,
+      payment.status,
+      payment.paymentProofs && payment.paymentProofs.length > 0 ? 'Yes' : 'No',
+      (payment.notes || '').replace(/,/g, ';')
+    ].join(','));
+
+    const csvContent = [csvHeaders, ...csvRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=payments_received.csv');
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('❌ Error exporting payments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error exporting payments',
+      error: error.message
+    });
+  }
+}); router.get('/customer/:customerId/unpaid-invoices', verifyToken, async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    console.log(`🔍 Fetching unpaid invoices for customer: ${customerId}`);
+
+    // Convert customerId to ObjectId if it's a valid ObjectId string
+    let customerIdQuery;
+    if (ObjectId.isValid(customerId)) {
+      customerIdQuery = new ObjectId(customerId);
+      console.log(`   Using ObjectId: ${customerIdQuery}`);
+    } else {
+      customerIdQuery = customerId;
+      console.log(`   Using string: ${customerIdQuery}`);
+    }
+
+    // Build query - try both ObjectId and string match
+    let query = {
+      $or: [
+        { customerId: customerIdQuery },  // ObjectId match
+        { customerId: customerId }  // String match (fallback)
+      ],
+      status: { $in: ['SENT', 'UNPAID', 'OVERDUE', 'PARTIALLY_PAID'] },
+      amountDue: { $gt: 0 }
+    };
+
+    // Apply date filter if provided
+    if (startDate && endDate) {
+      query.invoiceDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    console.log('📋 Query:', JSON.stringify(query, null, 2));
+
+    // Query MongoDB directly
+    const unpaidInvoices = await db.collection('invoices')
+      .find(query)
+      .sort({ invoiceDate: -1 })
+      .toArray();
+
+    console.log(`✅ Found ${unpaidInvoices.length} unpaid invoices`);
+
+    // Log each invoice found
+    unpaidInvoices.forEach((inv, index) => {
+      console.log(`   ${index + 1}. ${inv.invoiceNumber} - Status: ${inv.status} - Due: ₹${inv.amountDue}`);
+    });
+
+    res.json({
+      success: true,
+      data: unpaidInvoices,
+      total: unpaidInvoices.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching unpaid invoices:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching unpaid invoices',
+      error: error.message
+    });
+  }
+});
+// ============================================================================
+// GET CUSTOMER UNUSED CREDITS BALANCE
+// ============================================================================
+
+router.get('/customer/:customerId/unused-credits', verifyToken, async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    const custId = ObjectId.isValid(customerId) ? new ObjectId(customerId) : customerId;
+
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const customer = await db.collection('billing-customers').findOne(
+      { _id: custId, ...orgFilter },
+      { unusedCredits: 1, customerDisplayName: 1 }
+    ).lean();
+
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        customerName: customer.customerDisplayName || '',
+        unusedCredits: customer.unusedCredits || 0,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error fetching customer unused credits:', error);
+    res.status(500).json({ success: false, message: 'Error fetching unused credits', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET PAYMENTS FOR ONE INVOICE — authoritative source (payments_received),
+// not the invoice's own embedded `payments[]` array, which can carry stale
+// duplicate entries from past sync issues.
+// ============================================================================
+
+router.get('/for-invoice/:invoiceId', verifyToken, async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+
+    const query = { ...orgFilter };
+    query[`invoicePayments.${invoiceId}`] = { $exists: true };
+
+    const payments = await db.collection('payments_received')
+      .find(query)
+      .sort({ paymentDate: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      data: payments.map(p => ({
+        paymentNumber: p.paymentNumber,
+        amount: p.invoicePayments[invoiceId],
+        paymentDate: p.paymentDate,
+        paymentMode: p.paymentMode || p.paymentMethod || '',
+        referenceNumber: p.reference || p.referenceNumber || '',
+        recordedBy: p.createdBy || p.recordedBy || '',
+        status: p.status || '',
+      })),
+    });
+  } catch (error) {
+    console.error('❌ Error fetching payments for invoice:', error);
+    res.status(500).json({ success: false, message: 'Error fetching payments for invoice', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET PAYMENT BY ID
+// ============================================================================
+
+router.get('/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment ID'
+      });
+    }
+
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    const payment = await db.collection('payments_received').findOne(query);
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // ── Resolve depositTo ObjectId → account name ──────────────────────────
+    let depositToName = payment.depositTo || '';
+    if (payment.depositTo && ObjectId.isValid(payment.depositTo)) {
+      try {
+        const acct = await db.collection('paymentaccounts').findOne(
+          { _id: new ObjectId(payment.depositTo) },
+          { projection: { accountName: 1 } }
+        );
+        if (acct?.accountName) depositToName = acct.accountName;
+      } catch (_) { }
+    }
+
+    // ── Resolve invoicePayments { invoiceId: amount } → { invoiceNumber: amount } ──
+    let resolvedInvoicePayments = {};
+    let clearedInvoices = [];
+    if (payment.invoicePayments && typeof payment.invoicePayments === 'object') {
+      const invoiceIds = Object.keys(payment.invoicePayments)
+        .filter(id => ObjectId.isValid(id))
+        .map(id => new ObjectId(id));
+      
+      if (invoiceIds.length > 0) {
+        clearedInvoices = await db.collection('invoices')
+          .find({ _id: { $in: invoiceIds } })
+          .toArray();
+
+        // Build the resolved map
+        clearedInvoices.forEach(inv => {
+          resolvedInvoicePayments[inv.invoiceNumber] = payment.invoicePayments[inv._id.toString()];
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...payment,
+        depositToName,
+        invoicePaymentsResolved: resolvedInvoicePayments,
+        clearedInvoices: clearedInvoices
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching payment',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// CREATE NEW PAYMENT WITH PROOFS - ZOHO BOOKS WORKFLOW
+// ============================================================================
+
+router.post('/', verifyToken, uploadPaymentProofs, async (req, res) => {
+  try {
+    console.log('\n' + '💰'.repeat(50));
+    console.log('ZOHO BOOKS WORKFLOW: RECORD PAYMENT WITH PROOFS');
+    console.log('💰'.repeat(50));
+
+    // Parse payment data from form field
+    let paymentData;
+    try {
+      paymentData = JSON.parse(req.body.paymentData);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment data format'
+      });
+    }
+
+    const {
+      customerId,
+      customerName,
+      customerEmail,
+      amountReceived,
+      bankCharges = 0,
+      paymentDate,
+      paymentMode = 'Cash',
+      depositTo,
+      reference = '',
+      taxDeduction = 'No Tax deducted',
+      notes = '',
+      sendThankYouNote = false,
+      invoicePayments = {},
+      invoiceTds = {},       // TDS deducted per-invoice: { invoiceId: amount }
+      invoiceWriteOffs = {}, // Rounding/Write-off per-invoice: { invoiceId: amount }
+      status = 'paid',
+      providerTransactionId = null,
+      creditsApplied = 0,
+      paymentType = 'payment', // 'payment' | 'advance'
+    } = paymentData;
+
+    // Generate a unique payment number (auto-increment past any collision)
+    const orgId = req.user?.orgId || null;
+    const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+    const orgFilter = { ...(orgId ? { orgId } : {}), ...(branchId ? { branchId } : {}) };
+
+    const existingNumbers = await db.collection('payments_received')
+      .find({ ...orgFilter, paymentNumber: { $regex: '^REC\\d' } }, { projection: { paymentNumber: 1 } })
+      .toArray();
+
+    let max = 0;
+    for (const p of existingNumbers) {
+      const n = parseInt((p.paymentNumber || '').slice('REC'.length), 10);
+      if (!isNaN(n) && n > max) max = n;
+    }
+
+    // If the frontend sent a number, honour it — but if it's already taken, bump past max
+    let paymentNumber = paymentData.paymentNumber;
+    if (paymentNumber) {
+      const collision = await db.collection('payments_received')
+        .findOne({ paymentNumber, orgId });
+      if (collision) {
+        // Stale number from the frontend — generate a fresh one
+        paymentNumber = `REC${String(max + 1).padStart(6, '0')}`;
+        console.log(`⚠️  Payment number collision — reassigned to ${paymentNumber}`);
+      }
+    } else {
+      paymentNumber = `REC${String(max + 1).padStart(6, '0')}`;
+    }
+
+    console.log('📋 Payment Details:');
+    console.log('   Customer ID:', customerId);
+    console.log('   Customer Name:', customerName);
+    console.log('   Amount Received:', amountReceived);
+    console.log('   Bank Charges:', bankCharges);
+    console.log('   Payment #:', paymentNumber);
+    console.log('   Payment Type:', paymentType);
+    console.log('   Files uploaded:', req.files ? req.files.length : 0);
+    console.log('   Invoice Payments:', JSON.stringify(invoicePayments));
+    console.log('   Credits Applied:', creditsApplied);
+
+    // Validation
+    if (!customerName || amountReceived == null || !paymentDate || !depositTo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: customerName, amountReceived, paymentDate, depositTo'
+      });
+    }
+
+    // Process uploaded files
+    const paymentProofs = [];
+    const proofPaths = [];
+    if (req.files && req.files.length > 0) {
+      console.log('📎 Processing uploaded files...');
+      for (const file of req.files) {
+        paymentProofs.push({
+          filename: file.filename,
+          originalName: file.originalname,
+          filepath: file.path,
+          fileType: file.mimetype,
+          fileSize: file.size,
+          uploadedAt: new Date()
+        });
+        proofPaths.push(file.path);
+        console.log(`   ✅ ${file.originalname} (${(file.size / 1024).toFixed(1)} KB)`);
+      }
+    }
+
+    // Calculate amounts
+    const totalInvoicePayments = Object.values(invoicePayments).reduce((sum, amt) => sum + parseFloat(amt), 0);
+    const netAmount = parseFloat(amountReceived) - parseFloat(bankCharges);
+
+    // Create payment record
+    const paymentRecord = {
+      customerId,
+      customerName,
+      customerEmail,
+      amountReceived: parseFloat(amountReceived),
+      bankCharges: parseFloat(bankCharges),
+      paymentDate,
+      paymentNumber,
+      paymentMode,
+      depositTo,
+      depositedToAccountId: ['Cash', 'Cheque'].includes(paymentMode)
+        ? null        // undeposited — shows in Record Deposit dialog
+        : depositTo,  // already in bank — won't show in Record Deposit
+      depositedAt: ['Cash', 'Cheque'].includes(paymentMode)
+        ? null
+        : new Date(),
+      isUndeposited: ['Cash', 'Cheque'].includes(paymentMode),
+      reference,
+      taxDeduction,
+      notes,
+      sendThankYouNote,
+      status,
+
+      // Payment type — 'payment' (against invoices) | 'advance' (no invoice, full amount → unusedCredits)
+      paymentType,
+
+      // Invoice payments
+      invoicePayments,
+
+      // Calculated fields
+      netAmount,
+      amountUsedForPayments: totalInvoicePayments,
+      amountRefunded: 0,
+      amountInExcess: netAmount - totalInvoicePayments - (parseFloat(creditsApplied) || 0),
+      creditsApplied: parseFloat(creditsApplied) || 0,
+      orgId: req.user?.orgId || null,
+      branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+      providerTransactionId: providerTransactionId ? (ObjectId.isValid(providerTransactionId) ? new ObjectId(providerTransactionId) : providerTransactionId) : null,
+      // Payment proofs
+      paymentProofs,
+
+      // Metadata
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: req.user?.email || req.user?.uid || 'system',
+      emailSent: false
+    };
+
+    // Insert payment
+    const result = await db.collection('payments_received').insertOne(paymentRecord);
+    console.log('✅ Payment created:', result.insertedId);
+
+    // ── UPDATE CUSTOMER UNUSED CREDITS ──────────────────────────────────────
+    // For ADVANCE: entire netAmount goes to unusedCredits (no invoice linkage)
+    // For PAYMENT: change in credits is (netAmount - totalInvoicePayments)
+    try {
+      const isAdvance = paymentType === 'advance';
+      const creditsAppliedAmt = parseFloat(paymentData.creditsApplied || 0);
+      let creditDelta;
+
+      if (isAdvance) {
+        // Full net amount becomes a new credit on the customer
+        creditDelta = netAmount;
+      } else {
+        // Cash received minus cash applied to invoices equals the change in unused credits.
+        creditDelta = netAmount - totalInvoicePayments;
+      }
+
+      console.log(`🔍 [UNUSED CREDITS DEBUG]`);
+      console.log(`   customerId: ${customerId}`);
+      console.log(`   paymentType: ${paymentType}`);
+      console.log(`   isAdvance: ${isAdvance}`);
+      console.log(`   netAmount: ${netAmount}`);
+      console.log(`   totalInvoicePayments: ${totalInvoicePayments}`);
+      console.log(`   creditsAppliedAmt: ${creditsAppliedAmt}`);
+      console.log(`   creditDelta: ${creditDelta}`);
+
+      if (creditDelta !== 0 && customerId) {
+        const custId = ObjectId.isValid(customerId) ? new ObjectId(customerId) : customerId;
+        console.log(`   custId (converted): ${custId}`);
+
+        const updateResult = await db.collection('billing-customers').findOneAndUpdate(
+          { _id: custId },
+          { $inc: { unusedCredits: creditDelta } },
+          { returnDocument: 'after' }
+        );
+        console.log(`   Update result: ${updateResult ? 'SUCCESS' : 'NOT FOUND'}`);
+        if (updateResult) {
+          console.log(`   New unusedCredits value: ${updateResult.unusedCredits}`);
+        }
+
+        // Ensure it never goes below 0
+        await db.collection('billing-customers').updateMany(
+          { _id: custId, unusedCredits: { $lt: 0 } },
+          { $set: { unusedCredits: 0 } }
+        );
+        console.log(`✅ Customer unusedCredits updated by ${creditDelta > 0 ? '+' : ''}${creditDelta} (type: ${isAdvance ? 'advance' : 'payment'})`);
+      } else {
+        console.log(`⚠️ Skipping unusedCredits update: creditDelta=${creditDelta}, customerId=${customerId}`);
+      }
+    } catch (creditErr) {
+      console.error('⚠️ Failed to update customer unusedCredits:', creditErr.message);
+    }
+    // ── END UNUSED CREDITS UPDATE ────────────────────────────────────────────
+
+    // ============================================================================
+    // UPDATE LINKED INVOICES - ZOHO BOOKS WORKFLOW
+    // ============================================================================
+    let updatedInvoices = [];
+    if (Object.keys(invoicePayments).length > 0) {
+      console.log('🔗 Updating linked invoices...');
+
+      for (const [invoiceId, amount] of Object.entries(invoicePayments)) {
+        if (parseFloat(amount) > 0) {
+          try {
+            // Convert invoiceId to ObjectId if needed
+            const invoiceObjectId = ObjectId.isValid(invoiceId) ? new ObjectId(invoiceId) : invoiceId;
+
+            // Find invoice
+            const invoice = await db.collection('invoices').findOne({ _id: invoiceObjectId });
+
+            if (invoice) {
+              // Get per-invoice TDS and write-off (Zoho Books workflow)
+              const invoiceTdsAmt = parseFloat(invoiceTds[invoiceId] || 0);
+              const invoiceWriteOffAmt = parseFloat(invoiceWriteOffs[invoiceId] || 0);
+              const cashPaid = parseFloat(amount);
+              const totalCleared = cashPaid + invoiceTdsAmt + invoiceWriteOffAmt;
+
+              console.log(`  📋 Invoice ${invoice.invoiceNumber}: cash=${cashPaid}, tds=${invoiceTdsAmt}, writeOff=${invoiceWriteOffAmt}, totalCleared=${totalCleared}`);
+
+              // Prepare payment record for invoice
+              const paymentRecord = {
+                paymentId: result.insertedId.toString(),
+                amount: cashPaid,
+                tdsAmount: invoiceTdsAmt,
+                writeOffAmount: invoiceWriteOffAmt,
+                totalCleared,
+                paymentDate: new Date(paymentDate),
+                paymentMethod: paymentMode,
+                referenceNumber: reference,
+                notes: `Payment #${paymentNumber}`,
+                recordedBy: req.user?.email || req.user?.uid || 'system',
+                recordedAt: new Date()
+              };
+
+              // Calculate new amounts — cash + TDS + writeOff all clear the receivable
+              const newAmountPaid = (invoice.amountPaid || 0) + totalCleared;
+              const newAmountDue = Math.max(0, parseFloat((invoice.totalAmount - newAmountPaid).toFixed(2)));
+
+              // Determine new status
+              let newStatus = invoice.status;
+              if (newAmountDue <= 0) {
+                newStatus = 'PAID';
+              } else if (newAmountPaid > 0 && newAmountDue > 0) {
+                newStatus = 'PARTIALLY_PAID';
+              }
+
+              // Update invoice
+              await db.collection('invoices').updateOne(
+                { _id: invoiceObjectId },
+                {
+                  $push: { payments: paymentRecord },
+                  $set: {
+                    amountPaid: newAmountPaid,
+                    amountDue: newAmountDue,
+                    status: newStatus,
+                    updatedAt: new Date()
+                  }
+                }
+              );
+
+              // Get updated invoice for response
+              const updatedInvoice = await db.collection('invoices').findOne({ _id: invoiceObjectId });
+              updatedInvoices.push(updatedInvoice);
+
+              console.log(`   ✅ Updated invoice ${invoice.invoiceNumber} (+₹${amount}) - Status: ${newStatus}`);
+            } else {
+              console.log(`   ⚠️  Invoice ${invoiceId} not found`);
+            }
+          } catch (err) {
+            console.error(`   ⚠️  Failed to update invoice ${invoiceId}:`, err.message);
+          }
+        }
+      }
+    }
+
+    // ============================================================================
+    // UPDATE ACCOUNT BALANCE - CREDIT RECEIVED AMOUNT
+    // ============================================================================
+    // credit_application = pure journal entry (no cash moved) — skip bank balance
+    if (paymentType !== 'credit_application') {
+      try {
+        const PaymentAccount = db.collection('paymentaccounts');
+        const depositAccountId = depositTo;
+        let balanceCredited = false;
+        const creditAmount = parseFloat(amountReceived);
+
+        // Only credit bank balance immediately for non-cash/cheque payments
+        // Cash/Cheque goes to Undeposited Funds first
+        const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
+
+        if (creditImmediately) {
+          if (ObjectId.isValid(depositAccountId)) {
+            await PaymentAccount.findOneAndUpdate(
+              { _id: new ObjectId(depositAccountId) },
+              { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            balanceCredited = true;
+            console.log(`✅ Balance credited to account ID ${depositAccountId}: +₹${creditAmount}`);
+          }
+
+          // If ObjectId lookup failed, try by account name
+          if (!balanceCredited) {
+            const updateResult = await PaymentAccount.findOneAndUpdate(
+              { accountName: depositAccountId },
+              { $inc: { currentBalance: creditAmount }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            if (updateResult) {
+              balanceCredited = true;
+              console.log(`✅ Balance credited to account name "${depositAccountId}": +₹${creditAmount}`);
+            }
+          }
+
+          if (!balanceCredited) {
+            console.warn(`⚠️ BALANCE WARNING: Could not find deposit account "${depositAccountId}" to credit ₹${creditAmount}. Payment saved but balance NOT updated.`);
+          }
+        } else {
+          // For Cash/Cheque — balance will be credited when Record Deposit is done
+          console.log(`ℹ️ Cash/Cheque payment — balance will be credited on Record Deposit`);
+        }
+      } catch (balanceErr) {
+        console.error(`⚠️ BALANCE ERROR: Failed to credit balance for payment ${result.insertedId}:`, balanceErr.message);
+      }
+    } else {
+      console.log(`ℹ️ credit_application — skipping bank balance update (no cash moved)`);
+    }
+
+    // ✅ COA: Debit deposit account + Credit Accounts Receivable
+    const currentOrgId = req.user?.orgId || null;
+    try {
+      // Parse payment date — supports DD/MM/YYYY and ISO formats
+      let txnDate;
+      if (paymentDate && typeof paymentDate === 'string' && paymentDate.includes('/')) {
+        const [day, month, year] = paymentDate.split('/');
+        txnDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+      } else {
+        txnDate = new Date(paymentDate);
+      }
+      if (isNaN(txnDate)) txnDate = new Date();
+
+      const branchIdForCOA = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+      // ── CREDIT APPLICATION: Dr Advance from Customer → Cr Accounts Receivable ──
+      // No cash moves — pure liability-to-receivable journal entry
+      if (paymentType === 'credit_application') {
+        const creditsAppliedAmt = parseFloat(creditsApplied) || 0;
+        if (creditsAppliedAmt > 0) {
+          const [advanceAccId, arAccId] = await Promise.all([
+            getSystemAccountId('Advance from Customer', currentOrgId),
+            getSystemAccountId('Accounts Receivable', currentOrgId),
+          ]);
+          if (advanceAccId) {
+            await postTransactionToCOA({
+              accountId: advanceAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
+              referenceType: 'CreditApplication', referenceId: result.insertedId,
+              referenceNumber: paymentNumber,
+              debit: creditsAppliedAmt, credit: 0,
+            });
+            console.log(`✅ COA Dr Advance from Customer: ${creditsAppliedAmt}`);
+          }
+          if (arAccId) {
+            await postTransactionToCOA({
+              accountId: arAccId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Credits applied to invoice - ${paymentNumber} - ${customerName}`,
+              referenceType: 'CreditApplication', referenceId: result.insertedId,
+              referenceNumber: paymentNumber,
+              debit: 0, credit: creditsAppliedAmt,
+            });
+            console.log(`✅ COA Cr Accounts Receivable: ${creditsAppliedAmt}`);
+          }
+        }
+        console.log(`✅ [COA] credit_application journal entry complete for: ${paymentNumber}`);
+      } else {
+        // ── NORMAL PAYMENT / ADVANCE: existing cash-flow COA logic ──────────────
+        // Resolve deposit account name
+        let cleanDepositName = 'Undeposited Funds';
+        try {
+          const PaymentAccountCol = db.collection('paymentaccounts');
+          if (ObjectId.isValid(depositTo)) {
+            const depositAccount = await PaymentAccountCol.findOne({ _id: new ObjectId(depositTo) });
+            if (depositAccount) {
+              cleanDepositName = depositAccount.accountName;
+              console.log(`💰 Resolved deposit account name: "${cleanDepositName}"`);
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not resolve deposit account name:', e.message);
+        }
+
+        // Look up COA IDs
+        const [cashId, arId] = await Promise.all([
+          ChartOfAccount.findOne({
+            accountName: { $regex: new RegExp(`^${cleanDepositName}`, 'i') },
+            ...(currentOrgId ? { orgId: currentOrgId } : {})
+          }).select('_id').lean().then(acc => {
+            if (acc) return acc._id;
+            console.log(`⚠️ COA not found for "${cleanDepositName}", trying Undeposited Funds`);
+            return getSystemAccountId('Undeposited Funds', currentOrgId);
+          }),
+          getSystemAccountId('Accounts Receivable', currentOrgId),
+        ]);
+
+        const paymentAmount = parseFloat(amountReceived);
+
+        console.log(`💰 Posting COA for payment ${paymentNumber}:`);
+        console.log(`   cashId (${cleanDepositName}): ${cashId}`);
+        console.log(`   arId (Accounts Receivable): ${arId}`);
+        console.log(`   amount: ${paymentAmount}`);
+        console.log(`   orgId: ${currentOrgId}`);
+
+        // For Cash/Cheque → Dr Undeposited Funds (not the bank yet)
+        // For others → Dr Bank directly
+        const depositCOAId = ['Cash', 'Cheque'].includes(paymentMode)
+          ? await getSystemAccountId('Undeposited Funds', currentOrgId)
+          : cashId;
+
+        if (depositCOAId) {
+          await postTransactionToCOA({
+            accountId: depositCOAId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+            description: `Payment received - ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: result.insertedId,
+            referenceNumber: paymentNumber,
+            debit: paymentAmount, credit: 0
+          });
+          console.log(`✅ COA Debit posted to: ${['Cash', 'Cheque'].includes(paymentMode) ? 'Undeposited Funds' : cleanDepositName}`);
+        } else {
+          console.warn(`⚠️ COA depositCOAId not found for "${cleanDepositName}" — debit NOT posted`);
+        }
+
+        // ── TDS Receivable — Debit for TDS deducted across all invoices ─────────
+        const totalTdsDeducted = Object.values(invoiceTds).reduce((s, v) => s + parseFloat(v || 0), 0);
+        if (totalTdsDeducted > 0) {
+          const tdsReceivableId = await getSystemAccountId('TDS Receivable', currentOrgId);
+          if (tdsReceivableId) {
+            await postTransactionToCOA({
+              accountId: tdsReceivableId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `TDS deducted on payment ${paymentNumber} - ${customerName}`,
+              referenceType: 'Payment', referenceId: result.insertedId, referenceNumber: paymentNumber,
+              debit: totalTdsDeducted, credit: 0,
+            });
+            console.log(`✅ COA Dr TDS Receivable: ₹${totalTdsDeducted}`);
+          } else {
+            console.warn(`⚠️ TDS Receivable account not found — TDS COA NOT posted`);
+          }
+        }
+
+        // ── Write Off / Rounding Expense — Debit for write-offs across invoices ──
+        const totalWriteOff = Object.values(invoiceWriteOffs).reduce((s, v) => s + parseFloat(v || 0), 0);
+        if (totalWriteOff !== 0) {
+          const writeOffId = await getSystemAccountId('Rounding Off', currentOrgId)
+            || await getSystemAccountId('Other Expense', currentOrgId)
+            || await getSystemAccountId('Other Expenses', currentOrgId);
+          if (writeOffId) {
+            // Positive write-off = expense (Dr); negative write-off = income credit (Cr)
+            await postTransactionToCOA({
+              accountId: writeOffId, orgId: currentOrgId, branchId: branchIdForCOA, date: txnDate,
+              description: `Rounding write-off on payment ${paymentNumber} - ${customerName}`,
+              referenceType: 'Payment', referenceId: result.insertedId, referenceNumber: paymentNumber,
+              debit: totalWriteOff > 0 ? totalWriteOff : 0,
+              credit: totalWriteOff < 0 ? Math.abs(totalWriteOff) : 0,
+            });
+            console.log(`✅ COA Write-Off posted: ₹${totalWriteOff}`);
+          } else {
+            console.warn(`⚠️ Rounding/Write-Off account not found — write-off COA NOT posted`);
+          }
+        }
+
+        // For ADVANCE — credit Advance from Customer (Liability)
+        // For normal payment — credit Accounts Receivable for the FULL cleared amount
+        // (cash + TDS + write-off — the entire receivable balance is settled)
+        const totalClearedAllInvoices = parseFloat(amountReceived) + totalTdsDeducted + totalWriteOff;
+        const creditAmount = paymentType === 'advance' ? paymentAmount : totalClearedAllInvoices;
+
+        let creditAccountId;
+        if (paymentType === 'advance') {
+          creditAccountId = await getSystemAccountId('Advance from Customer', currentOrgId);
+          if (!creditAccountId) {
+            const advAcc = await ChartOfAccount.findOne({
+              accountName: { $regex: /^Advance from Customer$/i },
+            }).select('_id').lean();
+            creditAccountId = advAcc?._id || null;
+          }
+        } else {
+          creditAccountId = arId;
+        }
+
+        if (creditAccountId) {
+          await postTransactionToCOA({
+            accountId: creditAccountId,
+            orgId: currentOrgId,
+            branchId: branchIdForCOA,
+            date: txnDate,
+            description: `Payment received - ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: result.insertedId,
+            referenceNumber: paymentNumber,
+            debit: 0,
+            credit: creditAmount
+          });
+          console.log(`✅ COA Credit posted to: ${paymentType === 'advance' ? 'Advance from Customer' : 'Accounts Receivable'} — ₹${creditAmount}`);
+        } else {
+          console.warn(`⚠️ COA creditAccountId not found — credit NOT posted`);
+        }
+
+        console.log(`✅ [COA] Full COA posting complete for payment: ${paymentNumber}`);
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA post error (payment received):', coaErr.message);
+    }
+
+    // ── CREATE PROVIDER TRANSACTION (for All Transactions tab) ──────────────
+    // Skip if this payment was created from the banking categorization flow
+    // (providerTransactionId present means the original bank txn already exists
+    //  and will be marked via /mark-categorized — creating a duplicate here
+    //  would cause ghost entries that survive uncategorization)
+    // Also skip for credit_application — no cash moved, nothing to show in bank feed
+    try {
+      const mongoose = require('mongoose');
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+          new mongoose.Schema({}, { strict: false }),
+          'providertransactions');
+
+      // Only create for non-Cash/Cheque (those go through Record Deposit)
+      const creditImmediately = !['Cash', 'Cheque'].includes(paymentMode);
+      if (creditImmediately && depositTo && mongoose.Types.ObjectId.isValid(depositTo)
+        && !providerTransactionId
+        && paymentType !== 'credit_application') {
+        await ProviderTransaction.create({
+          accountId: new mongoose.Types.ObjectId(depositTo),
+          orgId: req.user?.orgId || null,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          transactionDate: new Date(paymentDate),
+          description: `Customer Payment: ${customerName}`,
+          amount: parseFloat(amountReceived),
+          transactionType: 'CREDIT',
+          reconciliationStatus: 'CATEGORIZED',
+          categoryLabel: 'Customer Payment',
+          source: 'SYSTEM_ENTRY',
+          linkedRecordId: result.insertedId,
+          linkedRecordType: 'PaymentReceived',
+          journalRef: paymentNumber,
+          categorizedAt: new Date(),
+          categorizedBy: req.user?.email || 'system',
+          importedAt: new Date(),
+          importedBy: req.user?.email || 'system',
+        });
+        console.log(`✅ ProviderTransaction created for payment received: ${paymentNumber}`);
+      }
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction create error (payment received):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION ─────────────────────────────────────────────
+
+    // ============================================================================
+    // SEND PAYMENT RECEIPT EMAIL WITH PROOFS - ZOHO BOOKS WORKFLOW
+    // ============================================================================
+    let emailSent = false;
+    if (sendThankYouNote && (customerEmail || updatedInvoices[0]?.customerEmail)) {
+      try {
+        console.log('📧 Sending payment receipt email with proofs...');
+        await sendPaymentReceiptEmail(
+          paymentRecord,
+          updatedInvoices[0], // Primary invoice
+          proofPaths
+        );
+
+        // Update payment record
+        await db.collection('payments_received').updateOne(
+          { _id: result.insertedId },
+          { $set: { emailSent: true, emailSentAt: new Date() } }
+        );
+
+        emailSent = true;
+        console.log('✅ Payment receipt email sent successfully');
+      } catch (emailError) {
+        console.error('⚠️  Failed to send email (non-critical):', emailError.message);
+      }
+    }
+
+    console.log('✅ PAYMENT RECORDING COMPLETE');
+    console.log('💰'.repeat(50) + '\n');
+
+    res.status(201).json({
+      success: true,
+      message: 'Payment recorded successfully',
+      data: {
+        id: result.insertedId,
+        paymentNumber,
+        proofsUploaded: paymentProofs.length,
+        invoicesUpdated: updatedInvoices.length,
+        emailSent,
+        ...paymentRecord
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating payment:', error);
+
+    // Clean up uploaded files on error
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {
+          console.error('Failed to delete file:', err);
+        }
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error creating payment',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// UPDATE PAYMENT
+// ============================================================================
+
+router.put('/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment ID'
+      });
+    }
+
+    const getQuery = { _id: new ObjectId(id) };
+    if (req.user?.orgId) getQuery.orgId = req.user.orgId;
+
+    // ✅ Fetch old payment BEFORE updating
+    const oldPayment = await db.collection('payments_received').findOne(getQuery);
+
+    if (!oldPayment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    const oldAmount = parseFloat(oldPayment.amountReceived || 0);
+    const oldDepositTo = oldPayment.depositTo;
+
+    const updateData = {
+      ...req.body,
+      updatedAt: new Date(),
+      updatedBy: req.user?.email || req.user?.uid || 'system'
+    };
+
+    // Remove fields that shouldn't be updated
+    delete updateData._id;
+    delete updateData.createdAt;
+    delete updateData.createdBy;
+    delete updateData.paymentProofs;
+
+    const result = await db.collection('payments_received')
+      .updateOne(getQuery, { $set: updateData });
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // ── BALANCE ADJUSTMENT ON UPDATE ─────────────────────────────────────────
+    try {
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
+      const newDepositTo = req.body.depositTo || oldDepositTo;
+      const depositChanged = req.body.depositTo && req.body.depositTo !== oldDepositTo;
+      const PaymentAccountCol = db.collection('paymentaccounts');
+
+      if (depositChanged) {
+        // ✅ Account changed — reverse full amount from OLD account
+        let oldReversed = false;
+
+        if (ObjectId.isValid(oldDepositTo)) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { _id: new ObjectId(oldDepositTo) },
+            { $inc: { currentBalance: -oldAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) {
+            oldReversed = true;
+            console.log(`✅ Reversed ₹${oldAmount} from old account ID ${oldDepositTo}`);
+          }
+        }
+        if (!oldReversed) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { accountName: oldDepositTo },
+            { $inc: { currentBalance: -oldAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) console.log(`✅ Reversed ₹${oldAmount} from old account name "${oldDepositTo}"`);
+        }
+
+        // ✅ Credit full new amount to NEW account
+        let newCredited = false;
+
+        if (ObjectId.isValid(newDepositTo)) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { _id: new ObjectId(newDepositTo) },
+            { $inc: { currentBalance: newAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) {
+            newCredited = true;
+            console.log(`✅ Credited ₹${newAmount} to new account ID ${newDepositTo}`);
+          }
+        }
+        if (!newCredited) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { accountName: newDepositTo },
+            { $inc: { currentBalance: newAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) console.log(`✅ Credited ₹${newAmount} to new account name "${newDepositTo}"`);
+        }
+
+      } else {
+        // ✅ Same account — adjust the difference only
+        const difference = newAmount - oldAmount;
+
+        if (difference !== 0) {
+          let adjusted = false;
+
+          if (ObjectId.isValid(newDepositTo)) {
+            const r = await PaymentAccountCol.findOneAndUpdate(
+              { _id: new ObjectId(newDepositTo) },
+              { $inc: { currentBalance: difference }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            if (r) {
+              adjusted = true;
+              console.log(`✅ Balance adjusted by ₹${difference} on account ID ${newDepositTo} → new balance: ₹${r.currentBalance}`);
+            }
+          }
+          if (!adjusted) {
+            const r = await PaymentAccountCol.findOneAndUpdate(
+              { accountName: newDepositTo },
+              { $inc: { currentBalance: difference }, $set: { updatedAt: new Date() } },
+              { returnDocument: 'after' }
+            );
+            if (r) console.log(`✅ Balance adjusted by ₹${difference} on account name "${newDepositTo}"`);
+          }
+        } else {
+          console.log('ℹ️ No balance change needed — amount unchanged');
+        }
+      }
+    } catch (balanceErr) {
+      console.error('⚠️ Balance adjustment error (payment update):', balanceErr.message);
+    }
+    // ── END BALANCE ADJUSTMENT ───────────────────────────────────────────────
+
+    // ── COA ADJUSTMENT ON UPDATE ─────────────────────────────────────────────
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
+      const newDepositTo = req.body.depositTo || oldDepositTo;
+      const depositChanged = req.body.depositTo && req.body.depositTo !== oldDepositTo;
+
+      // Resolve deposit account names for COA lookup
+      const resolveDepositName = async (depositId) => {
+        if (!depositId) return 'Undeposited Funds';
+        if (ObjectId.isValid(depositId)) {
+          const acc = await db.collection('paymentaccounts')
+            .findOne({ _id: new ObjectId(depositId) });
+          return acc?.accountName || 'Undeposited Funds';
+        }
+        return depositId;
+      };
+
+      const [oldDepositName, newDepositName] = await Promise.all([
+        resolveDepositName(oldDepositTo),
+        resolveDepositName(newDepositTo),
+      ]);
+
+      const getCOAId = async (name) => {
+        const acc = await ChartOfAccount.findOne({
+          accountName: { $regex: new RegExp(`^${name}$`, 'i') },
+          orgId: currentOrgId
+        }).select('_id').lean();
+        return acc ? acc._id : await getSystemAccountId('Undeposited Funds', currentOrgId);
+      };
+
+      const [oldCashId, newCashId, arId] = await Promise.all([
+        getCOAId(oldDepositName),
+        getCOAId(newDepositName),
+        getSystemAccountId('Accounts Receivable', currentOrgId),
+      ]);
+
+      const paymentDate = req.body.paymentDate || oldPayment.paymentDate;
+      const paymentNumber = oldPayment.paymentNumber;
+      const customerName = req.body.customerName || oldPayment.customerName;
+
+      let txnDate;
+      if (paymentDate && paymentDate.includes('/')) {
+        const [day, month, year] = paymentDate.split('/');
+        txnDate = new Date(`${year}-${month}-${day}`);
+      } else {
+        txnDate = new Date(paymentDate);
+      }
+      if (isNaN(txnDate)) txnDate = new Date();
+
+      const paymentObjId = new ObjectId(id);
+
+      if (depositChanged) {
+        // Reverse old COA entries
+        if (oldCashId) await postTransactionToCOA({
+          accountId: oldCashId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+          description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+          referenceType: 'Payment', referenceId: paymentObjId,
+          referenceNumber: paymentNumber,
+          debit: 0, credit: oldAmount
+        });
+        if (arId) await postTransactionToCOA({
+          accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+          description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+          referenceType: 'Payment', referenceId: paymentObjId,
+          referenceNumber: paymentNumber,
+          debit: oldAmount, credit: 0
+        });
+
+        // Post new COA entries
+        if (newCashId) await postTransactionToCOA({
+          accountId: newCashId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+          description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
+          referenceType: 'Payment', referenceId: paymentObjId,
+          referenceNumber: paymentNumber,
+          debit: newAmount, credit: 0
+        });
+        if (arId) await postTransactionToCOA({
+          accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+          description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
+          referenceType: 'Payment', referenceId: paymentObjId,
+          referenceNumber: paymentNumber,
+          debit: 0, credit: newAmount
+        });
+
+      } else {
+        // Same account — post difference only
+        const difference = newAmount - oldAmount;
+        if (difference !== 0) {
+          if (newCashId) await postTransactionToCOA({
+            accountId: newCashId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+            description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment', referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: difference > 0 ? difference : 0,
+            credit: difference < 0 ? Math.abs(difference) : 0
+          });
+          if (arId) await postTransactionToCOA({
+            accountId: arId, orgId: currentOrgId, branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null, date: txnDate,
+            description: `UPDATED - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment', referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: difference < 0 ? Math.abs(difference) : 0,
+            credit: difference > 0 ? difference : 0
+          });
+        } else {
+          console.log('ℹ️ No COA change needed — amount unchanged');
+        }
+      }
+
+      console.log('✅ COA adjustment posted for payment update');
+    } catch (coaErr) {
+      console.error('⚠️ COA adjustment error (payment update):', coaErr.message);
+    }
+    // ── END COA ADJUSTMENT ───────────────────────────────────────────────────
+
+    // ── ADJUST INVOICE amountPaid/amountDue/status/payments[] ON UPDATE ──────
+    // The create-payment route pushes a payment record onto each affected
+    // invoice's payments[] array and updates amountPaid/amountDue/status;
+    // the delete route reverses both fully. This update route had neither —
+    // it adjusted the customer's unusedCredits below based on
+    // invoicePayments, but never touched the invoices themselves. So
+    // changing which invoice got how much (e.g. editing the "Applied To"
+    // allocation) silently left every invoice's own amountPaid/status AND
+    // its embedded payments[] entry for this payment stuck at the old
+    // value. Fix: for each affected invoice, adjust amountPaid/amountDue by
+    // the delta (not overwrite — may include TDS/write-off from other
+    // fields) and sync the matching payments[] entry the same way
+    // create/delete already do — push if newly added to this payment,
+    // pull if removed entirely, update-in-place if the amount changed.
+    try {
+      const paymentIdStr = id;
+      const oldInvoicePayments = oldPayment.invoicePayments || {};
+      const newInvoicePaymentsForInvoices = req.body.invoicePayments || oldInvoicePayments;
+      const affectedInvoiceIds = new Set([
+        ...Object.keys(oldInvoicePayments),
+        ...Object.keys(newInvoicePaymentsForInvoices),
+      ]);
+
+      for (const invoiceId of affectedInvoiceIds) {
+        if (!ObjectId.isValid(invoiceId)) continue;
+        const oldAlloc = parseFloat(oldInvoicePayments[invoiceId] || 0);
+        const newAlloc = parseFloat(newInvoicePaymentsForInvoices[invoiceId] || 0);
+        const delta = newAlloc - oldAlloc;
+        if (delta === 0) continue;
+
+        const invoice = await db.collection('invoices').findOne({ _id: new ObjectId(invoiceId) });
+        if (!invoice) continue;
+
+        const adjustedAmountPaid = Math.max(0, (invoice.amountPaid || 0) + delta);
+        const adjustedAmountDue = Math.max(0, parseFloat((invoice.totalAmount - adjustedAmountPaid).toFixed(2)));
+
+        let newStatus = invoice.status;
+        if (adjustedAmountPaid <= 0) {
+          newStatus = 'SENT';
+        } else if (adjustedAmountDue <= 0) {
+          newStatus = 'PAID';
+        } else {
+          newStatus = 'PARTIALLY_PAID';
+        }
+
+        await db.collection('invoices').updateOne(
+          { _id: new ObjectId(invoiceId) },
+          {
+            $set: {
+              amountPaid: adjustedAmountPaid,
+              amountDue: adjustedAmountDue,
+              status: newStatus,
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        // Sync the invoice's own payments[] entry for this specific payment.
+        if (newAlloc <= 0 && oldAlloc > 0) {
+          // Removed from this payment's allocation entirely.
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            { $pull: { payments: { paymentId: paymentIdStr } } }
+          );
+        } else if (newAlloc > 0 && oldAlloc <= 0) {
+          // Newly added to this payment's allocation.
+          const rawPaymentDate = req.body.paymentDate || oldPayment.paymentDate;
+          let pushedPaymentDate;
+          if (rawPaymentDate && typeof rawPaymentDate === 'string' && rawPaymentDate.includes('/')) {
+            const [day, month, year] = rawPaymentDate.split('/');
+            pushedPaymentDate = new Date(`${year}-${month}-${day}`);
+          } else {
+            pushedPaymentDate = new Date(rawPaymentDate);
+          }
+          if (isNaN(pushedPaymentDate)) pushedPaymentDate = new Date();
+
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            { $push: { payments: {
+                paymentId: paymentIdStr,
+                amount: newAlloc,
+                tdsAmount: 0,
+                writeOffAmount: 0,
+                totalCleared: newAlloc,
+                paymentDate: pushedPaymentDate,
+                paymentMethod: req.body.paymentMode || oldPayment.paymentMode,
+                referenceNumber: req.body.reference || oldPayment.reference,
+                notes: `Payment #${req.body.paymentNumber || oldPayment.paymentNumber}`,
+                recordedBy: req.user?.email || req.user?.uid || 'system',
+                recordedAt: new Date()
+            } } }
+          );
+        } else if (newAlloc > 0 && oldAlloc > 0) {
+          // Already allocated to this payment, amount changed — update the
+          // existing array entry in place rather than push a duplicate.
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId), 'payments.paymentId': paymentIdStr },
+            { $set: { 'payments.$.amount': newAlloc, 'payments.$.totalCleared': newAlloc } }
+          );
+        }
+
+        console.log(`✅ Invoice ${invoice.invoiceNumber} allocation adjusted by ${delta > 0 ? '+' : ''}${delta} on payment update — status: ${newStatus}`);
+      }
+    } catch (invoiceAdjustErr) {
+      console.error('⚠️ Invoice allocation adjustment error (payment update):', invoiceAdjustErr.message);
+    }
+    // ── END INVOICE ADJUSTMENT ────────────────────────────────────────────────
+
+    // ── ADJUST CUSTOMER UNUSED CREDITS ON UPDATE ─────────────────────────────
+    try {
+      const newAmount = parseFloat(req.body.amountReceived || oldAmount);
+      const newBankCharges = parseFloat(req.body.bankCharges || oldPayment.bankCharges || 0);
+      const newInvoicePayments = req.body.invoicePayments || oldPayment.invoicePayments || {};
+      const isAdvance = (req.body.paymentType || oldPayment.paymentType) === 'advance';
+
+      const oldNetAmount = parseFloat(oldPayment.netAmount || 0);
+      const newNetAmount = newAmount - newBankCharges;
+
+      let oldCreditContrib, newCreditContrib;
+
+      if (isAdvance) {
+        // Advance: full netAmount is the credit contribution
+        oldCreditContrib = oldNetAmount;
+        newCreditContrib = newNetAmount;
+      } else {
+        const oldInvoiceTotal = Object.values(oldPayment.invoicePayments || {}).reduce((s, v) => s + parseFloat(v), 0);
+        oldCreditContrib = oldNetAmount - oldInvoiceTotal;
+
+        const newInvoiceTotal = Object.values(newInvoicePayments).reduce((s, v) => s + parseFloat(v), 0);
+        newCreditContrib = newNetAmount - newInvoiceTotal;
+      }
+
+      const creditDelta = newCreditContrib - oldCreditContrib;
+
+      if (creditDelta !== 0 && oldPayment.customerId) {
+        const custId = ObjectId.isValid(oldPayment.customerId)
+          ? new ObjectId(oldPayment.customerId) : oldPayment.customerId;
+        await db.collection('billing-customers').findOneAndUpdate(
+          { _id: custId },
+          { $inc: { unusedCredits: creditDelta } },
+          { returnDocument: 'after' }
+        );
+        await db.collection('billing-customers').updateMany(
+          { _id: custId, unusedCredits: { $lt: 0 } },
+          { $set: { unusedCredits: 0 } }
+        );
+        console.log(`✅ Customer unusedCredits adjusted by ${creditDelta > 0 ? '+' : ''}${creditDelta} on update (type: ${isAdvance ? 'advance' : 'payment'})`);
+      }
+    } catch (creditErr) {
+      console.error('⚠️ Failed to adjust customer unusedCredits on update:', creditErr.message);
+    }
+    // ── END UNUSED CREDITS ADJUSTMENT ────────────────────────────────────────
+
+    res.json({
+      success: true,
+      message: 'Payment updated successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating payment',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// DELETE PAYMENT
+// ============================================================================
+
+router.delete('/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment ID'
+      });
+    }
+
+    // Get payment before deleting — we need depositTo and amountReceived for balance reversal
+    const deleteQuery = { _id: new ObjectId(id) };
+    if (req.user?.orgId) deleteQuery.orgId = req.user.orgId;
+
+    const payment = await db.collection('payments_received').findOne(deleteQuery);
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // Delete associated proof files
+    if (payment.paymentProofs && payment.paymentProofs.length > 0) {
+      payment.paymentProofs.forEach(proof => {
+        try {
+          if (fs.existsSync(proof.filepath)) {
+            fs.unlinkSync(proof.filepath);
+            console.log(`🗑️  Deleted proof file: ${proof.filename}`);
+          }
+        } catch (err) {
+          console.error(`Failed to delete file ${proof.filename}:`, err);
+        }
+      });
+    }
+
+    // Delete payment record
+    const result = await db.collection('payments_received')
+      .deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // ── REVERSE INVOICE PAYMENTS ON DELETE ──────────────────────────────────
+    try {
+      if (payment.invoicePayments && Object.keys(payment.invoicePayments).length > 0) {
+        for (const [invoiceId, amount] of Object.entries(payment.invoicePayments)) {
+          if (!ObjectId.isValid(invoiceId)) continue;
+          const invoice = await db.collection('invoices')
+            .findOne({ _id: new ObjectId(invoiceId) });
+          if (!invoice) continue;
+
+          const reversedAmountPaid = (invoice.amountPaid || 0) - parseFloat(amount);
+          const reversedAmountDue = invoice.totalAmount - reversedAmountPaid;
+
+          let newStatus = invoice.status;
+          if (reversedAmountPaid <= 0) {
+            newStatus = 'SENT';
+          } else if (reversedAmountPaid > 0 && reversedAmountDue > 0) {
+            newStatus = 'PARTIALLY_PAID';
+          }
+
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            {
+              $pull: { payments: { paymentId: id } },
+              $set: {
+                amountPaid: Math.max(0, reversedAmountPaid),
+                amountDue: Math.max(0, reversedAmountDue),
+                status: newStatus,
+                updatedAt: new Date()
+              }
+            }
+          );
+          console.log(`✅ Invoice ${invoice.invoiceNumber} reversed — status: ${newStatus}`);
+        }
+      }
+    } catch (invoiceReverseErr) {
+      console.error('⚠️ Invoice reversal error (payment delete):', invoiceReverseErr.message);
+    }
+    // ── END INVOICE REVERSAL ─────────────────────────────────────────────────
+
+    // ── BALANCE REVERSE ON DELETE ────────────────────────────────────────────
+    // When a payment is deleted, reverse the credit — deduct the amount back from the account
+    try {
+      const depositAccountId = payment.depositTo;
+      const deductAmount = parseFloat(payment.amountReceived);
+      let balanceReversed = false;
+
+      // Skip if already deposited — Block 2 (deposit reversal) will handle it
+      if (payment.depositedToAccountId) {
+        console.log('ℹ️ Skipping balance reverse — deposit reversal block will handle it');
+        balanceReversed = true; // prevents Block 1 from running
+      }
+
+      if (depositAccountId && deductAmount > 0) {
+        const PaymentAccountCol = db.collection('paymentaccounts');
+
+        if (ObjectId.isValid(depositAccountId)) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { _id: new ObjectId(depositAccountId) },
+            { $inc: { currentBalance: -deductAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) {
+            balanceReversed = true;
+            console.log(`✅ Balance reversed on payment delete: -₹${deductAmount} from account ID ${depositAccountId}`);
+          }
+        }
+
+        if (!balanceReversed) {
+          const r = await PaymentAccountCol.findOneAndUpdate(
+            { accountName: depositAccountId },
+            { $inc: { currentBalance: -deductAmount }, $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (r) {
+            balanceReversed = true;
+            console.log(`✅ Balance reversed on payment delete: -₹${deductAmount} from account name "${depositAccountId}"`);
+          }
+        }
+
+        if (!balanceReversed) {
+          console.warn(`⚠️ BALANCE WARNING: Could not reverse balance. Account "${depositAccountId}" not found. Payment deleted but balance NOT updated.`);
+        }
+      }
+    } catch (balanceErr) {
+      console.error(`⚠️ BALANCE ERROR: Failed to reverse balance on payment delete:`, balanceErr.message);
+    }
+    // ── END BALANCE REVERSE ──────────────────────────────────────────────────
+
+    // ── COA REVERSAL ON DELETE ───────────────────────────────────────────────
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const deleteAmount = parseFloat(payment.amountReceived);
+      const paymentMode = payment.paymentMode;
+      const paymentNumber = payment.paymentNumber;
+      const customerName = payment.customerName;
+
+      // Parse payment date
+      let txnDate;
+      if (payment.paymentDate && payment.paymentDate.includes('/')) {
+        const [day, month, year] = payment.paymentDate.split('/');
+        txnDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+      } else {
+        txnDate = new Date(payment.paymentDate);
+      }
+      if (isNaN(txnDate)) txnDate = new Date();
+
+      // Resolve which COA account was debited
+      // Cash/Cheque → Undeposited Funds, others → actual bank account
+      let depositCOAId;
+      if (['Cash', 'Cheque'].includes(paymentMode)) {
+        depositCOAId = await getSystemAccountId('Undeposited Funds', currentOrgId);
+      } else {
+        let depositName = 'Undeposited Funds';
+        if (payment.depositTo && ObjectId.isValid(payment.depositTo)) {
+          const acc = await db.collection('paymentaccounts')
+            .findOne({ _id: new ObjectId(payment.depositTo) });
+          if (acc) depositName = acc.accountName;
+        }
+        const coaAcc = await ChartOfAccount.findOne({
+          accountName: { $regex: new RegExp(`^${depositName}$`, 'i') },
+          ...(currentOrgId ? { orgId: currentOrgId } : {})
+        }).select('_id').lean();
+        depositCOAId = coaAcc ? coaAcc._id
+          : await getSystemAccountId('Undeposited Funds', currentOrgId);
+      }
+
+      const arId = await getSystemAccountId('Accounts Receivable', currentOrgId);
+      const paymentObjId = new ObjectId(id);
+
+      // REVERSE: Cr Undeposited Funds / Bank (was Dr before)
+      if (payment.paymentType === 'credit_application') {
+        // Reverse: Dr Accounts Receivable → Cr Advance from Customer
+        const advanceAccId = await getSystemAccountId('Advance from Customer', currentOrgId);
+        const creditsAmt = parseFloat(payment.creditsApplied || 0);
+
+        if (advanceAccId) {
+          await postTransactionToCOA({
+            accountId: advanceAccId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
+            referenceType: 'CreditApplication',
+            referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: 0,
+            credit: creditsAmt, // restore liability
+          });
+          console.log(`✅ COA Reversal: Cr Advance from Customer ₹${creditsAmt}`);
+        }
+
+        if (arId) {
+          await postTransactionToCOA({
+            accountId: arId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Credits Applied ${paymentNumber} - ${customerName}`,
+            referenceType: 'CreditApplication',
+            referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: creditsAmt, // reverse the AR credit
+            credit: 0,
+          });
+          console.log(`✅ COA Reversal: Dr Accounts Receivable ₹${creditsAmt}`);
+        }
+      } else {
+        // Normal payment / advance COA reversal
+        if (depositCOAId) {
+          await postTransactionToCOA({
+            accountId: depositCOAId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: 0,
+            credit: deleteAmount,  // ← reverses the Dr
+          });
+          console.log(`✅ COA Reversal: Cr Undeposited/Bank ₹${deleteAmount}`);
+        }
+
+        // REVERSE: Dr Accounts Receivable (was Cr before)
+        if (arId) {
+          await postTransactionToCOA({
+            accountId: arId,
+            orgId: currentOrgId,
+            branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+            date: txnDate,
+            description: `REVERSAL - Payment ${paymentNumber} - ${customerName}`,
+            referenceType: 'Payment',
+            referenceId: paymentObjId,
+            referenceNumber: paymentNumber,
+            debit: deleteAmount,  // ← reverses the Cr
+            credit: 0,
+          });
+          console.log(`✅ COA Reversal: Dr Accounts Receivable ₹${deleteAmount}`);
+        }
+      }
+
+      console.log(`✅ COA fully reversed for deleted payment: ${paymentNumber}`);
+    } catch (coaErr) {
+      console.error('⚠️ COA reversal error (payment delete):', coaErr.message);
+    }
+    // ── END COA REVERSAL ─────────────────────────────────────────────────────
+
+    // ── REVERSE DEPOSIT COA IF ALREADY DEPOSITED ─────────────────────────────
+    try {
+      if (payment.depositedToAccountId) {
+        const bankAccount = await db.collection('paymentaccounts')
+          .findOne({ _id: new ObjectId(payment.depositedToAccountId) });
+
+        if (bankAccount) {
+          const bankCOA = await ChartOfAccount.findOne({
+            accountName: { $regex: new RegExp(`^${bankAccount.accountName}$`, 'i') },
+            ...req.orgFilter
+          }).lean();
+
+          if (bankCOA) {
+            // Reverse: Cr Bank (was Dr on deposit)
+            await postTransactionToCOA({
+              accountId: bankCOA._id,
+              orgId: req.user?.orgId || null,
+              branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+              date: new Date(),
+              description: `REVERSAL - Deposit for Payment ${payment.paymentNumber}`,
+              referenceType: 'Payment',
+              referenceId: new ObjectId(id),
+              referenceNumber: payment.paymentNumber,
+              debit: 0,
+              credit: parseFloat(payment.amountReceived),
+            });
+
+            // Reverse PaymentAccount balance
+            await db.collection('paymentaccounts').updateOne(
+              { _id: new ObjectId(payment.depositedToAccountId) },
+              { $inc: { currentBalance: -parseFloat(payment.amountReceived) } }
+            );
+
+            console.log(`✅ Bank COA reversed for deposited payment: ${payment.paymentNumber}`);
+          }
+        }
+      }
+    } catch (depositReversalErr) {
+      console.error('⚠️ Deposit reversal error:', depositReversalErr.message);
+    }
+    // ── END DEPOSIT REVERSAL ──────────────────────────────────────────────────
+
+    // ── CLEAN UP PROVIDER TRANSACTIONS ──────────────────────────────────────
+    try {
+      const mongoose = require('mongoose');
+      const ProviderTransaction = mongoose.models.ProviderTransaction
+        || mongoose.model('ProviderTransaction',
+          new mongoose.Schema({}, { strict: false }),
+          'providertransactions');
+
+      // Delete any system-created ProviderTransaction linked to this payment
+      await ProviderTransaction.deleteMany({
+        linkedRecordId: new mongoose.Types.ObjectId(id),
+        linkedRecordType: 'PaymentReceived',
+        source: 'SYSTEM_ENTRY',
+        ...req.orgFilter,
+      });
+
+      // If this payment was created from the banking flow, reset the original
+      // imported bank ProviderTransaction back to UNCATEGORIZED
+      if (payment.providerTransactionId) {
+        await ProviderTransaction.findByIdAndUpdate(payment.providerTransactionId, {
+          $set: {
+            reconciliationStatus: 'UNCATEGORIZED',
+            categorizedAt: null,
+            categorizedBy: null,
+            journalRef: null,
+            categoryLabel: null,
+            linkedRecordId: null,
+            linkedRecordType: null,
+          }
+        });
+      }
+      console.log(`✅ ProviderTransaction cleaned up for payment received: ${id}`);
+    } catch (ptErr) {
+      console.error('⚠️ ProviderTransaction cleanup error (payment received delete):', ptErr.message);
+    }
+    // ── END PROVIDER TRANSACTION CLEANUP ─────────────────────────────────────
+
+    // ── REVERSE CUSTOMER UNUSED CREDITS ON DELETE ────────────────────────────
+    try {
+      let creditDelta;
+      if (payment.paymentType === 'advance') {
+        // Advance: full netAmount was added → reverse it fully
+        creditDelta = -(parseFloat(payment.netAmount || 0));
+      } else if (payment.paymentType === 'credit_application') {
+        creditDelta = parseFloat(payment.creditsApplied || 0); // restore credits back
+      } else {
+        // For normal payment, POST creditDelta was (netAmount - totalInvoicePayments)
+        const oldInvoiceTotal = Object.values(payment.invoicePayments || {}).reduce((s, v) => s + parseFloat(v), 0);
+        const oldCreditAdded = parseFloat(payment.netAmount || 0) - oldInvoiceTotal;
+        creditDelta = -oldCreditAdded;
+      }
+
+      if (creditDelta !== 0 && payment.customerId) {
+        const custId = ObjectId.isValid(payment.customerId)
+          ? new ObjectId(payment.customerId) : payment.customerId;
+        await db.collection('billing-customers').findOneAndUpdate(
+          { _id: custId },
+          { $inc: { unusedCredits: creditDelta } },
+          { returnDocument: 'after' }
+        );
+        await db.collection('billing-customers').updateMany(
+          { _id: custId, unusedCredits: { $lt: 0 } },
+          { $set: { unusedCredits: 0 } }
+        );
+        console.log(`✅ Customer unusedCredits reversed by ${creditDelta} (type: ${payment.paymentType || 'payment'})`);
+      }
+    } catch (creditErr) {
+      console.error('⚠️ Failed to reverse customer unusedCredits on delete:', creditErr.message);
+    }
+    // ── END UNUSED CREDITS REVERSAL ──────────────────────────────────────────
+
+    res.json({
+      success: true,
+      message: 'Payment deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting payment',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// GET /customer-payments-with-balance/:customerId
+// Returns all payments received from a customer where amountInExcess > 0
+// Used by the Customer Payment Refund flow
+// ============================================================================
+
+router.get('/customer-payments-with-balance/:customerId', verifyToken, async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    console.log('\n🔍 [GET PAYMENTS WITH BALANCE]');
+    console.log('   customerId:', customerId);
+    console.log('   isValid:', ObjectId.isValid(customerId));
+
+    if (!ObjectId.isValid(customerId)) {
+      return res.status(400).json({ success: false, error: 'Invalid customer ID' });
+    }
+
+    const orgFilter = req.user?.orgId
+      ? { $or: [{ orgId: req.user.orgId }, { orgId: null }, { orgId: { $exists: false } }] }
+      : {};
+
+    const payments = await db.collection('payments_received').find({
+      customerId: customerId.toString(),
+      ...orgFilter,
+      ...(req.branchFilter || {}),
+    }).sort({ paymentDate: -1 }).toArray();
+
+    console.log('   Total payments found:', payments.length);
+
+    // Only return payments that have a refundable excess balance
+    const withBalance = payments
+      .map(p => {
+        const amountInExcess = p.amountInExcess != null
+          ? p.amountInExcess
+          : Math.max(0, (p.amountReceived || 0) - (p.amountUsedForPayments || 0) - (p.amountRefunded || 0));
+
+        console.log(`   Payment ${p.paymentNumber}: amountInExcess = ${amountInExcess}`);
+
+        return {
+          _id: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate,
+          paymentMode: p.paymentMode,
+          paymentType: p.paymentType,
+          amountReceived: p.amountReceived || 0,
+          amountInExcess,
+          amountRefunded: p.amountRefunded || 0,
+          status: p.status,
+          referenceNumber: p.reference || p.referenceNumber || '',
+          notes: p.notes || '',
+        };
+      })
+      .filter(p => p.amountInExcess > 0.001);
+
+    console.log('   Payments with balance > 0:', withBalance.length);
+    console.log('✅ [GET PAYMENTS WITH BALANCE] Complete\n');
+
+    res.json({ success: true, count: withBalance.length, data: withBalance });
+  } catch (err) {
+    console.error('Error fetching customer payments with balance:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// POST /:id/refund — record a refund on a payment received
+// Body: { amount, refundMode, referenceNumber, refundDate, notes }
+// ============================================================================
+
+router.post('/:id/refund', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid payment ID' });
+    }
+
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+    const payment = await db.collection('payments_received').findOne({
+      _id: new ObjectId(id),
+      ...orgFilter,
+    });
+    if (!payment) {
+      return res.status(404).json({ success: false, error: 'Payment not found' });
+    }
+
+    const { amount, refundMode, referenceNumber, refundDate, notes, providerTransactionId } = req.body;
+
+    console.log('\n🔍 [PAYMENT REFUND DEBUG]');
+    console.log('   Payment ID:', id);
+    console.log('   Amount:', amount);
+    console.log('   providerTransactionId:', providerTransactionId);
+    console.log('   Has existing bank transaction:', !!providerTransactionId);
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'Invalid refund amount' });
+    }
+
+    // Calculate current refundable balance
+    const currentExcess = payment.amountInExcess != null
+      ? payment.amountInExcess
+      : Math.max(0, (payment.amountReceived || 0) - (payment.amountUsedForPayments || 0) - (payment.amountRefunded || 0));
+
+    if (amount > currentExcess + 0.01) {
+      return res.status(400).json({ success: false, error: `Refund amount ₹${amount} exceeds available balance ₹${currentExcess.toFixed(2)}` });
+    }
+
+    const refundEntry = {
+      _id: new ObjectId(),
+      amount: parseFloat(amount),
+      refundDate: refundDate ? new Date(refundDate) : new Date(),
+      refundMode: refundMode || 'Cash',
+      referenceNumber: referenceNumber || '',
+      notes: notes || '',
+      refundedBy: req.user?.email || 'system',
+      refundedAt: new Date(),
+    };
+
+    const newAmountRefunded = (payment.amountRefunded || 0) + parseFloat(amount);
+    const newAmountInExcess = Math.max(0, currentExcess - parseFloat(amount));
+
+    await db.collection('payments_received').updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $push: { refunds: refundEntry },
+        $set: {
+          amountRefunded: newAmountRefunded,
+          amountInExcess: newAmountInExcess,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    // Decrease customer unusedCredits — the excess was sitting there
+    if (payment.customerId) {
+      try {
+        console.log('\n🔍 [REFUND - UNUSED CREDITS DEBUG]');
+        console.log('   customerId:', payment.customerId);
+        console.log('   refundAmount:', amount);
+        console.log('   Decreasing unusedCredits by:', parseFloat(amount));
+
+        const custId = ObjectId.isValid(payment.customerId)
+          ? new ObjectId(payment.customerId)
+          : payment.customerId;
+
+        const beforeUpdate = await db.collection('billing-customers').findOne({ _id: custId });
+        console.log('   unusedCredits BEFORE refund:', beforeUpdate?.unusedCredits || 0);
+
+        const result = await db.collection('billing-customers').findOneAndUpdate(
+          { _id: custId },
+          { $inc: { unusedCredits: -parseFloat(amount) } },
+          { returnDocument: 'after' }
+        );
+
+        console.log('   unusedCredits AFTER refund:', result?.unusedCredits || 0);
+        console.log('   Update result:', result ? 'SUCCESS' : 'FAILED');
+
+        // Ensure it never goes below 0
+        const finalResult = await db.collection('billing-customers').findOneAndUpdate(
+          { _id: custId, unusedCredits: { $lt: 0 } },
+          { $set: { unusedCredits: 0 } },
+          { returnDocument: 'after' }
+        );
+
+        if (finalResult) {
+          console.log('   ⚠️ unusedCredits was negative, reset to 0');
+        }
+
+        console.log('✅ Customer unusedCredits decreased by -₹' + amount);
+      } catch (creditErr) {
+        console.error('⚠️ Failed to update customer unusedCredits on refund:', creditErr.message);
+        console.error('   Error stack:', creditErr.stack);
+      }
+    } else {
+      console.log('⚠️ [REFUND] No customerId found on payment - skipping unusedCredits update');
+    }
+
+    // ── COA entries ──────────────────────────────────────────────────────────
+    // Dr Accounts Receivable (or Advance from Customer)  ← liability reduces
+    // Cr Bank / Cash                                      ← money goes out
+    try {
+      const currentOrgId = req.user?.orgId || null;
+      const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
+
+      // Resolve the bank account name from the original payment's depositTo
+      let bankAccountName = 'Undeposited Funds';
+      if (payment.depositTo) {
+        const PaymentAccount = db.collection('paymentaccounts');
+        const depositAcc = ObjectId.isValid(payment.depositTo)
+          ? await PaymentAccount.findOne({ _id: new ObjectId(payment.depositTo) })
+          : await PaymentAccount.findOne({ accountName: payment.depositTo });
+        if (depositAcc) bankAccountName = depositAcc.accountName;
+      }
+
+      const isAdvance = payment.paymentType === 'advance';
+      const debitAccountName = isAdvance ? 'Advance from Customer' : 'Accounts Receivable';
+
+      const [debitAccId, creditAccId] = await Promise.all([
+        getSystemAccountId(debitAccountName, currentOrgId),
+        ChartOfAccount.findOne({
+          accountName: { $regex: new RegExp(`^${bankAccountName}`, 'i') },
+          ...(currentOrgId ? { orgId: currentOrgId } : {}),
+        }).select('_id').lean().then(a => a ? a._id : getSystemAccountId('Undeposited Funds', currentOrgId)),
+      ]);
+
+      const txnDate = refundDate ? new Date(refundDate) : new Date();
+      const refundAmt = parseFloat(amount);
+
+      if (debitAccId) {
+        await postTransactionToCOA({
+          accountId: debitAccId, orgId: currentOrgId, branchId, date: txnDate,
+          description: `Payment refund - ${payment.paymentNumber} - ${payment.customerName}`,
+          referenceType: 'PaymentRefund',
+          referenceId: new ObjectId(id),
+          referenceNumber: payment.paymentNumber,
+          debit: refundAmt, credit: 0,
+        });
+      }
+      if (creditAccId) {
+        await postTransactionToCOA({
+          accountId: creditAccId, orgId: currentOrgId, branchId, date: txnDate,
+          description: `Payment refund - ${payment.paymentNumber} - ${payment.customerName}`,
+          referenceType: 'PaymentRefund',
+          referenceId: new ObjectId(id),
+          referenceNumber: payment.paymentNumber,
+          debit: 0, credit: refundAmt,
+        });
+      }
+    } catch (coaErr) {
+      console.error('⚠️ COA posting failed for payment refund:', coaErr.message);
+    }
+
+    // ── Decrease bank account balance ────────────────────────────────────────
+    try {
+      if (payment.depositTo) {
+        const PaymentAccount = db.collection('paymentaccounts');
+        if (ObjectId.isValid(payment.depositTo)) {
+          await PaymentAccount.findOneAndUpdate(
+            { _id: new ObjectId(payment.depositTo) },
+            { $inc: { currentBalance: -parseFloat(amount) }, $set: { updatedAt: new Date() } }
+          );
+        } else {
+          await PaymentAccount.findOneAndUpdate(
+            { accountName: payment.depositTo },
+            { $inc: { currentBalance: -parseFloat(amount) }, $set: { updatedAt: new Date() } }
+          );
+        }
+      }
+    } catch (balErr) {
+      console.error('⚠️ Failed to update bank balance on refund:', balErr.message);
+    }
+
+    // ── Provider transaction (DEBIT — money going out) ───────────────────────
+    // Only create a NEW transaction if we're NOT categorizing an existing one
+    try {
+      if (providerTransactionId) {
+        console.log('✅ [PAYMENT REFUND] Using existing bank transaction:', providerTransactionId);
+        // Don't create a new transaction - the existing one is already being categorized
+      } else {
+        console.log('⚠️ [PAYMENT REFUND] Creating NEW provider transaction (no existing transaction provided)');
+        await db.collection('providertransactions').insertOne({
+          orgId: req.user?.orgId || null,
+          branchId: req.branchIds?.length > 0 ? req.branchIds[0] : null,
+          transactionType: 'DEBIT',
+          amount: parseFloat(amount),
+          transactionDate: refundDate ? new Date(refundDate) : new Date(),
+          description: `Payment Refund - ${payment.paymentNumber}`,
+          categoryLabel: 'Payment Refund',
+          linkedRecordType: 'PaymentReceived',
+          linkedRecordId: new ObjectId(id),
+          source: 'SYSTEM_ENTRY',
+          reconciliationStatus: 'CATEGORIZED',
+          createdAt: new Date(),
+        });
+      }
+    } catch (ptErr) {
+      console.error('⚠️ Failed to create provider transaction for refund:', ptErr.message);
+    }
+
+    const updated = await db.collection('payments_received').findOne({ _id: new ObjectId(id) });
+    res.json({ success: true, message: 'Refund recorded successfully', data: updated });
+  } catch (err) {
+    console.error('Error recording payment refund:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// GET /:id/pdf — generate and download payment receipt PDF
+// ============================================================================
+
+router.get('/:id/pdf', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    // Fetch customer to get billing address and GSTIN
+    let customer = null;
+    if (payment.customerId && ObjectId.isValid(payment.customerId)) {
+      customer = await db.collection('billing_customers').findOne({ _id: new ObjectId(payment.customerId) });
+    }
+
+    function formatAddress(addr) {
+      if (!addr) return '';
+      return [addr.attention, addr.street, addr.city, addr.state, addr.zip || addr.pincode, addr.country].filter(Boolean).join(', ');
+    }
+
+    // Fetch ALL linked invoices
+    let linkedInvoices = [];
+    let linkedInvoice = null; // keep for backward compat (first invoice)
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      for (const invId of invoiceIds) {
+        if (ObjectId.isValid(invId)) {
+          const inv = await db.collection('invoices').findOne({ _id: new ObjectId(invId) });
+          if (inv) linkedInvoices.push({ ...inv, _appliedAmount: parseFloat(payment.invoicePayments[invId] || 0) });
+        }
+      }
+      if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
+    } catch (_) { }
+
+    // Fetch org details — branch-aware
+    let orgData = null;
+    try {
+      const mongoose = require('mongoose');
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(req.user?.orgId || payment.orgId, payment.branchId || req.branchFilter?.branchId || null, db);
+    } catch (err) { console.error('orgData fetch error:', err); }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
+    const orgAddr = orgData?.address || '';
+
+    // ── Org logo helper (inline, no external dependency) ─────────────────────
+    function getOrgLogoPath(orgId) {
+      if (orgId) {
+        const orgLogoDir = path.join(__dirname, '..', 'uploads', 'org-logos');
+        if (fs.existsSync(orgLogoDir)) {
+          try {
+            const files = fs.readdirSync(orgLogoDir);
+            const match = files.find(f => f.startsWith(`org-${orgId}-`));
+            if (match) {
+              const fullPath = path.join(orgLogoDir, match);
+              if (fs.existsSync(fullPath) && fs.statSync(fullPath).size > 0) return fullPath;
+            }
+          } catch (_) { }
+        }
+      }
+      const fallbacks = [
+        path.join(__dirname, '..', 'assets', 'abra.jpeg'),
+        path.join(__dirname, '..', 'assets', 'abra.jpg'),
+        path.join(__dirname, '..', 'assets', 'abra.png'),
+        path.join(process.cwd(), 'assets', 'abra.jpeg'),
+        path.join(process.cwd(), 'assets', 'abra.jpg'),
+        path.join(process.cwd(), 'assets', 'abra.png'),
+      ];
+      for (const p of fallbacks) {
+        try { if (fs.existsSync(p) && fs.statSync(p).size > 0) return p; } catch (_) { }
+      }
+      return null;
+    }
+
+    const PDFDocument = require('pdfkit');
+    const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const filename = `payment-${payment.paymentNumber}.pdf`;
+    const filepath = path.join(uploadsDir, filename);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    
+    const drawPageOutline = () => {
+      doc.rect(20, 20, 555, 802).lineWidth(1).strokeColor('#000000').stroke();
+    };
+    doc.on('pageAdded', drawPageOutline);
+    drawPageOutline();
+
+    const stream = fs.createWriteStream(filepath);
+    doc.pipe(stream);
+
+    const pageW = 515;
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const amountDue = linkedInvoice ? parseFloat(linkedInvoice.amountDue || 0) : 0;
+
+    // ── Logo ──────────────────────────────────────────────────────────────────
+    let logoData = null;
+    if (orgData?.logoBase64) {
+      const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgData?.logoUrl) {
+      const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    if (!logoData) {
+      const lp = getOrgLogoPath ? getOrgLogoPath(payment.orgId) : null;
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    const textX = logoData ? 166 : 50;
+    const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+    const textBlockH = 14 + 12 + contactLines.length * 9;
+    const textStartY = 35;
+    const logoCenterY = textStartY + textBlockH / 2;
+    
+    const logoH = 82; // Increased to match invoice
+    const logoW = 110; // Increased to match invoice
+    const logoY = textStartY; // Align top of logo with top of text
+
+    if (logoData) {
+      try { doc.image(logoData, 44, logoY, { width: logoW, height: logoH, fit: [logoW, logoH] }); } catch (_) { }
+    }
+
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold')
+      .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+    doc.fontSize(12).font('Helvetica-Bold');
+    const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+    const subtitleY = textStartY + orgNameH + 2;
+    doc.fontSize(7).fillColor('#444444').font('Helvetica')
+      .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
+    doc.fontSize(7).fillColor('#000000');
+    let cy = subtitleY + 12;
+    contactLines.forEach(l => {
+      doc.text(l, textX, cy, { width: 240 });
+      const lineH = doc.heightOfString(l, { width: 240 });
+      cy += Math.max(lineH, 9) + 1;
+    });
+
+    doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+      .text(payment.paymentType === 'advance' ? 'ADVANCE RECEIPT' : 'PAYMENT RECEIPT', 380, 40, { width: 170, align: 'right', characterSpacing: 2 });
+    doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold')
+      .text(payment.paymentNumber, 380, 52, { width: 170, align: 'right' });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+      .text(`Date: ${payment.paymentDate}`, 380, 74, { width: 170, align: 'right' });
+
+    let addrToUse = null;
+    let gstToUse = '';
+    
+    if (linkedInvoice && linkedInvoice.billingAddress && Object.keys(linkedInvoice.billingAddress).length > 0) {
+      addrToUse = linkedInvoice.billingAddress;
+      gstToUse = linkedInvoice.customerGSTIN || '';
+    } else if (customer) {
+      addrToUse = customer.billingAddress || {
+        street: customer.addressLine1 || customer.address || '',
+        city: customer.city || '',
+        state: customer.state || '',
+        zip: customer.postalCode || customer.pincode || '',
+        country: customer.country || ''
+      };
+      gstToUse = customer.gstin || customer.taxPreference === 'taxable' ? customer.gstin : '';
+    }
+    
+    const billingStr = formatAddress(addrToUse) || (payment.customerEmail || '');
+    const custGST = gstToUse;
+    
+    // ── Meta Grid ───────────────────────────────────────────────────────────────
+    const metaY = Math.max(132, cy + 8);
+    const colW = pageW / 2;
+    doc.fontSize(10).font('Helvetica-Bold');
+    const custNameH = doc.heightOfString(payment.customerName || '', { width: colW - 16 });
+    doc.fontSize(8).font('Helvetica');
+    const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+    const gstH = custGST ? 10 : 0;
+    const metaH = Math.max(90, 18 + custNameH + 2 + addrH + gstH + 10);
+
+    // ── Col 1: Received From ──────────────────────────────────────────────────
+    const billX = 40;
+    doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+    doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+       .text('RECEIVED FROM', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold')
+       .text(payment.customerName || '', billX + 8, metaY + 18, { width: colW - 16 });
+       
+    const billAddrY = metaY + 18 + custNameH + 2;
+    if (billingStr) {
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
+    }
+    if (custGST) {
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`GSTIN: ${custGST}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16 });
+    }
+
+    // ── Col 2: Payment Details ──────────────────────────────────────────
+    const detX = 40 + colW;
+    doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+    doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+       .text('PAYMENT DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text(`Payment #: ${payment.paymentNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+    doc.text(`Date: ${payment.paymentDate}`, detX + 8, metaY + 29, { width: colW - 16 });
+    doc.text(`Mode: ${payment.paymentMode}`, detX + 8, metaY + 39, { width: colW - 16 });
+    if (payment.reference) doc.text(`Ref: ${payment.reference}`, detX + 8, metaY + 49, { width: colW - 16 });
+    if (bankCharges > 0) doc.text(`Bank Charges: Rs.${bankCharges.toFixed(2)}`, detX + 8, metaY + 59, { width: colW - 16 });
+
+    let y = metaY + metaH + 16;
+    
+    // ── Amount received ───────────────────────────────────────────────────────
+    doc.rect(40, y, 515, 30).fillAndStroke('#f7f9fc', '#000000');
+    doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold')
+      .text(payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received', 50, y + 9, { width: 300 });
+    doc.fontSize(14).fillColor('#27AE60').font('Helvetica-Bold')
+      .text(`Rs.${amountReceived.toFixed(2)}`, 250, y + 8, { width: 295, align: 'right' });
+    y += 42;
+
+    // ── Advance-specific: show credit balance ─────────────────────────────────
+    if (payment.paymentType === 'advance') {
+      y += 8;
+      doc.rect(40, y, 515, 36).fill('#E8F5E9');
+      doc.fontSize(9).fillColor('#1B5E20').font('Helvetica-Bold')
+        .text('This amount has been recorded as an advance credit on your account.', 50, y + 6, { width: 505 });
+      doc.fontSize(9).fillColor('#1B5E20').font('Helvetica')
+        .text('It will be automatically applied when invoices are raised against your account.', 50, y + 19, { width: 505 });
+      y += 44;
+    }
+
+    // ── Invoices applied table ────────────────────────────────────────────────
+    if (linkedInvoices.length > 0) {
+      y += 6;
+      doc.fontSize(9).fillColor('#444444').font('Helvetica-Bold').text('APPLIED TO INVOICES', 40, y, { characterSpacing: 0.5 });
+      y += 14;
+
+      // Table header
+      doc.rect(40, y, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold')
+        .text('INVOICE #', 42, y + 7, { width: 120 })
+        .text('INVOICE DATE', 170, y + 7, { width: 100 })
+        .text('INVOICE AMT', 275, y + 7, { width: 100, align: 'center' })
+        .text('APPLIED', 380, y + 7, { width: 90, align: 'center' })
+        .text('BALANCE DUE', 475, y + 7, { width: 78, align: 'center' });
+      y += 20;
+
+      linkedInvoices.forEach((inv, idx) => {
+        const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+        const rowH = 24;
+        
+        doc.rect(40, y, 515, rowH).fill(fill);
+        doc.rect(40, y, 515, rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+
+        // Draw vertical column lines
+        [168, 273, 378, 473].forEach(x => {
+          doc.moveTo(x, y).lineTo(x, y + rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+        });
+
+        const invTotal = parseFloat(inv.totalAmount || 0);
+        const invDue = parseFloat(inv.amountDue || 0);
+        const applied = inv._appliedAmount || 0;
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+          .text(inv.invoiceNumber || '-', 42, y + 8, { width: 120 })
+          .text(inv.invoiceDate ? String(inv.invoiceDate).slice(0, 10) : '-', 170, y + 8, { width: 100 })
+          .text(`Rs. ${invTotal.toFixed(2)}`, 275, y + 8, { width: 96, align: 'right' })
+          .text(`Rs. ${applied.toFixed(2)}`, 380, y + 8, { width: 86, align: 'right' });
+        const dueColor = invDue > 0 ? '#DC2626' : '#27AE60';
+        doc.fontSize(7).fillColor(dueColor).font('Helvetica-Bold')
+          .text(invDue > 0 ? `Rs. ${invDue.toFixed(2)}` : 'PAID', 475, y + 8, { width: 76, align: 'right' });
+        y += rowH;
+      });
+
+      // Total applied row
+      const totalApplied = linkedInvoices.reduce((s, inv) => s + (inv._appliedAmount || 0), 0);
+      doc.rect(40, y, 515, 24).fill('#E8F5E9');
+      doc.rect(40, y, 515, 24).lineWidth(0.5).strokeColor('#000000').stroke();
+      doc.fontSize(8.5).fillColor('#1B5E20').font('Helvetica-Bold')
+        .text('Total Applied to Invoices', 44, y + 8, { width: 330 })
+        .text(`Rs. ${totalApplied.toFixed(2)}`, 380, y + 8, { width: 86, align: 'right' });
+      y += 34;
+    }
+
+    // ── Remaining balance (overall) ───────────────────────────────────────────
+    const totalDue = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
+    if (linkedInvoices.length > 0) {
+      y += 4;
+      doc.fontSize(9).fillColor('#666666').font('Helvetica').text(
+        linkedInvoices.length === 1 ? 'Remaining Balance' : 'Total Remaining Balance (all invoices)',
+        40, y, { width: 300 }
+      );
+      const balColor = totalDue > 0 ? '#DC2626' : '#27AE60';
+      doc.fontSize(9).fillColor(balColor).font('Helvetica-Bold').text(`Rs.${totalDue.toFixed(2)}`, 250, y, { width: 305, align: 'right' });
+      y += 16;
+    }
+
+    if (payment.notes) {
+      y += 10;
+      doc.fontSize(9).fillColor('#666666').font('Helvetica-Bold').text('Notes:', 40, y);
+      y += 12;
+      doc.fontSize(9).fillColor('#444444').font('Helvetica').text(payment.notes, 40, y, { width: pageW });
+    }
+
+    // ── Authorized Signatory ──────────────────────────────────────────────────
+    // Footer is fixed at y=760. Signature sits centered in the gap between
+    // content end (y) and the footer, aligned to the right.
+    const footerY = 760;
+    const signBoxW = 220;
+    const authBoxX = 555 - signBoxW;
+
+    // Available vertical space between content and footer
+    const gapTop = y + 10;          // 10px padding below last content line
+    const gapBottom = footerY - 10;    // 10px above footer line
+    const sigBlockH = 10 + 200 + 14 + 12; // "For ORG" label + sig image (200px) + gap + "Authorized Signatory"
+    // Center the block in the gap
+    const signSectionY = Math.max(gapTop, Math.round((gapTop + gapBottom - sigBlockH) / 2));
+
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
+      .text(`For ${orgName.toUpperCase()}`, authBoxX, signSectionY, { width: signBoxW, characterSpacing: 0.5, ellipsis: true });
+
+    const _prSigRelPath = orgData?.digitalSignaturePath;
+    const _prSigSize = 200; // large square so round stamps show fully (matches invoices.js)
+    let _prActualSigH = _prSigSize;
+    
+    let sigBuf = null;
+    let sigExt = '.png';
+    if (orgData?.signatureBase64) {
+      const match = orgData.signatureBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+      if (match) {
+        sigExt = '.' + match[1].replace('jpeg', 'jpg');
+        sigBuf = Buffer.from(match[2], 'base64');
+      }
+    } else if (_prSigRelPath) {
+      const _prSigAbs = path.join(__dirname, '..', _prSigRelPath.replace(/^\//, ''));
+      try { if (fs.existsSync(_prSigAbs)) { sigBuf = fs.readFileSync(_prSigAbs); sigExt = path.extname(_prSigAbs).toLowerCase(); } } catch (_) {}
+    }
+
+    if (sigBuf) {
+      try {
+          let _prW = _prSigSize, _prH = _prSigSize;
+          try {
+            if (sigExt === '.png' && sigBuf.length > 24) { _prW = sigBuf.readUInt32BE(16); _prH = sigBuf.readUInt32BE(20); }
+            else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
+              let _pri = 2;
+              while (_pri < sigBuf.length - 8) {
+                if (sigBuf[_pri] === 0xFF && sigBuf[_pri + 1] >= 0xC0 && sigBuf[_pri + 1] <= 0xC3) { _prH = sigBuf.readUInt16BE(_pri + 5); _prW = sigBuf.readUInt16BE(_pri + 7); break; }
+                _pri += 2 + sigBuf.readUInt16BE(_pri + 2);
+              }
+            }
+          } catch (_) { }
+          const _prScale = Math.min(_prSigSize / _prW, _prSigSize / _prH);
+          _prActualSigH = Math.round(_prH * _prScale);
+          const _prActualSigW = Math.round(_prW * _prScale);
+          const _prCenteredX = authBoxX + (signBoxW - _prActualSigW) / 2;
+          doc.image(sigBuf, _prCenteredX, signSectionY + 10, { width: _prActualSigW, height: _prActualSigH });
+      } catch (_e) { console.warn('⚠️ Signature render failed:', _e.message); }
+    }
+
+    // Line sits exactly 14pt below the actual rendered image (matches invoices.js)
+    const _prSigLineY = signSectionY + 10 + _prActualSigH + 14;
+    doc.moveTo(authBoxX, _prSigLineY).lineTo(authBoxX + signBoxW, _prSigLineY)
+      .lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+    doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+      .text('Authorized Signatory', authBoxX, _prSigLineY + 3, { width: signBoxW, align: 'center' });
+
+    // ── Footer — fixed at bottom of page ─────────────────────────────────────
+    doc.moveTo(40, footerY).lineTo(555, footerY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
+    doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
+      .text(`${orgName}${orgGST ? ' · GSTIN: ' + orgGST : ''} · ${payment.paymentNumber}`, 40, footerY + 6, { width: pageW / 2 });
+    doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footerY + 6, { width: pageW, align: 'right' });
+
+    doc.end();
+
+    await new Promise((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    res.download(filepath, `Payment-${payment.paymentNumber}.pdf`);
+  } catch (error) {
+    console.error('❌ Error generating payment PDF:', error);
+    res.status(500).json({ success: false, message: 'Error generating PDF', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET /:id/email-preview — return payment receipt email HTML for preview
+// ============================================================================
+
+router.get('/:id/email-preview', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    let linkedInvoices = [];
+    let linkedInvoice = null;
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      for (const invId of invoiceIds) {
+        if (ObjectId.isValid(invId)) {
+          const inv = await db.collection('invoices').findOne({ _id: new ObjectId(invId) });
+          if (inv) linkedInvoices.push({ ...inv, _appliedAmount: parseFloat(payment.invoicePayments[invId] || 0) });
+        }
+      }
+      if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
+    } catch (_) { }
+
+    let orgData = null;
+    try {
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
+    } catch (_) { }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
+
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const totalDue = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
+
+    // Build invoices applied table rows
+    const invoiceRowsHtml = linkedInvoices.length > 0 ? `
+      <div style="margin:20px 0;">
+        <h3 style="color:#0f1e3d;font-size:14px;margin:0 0 10px 0;">Applied to Invoices</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:#0D1B3E;color:white;">
+              <th style="padding:8px 10px;text-align:left;">Invoice #</th>
+              <th style="padding:8px 10px;text-align:right;">Invoice Amt</th>
+              <th style="padding:8px 10px;text-align:right;">Applied</th>
+              <th style="padding:8px 10px;text-align:right;">Balance Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linkedInvoices.map((inv, i) => `
+            <tr style="background:${i % 2 === 0 ? '#f8f9fa' : '#ffffff'};">
+              <td style="padding:7px 10px;font-weight:600;color:#1a3a6b;">${inv.invoiceNumber || '-'}</td>
+              <td style="padding:7px 10px;text-align:right;">₹${parseFloat(inv.totalAmount || 0).toFixed(2)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#15803d;font-weight:600;">₹${(inv._appliedAmount || 0).toFixed(2)}</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:600;color:${parseFloat(inv.amountDue || 0) > 0 ? '#dc2626' : '#15803d'};">₹${parseFloat(inv.amountDue || 0).toFixed(2)}</td>
+            </tr>`).join('')}
+            <tr style="background:#e8f5e9;font-weight:bold;">
+              <td style="padding:8px 10px;" colspan="2">Total Applied</td>
+              <td style="padding:8px 10px;text-align:right;color:#15803d;">₹${linkedInvoices.reduce((s, inv) => s + (inv._appliedAmount || 0), 0).toFixed(2)}</td>
+              <td style="padding:8px 10px;text-align:right;color:${totalDue > 0 ? '#dc2626' : '#15803d'};">₹${totalDue.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>` : '';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #0f1e3d 0%, #1a3a6b 50%, #2463ae 100%); color: white; padding: 30px 32px; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0 0 6px 0; font-size: 22px; }
+    .header p  { margin: 0; font-size: 13px; opacity: 0.85; }
+    .content { background: #f8f9fa; padding: 28px 32px; border-radius: 0 0 8px 8px; }
+    .success-badge { background: #d4edda; color: #155724; padding: 14px 18px; border-radius: 8px; text-align: center; margin: 0 0 20px 0; border: 1px solid #c3e6cb; }
+    .payment-box { background: white; padding: 20px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid #1a3a6b; }
+    .payment-box h3 { margin: 0 0 14px 0; color: #0f1e3d; font-size: 15px; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: #666; }
+    .detail-value { font-weight: 600; color: #222; }
+    .total-row { padding-top: 12px; margin-top: 8px; border-top: 2px solid #1a3a6b; font-size: 15px; font-weight: bold; }
+    .balance-due { color: #dc2626; }
+    .balance-paid { color: #15803d; }
+    .advance-notice { background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 8px; padding: 14px 18px; margin: 0 0 20px 0; font-size: 13px; color: #1b5e20; }
+    .footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>${payment.paymentType === 'advance' ? '💰 Advance Receipt' : '✅ Payment Receipt'}</h1>
+      <p>${orgName} — Billing &amp; Finance</p>
+    </div>
+    <div class="content">
+      <div class="success-badge">
+        <h2 style="margin:0 0 4px 0;font-size:17px;">${payment.paymentType === 'advance' ? 'Advance Payment Received' : 'Payment Received Successfully'}</h2>
+        <p style="margin:0;font-size:13px;">We have received ${payment.paymentType === 'advance' ? 'an advance of' : 'your payment of'} ₹${amountReceived.toFixed(2)}</p>
+      </div>
+      <div class="payment-box">
+        <h3>${payment.paymentType === 'advance' ? 'Advance Details' : 'Payment Details'}</h3>
+        <div class="detail-row"><span class="detail-label">Receipt Number</span><span class="detail-value">${payment.paymentNumber}</span></div>
+        <div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">${payment.paymentDate}</span></div>
+        <div class="detail-row"><span class="detail-label">Payment Mode</span><span class="detail-value">${payment.paymentMode}</span></div>
+        ${payment.reference ? `<div class="detail-row"><span class="detail-label">Reference Number</span><span class="detail-value">${payment.reference}</span></div>` : ''}
+        ${bankCharges > 0 ? `<div class="detail-row"><span class="detail-label">Bank Charges</span><span class="detail-value" style="color:#dc2626;">-₹${bankCharges.toFixed(2)}</span></div>` : ''}
+        <div class="detail-row total-row"><span>${payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received'}</span><span class="balance-paid">₹${amountReceived.toFixed(2)}</span></div>
+        ${linkedInvoices.length > 0 ? `<div class="detail-row" style="padding-top:8px;"><span class="detail-label">${linkedInvoices.length === 1 ? 'Remaining Balance' : 'Total Remaining Balance'}</span><span class="detail-value ${totalDue > 0 ? 'balance-due' : 'balance-paid'}">₹${totalDue.toFixed(2)}</span></div>` : ''}
+      </div>
+      ${payment.paymentType === 'advance' ? `
+      <div class="advance-notice">
+        <strong>📋 Advance Credit Applied</strong><br>
+        This advance of ₹${amountReceived.toFixed(2)} has been credited to your account. It will be automatically applied when invoices are raised against your account.
+      </div>` : ''}
+      ${invoiceRowsHtml}
+      ${payment.notes ? `<div style="background:white;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px;"><strong style="color:#0f1e3d;">Notes:</strong><p style="margin:6px 0 0 0;color:#555;">${payment.notes}</p></div>` : ''}
+    </div>
+    <div class="footer">
+      <strong>${orgName}</strong><br>
+      ${orgGST ? `GST: ${orgGST}<br>` : ''}
+      ${orgPhone ? `Ph: ${orgPhone}<br>` : ''}
+      ${orgEmail || ''}
+    </div>
+  </div>
+</body>
+</html>`;
+
+    res.json({
+      success: true,
+      data: {
+        subject: `${payment.paymentType === 'advance' ? 'Advance Receipt' : 'Payment Receipt'} - ${payment.paymentNumber} - Rs.${amountReceived.toFixed(2)}`,
+        html,
+        to: payment.customerEmail || '',
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error generating payment email preview:', error);
+    res.status(500).json({ success: false, message: 'Error generating email preview', error: error.message });
+  }
+});
+
+// ============================================================================
+// PATCH /:id/mark-as-sent — mark payment as sent without sending email
+// ============================================================================
+
+router.patch('/:id/mark-as-sent', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    await db.collection('payments_received').updateOne(query, {
+      $set: { status: 'sent', markedAsSentAt: new Date(), updatedAt: new Date() }
+    });
+
+    console.log(`✅ Payment marked as sent (no email): ${payment.paymentNumber}`);
+    res.json({ success: true, message: 'Payment marked as sent' });
+  } catch (error) {
+    console.error('❌ Error marking payment as sent:', error);
+    res.status(500).json({ success: false, message: 'Error marking payment as sent', error: error.message });
+  }
+});
+
+// ============================================================================
+// POST /:id/send-email — send payment receipt email to customer
+// ============================================================================
+
+router.post('/:id/send-email', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+    const query = { _id: new ObjectId(id) };
+    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+
+    const payment = await db.collection('payments_received').findOne(query);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const toEmail = payment.customerEmail;
+    if (!toEmail) {
+      return res.status(400).json({ success: false, message: 'Customer email not available on this payment' });
+    }
+
+    // Fetch ALL linked invoices for balance info
+    let linkedInvoices = [];
+    let linkedInvoice = null;
+    try {
+      const invoiceIds = Object.keys(payment.invoicePayments || {});
+      for (const invId of invoiceIds) {
+        if (ObjectId.isValid(invId)) {
+          const inv = await db.collection('invoices').findOne({ _id: new ObjectId(invId) });
+          if (inv) linkedInvoices.push({ ...inv, _appliedAmount: parseFloat(payment.invoicePayments[invId] || 0) });
+        }
+      }
+      if (linkedInvoices.length > 0) linkedInvoice = linkedInvoices[0];
+    } catch (_) { }
+
+    // Fetch org details — branch-aware
+    let orgData = null;
+    try {
+      const { getEffectiveOrgData } = require('./branches');
+      const db = mongoose.connection.db;
+      if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
+    } catch (_) { }
+    const orgName = orgData?.orgName || 'Billing Team';
+    const orgGST = orgData?.gstNumber || '';
+    const orgPhone = orgData?.phone || '';
+    const orgEmail = orgData?.email || '';
+
+    const amountReceived = parseFloat(payment.amountReceived || 0);
+    const bankCharges = parseFloat(payment.bankCharges || 0);
+    const totalDue = linkedInvoices.reduce((s, inv) => s + parseFloat(inv.amountDue || 0), 0);
+
+    // Build invoices applied table rows for email
+    const invoiceRowsHtml = linkedInvoices.length > 0 ? `
+      <div style="margin:20px 0;">
+        <h3 style="color:#0f1e3d;font-size:14px;margin:0 0 10px 0;">Applied to Invoices</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:#0D1B3E;color:white;">
+              <th style="padding:8px 10px;text-align:left;">Invoice #</th>
+              <th style="padding:8px 10px;text-align:right;">Invoice Amt</th>
+              <th style="padding:8px 10px;text-align:right;">Applied</th>
+              <th style="padding:8px 10px;text-align:right;">Balance Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linkedInvoices.map((inv, i) => `
+            <tr style="background:${i % 2 === 0 ? '#f8f9fa' : '#ffffff'};">
+              <td style="padding:7px 10px;font-weight:600;color:#1a3a6b;">${inv.invoiceNumber || '-'}</td>
+              <td style="padding:7px 10px;text-align:right;">₹${parseFloat(inv.totalAmount || 0).toFixed(2)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#15803d;font-weight:600;">₹${(inv._appliedAmount || 0).toFixed(2)}</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:600;color:${parseFloat(inv.amountDue || 0) > 0 ? '#dc2626' : '#15803d'};">₹${parseFloat(inv.amountDue || 0).toFixed(2)}</td>
+            </tr>`).join('')}
+            <tr style="background:#e8f5e9;font-weight:bold;">
+              <td style="padding:8px 10px;" colspan="2">Total Applied</td>
+              <td style="padding:8px 10px;text-align:right;color:#15803d;">₹${linkedInvoices.reduce((s, inv) => s + (inv._appliedAmount || 0), 0).toFixed(2)}</td>
+              <td style="padding:8px 10px;text-align:right;color:${totalDue > 0 ? '#dc2626' : '#15803d'};">₹${totalDue.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>` : '';
+
+    const emailHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #0f1e3d 0%, #1a3a6b 50%, #2463ae 100%); color: white; padding: 30px 32px; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0 0 6px 0; font-size: 22px; }
+    .header p  { margin: 0; font-size: 13px; opacity: 0.85; }
+    .content { background: #f8f9fa; padding: 28px 32px; border-radius: 0 0 8px 8px; }
+    .success-badge { background: #d4edda; color: #155724; padding: 14px 18px; border-radius: 8px; text-align: center; margin: 0 0 20px 0; border: 1px solid #c3e6cb; }
+    .success-badge h2 { margin: 0 0 4px 0; font-size: 17px; }
+    .success-badge p  { margin: 0; font-size: 13px; }
+    .payment-box { background: white; padding: 20px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid #1a3a6b; }
+    .payment-box h3 { margin: 0 0 14px 0; color: #0f1e3d; font-size: 15px; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: #666; }
+    .detail-value { font-weight: 600; color: #222; }
+    .total-row { padding-top: 12px; margin-top: 8px; border-top: 2px solid #1a3a6b; font-size: 15px; font-weight: bold; }
+    .balance-due { color: #dc2626; }
+    .balance-paid { color: #15803d; }
+    .footer { text-align: center; color: #888; font-size: 11px; margin-top: 24px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Payment Receipt</h1>
+      <p>${orgName} — Billing &amp; Finance</p>
+    </div>
+    <div class="content">
+      <div class="success-badge">
+        <h2>Payment Received Successfully</h2>
+        <p>We have received your payment of ₹${amountReceived.toFixed(2)}</p>
+      </div>
+
+      <div class="payment-box">
+        <h3>Payment Details</h3>
+        <div class="detail-row">
+          <span class="detail-label">Payment Number</span>
+          <span class="detail-value">${payment.paymentNumber}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Payment Date</span>
+          <span class="detail-value">${payment.paymentDate}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Payment Mode</span>
+          <span class="detail-value">${payment.paymentMode}</span>
+        </div>
+        ${linkedInvoice ? `
+        <div class="detail-row">
+          <span class="detail-label">Invoice Number</span>
+          <span class="detail-value">${linkedInvoice.invoiceNumber}</span>
+        </div>` : ''}
+        ${payment.reference ? `
+        <div class="detail-row">
+          <span class="detail-label">Reference Number</span>
+          <span class="detail-value">${payment.reference}</span>
+        </div>` : ''}
+        ${bankCharges > 0 ? `
+        <div class="detail-row">
+          <span class="detail-label">Bank Charges</span>
+          <span class="detail-value" style="color:#dc2626;">-₹${bankCharges.toFixed(2)}</span>
+        </div>` : ''}
+        <div class="detail-row total-row">
+          <span>Amount Received</span>
+          <span class="balance-paid">₹${amountReceived.toFixed(2)}</span>
+        </div>
+        ${linkedInvoices.length > 0 ? `
+        <div class="detail-row" style="padding-top:8px;">
+          <span class="detail-label">${linkedInvoices.length === 1 ? 'Remaining Balance' : 'Total Remaining Balance'}</span>
+          <span class="detail-value ${totalDue > 0 ? 'balance-due' : 'balance-paid'}">₹${totalDue.toFixed(2)}</span>
+        </div>` : ''}
+      </div>
+
+      ${payment.notes ? `
+      <div style="background:white;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px;">
+        <strong style="color:#0f1e3d;">Notes:</strong>
+        <p style="margin:6px 0 0 0;color:#555;">${payment.notes}</p>
+      </div>` : ''}
+
+      ${invoiceRowsHtml}
+
+      <div style="background:white;padding:16px 18px;border-radius:8px;font-size:13px;">
+        <strong style="color:#0f1e3d;">Need Help?</strong>
+        <p style="margin:8px 0 0 0;color:#555;">
+          ${orgEmail ? `📧 ${orgEmail}<br>` : ''}
+          ${orgPhone ? `📞 ${orgPhone}<br>` : ''}
+          🕐 Mon–Fri, 9 AM – 6 PM IST
+        </p>
+      </div>
+    </div>
+    <div class="footer">
+      <strong>${orgName}</strong><br>
+      ${orgGST ? `GST: ${orgGST}<br>` : ''}
+      This is an automated email. Please do not reply.
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendMail({
+      orgId: payment.orgId,
+      branchId: payment.branchId || null,
+      db: require('mongoose').connection.db,
+      to: toEmail,
+      subject: `${payment.paymentType === 'advance' ? 'Advance Receipt' : 'Payment Receipt'} - ${payment.paymentNumber} - ₹${amountReceived.toFixed(2)}`,
+      html: emailHtml,
+    });
+
+    // Update payment record
+    await db.collection('payments_received').updateOne(query, {
+      $set: { emailSent: true, emailSentAt: new Date(), status: 'sent', updatedAt: new Date() },
+      $push: { emailsSent: { sentTo: toEmail, sentAt: new Date() } }
+    });
+
+    console.log(`📧 Payment receipt email sent to ${toEmail} for ${payment.paymentNumber}`);
+    res.json({ success: true, message: `Payment receipt email sent to ${toEmail}` });
+  } catch (error) {
+    console.error('❌ Error sending payment email:', error);
+    res.status(500).json({ success: false, message: 'Error sending email', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET PAYMENT PROOFS
+// ============================================================================
+
+router.get('/:id/proofs', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment ID'
+      });
+    }
+
+    const payment = await db.collection('payments_received')
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: payment.paymentProofs || []
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching payment proofs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching payment proofs',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// DOWNLOAD PAYMENT PROOF
+// ============================================================================
+
+router.get('/:id/proofs/:proofIndex/download', verifyToken, async (req, res) => {
+  try {
+    const { id, proofIndex } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment ID'
+      });
+    }
+
+    const payment = await db.collection('payments_received')
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    const index = parseInt(proofIndex);
+    if (!payment.paymentProofs || index >= payment.paymentProofs.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Proof not found'
+      });
+    }
+
+    const proof = payment.paymentProofs[index];
+
+    if (!fs.existsSync(proof.filepath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Proof file not found on server'
+      });
+    }
+
+    res.download(proof.filepath, proof.originalName);
+
+  } catch (error) {
+    console.error('❌ Error downloading payment proof:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error downloading payment proof',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
+// GET UNPAID INVOICES FOR CUSTOMER
+// ============================================================================
+
+// GET UNPAID INVOICES FOR CUSTOMER - FIXED TO HANDLE OBJECTID
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+// GET PAYMENT STATISTICS
+// ============================================================================
+
+
+// ============================================================================
+// EXPORT PAYMENTS TO CSV
+// ============================================================================
+
+
+
+// ============================================================================
+// GET NEXT PAYMENT NUMBER
+// ============================================================================
+
+
+// ============================================================================
+// DEBUG: COA ACCOUNT CHECK
+// ============================================================================
+
+router.get('/debug/coa-check', verifyToken, async (req, res) => {
+  try {
+    const orgId = req.user?.orgId || null;
+
+    const accounts = await ChartOfAccount.find({
+      accountName: { $in: ['Accounts Receivable', 'Undeposited Funds', 'Cash', 'Bank'] },
+      ...(orgId ? { orgId } : {})
+    }).select('accountName isSystemAccount orgId').lean();
+
+    const allAccounts = await ChartOfAccount.find(
+      orgId ? { orgId } : {}
+    ).select('accountName isSystemAccount').lean();
+
+    res.json({
+      orgId,
+      matchingAccounts: accounts,
+      totalOrgAccounts: allAccounts.length,
+      allAccountNames: allAccounts.map(a => a.accountName)
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ============================================================================
+// POST /:id/proofs  — add one or more proof files to an existing payment
+// ============================================================================
+
+router.post('/:id/proofs', verifyToken, uploadPaymentProofs, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No proof files uploaded' });
+    }
+
+    const payment = await db.collection('payments_received').findOne({ _id: new ObjectId(id) });
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const newProofs = req.files.map(file => ({
+      filename: file.filename,
+      originalName: file.originalname,
+      filepath: file.path,
+      fileType: file.mimetype,
+      fileSize: file.size,
+      uploadedAt: new Date(),
+    }));
+
+    await db.collection('payments_received').updateOne(
+      { _id: new ObjectId(id) },
+      { $push: { paymentProofs: { $each: newProofs } } }
+    );
+
+    console.log(`✅ Added ${newProofs.length} proof(s) to payment ${id}`);
+    res.json({
+      success: true,
+      message: `${newProofs.length} proof(s) uploaded successfully`,
+      data: newProofs,
+    });
+  } catch (error) {
+    console.error('❌ Error adding payment proofs:', error);
+    if (req.files) {
+      req.files.forEach(f => { try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) { } });
+    }
+    res.status(500).json({ success: false, message: 'Error uploading proofs', error: error.message });
+  }
+});
+
+// ============================================================================
+// DELETE /:id/proofs/:proofIndex  — remove a single proof from a payment
+// ============================================================================
+
+router.delete('/:id/proofs/:proofIndex', verifyToken, async (req, res) => {
+  try {
+    const { id, proofIndex } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment ID' });
+    }
+
+    const payment = await db.collection('payments_received').findOne({ _id: new ObjectId(id) });
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    const index = parseInt(proofIndex);
+    if (!payment.paymentProofs || index < 0 || index >= payment.paymentProofs.length) {
+      return res.status(404).json({ success: false, message: 'Proof not found' });
+    }
+
+    const proof = payment.paymentProofs[index];
+
+    // Delete file from disk
+    try {
+      if (proof.filepath && fs.existsSync(proof.filepath)) {
+        fs.unlinkSync(proof.filepath);
+        console.log(`🗑️  Deleted proof file: ${proof.originalName}`);
+      }
+    } catch (e) {
+      console.error('⚠️  Could not delete proof file:', e.message);
+    }
+
+    // Remove from array by index
+    const updatedProofs = payment.paymentProofs.filter((_, i) => i !== index);
+    await db.collection('payments_received').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { paymentProofs: updatedProofs } }
+    );
+
+    console.log(`✅ Deleted proof index ${index} from payment ${id}`);
+    res.json({ success: true, message: 'Proof deleted successfully' });
+  } catch (error) {
+    console.error('❌ Error deleting payment proof:', error);
+    res.status(500).json({ success: false, message: 'Error deleting proof', error: error.message });
+  }
+});
+
+module.exports = router;

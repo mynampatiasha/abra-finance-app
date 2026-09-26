@@ -421,7 +421,23 @@ class _NewExpensePageState extends State<NewExpensePage> {
           _dateCtrl.text = DateFormat('dd/MM/yyyy').format(parsedDate);
           _expenseAcctCtrl.text = exp.expenseAccount;
           _amountCtrl.text = exp.amount > 0 ? exp.amount.toString() : '';
-          _taxCtrl.text = exp.tax > 0 ? exp.tax.toString() : '';
+          // The field is now a % rate, not a flat rupee amount — an
+          // existing expense saved before this change stored the flat tax
+          // rupee figure, so reverse it into the equivalent % here so
+          // reopening it for edit shows a sensible rate, not last time's
+          // rupee number sitting in what's now a percentage box.
+          // Since a bare/negative-typed number now defaults to a deduction
+          // (see _signedTaxPercent), a stored POSITIVE tax must redisplay
+          // with an explicit '+' — otherwise just reopening and resaving
+          // this expense without touching the field would silently flip
+          // it from an addition to a deduction.
+          if (exp.tax != 0 && exp.amount > 0) {
+            final pct = (exp.tax / exp.amount) * 100;
+            _taxCtrl.text =
+                pct > 0 ? '+${pct.toStringAsFixed(2)}' : pct.toStringAsFixed(2);
+          } else {
+            _taxCtrl.text = '';
+          }
           _notesCtrl.text = exp.notes ?? '';
           _invoiceCtrl.text = exp.invoiceNumber ?? '';
           _customerCtrl.text = exp.customerName ?? '';
@@ -480,7 +496,24 @@ class _NewExpensePageState extends State<NewExpensePage> {
     return double.tryParse(_amountCtrl.text) ?? 0.0;
   }
 
-  double _calcTax() => double.tryParse(_taxCtrl.text) ?? 0.0;
+  // _taxCtrl now holds a percentage (e.g. "2" means 2%), not a flat rupee
+  // figure — the actual tax amount is that percentage of the subtotal.
+  //
+  // Finance team convention: a bare number or an explicit '-' both mean
+  // "deduct" (e.g. "18" and "-18" are the same -18%) — only a leading '+'
+  // means "add" (+18%). So the sign is not taken from the text as typed;
+  // only the presence of a leading '+' decides it.
+  double _signedTaxPercent() {
+    final raw = _taxCtrl.text.trim();
+    if (raw.isEmpty) return 0.0;
+    if (raw.startsWith('+')) {
+      return double.tryParse(raw.substring(1)) ?? 0.0;
+    }
+    final magnitude = (double.tryParse(raw) ?? 0.0).abs();
+    return magnitude == 0 ? 0.0 : -magnitude;
+  }
+
+  double _calcTax() => _calcSubtotal() * (_signedTaxPercent() / 100);
   double _calcTotal() => _calcSubtotal() + _calcTax();
   double _calcBillable() {
     if (!_isBillable) return 0.0;
@@ -608,7 +641,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
           expenseAccount: _expenseAcctCtrl.text.trim(),
           paidThrough: _selectedPaidThroughName!,
           amount: _isItemized ? '0' : _amountCtrl.text.trim(),
-          tax: _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
+          // Save the computed rupee amount (subtotal × the % entered), not
+          // the raw % text — every existing display of expense.tax expects
+          // a rupee figure, same as before this change.
+          tax: _calcTax().toStringAsFixed(2),
           vendor: _selectedVendorName,
           invoiceNumber:
               _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
@@ -629,7 +665,10 @@ class _NewExpensePageState extends State<NewExpensePage> {
           expenseAccount: _expenseAcctCtrl.text.trim(),
           paidThrough: _selectedPaidThroughName!,
           amount: _isItemized ? '0' : _amountCtrl.text.trim(),
-          tax: _taxCtrl.text.isNotEmpty ? _taxCtrl.text.trim() : '0',
+          // Save the computed rupee amount (subtotal × the % entered), not
+          // the raw % text — every existing display of expense.tax expects
+          // a rupee figure, same as before this change.
+          tax: _calcTax().toStringAsFixed(2),
           vendor: _selectedVendorName,
           invoiceNumber:
               _invoiceCtrl.text.isNotEmpty ? _invoiceCtrl.text : null,
@@ -997,12 +1036,12 @@ class _NewExpensePageState extends State<NewExpensePage> {
               );
               final taxField = _textField(
                 controller: _taxCtrl,
-                label: 'Tax Amount',
+                label: 'Tax %',
                 hint: '0.00',
                 required: false,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                prefixText: '₹ ',
+                prefixText: '% ',
                 icon: Icons.percent,
                 onChanged: (_) => setState(() {}),
               );

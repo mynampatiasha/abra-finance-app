@@ -28,6 +28,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_manual_journal.dart';
 import 'manual_journal_detail.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -154,6 +155,9 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
   }
 
   void _openEdit(ManualJournal j) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'manual_journals');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -237,6 +241,9 @@ class _ManualJournalsListPageState extends State<ManualJournalsListPage> {
   }
 
   Future<void> _delete(ManualJournal j) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'manual_journals');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Journal',
       message: 'Delete ${j.journalNumber}? This cannot be undone.',

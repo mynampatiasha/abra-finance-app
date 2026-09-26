@@ -10,9 +10,21 @@ import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/services/reports_service.dart';
+import '../../../../core/services/payment_service.dart';
+import '../../../../core/services/payment_made_service.dart';
 import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'report_viewer_page.dart';
+import 'invoice_detail_page.dart';
+import 'bill_detail_page.dart';
+import 'credit_note_detail_page.dart';
+import 'customer_detail_page.dart';
+import 'expense_detail_page.dart';
+import 'payment_made_detail_page.dart';
+import 'payment_received_detail_page.dart';
+import 'purchase_order_detail_page.dart';
+import 'vendor_credit_detail.dart';
+import 'vendor_detail_page.dart';
 
 const _navy = Color(0xFF1E3A8A);
 const _green = Color(0xFF27AE60);
@@ -136,7 +148,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   // ── Entity name ────────────────────────────────────────────────────────────
   String get _entityName {
     final r = widget.rowData;
-    return r['customerName']?.toString() ??
+    return r['section']?.toString() ??
+        r['customerName']?.toString() ??
         r['vendorName']?.toString() ??
         r['projectName']?.toString() ??
         r['itemName']?.toString() ??
@@ -152,6 +165,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   // ── Detail endpoint & params ───────────────────────────────────────────────
   String get _detailKey {
     final k = widget.parentReport.key;
+    if (k.contains('tds-receivable')) return 'tds-receivable-details';
     if (k.contains('sales-by-customer') ||
         k.contains('customer-balance') ||
         k.contains('ar-aging') ||
@@ -198,9 +212,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final pk = widget.parentReport.key;
     final rawId = r['_id']?.toString();
 
-    if (pk.contains('sales-by-customer') ||
+    if (pk.contains('tds-receivable')) {
+      if (r['section'] != null) params['section'] = r['section'].toString();
+    } else if (pk.contains('sales-by-customer') ||
         pk.contains('customer-balance') ||
-        pk.contains('ar-aging')) {
+        pk.contains('ar-aging') ||
+        pk.contains('receivable-details')) {
       if (rawId != null && rawId.isNotEmpty && rawId != 'null') {
         if (RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(rawId)) {
           params['customerId'] = rawId;
@@ -210,6 +227,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       }
       if (r['customerName'] != null) {
         params['customerName'] = r['customerName'].toString();
+      }
+      // Sales by Customer is an activity report — must stay period-scoped
+      // to match its own summary. The other three are balance-snapshot
+      // reports and need the full outstanding balance regardless of age.
+      if (!pk.contains('sales-by-customer')) {
+        params['balanceSnapshot'] = 'true';
       }
     } else if (pk.contains('vendor-balance') ||
         pk.contains('purchases-by-vendor') ||
@@ -224,28 +247,43 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       if (r['vendorName'] != null) {
         params['vendorName'] = r['vendorName'].toString();
       }
+      // Same distinction as the customer branch — Purchases by Vendor is an
+      // activity report and must stay period-scoped.
+      if (!pk.contains('purchases-by-vendor')) {
+        params['balanceSnapshot'] = 'true';
+      }
+    } else if (pk.contains('receivable-summary')) {
+      // Grouped by status, not by customer — forward the status itself.
+      if (r['status'] != null) params['status'] = r['status'].toString();
     } else if (pk.contains('sales-by-salesperson')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['salesperson'] = rawId;
+      final salesperson = r['salesperson']?.toString() ?? rawId;
+      if (salesperson != null && salesperson.isNotEmpty && salesperson != 'null')
+        params['salesperson'] = salesperson;
     } else if (pk.contains('sales-by-item') ||
         pk.contains('purchases-by-item')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['itemName'] = rawId;
+      final itemName = r['itemName']?.toString() ?? rawId;
+      if (itemName != null && itemName.isNotEmpty && itemName != 'null')
+        params['itemName'] = itemName;
     } else if (pk.contains('expenses-by-category')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['expenseAccount'] = rawId;
+      final category = r['category']?.toString() ?? rawId;
+      if (category != null && category.isNotEmpty && category != 'null')
+        params['expenseAccount'] = category;
     } else if (pk.contains('expenses-by-customer')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['customerName'] = rawId;
+      final customerName = r['customerName']?.toString() ?? rawId;
+      if (customerName != null && customerName.isNotEmpty && customerName != 'null')
+        params['customerName'] = customerName;
     } else if (pk.contains('expenses-by-project')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['project'] = rawId;
+      final project = r['project']?.toString() ?? rawId;
+      if (project != null && project.isNotEmpty && project != 'null')
+        params['project'] = project;
     } else if (pk.contains('expenses-by-employee')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['paidThrough'] = rawId;
+      final employee = r['employee']?.toString() ?? rawId;
+      if (employee != null && employee.isNotEmpty && employee != 'null')
+        params['paidThrough'] = employee;
     } else if (pk.contains('account-type-summary')) {
-      if (rawId != null && rawId.isNotEmpty && rawId != 'null')
-        params['accountType'] = rawId;
+      final accountType = r['accountType']?.toString() ?? rawId;
+      if (accountType != null && accountType.isNotEmpty && accountType != 'null')
+        params['accountType'] = accountType;
     } else if (pk.contains('project-summary') ||
         pk.contains('projects-cost') ||
         pk.contains('projects-revenue') ||
@@ -368,9 +406,16 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       final hSet = <String>{};
       for (final row in list) {
         if (row is Map)
-          hSet.addAll(row.keys
-              .cast<String>()
-              .where((k) => !k.startsWith('_') && k != 'id'));
+          hSet.addAll(row.keys.cast<String>().where((k) =>
+              !k.startsWith('_') &&
+              k != 'id' &&
+              // atId/atType/customerId/vendorId exist only to let a row
+              // navigate to its source document (or the linked customer /
+              // vendor) — not meant to be shown as their own columns.
+              k != 'atId' &&
+              k != 'atType' &&
+              k != 'customerId' &&
+              k != 'vendorId'));
       }
       _headers = hSet.toList();
       _rows = list.map<Map<String, dynamic>>((r) {
@@ -391,7 +436,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   String _colLabel(String h) => h
-      .replaceAllMapped(RegExp(r'([A-Z])'), (m) => ' ${m.group(0)}')
+      // Keep acronyms (TDS, PAN, GST...) together as one word — only split
+      // at a lowercase→uppercase boundary or the end of an acronym run.
+      .replaceAllMapped(
+          RegExp(r'([A-Z]+)([A-Z][a-z])'), (m) => '${m.group(1)} ${m.group(2)}')
+      .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m.group(1)} ${m.group(2)}')
       .trim()
       .split(' ')
       .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
@@ -408,6 +458,11 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       } catch (_) {}
     }
     final hl = h.toLowerCase();
+    if (hl.contains('percent') || hl.contains('margin')) {
+      final n = double.tryParse(s.replaceAll(',', '').replaceAll('%', ''));
+      if (n != null) return '${n.toStringAsFixed(2)}%';
+      return s;
+    }
     if (hl.contains('amount') ||
         hl.contains('total') ||
         hl.contains('paid') ||
@@ -427,8 +482,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   }
 
   // ── Exports ────────────────────────────────────────────────────────────────
+  // Both exports use _filtered (not _rows) so the downloaded file always
+  // matches whatever the search box has currently narrowed the table to.
   Future<void> _exportPDF() async {
-    if (_rows.isEmpty) {
+    if (_filtered.isEmpty) {
       _snackErr('No data to export');
       return;
     }
@@ -437,7 +494,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       await ExportHelper.exportToPDF(
         title: '${widget.orgName}\n${widget.parentReport.name} — $_entityName',
         headers: _headers.map(_colLabel).toList(),
-        data: _rows
+        data: _filtered
             .map((r) => _headers
                 .map((h) => _displayVal(h, r[h]).replaceAll('₹', 'Rs.'))
                 .toList())
@@ -454,16 +511,28 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   }
 
   Future<void> _exportExcel() async {
-    if (_rows.isEmpty) {
+    if (_filtered.isEmpty) {
       _snackErr('No data to export');
       return;
     }
     setState(() => _exporting = true);
     try {
+      // Pre-format rows client-side with matched, already-humanized keys —
+      // same pattern report_viewer_page.dart's export already uses. Sending
+      // raw rows alongside humanized headers made every backend row[h]
+      // lookup fail (e.g. row["Invoice Number"] when the real key was
+      // row["invoiceNumber"]), so every exported data row came out blank.
+      final formattedRows = _filtered.map((r) {
+        final formatted = <String, dynamic>{};
+        for (final h in _headers) {
+          formatted[_colLabel(h)] = _displayVal(h, r[h]);
+        }
+        return formatted;
+      }).toList();
       await ReportsService.exportExcel(
         reportName: '${widget.parentReport.name} — $_entityName',
         companyName: widget.orgName,
-        reportData: _rows,
+        reportData: formattedRows,
         headers: _headers.map(_colLabel).toList(),
       );
       _snackOk('Excel downloaded');
@@ -482,6 +551,94 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   void _snackErr(String m) {
     if (!mounted) return;
     AppSnackbar.show(context, message: m);
+  }
+
+  // ── Source-document navigation ────────────────────────────────────────────
+  // A single generalized rule set, used by both the table cells and the
+  // "Record Details" popup, so every entity number/name that has a real
+  // linkable id behaves as a link everywhere it appears, not just Invoice.
+  VoidCallback? _navFor(Map<String, dynamic> row, String header) {
+    final hl = header.toLowerCase();
+    final atType = row['atType'];
+    final atId = row['atId']?.toString();
+    final customerId = row['customerId']?.toString();
+    final vendorId = row['vendorId']?.toString();
+
+    if (hl == 'invoicenumber' && atType == 'Invoice' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => InvoiceDetailPage(invoiceId: atId)));
+    }
+    if (hl == 'billnumber' && atType == 'Bill' && atId != null) {
+      return () => Navigator.push(
+          context, MaterialPageRoute(builder: (_) => BillDetailPage(billId: atId)));
+    }
+    if (hl == 'creditnotenumber' && atType == 'CreditNote' && atId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => CreditNoteDetailPage(creditNoteId: atId)));
+    }
+    if (hl == 'creditnumber' && atType == 'VendorCredit' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => VendorCreditDetailPage(creditId: atId)));
+    }
+    if (hl == 'purchaseordernumber' &&
+        atType == 'PurchaseOrder' &&
+        atId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => PurchaseOrderDetailPage(purchaseOrderId: atId)));
+    }
+    if (hl == 'expensenumber' && atType == 'Expense' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => ExpenseDetailPage(expenseId: atId)));
+    }
+    if (hl == 'paymentnumber' && atType == 'PaymentMade' && atId != null) {
+      return () async {
+        final p = await PaymentMadeService.getPayment(atId);
+        if (!context.mounted) return;
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => PaymentMadeDetailPage(payment: p)));
+      };
+    }
+    if (hl == 'paymentnumber' && atType == 'PaymentReceived' && atId != null) {
+      return () async {
+        final p = await PaymentService.getPayment(atId);
+        if (!context.mounted) return;
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => PaymentReceivedDetailPage(payment: p)));
+      };
+    }
+    if (hl == 'customername' && customerId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => CustomerDetailPage(customerId: customerId)));
+    }
+    if (hl == 'vendorname' && vendorId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => VendorDetailPage(vendorId: vendorId)));
+    }
+    return null;
+  }
+
+  Widget _cellOrLink(Map<String, dynamic> row, String header, String text) {
+    final nav = _navFor(row, header);
+    if (nav == null) {
+      return Text(text,
+          overflow: TextOverflow.ellipsis, style: _cellStyle(header, text));
+    }
+    return InkWell(
+        onTap: nav,
+        child: Text(text,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: _navy,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline)));
   }
 
   // ── Row tap — go one level deeper ─────────────────────────────────────────
@@ -580,7 +737,16 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                             // Key-value pairs
                             ...row.entries
                                 .where((e) =>
-                                    !e.key.startsWith('_') && e.key != 'status')
+                                    !e.key.startsWith('_') &&
+                                    e.key != 'status' &&
+                                    e.key != 'id' &&
+                                    // atId/atType/customerId/vendorId are
+                                    // only navigation ids — not shown as
+                                    // their own rows here either.
+                                    e.key != 'atId' &&
+                                    e.key != 'atType' &&
+                                    e.key != 'customerId' &&
+                                    e.key != 'vendorId')
                                 .map((e) => Container(
                                     margin: const EdgeInsets.only(bottom: 1),
                                     padding: const EdgeInsets.symmetric(
@@ -601,12 +767,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                                                           FontWeight.w600,
                                                       color: _navy))),
                                           Expanded(
-                                              child: Text(
-                                                  _displayVal(e.key, e.value),
-                                                  style: const TextStyle(
-                                                      fontSize: 14,
-                                                      color:
-                                                          Color(0xFF374151)))),
+                                              child: _cellOrLink(row, e.key,
+                                                  _displayVal(e.key, e.value))),
                                         ]))),
                           ]))),
                   Container(
@@ -1217,10 +1379,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                                           child: h.toLowerCase() == 'status'
                                               ? _statusBadge(
                                                   v?.toString() ?? '')
-                                              : Text(_displayVal(h, v),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: _cellStyle(h, v))));
+                                              : _cellOrLink(
+                                                  e.value, h, _displayVal(h, v))));
                                     }).toList(),
                                   ))
                               .toList(),

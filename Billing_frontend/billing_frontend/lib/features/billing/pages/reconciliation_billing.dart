@@ -27,6 +27,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:universal_html/html.dart' as html show Blob, Url, AnchorElement;
 import '../../../core/services/bank_transaction_service.dart';
 import '../../../core/finance_secure_storage.dart';
+import '../../../core/permissions_finance.dart';
 import '../../../app/config/api_config.dart';
 
 // ── colours ──────────────────────────────────────────────────────────────────
@@ -255,6 +256,7 @@ class _ReconciliationBillingPageState extends State<ReconciliationBillingPage> {
 
   // ── DELETE ────────────────────────────────────────────────────────────────
   Future<void> _delete(Map<String, dynamic> rec) async {
+    if (!await FinancePermissions.checkCanDelete(context, 'banking')) return;
     final confirmed = await _confirm(
       'Delete Reconciliation',
       'This will permanently delete this reconciliation record. All transactions will return to unreconciled state. This cannot be undone.',

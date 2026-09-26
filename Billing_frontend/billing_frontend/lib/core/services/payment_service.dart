@@ -82,6 +82,25 @@ class PaymentService {
     }
   }
 
+  /// Get the real payment history for one invoice — sourced from
+  /// payments_received (authoritative), not the invoice's own embedded
+  /// `payments[]` array, which can carry stale duplicate entries.
+  static Future<List<Map<String, dynamic>>> getPaymentsForInvoice(
+      String invoiceId) async {
+    try {
+      final data = await _api.get('$_baseEndpoint/for-invoice/$invoiceId');
+      final list = data?['data'];
+      if (list is List) {
+        return List<Map<String, dynamic>>.from(
+            list.map((item) => Map<String, dynamic>.from(item as Map)));
+      }
+      return [];
+    } catch (e) {
+      print('❌ Error fetching payments for invoice: $e');
+      return [];
+    }
+  }
+
   /// Get single payment by ID
   static Future<Map<String, dynamic>> getPayment(String paymentId) async {
     try {
@@ -226,7 +245,11 @@ class PaymentService {
 
       print('✅ Payment updated');
 
-      return data['data'];
+      // The update route's success response is {success, message} — no
+      // nested "data" key — so fall back to the whole response instead of
+      // casting null to Map<String, dynamic> and crashing after a save that
+      // already succeeded.
+      return (data['data'] as Map<String, dynamic>?) ?? data;
     } catch (e) {
       print('❌ Error updating payment: $e');
       rethrow;

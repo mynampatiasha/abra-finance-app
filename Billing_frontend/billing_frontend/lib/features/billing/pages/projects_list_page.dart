@@ -16,6 +16,7 @@ import 'dart:convert';
 import '../../../../core/utils/export_helper.dart';
 import '../../../../core/services/project_service.dart';
 import '../../../../core/services/tms_service.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_project.dart';
 import 'project_dashboard_page.dart';
@@ -254,6 +255,7 @@ class _ProjectsListPageState extends State<ProjectsListPage> {
   }
 
   Future<void> _delete(Project p) async {
+    if (!await FinancePermissions.checkCanDelete(context, 'projects')) return;
     final ok = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(

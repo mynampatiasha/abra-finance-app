@@ -105,6 +105,7 @@ app.use('/api/finance/home',          verifyFinanceJWT, require('./routes/home_b
 
 // Sales
 app.use('/api/finance/invoices', verifyFinanceJWT, require('./routes/invoices'));
+app.use('/api/finance/tds-sections', verifyFinanceJWT, require('./routes/tds_sections'));
 app.use('/api/finance/invoices-automation', verifyFinanceJWT, require('./routes/invoices_automation'));
 
 // ── Reminder Settings routes ──────────────────────────────────────────────────
@@ -114,6 +115,7 @@ app.use('/api/finance/recurring-invoices', verifyFinanceJWT, require('./routes/r
 app.use('/api/finance/quotes',        verifyFinanceJWT, require('./routes/quotes'));
 app.use('/api/finance/sales-orders',  verifyFinanceJWT, require('./routes/sales-order'));
 app.use('/api/finance/customers',     verifyFinanceJWT, require('./routes/billing-customers'));
+app.use('/api/finance/customers',     verifyFinanceJWT, require('./routes/customer_transactions_export'));
 app.use('/api/finance/credit-notes',  verifyFinanceJWT, require('./routes/credit-notes'));
 app.use('/api/finance/delivery-challans', verifyFinanceJWT, require('./routes/delivery_challans'));
 app.use('/api/finance/eway-bills',        verifyFinanceJWT, require('./routes/eway_bill_routes'));

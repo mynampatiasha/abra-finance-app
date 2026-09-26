@@ -36,6 +36,7 @@ import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'new_payment_made.dart';
 import 'payment_made_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette (matches recurring_invoices_list_page) ──────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -200,6 +201,9 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
   }
 
   Future<void> _openEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'payments_made');
+    if (!canEdit) return;
+
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => NewPaymentMadeScreen(paymentId: id)),
     );
@@ -209,6 +213,9 @@ class _PaymentMadeListPageState extends State<PaymentMadeListPage> {
   // ── actions ───────────────────────────────────────────────────────────────
 
   Future<void> _delete(PaymentMade p) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'payments_made');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete ${p.paymentNumber}?',
       message:

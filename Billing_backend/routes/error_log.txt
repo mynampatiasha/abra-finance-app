@@ -1,0 +1,11 @@
+CastError: Cast to ObjectId failed for value "CUST-20260521164515" (type string) at path "customerId" for model "CreditNote"
+    at SchemaObjectId.cast (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schema\objectId.js:253:11)
+    at SchemaType.applySetters (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schemaType.js:1287:12)
+    at SchemaType.castForQuery (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schemaType.js:1713:17)
+    at D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schemaType.js:1668:18
+    at Array.map (<anonymous>)
+    at SchemaObjectId.handle$in (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schemaType.js:1664:14)
+    at SchemaType.castForQuery (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\schemaType.js:1709:20)
+    at cast (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\cast.js:363:39)
+    at Query.cast (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\query.js:5127:12)
+    at Query._castConditions (D:\Fleet_Management\Fleet_Management\Abra_finance_system\Billing_backend\node_modules\mongoose\lib\query.js:2376:10)

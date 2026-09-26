@@ -336,6 +336,7 @@ class QuoteService {
   // Get all quotes with filtering and pagination
   static Future<QuoteListResponse> getQuotes({
     String? status,
+    String? customerId,
     int page = 1,
     int limit = 20,
     String? search,
@@ -356,6 +357,10 @@ class QuoteService {
 
       if (status != null && status != 'All') {
         queryParams['status'] = status;
+      }
+
+      if (customerId != null) {
+        queryParams['customerId'] = customerId;
       }
 
       if (search != null && search.isNotEmpty) {

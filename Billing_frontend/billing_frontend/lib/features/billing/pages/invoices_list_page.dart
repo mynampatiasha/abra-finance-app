@@ -34,6 +34,7 @@ import 'invoice_detail_page.dart';
 import 'new_recurring_invoice.dart';
 import 'reminder_settings_page.dart';
 import 'invoice_automation_list_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -213,6 +214,9 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   }
 
   void _openEditInvoice(String invoiceId) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'invoices');
+    if (!canEdit) return;
+
     final result = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -241,6 +245,9 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   }
 
   Future<void> _deleteInvoice(Invoice invoice) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'invoices');
+    if (!canDelete) return;
+
     if (invoice.status != 'DRAFT') {
       _snackError('Only draft invoices can be deleted');
       return;
@@ -352,8 +359,8 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
         'Invoice # : ${invoice.invoiceNumber}\n'
         'Customer  : ${invoice.customerName}\n'
         'Email     : ${invoice.customerEmail ?? '-'}\n'
-        'Amount    : ₹${invoice.totalAmount.toStringAsFixed(2)}\n'
-        'Balance   : ₹${invoice.amountDue.toStringAsFixed(2)}\n'
+        'Amount    : ₹${NumberFormat('#,##,##0.00').format(invoice.totalAmount)}\n'
+        'Balance   : ₹${NumberFormat('#,##,##0.00').format(invoice.amountDue)}\n'
         'Status    : ${invoice.status}\n'
         'Date      : ${DateFormat('dd MMM yyyy').format(invoice.invoiceDate)}\n'
         'Due Date  : ${DateFormat('dd MMM yyyy').format(invoice.dueDate)}';
@@ -389,8 +396,8 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       'Hello ${invoice.customerName},\n\n'
       'Please find below your Invoice details from Abra Travels:\n\n'
       'Invoice Number : ${invoice.invoiceNumber}\n'
-      'Amount         : ₹${invoice.totalAmount.toStringAsFixed(2)}\n'
-      'Balance Due    : ₹${invoice.amountDue.toStringAsFixed(2)}\n'
+      'Amount         : ₹${NumberFormat('#,##,##0.00').format(invoice.totalAmount)}\n'
+      'Balance Due    : ₹${NumberFormat('#,##,##0.00').format(invoice.amountDue)}\n'
       'Status         : ${invoice.status}\n'
       'Invoice Date   : ${DateFormat('dd MMM yyyy').format(invoice.invoiceDate)}\n'
       'Due Date       : ${DateFormat('dd MMM yyyy').format(invoice.dueDate)}\n\n'
@@ -514,6 +521,24 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     }
     try {
       _snackSuccess('Preparing Excel export...');
+      // _invoices only ever holds the current page (server-side pagination,
+      // _itemsPerPage per request) — exporting it directly silently drops
+      // every invoice outside page 1. Re-fetch with the same active filters
+      // but a limit covering the full matching set (_totalInvoices, already
+      // known from the last _loadInvoices() call) so export gets everything,
+      // not just what's currently on screen.
+      final all = _totalInvoices > _invoices.length
+          ? (await InvoiceService.getInvoices(
+              status: _selectedStatus == 'All' ? null : _selectedStatus,
+              page: 1,
+              limit: _totalInvoices,
+              fromDate: _fromDate,
+              toDate: _toDate,
+              search: _searchQuery,
+            ))
+              .invoices
+          : _invoices;
+      final amtFmt = NumberFormat('#,##,##0.00');
       List<List<dynamic>> csvData = [
         [
           'Date',
@@ -532,7 +557,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           'Balance Due'
         ],
       ];
-      for (var inv in _invoices) {
+      for (var inv in all) {
         csvData.add([
           DateFormat('dd/MM/yyyy').format(inv.invoiceDate),
           inv.invoiceNumber,
@@ -541,17 +566,17 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           inv.customerEmail ?? '',
           inv.status,
           DateFormat('dd/MM/yyyy').format(inv.dueDate),
-          inv.subTotal.toStringAsFixed(2),
-          inv.cgst.toStringAsFixed(2),
-          inv.sgst.toStringAsFixed(2),
-          inv.igst.toStringAsFixed(2),
-          inv.totalAmount.toStringAsFixed(2),
-          inv.amountPaid.toStringAsFixed(2),
-          inv.amountDue.toStringAsFixed(2),
+          amtFmt.format(inv.subTotal),
+          amtFmt.format(inv.cgst),
+          amtFmt.format(inv.sgst),
+          amtFmt.format(inv.igst),
+          amtFmt.format(inv.totalAmount),
+          amtFmt.format(inv.amountPaid),
+          amtFmt.format(inv.amountDue),
         ]);
       }
       await ExportHelper.exportToExcel(data: csvData, filename: 'invoices');
-      _snackSuccess('✅ Excel downloaded with ${_invoices.length} invoices!');
+      _snackSuccess('✅ Excel downloaded with ${all.length} invoices!');
     } catch (e) {
       _snackError('Failed to export: $e');
     }
@@ -1139,21 +1164,21 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     final List<_StatCardData> cards = [
       _StatCardData(
         label: 'Total Revenue',
-        value: '₹${_stats!.totalRevenue.toStringAsFixed(2)}',
+        value: '₹${NumberFormat('#,##,##0.00').format(_stats!.totalRevenue)}',
         icon: Icons.attach_money_rounded,
         color: _blue,
         gradientColors: const [Color(0xFF3498DB), Color(0xFF2980B9)],
       ),
       _StatCardData(
         label: 'Total Paid',
-        value: '₹${_stats!.totalPaid.toStringAsFixed(2)}',
+        value: '₹${NumberFormat('#,##,##0.00').format(_stats!.totalPaid)}',
         icon: Icons.check_circle_outline_rounded,
         color: _green,
         gradientColors: const [Color(0xFF2ECC71), Color(0xFF27AE60)],
       ),
       _StatCardData(
         label: 'Total Due',
-        value: '₹${_stats!.totalDue.toStringAsFixed(2)}',
+        value: '₹${NumberFormat('#,##,##0.00').format(_stats!.totalDue)}',
         icon: Icons.pending_actions_rounded,
         color: _orange,
         gradientColors: const [Color(0xFFF39C12), Color(0xFFE67E22)],
@@ -1378,7 +1403,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
                             ))),
                     const DataColumn(label: Text('DATE')),
                     const DataColumn(label: Text('INVOICE #')),
-                    const DataColumn(label: Text('ORDER #')),
+                    // const DataColumn(label: Text('ORDER #')),
                     const DataColumn(label: Text('CUSTOMER')),
                     const DataColumn(label: Text('STATUS')),
                     const DataColumn(label: Text('DUE DATE')),
@@ -1431,11 +1456,11 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
             ))),
 
         // Order #
-        DataCell(SizedBox(
-            width: 130,
-            child: Text(invoice.orderNumber ?? '-',
-                style: TextStyle(color: Colors.grey[600]),
-                overflow: TextOverflow.ellipsis))),
+        // DataCell(SizedBox(
+        //     width: 130,
+        //     child: Text(invoice.orderNumber ?? '-',
+        //         style: TextStyle(color: Colors.grey[600]),
+        //         overflow: TextOverflow.ellipsis))),
 
         // Customer with avatar
         DataCell(SizedBox(
@@ -1475,7 +1500,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
         DataCell(SizedBox(
             width: 120,
             child: Text(
-              '₹${invoice.totalAmount.toStringAsFixed(2)}',
+              '₹${NumberFormat('#,##,##0.00').format(invoice.totalAmount)}',
               style: const TextStyle(fontWeight: FontWeight.w600),
               textAlign: TextAlign.right,
             ))),
@@ -1484,7 +1509,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
         DataCell(SizedBox(
             width: 120,
             child: Text(
-              '₹${invoice.amountDue.toStringAsFixed(2)}',
+              '₹${NumberFormat('#,##,##0.00').format(invoice.amountDue)}',
               style: TextStyle(
                   fontWeight: FontWeight.w600,
                   color: invoice.amountDue > 0 ? _red : _green),
@@ -1921,7 +1946,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          '₹${invoice.totalAmount.toStringAsFixed(2)}',
+                          '₹${NumberFormat('#,##,##0.00').format(invoice.totalAmount)}',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
@@ -1944,7 +1969,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          '₹${invoice.amountDue.toStringAsFixed(2)}',
+                          '₹${NumberFormat('#,##,##0.00').format(invoice.amountDue)}',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
@@ -2455,8 +2480,8 @@ class _RaiseTicketOverlayState extends State<_RaiseTicketOverlay> {
     return 'Invoice "${inv.invoiceNumber}" for customer "${inv.customerName}" '
         '(${inv.customerEmail ?? 'N/A'}) requires attention.\n\n'
         'Invoice Details:\n'
-        '• Total Amount: ₹${inv.totalAmount.toStringAsFixed(2)}\n'
-        '• Balance Due: ₹${inv.amountDue.toStringAsFixed(2)}\n'
+        '• Total Amount: ₹${NumberFormat('#,##,##0.00').format(inv.totalAmount)}\n'
+        '• Balance Due: ₹${NumberFormat('#,##,##0.00').format(inv.amountDue)}\n'
         '• Status: ${inv.status}\n'
         '• Invoice Date: ${DateFormat('dd MMM yyyy').format(inv.invoiceDate)}\n'
         '• Due Date: ${DateFormat('dd MMM yyyy').format(inv.dueDate)}\n\n'
@@ -2850,21 +2875,21 @@ class InvoiceDetailsDialog extends StatelessWidget {
               ...lineItems.map((item) => _lineItemCard(item)),
               const SizedBox(height: 20),
               _detailRow('Sub Total',
-                  '₹${invoiceData['subTotal']?.toStringAsFixed(2) ?? '0.00'}'),
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['subTotal'] ?? 0)}'),
               _detailRow('CGST',
-                  '₹${invoiceData['cgst']?.toStringAsFixed(2) ?? '0.00'}'),
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['cgst'] ?? 0)}'),
               _detailRow('SGST',
-                  '₹${invoiceData['sgst']?.toStringAsFixed(2) ?? '0.00'}'),
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['sgst'] ?? 0)}'),
               _detailRow('IGST',
-                  '₹${invoiceData['igst']?.toStringAsFixed(2) ?? '0.00'}'),
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['igst'] ?? 0)}'),
               const Divider(),
               _detailRow('Total Amount',
-                  '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}',
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['totalAmount'] ?? 0)}',
                   isBold: true),
               _detailRow('Amount Paid',
-                  '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['amountPaid'] ?? 0)}'),
               _detailRow('Balance Due',
-                  '₹${invoiceData['amountDue']?.toStringAsFixed(2) ?? '0.00'}',
+                  '₹${NumberFormat('#,##,##0.00').format(invoiceData['amountDue'] ?? 0)}',
                   isBold: true),
             ]),
           )),
@@ -2903,9 +2928,9 @@ class InvoiceDetailsDialog extends StatelessWidget {
         const SizedBox(height: 4),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(
-              'Qty: ${item['quantity']} × ₹${item['rate']?.toStringAsFixed(2)}',
+              'Qty: ${item['quantity']} × ₹${NumberFormat('#,##,##0.00').format(item['rate'] ?? 0)}',
               style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-          Text('₹${item['amount']?.toStringAsFixed(2)}',
+          Text('₹${NumberFormat('#,##,##0.00').format(item['amount'] ?? 0)}',
               style: const TextStyle(fontWeight: FontWeight.w600)),
         ]),
       ]),
@@ -3064,7 +3089,7 @@ class _ManualReminderConfirmDialog extends StatelessWidget {
                           _infoRow('Invoice #', invoice.invoiceNumber),
                           _infoRow('Customer', invoice.customerName),
                           _infoRow('Amount Due',
-                              '₹${invoice.amountDue.toStringAsFixed(2)}'),
+                              '₹${NumberFormat('#,##,##0.00').format(invoice.amountDue)}'),
                           _infoRow(
                               'Due Date',
                               DateFormat('dd MMM yyyy')
@@ -3440,18 +3465,18 @@ class InvoiceDetailsDialogV2 extends StatelessWidget {
                 const SizedBox(height: 24),
                 _section('Amount Details', [
                   _row('Subtotal',
-                      '₹${invoiceData['subtotal']?.toStringAsFixed(2) ?? '0.00'}'),
+                      '₹${NumberFormat('#,##,##0.00').format(invoiceData['subtotal'] ?? 0)}'),
                   _row('Tax Amount',
-                      '₹${invoiceData['taxAmount']?.toStringAsFixed(2) ?? '0.00'}'),
+                      '₹${NumberFormat('#,##,##0.00').format(invoiceData['taxAmount'] ?? 0)}'),
                   _row('Total Amount',
-                      '₹${invoiceData['totalAmount']?.toStringAsFixed(2) ?? '0.00'}',
+                      '₹${NumberFormat('#,##,##0.00').format(invoiceData['totalAmount'] ?? 0)}',
                       bold: true),
                   if (invoiceData['amountPaid'] != null)
                     _row('Amount Paid',
-                        '₹${invoiceData['amountPaid']?.toStringAsFixed(2) ?? '0.00'}'),
+                        '₹${NumberFormat('#,##,##0.00').format(invoiceData['amountPaid'] ?? 0)}'),
                   if (invoiceData['balanceDue'] != null)
                     _row('Balance Due',
-                        '₹${invoiceData['balanceDue']?.toStringAsFixed(2) ?? '0.00'}',
+                        '₹${NumberFormat('#,##,##0.00').format(invoiceData['balanceDue'] ?? 0)}',
                         bold: true),
                 ]),
                 if (invoiceData['notes'] != null &&
@@ -3598,11 +3623,11 @@ class InvoiceDetailsDialogV2 extends StatelessWidget {
                   Padding(
                       padding: const EdgeInsets.all(12),
                       child: Text(
-                          '₹${item['rate']?.toStringAsFixed(2) ?? '0.00'}')),
+                          '₹${NumberFormat('#,##,##0.00').format(item['rate'] ?? 0)}')),
                   Padding(
                       padding: const EdgeInsets.all(12),
                       child: Text(
-                          '₹${item['amount']?.toStringAsFixed(2) ?? '0.00'}')),
+                          '₹${NumberFormat('#,##,##0.00').format(item['amount'] ?? 0)}')),
                 ])),
           ],
         ),

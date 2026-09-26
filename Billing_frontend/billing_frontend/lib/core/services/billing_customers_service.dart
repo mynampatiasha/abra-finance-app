@@ -349,6 +349,60 @@ class CustomerTransaction {
 }
 
 // ============================================================================
+// CUSTOMER PAYMENT ROW — one row per real payment (with invoice breakdown),
+// used by the Transactions tab's "Customer Payments" section.
+// ============================================================================
+class CustomerPaymentBreakdownLine {
+  final String invoiceNumber;
+  final double amount;
+  const CustomerPaymentBreakdownLine({required this.invoiceNumber, required this.amount});
+  factory CustomerPaymentBreakdownLine.fromJson(Map<String, dynamic> json) =>
+      CustomerPaymentBreakdownLine(
+        invoiceNumber: json['invoiceNumber'] ?? '',
+        amount: (json['amount'] ?? 0).toDouble(),
+      );
+}
+
+class CustomerPaymentRow {
+  final String number;
+  final DateTime date;
+  final String status;
+  final double amount;
+  final List<CustomerPaymentBreakdownLine> breakdown;
+  final double excessAmount;
+
+  const CustomerPaymentRow({
+    required this.number,
+    required this.date,
+    required this.status,
+    required this.amount,
+    this.breakdown = const [],
+    this.excessAmount = 0,
+  });
+
+  factory CustomerPaymentRow.fromJson(Map<String, dynamic> json) {
+    return CustomerPaymentRow(
+      number: json['number'] ?? '',
+      date: DateTime.tryParse(json['date'] ?? '') ?? DateTime.now(),
+      status: json['status'] ?? '',
+      amount: (json['amount'] ?? 0).toDouble(),
+      breakdown: (json['breakdown'] as List? ?? [])
+          .map((b) => CustomerPaymentBreakdownLine.fromJson(b))
+          .toList(),
+      excessAmount: (json['excessAmount'] ?? 0).toDouble(),
+    );
+  }
+}
+
+class CustomerPaymentsPage {
+  final List<CustomerPaymentRow> rows;
+  final int total;
+  final int page;
+  final int pages;
+  const CustomerPaymentsPage({required this.rows, required this.total, required this.page, required this.pages});
+}
+
+// ============================================================================
 // CUSTOMER MAIL MODEL
 // ============================================================================
 // CUSTOMER MAIL MODEL
@@ -902,6 +956,24 @@ class BillingCustomersService {
     return (result['data'] as List? ?? [])
         .map((t) => CustomerTransaction.fromJson(t))
         .toList();
+  }
+
+  static Future<CustomerPaymentsPage> getCustomerPayments(
+      String customerId, {int page = 1, int limit = 20}) async {
+    final headers = await _getHeaders();
+    final response = await http
+        .get(Uri.parse('$_endpoint/$customerId/payments?page=$page&limit=$limit'), headers: headers)
+        .timeout(const Duration(seconds: 30));
+    final result = _handleResponse(response);
+    final pagination = result['pagination'] ?? {};
+    return CustomerPaymentsPage(
+      rows: (result['data'] as List? ?? [])
+          .map((r) => CustomerPaymentRow.fromJson(r))
+          .toList(),
+      total: pagination['total'] ?? 0,
+      page: pagination['page'] ?? page,
+      pages: pagination['pages'] ?? 1,
+    );
   }
 
   static Future<List<CustomerMail>> getCustomerMails(String customerId) async {

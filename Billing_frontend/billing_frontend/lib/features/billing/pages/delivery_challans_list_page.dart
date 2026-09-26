@@ -31,6 +31,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_delivery_challan.dart';
 import 'delivery_challan_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette (same as recurring_invoices_list_page) ───────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -246,6 +247,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   }
 
   void _openEdit(String challanId) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'delivery_challans');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -396,6 +400,9 @@ class _DeliveryChallansListPageState extends State<DeliveryChallansListPage> {
   }
 
   Future<void> _deleteChallan(DeliveryChallan challan) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'delivery_challans');
+    if (!canDelete) return;
+
     if (challan.status != 'DRAFT') {
       _showError('Only draft challans can be deleted');
       return;

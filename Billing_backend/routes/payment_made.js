@@ -750,10 +750,13 @@ router.get('/', async (req, res) => {
     } = req.query;
     const query = {};
     // FIX: orgId filter — also match records where orgId is null/missing
-    // (records created before orgId enforcement will have orgId: null)
-    if (req.user?.orgId) {
+    // (records created before orgId enforcement will have orgId: null).
+    // Uses req.orgIds (array) rather than req.orgFilter directly so a
+    // multi-org / "All Organizations" selection still matches, while
+    // keeping the legacy null-orgId fallback intact.
+    if (req.orgIds && req.orgIds.length > 0) {
       query.$or = [
-        { orgId: req.user.orgId },
+        { orgId: { $in: req.orgIds } },
         { orgId: null },
         { orgId: { $exists: false } },
       ];

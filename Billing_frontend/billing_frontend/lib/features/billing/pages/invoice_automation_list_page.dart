@@ -4,8 +4,10 @@ import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:excel/excel.dart' as xlsLib;
+import 'package:share_plus/share_plus.dart';
 import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/invoice_automation_service.dart';
+import '../../../../core/services/tms_service.dart';
 import '../../../../core/finance_secure_storage.dart';
 import '../app_top_bar.dart';
 import 'new_invoice_automation.dart';
@@ -111,6 +113,12 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
   Timer? _debounceDrafts;
   Timer? _debounceBilled;
   String _currentRole = '';
+  bool get _isApprover =>
+      _currentRole == 'owner' || _currentRole == 'admin';
+
+  // Previous-calendar-month pending status (Feature: month gating).
+  Map<String, dynamic>? _prevMonthStatus;
+  bool get _prevMonthBlocked => _prevMonthStatus?['blocked'] == true;
 
   @override
   void initState() {
@@ -211,6 +219,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
         // Also fetch default drafts and billed shipments for their respective tabs
         _fetchBilledShipments();
         _fetchDrafts();
+        _fetchPrevMonthStatus();
       } else {
         setState(() {
           _error = data['message'] ?? 'Failed';
@@ -223,6 +232,119 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
         _isLoading = false;
       });
     }
+  }
+
+  // ── Month gating ────────────────────────────────────────────────────────
+  Future<void> _fetchPrevMonthStatus() async {
+    try {
+      final data = await InvoiceAutomationService.getPrevMonthStatus(
+          DateFormat('yyyy-MM-dd').format(_startDate),
+          reportType: _selectedReportType);
+      if (mounted) setState(() => _prevMonthStatus = data);
+    } catch (_) {
+      // non-fatal — leave the gate un-evaluated rather than block on an error
+      if (mounted) setState(() => _prevMonthStatus = null);
+    }
+  }
+
+  Future<void> _grantOverride() async {
+    final s = _prevMonthStatus;
+    if (s == null) return;
+    final month = s['month']?.toString() ?? '';
+    final label = s['monthLabel']?.toString() ?? month;
+    final reasonCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text('Override — unlock $label'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            '$label still has ${s['totalPending']} pending shipment(s) '
+            '(${s['pendingInStaging']} in Staging, ${s['pendingInProcessing']} in Processing). '
+            'Granting this override lets the finance team generate invoices for the '
+            'next month anyway. This is logged against your account.',
+            style: const TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: reasonCtrl,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Reason (required)',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Grant override')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (reasonCtrl.text.trim().isEmpty) {
+      AppSnackbar.show(context,
+          message: 'A reason is required to grant an override.', isError: true);
+      return;
+    }
+    try {
+      await InvoiceAutomationService.createMonthOverride(
+          month, reasonCtrl.text.trim());
+      AppSnackbar.show(context, message: 'Override granted for $label.');
+      await _fetchPrevMonthStatus();
+    } catch (e) {
+      AppSnackbar.show(context,
+          message: 'Failed to grant override: $e', isError: true);
+    }
+  }
+
+  Future<void> _showOverrideHistory() async {
+    List<Map<String, dynamic>> rows = [];
+    try {
+      rows = await InvoiceAutomationService.getMonthOverrides();
+    } catch (e) {
+      AppSnackbar.show(context, message: 'Failed to load history: $e', isError: true);
+      return;
+    }
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Override history'),
+        content: SizedBox(
+          width: 560,
+          child: rows.isEmpty
+              ? const Text('No overrides granted yet.')
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: rows.map((r) {
+                      final at = r['createdAt']?.toString() ?? '';
+                      return ListTile(
+                        dense: true,
+                        title: Text(
+                            'Month ${r['month']}  ·  ${r['approvedByEmail'] ?? ''} (${r['approvedByRole'] ?? ''})'
+                            '${r['revoked'] == true ? '  ·  REVOKED' : ''}'),
+                        subtitle: Text('${r['reason'] ?? ''}\n$at'),
+                      );
+                    }).toList(),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchBilledShipments() async {
@@ -421,13 +543,34 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
 
     if (selectedItems.isEmpty) return;
 
+    // Month gate — the previous calendar month must be cleared (or overridden)
+    // before this month's automation invoices can be generated.
+    if (_prevMonthBlocked) {
+      final label = _prevMonthStatus?['monthLabel'] ?? 'the previous month';
+      AppSnackbar.show(
+        context,
+        message:
+            'You are not allowed to generate invoices through automation — '
+            '$label still has ${_prevMonthStatus?['totalPending']} pending shipment(s). '
+            'Contact your management for approval.',
+        isError: true,
+      );
+      return;
+    }
+
     final invoiceItems = selectedItems.map<InvoiceItem>((s) {
       final subtotalShipping =
           double.tryParse(s['subtotal']?.toString() ?? '0') ?? 0.0;
-      final volumetricWeight = double.tryParse(s['volumetric_weight']?.toString() ??
-              s['weight']?.toString() ??
-              '0') ??
-          0.0;
+      // Backend now sends chargeable_weight = max(actual weight, volumetric
+      // weight) directly (see /unbilled-shipments) — use it. The manual
+      // max() here is only a fallback for a response that predates that
+      // backend change, not the primary path.
+      final actualWeight = double.tryParse(s['weight']?.toString() ?? '0') ?? 0.0;
+      final rawVolumetricWeight =
+          double.tryParse(s['volumetric_weight']?.toString() ?? '0') ?? 0.0;
+      final volumetricWeight = double.tryParse(
+              s['chargeable_weight']?.toString() ?? '') ??
+          (actualWeight > rawVolumetricWeight ? actualWeight : rawVolumetricWeight);
 
       // Detect Full Load by checking shipping_method or remarks (case-insensitive)
       final shippingMethod = (s['shipping_method'] ?? s['shipment_type'] ?? '')
@@ -478,15 +621,8 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
           : '${s['origin'] ?? ''} --TO-- ${s['destination'] ?? ''}'; // Fallback if cities are empty
       final date = (s['delivery_date']?.toString() ?? '').split(' ').first;
 
-      final senderEmail = s['sender_email']?.toString() ?? '';
-      final customerEmail = s['customer_email']?.toString() ?? '';
-
       String details =
           '$tracking\n$locationString\nDate: $date\nType: ${shippingMethod.toUpperCase()}';
-      if (senderEmail.isNotEmpty && senderEmail.toLowerCase() != 'null')
-        details += '\nSender Email: $senderEmail';
-      if (customerEmail.isNotEmpty && customerEmail.toLowerCase() != 'null')
-        details += '\nCustomer Email: $customerEmail';
 
       return InvoiceItem(
         itemDetails: details,
@@ -1298,6 +1434,7 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
               const SizedBox(height: 16),
 
               // ── ACTION BAR ──
+              _buildPrevMonthBanner(),
               if (_draftCount > 0) ...[
                 Container(
                   padding:
@@ -1989,6 +2126,440 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
     }
   }
 
+  // ── Month-gate banner (Shipment Processing tab) ────────────────────────
+  Widget _buildPrevMonthBanner() {
+    final s = _prevMonthStatus;
+    if (s == null || s['applicable'] != true) return const SizedBox.shrink();
+    final total = (s['totalPending'] ?? 0) as int;
+    final label = s['monthLabel']?.toString() ?? s['month']?.toString() ?? '';
+
+    // Cleared — nothing pending in the previous month.
+    if (total == 0) return const SizedBox.shrink();
+
+    final overridden = s['overridden'] == true;
+    final crmChecked = s['crmChecked'] == true;
+    final color = overridden ? Colors.blue : Colors.red;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: color.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.shade200),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(overridden ? Icons.lock_open : Icons.lock_outline,
+            color: color, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              overridden
+                  ? '$label had pending shipments — override granted, you can generate invoices.'
+                  : 'You are not allowed to generate invoices through automation.',
+              style: TextStyle(
+                  color: color.shade900,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '$label still has $total pending shipment(s): '
+              '${s['pendingInStaging']} in Staging Drafts, '
+              '${s['pendingInProcessing']} in Shipment Processing'
+              '${crmChecked ? '' : ' (Shipment Processing count unavailable — CRM unreachable)'}.'
+              '${overridden ? '\nOverride by ${s['override']?['approvedByEmail'] ?? ''} — ${s['override']?['reason'] ?? ''}' : '\nContact your management for approval.'}',
+              style: TextStyle(color: color.shade800, fontSize: 12),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        if (_isApprover && !overridden)
+          TextButton(
+            onPressed: _grantOverride,
+            child: const Text('Grant override'),
+          ),
+        if (_isApprover)
+          TextButton(
+            onPressed: _showOverrideHistory,
+            child: const Text('History'),
+          ),
+      ]),
+    );
+  }
+
+  // ── Reconcile dialog: Export / Share / Ticket ───────────────────────────
+  // All three read only from the `clean`/`ambiguous` lists already loaded
+  // into the open dialog — none of them call the sync endpoint, so opening
+  // any of these can never write to Billed Shipments or touch a draft.
+
+  List<Map<String, dynamic>> _reconcileRows(
+      List<Map<String, dynamic>> clean, List<Map<String, dynamic>> ambiguous) {
+    final rows = <Map<String, dynamic>>[];
+    for (final c in clean) {
+      final inv = c['invoice'] as Map<String, dynamic>;
+      rows.add({
+        'trackingNo': c['trackingNo'],
+        'invoiceNumber': inv['invoiceNumber'],
+        'customerName': inv['customerName'] ?? '',
+        'status': inv['status'] ?? '',
+        'alsoInStagingDraft': c['alsoInStagingDraft'] == true,
+        'decisionNeeded': false,
+      });
+    }
+    for (final a in ambiguous) {
+      final invs = List<Map<String, dynamic>>.from(
+          (a['invoices'] as List).map((e) => Map<String, dynamic>.from(e)));
+      rows.add({
+        'trackingNo': a['trackingNo'],
+        'invoiceNumber': invs.map((i) => i['invoiceNumber']).join(' / '),
+        'customerName': invs.map((i) => i['customerName'] ?? '').join(' / '),
+        'status': invs.map((i) => i['status'] ?? '').join(' / '),
+        'alsoInStagingDraft': a['alsoInStagingDraft'] == true,
+        'decisionNeeded': true,
+      });
+    }
+    return rows;
+  }
+
+  void _exportReconcileList(
+      List<Map<String, dynamic>> clean, List<Map<String, dynamic>> ambiguous) {
+    final rows = _reconcileRows(clean, ambiguous);
+    if (rows.isEmpty) {
+      AppSnackbar.show(context, message: 'Nothing to export.');
+      return;
+    }
+    final excel = xlsLib.Excel.createExcel();
+    final sheet = excel['Reconcile'];
+    // delete() silently no-ops if called while this would-be-deleted sheet
+    // is the workbook's only sheet (a workbook can't have zero sheets) — so
+    // the named sheet above MUST be created first, making 'Sheet1' safe to
+    // remove second. Doing it in the other order (as one other export in
+    // this file already does) leaves the empty default tab behind.
+    excel.delete('Sheet1');
+    sheet.appendRow([
+      xlsLib.TextCellValue('AL NUMBER'),
+      xlsLib.TextCellValue('INVOICE NUMBER'),
+      xlsLib.TextCellValue('CUSTOMER'),
+      xlsLib.TextCellValue('STATUS'),
+      xlsLib.TextCellValue('ALSO IN STAGING DRAFT'),
+      xlsLib.TextCellValue('NEEDS A DECISION'),
+    ]);
+    for (final r in rows) {
+      sheet.appendRow([
+        xlsLib.TextCellValue(r['trackingNo'].toString()),
+        xlsLib.TextCellValue(r['invoiceNumber'].toString()),
+        xlsLib.TextCellValue(r['customerName'].toString()),
+        xlsLib.TextCellValue(r['status'].toString()),
+        xlsLib.TextCellValue(r['alsoInStagingDraft'] == true ? 'Yes' : ''),
+        xlsLib.TextCellValue(r['decisionNeeded'] == true ? 'Yes' : ''),
+      ]);
+    }
+    final bytes = excel.save();
+    if (bytes == null) return;
+    final blob = html.Blob(
+        [bytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    html.AnchorElement(href: url)
+      ..setAttribute('download',
+          'Reconcile_Manual_Invoices_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx')
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  Future<void> _shareReconcileList(
+      List<Map<String, dynamic>> clean, List<Map<String, dynamic>> ambiguous) async {
+    final rows = _reconcileRows(clean, ambiguous);
+    if (rows.isEmpty) {
+      AppSnackbar.show(context, message: 'Nothing to share.');
+      return;
+    }
+    final buf = StringBuffer();
+    buf.writeln('Reconcile — Manually-Invoiced Shipments');
+    buf.writeln('Period: ${DateFormat('dd MMM yyyy').format(_billedStartDate)}'
+        ' – ${DateFormat('dd MMM yyyy').format(_billedEndDate)}');
+    buf.writeln('─────────────────────────');
+    buf.writeln('Clear cases: ${clean.length}   Needs a decision: ${ambiguous.length}');
+    buf.writeln();
+    for (final r in rows) {
+      buf.writeln('${r['trackingNo']} → ${r['invoiceNumber']}');
+      buf.writeln('  ${r['customerName']} · ${r['status']}'
+          '${r['alsoInStagingDraft'] == true ? ' · also in a Staging Draft' : ''}'
+          '${r['decisionNeeded'] == true ? ' · NEEDS A DECISION' : ''}');
+    }
+    buf.writeln();
+    buf.writeln('Snapshot as of ${DateFormat('dd MMM yyyy, HH:mm').format(DateTime.now())} '
+        '— reopen "Reconcile manual invoices" in the app to see current data.');
+    try {
+      await Share.share(buf.toString(),
+          subject: 'Reconcile — Manually-Invoiced Shipments');
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.show(context, message: 'Share failed: $e', isError: true);
+      }
+    }
+  }
+
+  Future<void> _raiseReconcileTicket(
+      List<Map<String, dynamic>> clean, List<Map<String, dynamic>> ambiguous) async {
+    final rows = _reconcileRows(clean, ambiguous);
+    await showDialog(
+      context: context,
+      builder: (_) => _ReconcileTicketDialog(
+        rows: rows,
+        periodLabel:
+            '${DateFormat('dd MMM yyyy').format(_billedStartDate)} – ${DateFormat('dd MMM yyyy').format(_billedEndDate)}',
+        onRaised: (msg) => AppSnackbar.show(context, message: msg),
+        onError: (msg) => AppSnackbar.show(context, message: msg, isError: true),
+      ),
+    );
+  }
+
+  // ── Manual-billed reconciliation (Billed Shipments tab, admin only) ────
+  Future<void> _openManualBilledReconcile() async {
+    Map<String, dynamic> data;
+    try {
+      data = await InvoiceAutomationService.getManualBilledCandidates(
+        startDate: DateFormat('yyyy-MM-dd').format(_billedStartDate),
+        endDate: DateFormat('yyyy-MM-dd').format(_billedEndDate),
+      );
+    } catch (e) {
+      AppSnackbar.show(context,
+          message: 'Failed to load candidates: $e', isError: true);
+      return;
+    }
+    if (!mounted) return;
+
+    final clean = List<Map<String, dynamic>>.from(
+        (data['clean'] as List? ?? []).map((e) => Map<String, dynamic>.from(e)));
+    final ambiguous = List<Map<String, dynamic>>.from((data['ambiguous'] as List? ?? [])
+        .map((e) => Map<String, dynamic>.from(e)));
+
+    // Selection state
+    final Set<String> cleanSelected =
+        clean.map((c) => c['trackingNo'].toString()).toSet();
+    // trackingNo -> chosen invoiceId ('' = leave it)
+    final Map<String, String> ambiguousChoice = {
+      for (final a in ambiguous) a['trackingNo'].toString(): ''
+    };
+    final reasonCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(builder: (ctx, setInner) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Row(children: [
+            const Expanded(child: Text('Reconcile manually-invoiced shipments')),
+            IconButton(
+              tooltip: 'Export to Excel',
+              icon: const Icon(Icons.file_download, size: 20),
+              onPressed: () => _exportReconcileList(clean, ambiguous),
+            ),
+            IconButton(
+              tooltip: 'Share',
+              icon: const Icon(Icons.share, size: 20),
+              onPressed: () => _shareReconcileList(clean, ambiguous),
+            ),
+            IconButton(
+              tooltip: 'Raise a ticket about this',
+              icon: const Icon(Icons.confirmation_number_outlined, size: 20),
+              onPressed: () => _raiseReconcileTicket(clean, ambiguous),
+            ),
+          ]),
+          content: SizedBox(
+            width: 640,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'These shipments are on a real invoice but were never recorded in '
+                    'Billed Shipments, so they still show under Shipment Processing. '
+                    'Scoped to ${DateFormat('dd MMM yyyy').format(_billedStartDate)} – '
+                    '${DateFormat('dd MMM yyyy').format(_billedEndDate)} '
+                    '(change the dates above and re-open to widen).',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Clean candidates
+                  Text('Clear cases (${clean.length}) — one invoice each',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  if (clean.isEmpty)
+                    const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text('None.',
+                            style: TextStyle(color: Colors.grey))),
+                  ...clean.map((c) {
+                    final tn = c['trackingNo'].toString();
+                    final inv = c['invoice'] as Map<String, dynamic>;
+                    return CheckboxListTile(
+                      dense: true,
+                      value: cleanSelected.contains(tn),
+                      onChanged: (v) => setInner(() {
+                        if (v == true) {
+                          cleanSelected.add(tn);
+                        } else {
+                          cleanSelected.remove(tn);
+                        }
+                      }),
+                      title: Text('$tn  →  ${inv['invoiceNumber']}'),
+                      subtitle: Text(
+                          '${inv['customerName'] ?? ''} · ${inv['status'] ?? ''}'
+                          '${c['alsoInStagingDraft'] == true ? '  ·  ⚠ also in a Staging Draft' : ''}'),
+                    );
+                  }),
+
+                  const Divider(height: 24),
+
+                  // Ambiguous candidates
+                  Text('Needs a decision (${ambiguous.length}) — on more than one invoice',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  if (ambiguous.isEmpty)
+                    const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text('None.',
+                            style: TextStyle(color: Colors.grey))),
+                  ...ambiguous.map((a) {
+                    final tn = a['trackingNo'].toString();
+                    final invs = List<Map<String, dynamic>>.from(
+                        (a['invoices'] as List)
+                            .map((e) => Map<String, dynamic>.from(e)));
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.amber.shade300),
+                        borderRadius: BorderRadius.circular(6),
+                        color: Colors.amber.shade50,
+                      ),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(tn,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                            if (a['alsoInStagingDraft'] == true)
+                              const Text('⚠ also sitting in a Staging Draft',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.red)),
+                            RadioListTile<String>(
+                              dense: true,
+                              value: '',
+                              groupValue: ambiguousChoice[tn],
+                              onChanged: (v) =>
+                                  setInner(() => ambiguousChoice[tn] = v ?? ''),
+                              title: const Text('Leave it (do nothing)'),
+                            ),
+                            ...invs.map((inv) => RadioListTile<String>(
+                                  dense: true,
+                                  value: inv['invoiceId'].toString(),
+                                  groupValue: ambiguousChoice[tn],
+                                  onChanged: (v) => setInner(
+                                      () => ambiguousChoice[tn] = v ?? ''),
+                                  title: Text(
+                                      'Bill against ${inv['invoiceNumber']} '
+                                      '· ${inv['customerName'] ?? ''} '
+                                      '· ₹${inv['totalAmount'] ?? ''} '
+                                      '· ${inv['status'] ?? ''}'),
+                                )),
+                          ]),
+                    );
+                  }),
+
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reasonCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason (required)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _openManualBilledHistoryScreen();
+                },
+                child: const Text('View history')),
+            ElevatedButton(
+              onPressed: () async {
+                if (reasonCtrl.text.trim().isEmpty) {
+                  AppSnackbar.show(ctx,
+                      message: 'A reason is required.', isError: true);
+                  return;
+                }
+                final items = <Map<String, dynamic>>[];
+                for (final c in clean) {
+                  final tn = c['trackingNo'].toString();
+                  if (!cleanSelected.contains(tn)) continue;
+                  final inv = c['invoice'] as Map<String, dynamic>;
+                  items.add({
+                    'trackingNo': tn,
+                    'invoiceId': inv['invoiceId'],
+                    'invoiceNumber': inv['invoiceNumber'],
+                    'wasAmbiguous': false,
+                  });
+                }
+                for (final a in ambiguous) {
+                  final tn = a['trackingNo'].toString();
+                  final chosen = ambiguousChoice[tn] ?? '';
+                  if (chosen.isEmpty) continue; // "leave it"
+                  final inv = (a['invoices'] as List)
+                      .map((e) => Map<String, dynamic>.from(e))
+                      .firstWhere((e) => e['invoiceId'].toString() == chosen);
+                  items.add({
+                    'trackingNo': tn,
+                    'invoiceId': inv['invoiceId'],
+                    'invoiceNumber': inv['invoiceNumber'],
+                    'wasAmbiguous': true,
+                  });
+                }
+                if (items.isEmpty) {
+                  AppSnackbar.show(ctx,
+                      message: 'Nothing selected to sync.', isError: true);
+                  return;
+                }
+                try {
+                  final res = await InvoiceAutomationService.syncManualBilled(
+                      items, reasonCtrl.text.trim());
+                  Navigator.pop(ctx);
+                  AppSnackbar.show(context,
+                      message: res['message']?.toString() ??
+                          'Synced ${res['inserted']} shipment(s).');
+                  _fetchBilledShipments();
+                  _generateReport();
+                } catch (e) {
+                  AppSnackbar.show(ctx, message: 'Sync failed: $e', isError: true);
+                }
+              },
+              child: const Text('Sync to Billed'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  void _openManualBilledHistoryScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _ManualBilledHistoryScreen()),
+    );
+  }
+
   Widget _buildBilledShipmentsTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -2084,6 +2655,20 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
                   backgroundColor: const Color(0xFF1B2A47),
                   foregroundColor: Colors.white),
             ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: _openManualBilledHistoryScreen,
+              icon: const Icon(Icons.history, size: 16),
+              label: const Text('History'),
+            ),
+            if (_isApprover) ...[
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: _openManualBilledReconcile,
+                icon: const Icon(Icons.sync_problem, size: 16),
+                label: const Text('Reconcile manual invoices'),
+              ),
+            ],
           ]),
         ),
         const SizedBox(height: 16),
@@ -2282,6 +2867,624 @@ class _InvoiceAutomationListPageState extends State<InvoiceAutomationListPage>
               overflow: TextOverflow.ellipsis),
         ),
       );
+}
+
+// =========================================================================
+// MANUAL BILLED — FULL-SCREEN SYNC HISTORY
+// Reached from a standalone "History" button on the Billed Shipments tab,
+// and from the "View history" link inside the Reconcile dialog — both open
+// this same screen so there's one implementation, not two.
+// =========================================================================
+class _ManualBilledHistoryScreen extends StatefulWidget {
+  const _ManualBilledHistoryScreen();
+
+  @override
+  State<_ManualBilledHistoryScreen> createState() =>
+      _ManualBilledHistoryScreenState();
+}
+
+class _ManualBilledHistoryScreenState
+    extends State<_ManualBilledHistoryScreen> {
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _rows = [];
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String _searchText = '';
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHistory();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchHistory() async {
+    setState(() => _isLoading = true);
+    try {
+      final rows = await InvoiceAutomationService.getManualBilledHistory();
+      setState(() {
+        _rows = rows;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        AppSnackbar.show(context,
+            message: 'Failed to load history: $e', isError: true);
+      }
+    }
+  }
+
+  DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    return DateTime.tryParse(v.toString());
+  }
+
+  List<Map<String, dynamic>> get _filteredRows {
+    return _rows.where((r) {
+      final created = _parseDate(r['createdAt']);
+      if (_startDate != null &&
+          (created == null ||
+              created.isBefore(
+                  DateTime(_startDate!.year, _startDate!.month, _startDate!.day)))) {
+        return false;
+      }
+      if (_endDate != null &&
+          (created == null ||
+              created.isAfter(DateTime(_endDate!.year, _endDate!.month,
+                  _endDate!.day, 23, 59, 59)))) {
+        return false;
+      }
+      if (_searchText.trim().isNotEmpty) {
+        final q = _searchText.trim().toLowerCase();
+        final haystack = [
+          r['trackingNo'],
+          r['invoiceNumber'],
+          r['performedByEmail'],
+          r['reason'],
+        ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
+        if (!haystack.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  String _formatDate(dynamic v) {
+    final d = _parseDate(v);
+    if (d == null) return '';
+    return DateFormat('dd MMM yyyy, hh:mm a').format(d.toLocal());
+  }
+
+  void _exportHistory(List<Map<String, dynamic>> rows) {
+    if (rows.isEmpty) {
+      AppSnackbar.show(context, message: 'Nothing to export.');
+      return;
+    }
+    final excel = xlsLib.Excel.createExcel();
+    final sheet = excel['Sync History'];
+    // Named sheet must be created FIRST — deleting 'Sheet1' while it's the
+    // workbook's only sheet is a silent no-op (a workbook can't have zero
+    // sheets), which is what left the empty tab behind the first time this
+    // export pattern was built for the Reconcile dialog.
+    excel.delete('Sheet1');
+    sheet.appendRow([
+      xlsLib.TextCellValue('AL NUMBER'),
+      xlsLib.TextCellValue('INVOICE NUMBER'),
+      xlsLib.TextCellValue('REASON'),
+      xlsLib.TextCellValue('AMBIGUOUS'),
+      xlsLib.TextCellValue('PERFORMED BY'),
+      xlsLib.TextCellValue('ROLE'),
+      xlsLib.TextCellValue('DATE'),
+    ]);
+    for (final r in rows) {
+      sheet.appendRow([
+        xlsLib.TextCellValue((r['trackingNo'] ?? '').toString()),
+        xlsLib.TextCellValue((r['invoiceNumber'] ?? '').toString()),
+        xlsLib.TextCellValue((r['reason'] ?? '').toString()),
+        xlsLib.TextCellValue(r['wasAmbiguous'] == true ? 'Yes' : 'No'),
+        xlsLib.TextCellValue((r['performedByEmail'] ?? '').toString()),
+        xlsLib.TextCellValue((r['performedByRole'] ?? '').toString()),
+        xlsLib.TextCellValue(_formatDate(r['createdAt'])),
+      ]);
+    }
+    final bytes = excel.save();
+    if (bytes == null) return;
+    final blob = html.Blob(
+        [bytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    html.AnchorElement(href: url)
+      ..setAttribute('download',
+          'Manual_Billed_Sync_History_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx')
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  Widget _header(String text, double width) => Container(
+        width: width,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(text,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold)),
+      );
+
+  Widget _cell(String text, double width) => SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(text,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredRows;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: const Text('Manual Billed — Sync History'),
+        backgroundColor: const Color(0xFF1B2A47),
+        foregroundColor: Colors.white,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Filter bar
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!)),
+            child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 12, children: [
+              SizedBox(
+                width: 320,
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search AL number, invoice, or performed by...',
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onChanged: (v) {
+                    if (_debounce?.isActive ?? false) _debounce!.cancel();
+                    _debounce = Timer(const Duration(milliseconds: 400), () {
+                      setState(() => _searchText = v);
+                    });
+                  },
+                ),
+              ),
+              InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                      context: context,
+                      initialDate: _startDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100));
+                  if (d != null) setState(() => _startDate = d);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Text(
+                        _startDate == null
+                            ? 'Start date'
+                            : DateFormat('dd MMM yyyy').format(_startDate!),
+                        style: const TextStyle(fontSize: 13)),
+                  ]),
+                ),
+              ),
+              const Text('to'),
+              InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                      context: context,
+                      initialDate: _endDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100));
+                  if (d != null) setState(() => _endDate = d);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Text(
+                        _endDate == null
+                            ? 'End date'
+                            : DateFormat('dd MMM yyyy').format(_endDate!),
+                        style: const TextStyle(fontSize: 13)),
+                  ]),
+                ),
+              ),
+              if (_startDate != null || _endDate != null)
+                TextButton(
+                  onPressed: () =>
+                      setState(() {
+                        _startDate = null;
+                        _endDate = null;
+                      }),
+                  child: const Text('Clear dates'),
+                ),
+              OutlinedButton.icon(
+                onPressed: _fetchHistory,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Refresh'),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          if (_isLoading)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else if (filtered.isEmpty)
+            Expanded(
+                child: Center(
+                    child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.history, size: 48, color: Colors.grey[400]),
+                const SizedBox(height: 12),
+                Text(
+                    _rows.isEmpty
+                        ? 'No manual syncs recorded yet.'
+                        : 'No history rows match this filter.',
+                    style: TextStyle(fontSize: 15, color: Colors.grey[600])),
+              ],
+            )))
+          else ...[
+            Row(children: [
+              Icon(Icons.checklist, color: Colors.blueGrey.shade600, size: 20),
+              const SizedBox(width: 8),
+              Text('${filtered.length} sync record(s)',
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey)),
+              const Spacer(),
+              OutlinedButton.icon(
+                onPressed: () => _exportHistory(filtered),
+                icon: const Icon(Icons.download, size: 16, color: Colors.green),
+                label: const Text('Export Filtered',
+                    style: TextStyle(color: Colors.green)),
+                style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.green)),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: 1180,
+                    child: Column(children: [
+                      Container(
+                        color: const Color(0xFF1B2A47),
+                        height: 44,
+                        child: Row(children: [
+                          _header('TRACKING NO', 140),
+                          _header('INVOICE NO', 140),
+                          _header('REASON', 280),
+                          _header('AMBIGUOUS', 100),
+                          _header('PERFORMED BY', 220),
+                          _header('DATE', 200),
+                        ]),
+                      ),
+                      const Divider(height: 1, thickness: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (_, i) {
+                            final r = filtered[i];
+                            return Container(
+                              height: 52,
+                              color: i % 2 == 0 ? Colors.white : Colors.grey[50],
+                              child: Row(children: [
+                                Container(
+                                  width: 140,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                      (r['trackingNo'] ?? '').toString(),
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600),
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                                Container(
+                                  width: 140,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.shade50,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border:
+                                          Border.all(color: Colors.green.shade300),
+                                    ),
+                                    child: Text(
+                                        (r['invoiceNumber'] ?? '').toString(),
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green.shade800),
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                ),
+                                _cell((r['reason'] ?? '').toString(), 280),
+                                Container(
+                                  width: 100,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: r['wasAmbiguous'] == true
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.shade50,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            border: Border.all(
+                                                color: Colors.orange.shade300),
+                                          ),
+                                          child: Text('Yes',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color:
+                                                      Colors.orange.shade800)),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                                _cell(
+                                    '${r['performedByEmail'] ?? ''}'
+                                    '${r['performedByRole'] != null ? ' (${r['performedByRole']})' : ''}',
+                                    220),
+                                _cell(_formatDate(r['createdAt']), 200),
+                              ]),
+                            );
+                          },
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+// =========================================================================
+// RECONCILE — RAISE TICKET DIALOG
+// Same pattern as the "Raise Ticket" feature used elsewhere in this app
+// (Bills, Credit Notes, Expenses, etc.) — employee search + assign, backed
+// by the shared TMSService. Kept private to this file, matching how every
+// other page in the app implements its own copy of this dialog.
+// =========================================================================
+class _ReconcileTicketDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> rows;
+  final String periodLabel;
+  final void Function(String) onRaised;
+  final void Function(String) onError;
+  const _ReconcileTicketDialog({
+    required this.rows,
+    required this.periodLabel,
+    required this.onRaised,
+    required this.onError,
+  });
+
+  @override
+  State<_ReconcileTicketDialog> createState() => _ReconcileTicketDialogState();
+}
+
+class _ReconcileTicketDialogState extends State<_ReconcileTicketDialog> {
+  final _tmsService = TMSService();
+  final _searchCtrl = TextEditingController();
+  List<Map<String, dynamic>> _employees = [];
+  List<Map<String, dynamic>> _filtered = [];
+  Map<String, dynamic>? _selectedEmp;
+  bool _loading = true;
+  bool _assigning = false;
+  String _priority = 'Medium';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmployees();
+    _searchCtrl.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadEmployees() async {
+    final resp = await _tmsService.fetchEmployees();
+    if (resp['success'] == true && resp['data'] != null) {
+      setState(() {
+        _employees = List<Map<String, dynamic>>.from(resp['data']);
+        _filtered = _employees;
+        _loading = false;
+      });
+    } else {
+      setState(() => _loading = false);
+      widget.onError('Failed to load employees');
+    }
+  }
+
+  void _filter() {
+    final q = _searchCtrl.text.toLowerCase();
+    setState(() {
+      _filtered = q.isEmpty
+          ? _employees
+          : _employees
+              .where((e) =>
+                  (e['name_parson'] ?? '').toLowerCase().contains(q) ||
+                  (e['email'] ?? '').toLowerCase().contains(q) ||
+                  (e['role'] ?? '').toLowerCase().contains(q))
+              .toList();
+    });
+  }
+
+  String _buildMessage() {
+    final buf = StringBuffer();
+    buf.writeln('Manually-invoiced shipments need reconciling for '
+        '${widget.periodLabel}.');
+    buf.writeln();
+    for (final r in widget.rows.take(50)) {
+      buf.writeln('${r['trackingNo']} → ${r['invoiceNumber']}  '
+          '(${r['customerName']} · ${r['status']}'
+          '${r['alsoInStagingDraft'] == true ? ' · also in a Staging Draft' : ''}'
+          '${r['decisionNeeded'] == true ? ' · NEEDS A DECISION' : ''})');
+    }
+    if (widget.rows.length > 50) {
+      buf.writeln('...and ${widget.rows.length - 50} more.');
+    }
+    buf.writeln();
+    buf.writeln('Please review and take necessary action.');
+    return buf.toString();
+  }
+
+  Future<void> _assign() async {
+    if (_selectedEmp == null) return;
+    setState(() => _assigning = true);
+    try {
+      final resp = await _tmsService.createTicket(
+        subject: 'Reconcile manual invoices — ${widget.periodLabel}',
+        message: _buildMessage(),
+        priority: _priority,
+        timeline: 1440,
+        assignedTo: _selectedEmp!['_id'].toString(),
+      );
+      setState(() => _assigning = false);
+      if (resp['success'] == true) {
+        widget.onRaised('Ticket assigned to ${_selectedEmp!['name_parson']}');
+        if (mounted) Navigator.pop(context);
+      } else {
+        widget.onError(resp['message'] ?? 'Failed to create ticket');
+      }
+    } catch (e) {
+      setState(() => _assigning = false);
+      widget.onError('Failed: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: Container(
+        width: 480,
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            const Icon(Icons.confirmation_number_rounded, color: Colors.indigo),
+            const SizedBox(width: 10),
+            const Expanded(
+                child: Text('Raise a ticket',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.close)),
+          ]),
+          Text('${widget.rows.length} shipment(s) · ${widget.periodLabel}',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _searchCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Search employee',
+              prefixIcon: Icon(Icons.search),
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _filtered.isEmpty
+                    ? const Center(child: Text('No employees found.'))
+                    : ListView.builder(
+                        itemCount: _filtered.length,
+                        itemBuilder: (_, i) {
+                          final e = _filtered[i];
+                          final selected = _selectedEmp?['_id'] == e['_id'];
+                          return ListTile(
+                            dense: true,
+                            selected: selected,
+                            selectedTileColor: Colors.indigo.shade50,
+                            leading: const Icon(Icons.person_outline),
+                            title: Text(e['name_parson']?.toString() ?? ''),
+                            subtitle: Text(
+                                '${e['email'] ?? ''} · ${e['role'] ?? ''}'),
+                            onTap: () => setState(() => _selectedEmp = e),
+                          );
+                        },
+                      ),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _priority,
+            decoration: const InputDecoration(
+                labelText: 'Priority', isDense: true, border: OutlineInputBorder()),
+            items: ['Low', 'Medium', 'High']
+                .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                .toList(),
+            onChanged: (v) => setState(() => _priority = v ?? 'Medium'),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedEmp == null || _assigning ? null : _assign,
+              child: _assigning
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Assign ticket'),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 // =========================================================================

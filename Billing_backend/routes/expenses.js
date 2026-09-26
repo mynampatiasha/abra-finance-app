@@ -460,8 +460,7 @@ router.get('/', async (req, res) => {
     console.log('📥 Fetching all expenses from MongoDB...');
     
     const { vendor, customerName, startDate, endDate, expenseAccount } = req.query;
-    let query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    let query = { ...(req.orgFilter || {}) };
     Object.assign(query, req.branchFilter || {});
 
     if (vendor) {
@@ -2044,6 +2043,10 @@ router.get('/:id/pdf', async (req, res) => {
     let orgAddr  = '';
     let orgEmail = '';
     let orgPhone = '';
+    let orgLogoBase64 = '';
+    let orgLogoUrl = '';
+    let orgSigBase64 = '';
+    let orgSigPath = '';
     try {
       const { getEffectiveOrgData } = require('./branches');
       const db = mongoose.connection.db;
@@ -2054,6 +2057,10 @@ router.get('/:id/pdf', async (req, res) => {
         orgAddr  = org.address    || '';
         orgEmail = org.email      || '';
         orgPhone = org.phone      || '';
+        orgLogoBase64 = org.logoBase64 || '';
+        orgLogoUrl    = org.logoUrl || '';
+        orgSigBase64  = org.signatureBase64 || '';
+        orgSigPath    = org.digitalSignaturePath || '';
       }
     } catch (e) { /* org fetch is best-effort */ }
 
@@ -2073,11 +2080,34 @@ router.get('/:id/pdf', async (req, res) => {
     const pageW = 515;
 
     // ── Header ─────────────────────────────────────────────────────────────
+    let logoData = null;
+    if (orgLogoBase64) {
+      const match = orgLogoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgLogoUrl) {
+      const lp = path.join(__dirname, '..', orgLogoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    const textX = logoData ? 166 : 40;
+    if (logoData) {
+      try { doc.image(logoData, 40, 30, { width: 110, height: 82, fit: [110, 82] }); } catch (e) { console.warn('⚠️ Logo load failed:', e.message); }
+    }
+
     const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
-    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold').text(orgName.toUpperCase(), 40, 35, { width: 300 });
-    doc.fontSize(7).fillColor('#444444').font('Helvetica').text('BILLING & FINANCE', 40, 49, { width: 300, characterSpacing: 1 });
-    let cy = 61;
-    contactLines.forEach(line => { doc.fontSize(7).fillColor('#000000').text(line, 40, cy, { width: 300 }); cy += 9; });
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold').text(orgName.toUpperCase(), textX, 35, { width: 300 });
+    doc.fontSize(12).font('Helvetica-Bold');
+    const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 300 });
+    const subtitleY = 35 + orgNameH + 2;
+    doc.fontSize(7).fillColor('#444444').font('Helvetica').text('BILLING & FINANCE', textX, subtitleY, { width: 300, characterSpacing: 1 });
+    doc.fontSize(7).fillColor('#000000');
+    let cy = subtitleY + 12;
+    contactLines.forEach(line => {
+      doc.text(line, textX, cy, { width: 300 });
+      // Measure actual rendered height so the next line never overlaps
+      const lineH = doc.heightOfString(line, { width: 300 });
+      cy += Math.max(lineH, 9) + 1;
+    });
 
     doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold').text('EXPENSE VOUCHER', 380, 40, { width: 175, align: 'right', characterSpacing: 2 });
     doc.fontSize(18).fillColor('#000000').font('Helvetica-Bold').text(expNum, 380, 52, { width: 175, align: 'right' });
@@ -2095,10 +2125,15 @@ router.get('/:id/pdf', async (req, res) => {
     // Col 1 — Vendor / Paid Through
     doc.rect(40, metaY, colW, 70).fillAndStroke('#f7f9fc', '#dde4ef');
     doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold').text('VENDOR / PAID THROUGH', 48, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
-    doc.fontSize(9).fillColor('#000000').font('Helvetica-Bold').text(expense.vendor || 'N/A', 48, metaY + 18, { width: colW - 16 });
-    doc.fontSize(7).fillColor('#555555').font('Helvetica').text(`Paid Through: ${expense.paidThrough || 'N/A'}`, 48, metaY + 30, { width: colW - 16 });
+    const vendorText = expense.vendor || 'N/A';
+    doc.fontSize(9).font('Helvetica-Bold');
+    const vendorH = doc.heightOfString(vendorText, { width: colW - 16 });
+    doc.fillColor('#000000').text(vendorText, 48, metaY + 18, { width: colW - 16 });
+    let metaCy = metaY + 18 + Math.max(vendorH, 10) + 2;
+    doc.fontSize(7).fillColor('#555555').font('Helvetica').text(`Paid Through: ${expense.paidThrough || 'N/A'}`, 48, metaCy, { width: colW - 16 });
+    metaCy += 10;
     if (expense.customerName) {
-      doc.text(`Customer: ${expense.customerName}`, 48, metaY + 40, { width: colW - 16 });
+      doc.text(`Customer: ${expense.customerName}`, 48, metaCy, { width: colW - 16 });
     }
 
     // Col 2 — Expense Details
@@ -2149,7 +2184,7 @@ router.get('/:id/pdf', async (req, res) => {
     };
 
     tRow('Subtotal:', `Rs. ${(expense.amount || 0).toFixed(2)}`);
-    if ((expense.tax || 0) > 0) tRow('Tax:', `Rs. ${expense.tax.toFixed(2)}`);
+    if ((expense.tax || 0) !== 0) tRow('Tax:', `Rs. ${expense.tax.toFixed(2)}`);
 
     totY += 4;
     doc.rect(totX, totY, totW, 24).fill('#0f1e3d');
@@ -2164,6 +2199,57 @@ router.get('/:id/pdf', async (req, res) => {
       doc.fontSize(7.5).fillColor('#065f46').font('Helvetica-Bold')
          .text(`Notes: ${expense.notes}`, 48, notesY + 4, { width: pageW - 16 });
     }
+
+    // ── Digital Signature ─────────────────────────────────────────────────
+    const signBoxW = 200;
+    const signBoxX = 40 + pageW - signBoxW;
+    const signSectionY = Math.max(totY + 60, (expense.notes ? totY + 60 : totY + 40));
+    doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold')
+       .text(`For ${orgName.toUpperCase()}`, signBoxX, signSectionY, { width: signBoxW, align: 'center', ellipsis: true });
+
+    let sigBuf = null;
+    let sigExt = '.png';
+    if (orgSigBase64) {
+      const match = orgSigBase64.match(/^data:image\/(\w+);base64,(.*)$/);
+      if (match) { sigExt = '.' + match[1].replace('jpeg', 'jpg'); sigBuf = Buffer.from(match[2], 'base64'); }
+    } else if (orgSigPath) {
+      const sigAbsPath = path.join(__dirname, '..', orgSigPath.replace(/^\//, ''));
+      try { if (fs.existsSync(sigAbsPath)) { sigBuf = fs.readFileSync(sigAbsPath); sigExt = path.extname(sigAbsPath).toLowerCase(); } } catch (_) {}
+    }
+
+    const sigMaxSize = 200;
+    let actualSigH = sigMaxSize;
+    if (sigBuf) {
+      try {
+        let imgW = sigMaxSize, imgH = sigMaxSize;
+        try {
+          if (sigExt === '.png' && sigBuf.length > 24) {
+            imgW = sigBuf.readUInt32BE(16);
+            imgH = sigBuf.readUInt32BE(20);
+          } else if ((sigExt === '.jpg' || sigExt === '.jpeg') && sigBuf.length > 4) {
+            let i = 2;
+            while (i < sigBuf.length - 8) {
+              if (sigBuf[i] === 0xFF && sigBuf[i + 1] >= 0xC0 && sigBuf[i + 1] <= 0xC3) {
+                imgH = sigBuf.readUInt16BE(i + 5);
+                imgW = sigBuf.readUInt16BE(i + 7);
+                break;
+              }
+              i += 2 + sigBuf.readUInt16BE(i + 2);
+            }
+          }
+        } catch (_) {}
+        const scale = Math.min(sigMaxSize / imgW, sigMaxSize / imgH);
+        actualSigH = Math.round(imgH * scale);
+        const actualSigW = Math.round(imgW * scale);
+        const centeredX = signBoxX + (signBoxW - actualSigW) / 2;
+        doc.image(sigBuf, centeredX, signSectionY + 10, { width: actualSigW, height: actualSigH });
+      } catch (sigErr) { console.warn('⚠️ Could not render digital signature:', sigErr.message); }
+    }
+
+    const sigLineY = signSectionY + 10 + actualSigH + 14;
+    doc.moveTo(signBoxX, sigLineY).lineTo(signBoxX + signBoxW, sigLineY).lineWidth(0.5).strokeColor('#aaaaaa').stroke();
+    doc.fontSize(6.5).fillColor('#000000').font('Helvetica-Bold')
+       .text('Authorized Signatory', signBoxX, sigLineY + 3, { width: signBoxW, align: 'center' });
 
     // ── Footer ─────────────────────────────────────────────────────────────
     const footerY = doc.page.height - 50;

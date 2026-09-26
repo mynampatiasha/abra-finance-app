@@ -27,11 +27,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/invoice_service.dart';
+import '../../../../core/services/payment_service.dart';
 import 'new_invoice.dart';
+import '../widgets/document_preview_buttons.dart';
 import 'new_quote.dart';
 import 'new_sales_order.dart';
 import 'new_credit_note.dart';
 import 'new_payment_made.dart';
+import 'new_payment_page.dart';
 import 'reminder_settings_page.dart';
 
 // ── Brand colours ─────────────────────────────────────────────────────────────
@@ -62,6 +65,8 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
   bool _isSending = false;
   Invoice? _invoice;
   String? _error;
+  List<Map<String, dynamic>> _realPayments = [];
+  bool _loadingPayments = false;
 
   // ── Tab indices ─────────────────────────────────────────────────────────────
   static const int _TAB_OVERVIEW = 0;
@@ -98,12 +103,28 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
         _invoice = invoice;
         _isLoading = false;
       });
+      _loadRealPayments();
     } catch (e) {
       setState(() {
         _error = e.toString();
         _isLoading = false;
       });
     }
+  }
+
+  // Payment History reads from payments_received (authoritative), not the
+  // invoice's own embedded payments[] array — that array can carry stale
+  // duplicate entries from past sync issues, showing the same real payment
+  // twice even though the invoice's own amountPaid total is correct.
+  Future<void> _loadRealPayments() async {
+    setState(() => _loadingPayments = true);
+    final payments =
+        await PaymentService.getPaymentsForInvoice(widget.invoiceId);
+    if (!mounted) return;
+    setState(() {
+      _realPayments = payments;
+      _loadingPayments = false;
+    });
   }
 
   // ==========================================================================
@@ -125,13 +146,15 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
   }
 
   Future<void> _downloadPDF() async {
-    try {
-      final url = await InvoiceService.downloadPDF(widget.invoiceId);
-      // On mobile open in browser; on web direct download
-      _snackSuccess('Opening PDF…  $url');
-    } catch (e) {
-      _snackError('PDF error: $e');
-    }
+    // Same in-app PDF preview dialog new_invoice.dart already uses —
+    // was previously just printing the raw PDF URL into a snackbar instead
+    // of actually opening anything.
+    await openDocumentPdf(
+      context: context,
+      docId: widget.invoiceId,
+      pdfEndpoint: '/api/finance/invoices',
+      docNumber: _invoice?.invoiceNumber ?? 'Invoice',
+    );
   }
 
   // ==========================================================================
@@ -239,7 +262,7 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
               await Clipboard.setData(ClipboardData(text: inv.invoiceNumber));
               _snackSuccess('Invoice number copied');
             } else if (v == 'record_payment') {
-              _showRecordPaymentSheet();
+              _openRecordPayment();
             } else if (v == 'mark_sent') {
               try {
                 await InvoiceService.updateInvoice(
@@ -584,7 +607,7 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
               style: TextStyle(fontSize: 12, color: Colors.grey[600])),
         ])),
         ElevatedButton(
-          onPressed: _showRecordPaymentSheet,
+          onPressed: _openRecordPayment,
           style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green[700],
               foregroundColor: Colors.white,
@@ -640,27 +663,65 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
         ),
       ),
 
-      // Scrollable table
-      SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: _buildItemsDataTable(inv, isInterState)),
+      // Scrollable table — on a wide screen, columns stretch proportionally
+      // to fill the available width instead of leaving the rest of the card
+      // blank; on a narrow screen (natural width > available), it falls back
+      // to today's fixed-width + horizontal-scroll behaviour unchanged.
+      LayoutBuilder(builder: (context, constraints) {
+        final naturalWidth = _itemsTableNaturalWidth(isInterState);
+        final scale = constraints.maxWidth > naturalWidth
+            ? constraints.maxWidth / naturalWidth
+            : 1.0;
+        return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: _buildItemsDataTable(inv, isInterState, scale));
+      }),
     ]));
   }
 
-  Widget _buildItemsDataTable(Invoice inv, bool isInterState) {
-    // Column widths
-    const double wNo = 32;
-    const double wDesc = 180;
-    const double wHsn = 90;
-    const double wUnit = 50;
-    const double wQty = 50;
-    const double wRate = 80;
-    const double wDisc = 70;
-    const double wTaxable = 90;
-    const double wGst = 52;
-    const double wTax1 = 90; // CGST or IGST
-    const double wTax2 = 70; // SGST (hidden for inter-state)
-    const double wAmt = 90;
+  static const double _wNoBase = 32;
+  static const double _wDescBase = 180;
+  static const double _wHsnBase = 90;
+  static const double _wUnitBase = 50;
+  static const double _wQtyBase = 50;
+  static const double _wRateBase = 80;
+  static const double _wDiscBase = 70;
+  static const double _wTaxableBase = 90;
+  static const double _wGstBase = 52;
+  static const double _wTax1Base = 90; // CGST or IGST
+  static const double _wTax2Base = 70; // SGST (hidden for inter-state)
+  static const double _wAmtBase = 90;
+
+  double _itemsTableNaturalWidth(bool isInterState) {
+    double total = _wNoBase +
+        _wDescBase +
+        _wHsnBase +
+        _wUnitBase +
+        _wQtyBase +
+        _wRateBase +
+        _wDiscBase +
+        _wTaxableBase +
+        _wGstBase +
+        _wTax1Base +
+        _wAmtBase;
+    if (!isInterState) total += _wTax2Base;
+    return total;
+  }
+
+  Widget _buildItemsDataTable(Invoice inv, bool isInterState, double scale) {
+    // Column widths — scaled to fill the available width on wide screens.
+    final double wNo = _wNoBase * scale;
+    final double wDesc = _wDescBase * scale;
+    final double wHsn = _wHsnBase * scale;
+    final double wUnit = _wUnitBase * scale;
+    final double wQty = _wQtyBase * scale;
+    final double wRate = _wRateBase * scale;
+    final double wDisc = _wDiscBase * scale;
+    final double wTaxable = _wTaxableBase * scale;
+    final double wGst = _wGstBase * scale;
+    final double wTax1 = _wTax1Base * scale; // CGST or IGST
+    final double wTax2 = _wTax2Base * scale; // SGST (hidden for inter-state)
+    final double wAmt = _wAmtBase * scale;
 
     double totalW = wNo +
         wDesc +
@@ -1054,7 +1115,7 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
         SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _showRecordPaymentSheet,
+              onPressed: _openRecordPayment,
               icon: const Icon(Icons.payment),
               label: const Text('Record Payment'),
               style: ElevatedButton.styleFrom(
@@ -1075,7 +1136,12 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _cardTitle('Payment History', Icons.history),
         const SizedBox(height: 14),
-        if (inv.payments.isEmpty)
+        if (_loadingPayments)
+          const Center(
+              child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator()))
+        else if (_realPayments.isEmpty)
           Center(
               child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -1090,10 +1156,22 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: inv.payments.length,
+            itemCount: _realPayments.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (_, i) {
-              final p = inv.payments[i];
+              final p = _realPayments[i];
+              final amount = double.tryParse(p['amount'].toString()) ?? 0;
+              // payments_received.paymentDate is stored as "DD/MM/YYYY", not
+              // ISO — DateTime.parse would silently fail on it.
+              DateTime? paymentDate;
+              final dateStr = p['paymentDate']?.toString() ?? '';
+              final dmy = dateStr.split('/');
+              if (dmy.length == 3) {
+                paymentDate = DateTime.tryParse(
+                    '${dmy[2]}-${dmy[1].padLeft(2, '0')}-${dmy[0].padLeft(2, '0')}');
+              } else {
+                paymentDate = DateTime.tryParse(dateStr);
+              }
               return ListTile(
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
@@ -1105,7 +1183,7 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
                   child: Icon(Icons.check_circle,
                       color: Colors.green[700], size: 22),
                 ),
-                title: Text('₹${_fmt(p.amount)}',
+                title: Text('₹${_fmt(amount)}',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -1115,20 +1193,19 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
                     children: [
                       const SizedBox(height: 2),
                       Text(
-                          '${p.paymentMethod}  •  ${DateFormat('dd MMM yyyy').format(p.paymentDate)}',
+                          '${p['paymentMode'] ?? ''}  •  ${paymentDate != null ? DateFormat('dd MMM yyyy').format(paymentDate) : (p['paymentDate']?.toString() ?? '')}',
                           style:
                               TextStyle(fontSize: 12, color: Colors.grey[600])),
-                      if (p.referenceNumber != null &&
-                          p.referenceNumber!.isNotEmpty)
-                        Text('Ref: ${p.referenceNumber}',
+                      if ((p['referenceNumber'] ?? '').toString().isNotEmpty)
+                        Text('Ref: ${p['referenceNumber']}',
                             style: TextStyle(
                                 fontSize: 12, color: Colors.grey[500])),
-                      if (p.notes != null && p.notes!.isNotEmpty)
-                        Text(p.notes!,
+                      if ((p['paymentNumber'] ?? '').toString().isNotEmpty)
+                        Text('Payment #${p['paymentNumber']}',
                             style: TextStyle(
                                 fontSize: 12, color: Colors.grey[500])),
                     ]),
-                trailing: Text('By ${p.recordedBy ?? '—'}',
+                trailing: Text('By ${p['recordedBy'] ?? '—'}',
                     style: TextStyle(fontSize: 11, color: Colors.grey[500])),
               );
             },
@@ -1349,306 +1426,21 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage>
   // RECORD PAYMENT BOTTOM SHEET — Zoho style
   // ==========================================================================
 
-  void _showRecordPaymentSheet() {
+  void _openRecordPayment() {
     final inv = _invoice!;
     if (inv.amountDue <= 0) {
       _snackError('Invoice is fully paid');
       return;
     }
-
-    final amountCtrl =
-        TextEditingController(text: inv.amountDue.toStringAsFixed(2));
-    final refCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
-    DateTime payDate = DateTime.now();
-    String method = 'Bank Transfer';
-    bool isSaving = false;
-
-    final methods = [
-      'Cash',
-      'Cheque',
-      'Bank Transfer',
-      'UPI',
-      'Card',
-      'Online'
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
-        return Container(
-          height: MediaQuery.of(ctx).size.height * 0.88,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(children: [
-            // Handle + title
-            Container(
-              decoration: const BoxDecoration(
-                  color: _navy,
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(20))),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: Row(children: [
-                const Icon(Icons.payment, color: Colors.white),
-                const SizedBox(width: 12),
-                const Expanded(
-                    child: Text('Record Payment',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold))),
-                IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: () => Navigator.pop(ctx)),
-              ]),
-            ),
-
-            Expanded(
-                child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Outstanding summary
-                          Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                                color: Colors.orange[50],
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.orange[200]!)),
-                            child: Row(children: [
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Text('Invoice Total',
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 12)),
-                                    Text('₹${_fmt(inv.totalAmount)}',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            color: _navy)),
-                                  ])),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Text('Paid',
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 12)),
-                                    Text('₹${_fmt(inv.amountPaid)}',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            color: Colors.green[700])),
-                                  ])),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Text('Balance Due',
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 12)),
-                                    Text('₹${_fmt(inv.amountDue)}',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            color: Colors.red[700])),
-                                  ])),
-                            ]),
-                          ),
-
-                          const SizedBox(height: 20),
-
-                          // Amount
-                          TextFormField(
-                            controller: amountCtrl,
-                            decoration: InputDecoration(
-                              labelText: 'Amount Received *',
-                              prefixText: '₹ ',
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              filled: true,
-                              fillColor: Colors.grey[50],
-                              helperText: 'Max: ₹${_fmt(inv.amountDue)}',
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            style: const TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          // Date
-                          InkWell(
-                            onTap: () async {
-                              final d = await showDatePicker(
-                                  context: ctx,
-                                  initialDate: payDate,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime.now()
-                                      .add(const Duration(days: 1)));
-                              if (d != null) setSheet(() => payDate = d);
-                            },
-                            child: InputDecorator(
-                              decoration: InputDecoration(
-                                labelText: 'Payment Date *',
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: const Icon(Icons.calendar_today),
-                              ),
-                              child: Text(
-                                  DateFormat('dd MMM yyyy').format(payDate),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w500)),
-                            ),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          // Payment method
-                          DropdownButtonFormField<String>(
-                            value: method,
-                            decoration: InputDecoration(
-                                labelText: 'Payment Mode *',
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: const Icon(Icons.payment)),
-                            items: methods
-                                .map((m) =>
-                                    DropdownMenuItem(value: m, child: Text(m)))
-                                .toList(),
-                            onChanged: (v) => setSheet(() => method = v!),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          // Reference #
-                          TextFormField(
-                            controller: refCtrl,
-                            decoration: InputDecoration(
-                              labelText: 'Reference / Transaction ID',
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              filled: true,
-                              fillColor: Colors.grey[50],
-                              prefixIcon: const Icon(Icons.tag),
-                            ),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          // Notes
-                          TextFormField(
-                            controller: notesCtrl,
-                            decoration: InputDecoration(
-                              labelText: 'Internal Notes',
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              filled: true,
-                              fillColor: Colors.grey[50],
-                              alignLabelWithHint: true,
-                            ),
-                            maxLines: 3,
-                          ),
-                        ]))),
-
-            // Bottom buttons
-            Padding(
-              padding: EdgeInsets.only(
-                  left: 20,
-                  right: 20,
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-                  top: 12),
-              child: Row(children: [
-                Expanded(
-                    child: OutlinedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: _navy,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: const BorderSide(color: _border),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  child: const Text('Cancel',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
-                )),
-                const SizedBox(width: 12),
-                Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: isSaving
-                          ? null
-                          : () async {
-                              final amount =
-                                  double.tryParse(amountCtrl.text.trim());
-                              if (amount == null || amount <= 0) {
-                                _snackError('Enter a valid amount');
-                                return;
-                              }
-                              if (amount > inv.amountDue + 0.01) {
-                                _snackError(
-                                    'Amount exceeds balance due (₹${_fmt(inv.amountDue)})');
-                                return;
-                              }
-                              setSheet(() => isSaving = true);
-                              try {
-                                await InvoiceService.recordPayment(
-                                    widget.invoiceId, {
-                                  'amount': amount,
-                                  'paymentDate': payDate.toIso8601String(),
-                                  'paymentMethod': method,
-                                  'referenceNumber': refCtrl.text.trim(),
-                                  'notes': notesCtrl.text.trim(),
-                                });
-                                Navigator.pop(ctx);
-                                await _loadInvoice(silent: true);
-                                _snackSuccess(
-                                    'Payment of ₹${amount.toStringAsFixed(2)} recorded');
-                              } catch (e) {
-                                _snackError('Failed: $e');
-                                setSheet(() => isSaving = false);
-                              }
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[700],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                      child: isSaving
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2))
-                          : const Text('Save Payment',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 15)),
-                    )),
-              ]),
-            ),
-          ]),
-        );
-      }),
-    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NewPaymentPage(
+          invoiceId: widget.invoiceId,
+          showAppBar: true,
+        ),
+      ),
+    ).then((_) => _loadInvoice(silent: true));
   }
 
   // ==========================================================================

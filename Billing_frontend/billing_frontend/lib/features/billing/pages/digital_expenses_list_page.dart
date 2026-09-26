@@ -16,6 +16,7 @@ import 'package:pdf/pdf.dart';
 import '../app_top_bar.dart';
 import 'new_digital_expense.dart';
 import 'bulk_import_digital_expenses_dialog.dart';
+import '../../../../core/permissions_finance.dart';
 
 const Color _navy = Color(0xFF1e3a8a);
 const Color _purple = Color(0xFF9B59B6);
@@ -211,6 +212,9 @@ class _DigitalExpensesListPageState extends State<DigitalExpensesListPage> {
   }
 
   Future<void> _deleteExpense(String id) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'digital_expenses');
+    if (!canDelete) return;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

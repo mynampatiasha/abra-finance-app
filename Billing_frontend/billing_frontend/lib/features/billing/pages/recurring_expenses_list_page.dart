@@ -33,6 +33,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_recurring_expense.dart';
 import 'recurring_expense_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../app/config/api_config.dart';
 import '../../../../core/finance_secure_storage.dart';
@@ -249,6 +250,9 @@ class _RecurringExpensesListPageState extends State<RecurringExpensesListPage> {
   }
 
   void _openEdit(RecurringExpense p) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'recurring_expenses');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -300,6 +304,9 @@ class _RecurringExpensesListPageState extends State<RecurringExpensesListPage> {
   }
 
   Future<void> _delete(RecurringExpense p) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'recurring_expenses');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Profile',
       message: 'Delete "${p.profileName}"? This cannot be undone.',

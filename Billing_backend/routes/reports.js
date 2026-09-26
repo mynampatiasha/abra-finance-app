@@ -78,6 +78,16 @@ function parseDateRange(q) {
   };
 }
 
+// Expense.date is stored as a literal "YYYY-MM-DD" local-calendar string.
+// parseDateRange's start/end are local-midnight Date objects — converting
+// them with .toISOString() shifts by the server's UTC offset (e.g. IST is
+// UTC+5:30, so local midnight Aug 1 becomes "2026-07-31" in UTC), silently
+// pulling the previous day's records into "This Month" etc. Format directly
+// from the Date's own local fields instead, so no UTC shift occurs.
+function toLocalDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function orgScope(req) { return { ...req.orgFilter, ...(req.branchFilter || {}) }; }
 
 function coaScope(req) {
@@ -230,153 +240,168 @@ router.get('/profit-loss-monthly', async (req, res) => {
   }
 });
 
+// Shared by /balance-sheet (vertical) and /balance-sheet-horizontal (same
+// report, side-by-side layout instead of stacked) — both need the identical
+// account tree as of one date, so this is built once and reused rather than
+// kept as two independently-drifting copies.
+async function buildBalanceSheetTree(req, end) {
+  const scope = orgScope(req);
+  const ALL_ASSET_TYPES = ['Asset', 'Accounts Receivable', 'Other Current Asset', 'Fixed Asset', 'Cash', 'Bank', 'Stock', 'Other Asset'];
+
+  // ── Assets / Liabilities / Equity from COA transactions ─────────────
+  const accounts = await ChartOfAccount.find({ accountType: { $in: [...ALL_ASSET_TYPES, ...LIABILITY_TYPES, ...EQUITY_TYPES] }, isActive: true, ...coaScope(req) }).lean();
+  const ids = accounts.map(a => a._id);
+  const txns = await AccountTransaction.aggregate([
+    { $match: { accountId: { $in: ids }, date: { $lte: end }, ...scope } },
+    { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+  ]);
+  const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
+
+  const tree = {
+    assets: {
+      currentAssets: {
+        cashAndCashEquivalents: { cash: [], bank: [], total: 0 },
+        accountsReceivable: { items: [], total: 0 },
+        otherCurrentAssets: { items: [], inputTaxCredits: { items: [], total: 0 }, total: 0 },
+        total: 0
+      },
+      fixedAssets: { items: [], total: 0 },
+      nonCurrentAssets: { items: [], total: 0 },
+      otherAssets: { items: [], total: 0 },
+      total: 0
+    },
+    liabilities: {
+      currentLiabilities: {
+        accountsPayable: { items: [], total: 0 },
+        otherCurrentLiabilities: { items: [], gstPayable: { items: [], total: 0 }, total: 0 },
+        total: 0
+      },
+      nonCurrentLiabilities: { items: [], total: 0 },
+      otherLiabilities: { items: [], total: 0 },
+      total: 0
+    },
+    equities: { items: [], currentYearEarnings: 0, total: 0 }
+  };
+
+  let totA = 0, totL = 0, totE = 0;
+
+  for (const acc of accounts) {
+    const t = tMap[acc._id.toString()] || { dr: 0, cr: 0 };
+    const isAsset = ALL_ASSET_TYPES.includes(acc.accountType);
+    const rawNet = isAsset ? (t.dr - t.cr) : (t.cr - t.dr);
+
+    // Hide empty accounts just like Zoho Books (but always show Equity/Retained Earnings)
+    if (Math.abs(rawNet) < 0.01 && acc.accountType !== 'Equity') continue;
+
+    const net = fmt(rawNet);
+    const row = { accountId: acc._id, accountName: acc.accountName, accountCode: acc.accountCode, accountType: acc.accountType, amount: net };
+
+    if (isAsset) {
+      totA += rawNet;
+      if (acc.accountType === 'Cash') tree.assets.currentAssets.cashAndCashEquivalents.cash.push(row);
+      else if (acc.accountType === 'Bank') tree.assets.currentAssets.cashAndCashEquivalents.bank.push(row);
+      else if (acc.accountType === 'Accounts Receivable') tree.assets.currentAssets.accountsReceivable.items.push(row);
+      else if (['Other Current Asset', 'Stock'].includes(acc.accountType)) {
+        // Input Tax Credits sub-group mirrors GST Payable on the liabilities
+        // side (same "input" vs "output" GST distinction Zoho breaks out).
+        const n = acc.accountName.toLowerCase();
+        if (n.includes('input') && (n.includes('tax') || n.includes('gst') || n.includes('cgst') || n.includes('sgst') || n.includes('igst'))) {
+          tree.assets.currentAssets.otherCurrentAssets.inputTaxCredits.items.push(row);
+        } else {
+          tree.assets.currentAssets.otherCurrentAssets.items.push(row);
+        }
+      }
+      else if (acc.accountType === 'Fixed Asset') tree.assets.fixedAssets.items.push(row);
+      else tree.assets.otherAssets.items.push(row); // 'Asset', 'Other Asset'
+    } else if (LIABILITY_TYPES.includes(acc.accountType)) {
+      totL += rawNet;
+      if (acc.accountType === 'Accounts Payable') tree.liabilities.currentLiabilities.accountsPayable.items.push(row);
+      else if (acc.accountType === 'Other Current Liability') {
+        const n = acc.accountName.toLowerCase();
+        if (n.includes('gst') || n.includes('cgst') || n.includes('sgst') || n.includes('igst')) {
+          tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.items.push(row);
+        } else {
+          tree.liabilities.currentLiabilities.otherCurrentLiabilities.items.push(row);
+        }
+      } else if (acc.accountType === 'Non Current Liability') {
+        tree.liabilities.nonCurrentLiabilities.items.push(row);
+      } else {
+        tree.liabilities.otherLiabilities.items.push(row);
+      }
+    } else {
+      totE += rawNet;
+      tree.equities.items.push(row);
+    }
+  }
+
+  // ── Calculate Net Profit and add to Current Year Earnings ───────────
+  const plAccounts = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, isActive: true, ...coaScope(req) }).lean();
+  const plIds = plAccounts.map(a => a._id);
+  const plTxns = await AccountTransaction.aggregate([
+    { $match: { accountId: { $in: plIds }, date: { $lte: end }, ...scope } },
+    { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
+  ]);
+  const plMap = {}; plTxns.forEach(t => { plMap[t._id.toString()] = t; });
+  let netProfit = 0;
+  for (const acc of plAccounts) {
+    const t = plMap[acc._id.toString()] || { dr: 0, cr: 0 };
+    if (INCOME_TYPES.includes(acc.accountType)) netProfit += t.cr - t.dr;
+    else netProfit -= t.dr - t.cr;
+  }
+
+  totE += netProfit;
+  tree.equities.currentYearEarnings = fmt(netProfit);
+
+  // ── Automatic Rounding Sweep ────────────────────────────────────────
+  const difference = totA - (totL + totE);
+  if (Math.abs(difference) > 0.009 && Math.abs(difference) <= 2.00) {
+    tree.equities.items.push({ accountName: 'Rounding Adjustments', accountCode: '', accountType: 'Equity', amount: fmt(difference) });
+    totE += difference;
+  }
+
+  // ── Compute all sub-totals ───────────────────────────────────────────────
+  const s = (arr) => arr.reduce((acc, row) => acc + row.amount, 0);
+
+  // Assets
+  const cCash = s(tree.assets.currentAssets.cashAndCashEquivalents.cash);
+  const cBank = s(tree.assets.currentAssets.cashAndCashEquivalents.bank);
+  tree.assets.currentAssets.cashAndCashEquivalents.total = fmt(cCash + cBank);
+  tree.assets.currentAssets.accountsReceivable.total = fmt(s(tree.assets.currentAssets.accountsReceivable.items));
+  tree.assets.currentAssets.otherCurrentAssets.inputTaxCredits.total = fmt(s(tree.assets.currentAssets.otherCurrentAssets.inputTaxCredits.items));
+  tree.assets.currentAssets.otherCurrentAssets.total = fmt(s(tree.assets.currentAssets.otherCurrentAssets.items) + tree.assets.currentAssets.otherCurrentAssets.inputTaxCredits.total);
+  tree.assets.currentAssets.total = fmt(tree.assets.currentAssets.cashAndCashEquivalents.total + tree.assets.currentAssets.accountsReceivable.total + tree.assets.currentAssets.otherCurrentAssets.total);
+
+  tree.assets.fixedAssets.total = fmt(s(tree.assets.fixedAssets.items));
+  tree.assets.nonCurrentAssets.total = fmt(s(tree.assets.nonCurrentAssets.items));
+  tree.assets.otherAssets.total = fmt(s(tree.assets.otherAssets.items));
+  tree.assets.total = fmt(tree.assets.currentAssets.total + tree.assets.fixedAssets.total + tree.assets.nonCurrentAssets.total + tree.assets.otherAssets.total);
+
+  // Liabilities
+  tree.liabilities.currentLiabilities.accountsPayable.total = fmt(s(tree.liabilities.currentLiabilities.accountsPayable.items));
+  tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.total = fmt(s(tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.items));
+  tree.liabilities.currentLiabilities.otherCurrentLiabilities.total = fmt(s(tree.liabilities.currentLiabilities.otherCurrentLiabilities.items) + tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.total);
+  tree.liabilities.currentLiabilities.total = fmt(tree.liabilities.currentLiabilities.accountsPayable.total + tree.liabilities.currentLiabilities.otherCurrentLiabilities.total);
+
+  tree.liabilities.nonCurrentLiabilities.total = fmt(s(tree.liabilities.nonCurrentLiabilities.items));
+  tree.liabilities.otherLiabilities.total = fmt(s(tree.liabilities.otherLiabilities.items));
+  tree.liabilities.total = fmt(tree.liabilities.currentLiabilities.total + tree.liabilities.nonCurrentLiabilities.total + tree.liabilities.otherLiabilities.total);
+
+  // Equities
+  tree.equities.total = fmt(s(tree.equities.items) + tree.equities.currentYearEarnings);
+
+  return {
+    asOf: end,
+    nestedTree: tree,
+    totalLiabilitiesAndEquity: fmt(tree.liabilities.total + tree.equities.total),
+    balanced: Math.abs(tree.assets.total - (tree.liabilities.total + tree.equities.total)) < 0.02,
+  };
+}
+
 router.get('/balance-sheet', async (req, res) => {
   try {
     const { end } = parseDateRange(req.query);
-    const scope = orgScope(req);
-
-    const ALL_ASSET_TYPES = ['Asset', 'Accounts Receivable', 'Other Current Asset', 'Fixed Asset', 'Cash', 'Bank', 'Stock', 'Other Asset'];
-    
-    // ── Assets / Liabilities / Equity from COA transactions ─────────────
-    const accounts = await ChartOfAccount.find({ accountType: { $in: [...ALL_ASSET_TYPES, ...LIABILITY_TYPES, ...EQUITY_TYPES] }, isActive: true, ...coaScope(req) }).lean();
-    const ids = accounts.map(a => a._id);
-    const txns = await AccountTransaction.aggregate([
-      { $match: { accountId: { $in: ids }, date: { $lte: end }, ...scope } },
-      { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
-    ]);
-    const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
-    
-    const tree = {
-      assets: {
-        currentAssets: {
-          cashAndCashEquivalents: { cash: [], bank: [], total: 0 },
-          accountsReceivable: { items: [], total: 0 },
-          otherCurrentAssets: { items: [], total: 0 },
-          total: 0
-        },
-        fixedAssets: { items: [], total: 0 },
-        nonCurrentAssets: { items: [], total: 0 },
-        otherAssets: { items: [], total: 0 },
-        total: 0
-      },
-      liabilities: {
-        currentLiabilities: {
-          accountsPayable: { items: [], total: 0 },
-          otherCurrentLiabilities: { items: [], gstPayable: { items: [], total: 0 }, total: 0 },
-          total: 0
-        },
-        nonCurrentLiabilities: { items: [], total: 0 },
-        otherLiabilities: { items: [], total: 0 },
-        total: 0
-      },
-      equities: { items: [], currentYearEarnings: 0, total: 0 }
-    };
-
-    let totA = 0, totL = 0, totE = 0;
-
-    for (const acc of accounts) {
-      const t = tMap[acc._id.toString()] || { dr: 0, cr: 0 };
-      const isAsset = ALL_ASSET_TYPES.includes(acc.accountType);
-      const rawNet = isAsset ? (t.dr - t.cr) : (t.cr - t.dr);
-      
-      // Hide empty accounts just like Zoho Books (but always show Equity/Retained Earnings)
-      if (Math.abs(rawNet) < 0.01 && acc.accountType !== 'Equity') continue;
-
-      const net = fmt(rawNet);
-      const row = { accountId: acc._id, accountName: acc.accountName, accountCode: acc.accountCode, accountType: acc.accountType, amount: net };
-
-      if (isAsset) {
-        totA += rawNet;
-        if (acc.accountType === 'Cash') tree.assets.currentAssets.cashAndCashEquivalents.cash.push(row);
-        else if (acc.accountType === 'Bank') tree.assets.currentAssets.cashAndCashEquivalents.bank.push(row);
-        else if (acc.accountType === 'Accounts Receivable') tree.assets.currentAssets.accountsReceivable.items.push(row);
-        else if (['Other Current Asset', 'Stock'].includes(acc.accountType)) tree.assets.currentAssets.otherCurrentAssets.items.push(row);
-        else if (acc.accountType === 'Fixed Asset') tree.assets.fixedAssets.items.push(row);
-        else tree.assets.otherAssets.items.push(row); // 'Asset', 'Other Asset'
-      } else if (LIABILITY_TYPES.includes(acc.accountType)) {
-        totL += rawNet;
-        if (acc.accountType === 'Accounts Payable') tree.liabilities.currentLiabilities.accountsPayable.items.push(row);
-        else if (acc.accountType === 'Other Current Liability') {
-          const n = acc.accountName.toLowerCase();
-          if (n.includes('gst') || n.includes('cgst') || n.includes('sgst') || n.includes('igst')) {
-            tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.items.push(row);
-          } else {
-            tree.liabilities.currentLiabilities.otherCurrentLiabilities.items.push(row);
-          }
-        } else if (acc.accountType === 'Non Current Liability') {
-          tree.liabilities.nonCurrentLiabilities.items.push(row);
-        } else {
-          tree.liabilities.otherLiabilities.items.push(row);
-        }
-      } else {
-        totE += rawNet;
-        tree.equities.items.push(row);
-      }
-    }
-
-    // ── Calculate Net Profit and add to Current Year Earnings ───────────
-    const plAccounts = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, isActive: true, ...coaScope(req) }).lean();
-    const plIds = plAccounts.map(a => a._id);
-    const plTxns = await AccountTransaction.aggregate([
-      { $match: { accountId: { $in: plIds }, date: { $lte: end }, ...scope } },
-      { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
-    ]);
-    const plMap = {}; plTxns.forEach(t => { plMap[t._id.toString()] = t; });
-    let netProfit = 0;
-    for (const acc of plAccounts) {
-      const t = plMap[acc._id.toString()] || { dr: 0, cr: 0 };
-      if (INCOME_TYPES.includes(acc.accountType)) netProfit += t.cr - t.dr;
-      else netProfit -= t.dr - t.cr;
-    }
-    
-    totE += netProfit;
-    tree.equities.currentYearEarnings = fmt(netProfit);
-
-    // ── Automatic Rounding Sweep ────────────────────────────────────────
-    const difference = totA - (totL + totE);
-    if (Math.abs(difference) > 0.009 && Math.abs(difference) <= 2.00) {
-      tree.equities.items.push({ accountName: 'Rounding Adjustments', accountCode: '', accountType: 'Equity', amount: fmt(difference) });
-      totE += difference;
-    }
-
-    // ── Compute all sub-totals ───────────────────────────────────────────────
-    const s = (arr) => arr.reduce((acc, row) => acc + row.amount, 0);
-
-    // Assets
-    const cCash = s(tree.assets.currentAssets.cashAndCashEquivalents.cash);
-    const cBank = s(tree.assets.currentAssets.cashAndCashEquivalents.bank);
-    tree.assets.currentAssets.cashAndCashEquivalents.total = fmt(cCash + cBank);
-    tree.assets.currentAssets.accountsReceivable.total = fmt(s(tree.assets.currentAssets.accountsReceivable.items));
-    tree.assets.currentAssets.otherCurrentAssets.total = fmt(s(tree.assets.currentAssets.otherCurrentAssets.items));
-    tree.assets.currentAssets.total = fmt(tree.assets.currentAssets.cashAndCashEquivalents.total + tree.assets.currentAssets.accountsReceivable.total + tree.assets.currentAssets.otherCurrentAssets.total);
-    
-    tree.assets.fixedAssets.total = fmt(s(tree.assets.fixedAssets.items));
-    tree.assets.nonCurrentAssets.total = fmt(s(tree.assets.nonCurrentAssets.items));
-    tree.assets.otherAssets.total = fmt(s(tree.assets.otherAssets.items));
-    tree.assets.total = fmt(tree.assets.currentAssets.total + tree.assets.fixedAssets.total + tree.assets.nonCurrentAssets.total + tree.assets.otherAssets.total);
-
-    // Liabilities
-    tree.liabilities.currentLiabilities.accountsPayable.total = fmt(s(tree.liabilities.currentLiabilities.accountsPayable.items));
-    tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.total = fmt(s(tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.items));
-    tree.liabilities.currentLiabilities.otherCurrentLiabilities.total = fmt(s(tree.liabilities.currentLiabilities.otherCurrentLiabilities.items) + tree.liabilities.currentLiabilities.otherCurrentLiabilities.gstPayable.total);
-    tree.liabilities.currentLiabilities.total = fmt(tree.liabilities.currentLiabilities.accountsPayable.total + tree.liabilities.currentLiabilities.otherCurrentLiabilities.total);
-
-    tree.liabilities.nonCurrentLiabilities.total = fmt(s(tree.liabilities.nonCurrentLiabilities.items));
-    tree.liabilities.otherLiabilities.total = fmt(s(tree.liabilities.otherLiabilities.items));
-    tree.liabilities.total = fmt(tree.liabilities.currentLiabilities.total + tree.liabilities.nonCurrentLiabilities.total + tree.liabilities.otherLiabilities.total);
-
-    // Equities
-    tree.equities.total = fmt(s(tree.equities.items) + tree.equities.currentYearEarnings);
-
-    res.json({ 
-      success: true, 
-      data: { 
-        asOf: end, 
-        nestedTree: tree,
-        totalLiabilitiesAndEquity: fmt(tree.liabilities.total + tree.equities.total), 
-        balanced: Math.abs(tree.assets.total - (tree.liabilities.total + tree.equities.total)) < 0.02 
-      } 
-    });
+    const data = await buildBalanceSheetTree(req, end);
+    res.json({ success: true, data });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -412,8 +437,8 @@ router.get('/cash-flow', async (req, res) => {
     }).lean();
 
     let openingBalance = 0;
-    let operatingInflows = 0;
-    let operatingOutflows = 0;
+    let totalInflows = 0;
+    let totalOutflows = 0;
     const monthlyMap = {};
 
     const parseDate = (d) => {
@@ -422,11 +447,16 @@ router.get('/cash-flow', async (req, res) => {
       return new Date(d);
     };
 
-    // 3. Process Transactions
+    const periodTxns = [];
+
+    // 3. Process Transactions — opening balance + total incoming/outgoing
+    //    (unchanged: these still represent the true, unclassified cash
+    //    movement, same as before — the dashboard tile depends on these
+    //    exact totals staying as-is).
     for (const txn of allTxns) {
       const d = parseDate(txn.date);
       if (!d) continue;
-      
+
       const debit = txn.debit || 0;
       const credit = txn.credit || 0;
 
@@ -434,15 +464,79 @@ router.get('/cash-flow', async (req, res) => {
         // True cash position is always Debit - Credit
         openingBalance += (debit - credit);
       } else if (d >= start && d <= end) {
-        operatingInflows += debit;
-        operatingOutflows += credit;
-        
+        totalInflows += debit;
+        totalOutflows += credit;
+        periodTxns.push(txn);
+
         const key = `${d.getFullYear()}-${d.getMonth()}`;
         if (!monthlyMap[key]) monthlyMap[key] = { incoming: 0, outgoing: 0 };
         monthlyMap[key].incoming += debit;
         monthlyMap[key].outgoing += credit;
       }
     }
+
+    // 4. Classify each period transaction into Operating / Investing /
+    //    Financing by looking at its double-entry counterparty account's
+    //    type (same referenceNumber-matching pattern used elsewhere in this
+    //    file, e.g. /account-transactions' counterparty lookup).
+    const refNumbers = [...new Set(periodTxns.map(t => t.referenceNumber).filter(Boolean))];
+    const counterTxns = refNumbers.length
+      ? await AccountTransaction.find({ referenceNumber: { $in: refNumbers }, accountId: { $nin: coaIds }, ...scope }).lean()
+      : [];
+    const counterAccIds = [...new Set(counterTxns.map(t => t.accountId?.toString()).filter(Boolean))];
+    const counterAccs = counterAccIds.length
+      ? await ChartOfAccount.find({ _id: { $in: counterAccIds } }).lean()
+      : [];
+    const counterTypeMap = {}, counterNameMap = {};
+    counterAccs.forEach(a => { counterTypeMap[a._id.toString()] = a.accountType; counterNameMap[a._id.toString()] = a.accountName; });
+    // Track the counterparty account itself, not just its type — the type
+    // decides which bucket a transaction falls into, the account is what
+    // gets shown as an itemized line under that bucket (matching Zoho's
+    // per-account Cash Flow breakdown).
+    const refAccountMap = {};
+    for (const t of counterTxns) {
+      if (t.referenceNumber && t.accountId && !refAccountMap[t.referenceNumber]) {
+        refAccountMap[t.referenceNumber] = t.accountId.toString();
+      }
+    }
+
+    const INVESTING_TYPES = ['Fixed Asset', 'Non Current Asset', 'Other Asset'];
+    const FINANCING_TYPES = ['Equity', 'Long Term Liability', 'Non Current Liability'];
+    const classify = (type) => {
+      if (INVESTING_TYPES.includes(type)) return 'investing';
+      if (FINANCING_TYPES.includes(type)) return 'financing';
+      return 'operating';
+    };
+
+    let operatingInflows = 0, operatingOutflows = 0;
+    let investingInflows = 0, investingOutflows = 0;
+    let financingInflows = 0, financingOutflows = 0;
+    const itemsByBucket = { operating: {}, investing: {}, financing: {} };
+    for (const txn of periodTxns) {
+      const debit = txn.debit || 0;
+      const credit = txn.credit || 0;
+      const counterAccountId = txn.referenceNumber ? refAccountMap[txn.referenceNumber] : null;
+      const counterType = counterAccountId ? counterTypeMap[counterAccountId] : '';
+      const bucket = classify(counterType);
+      if (bucket === 'investing') { investingInflows += debit; investingOutflows += credit; }
+      else if (bucket === 'financing') { financingInflows += debit; financingOutflows += credit; }
+      else { operatingInflows += debit; operatingOutflows += credit; }
+
+      // Itemize by counterparty account — transactions with no identifiable
+      // counterparty (no referenceNumber match) still count toward the
+      // bucket's total above, they just don't get their own line item.
+      if (counterAccountId) {
+        const bucketItems = itemsByBucket[bucket];
+        if (!bucketItems[counterAccountId]) {
+          bucketItems[counterAccountId] = { accountId: counterAccountId, accountName: counterNameMap[counterAccountId] || 'Unknown', amount: 0 };
+        }
+        bucketItems[counterAccountId].amount += (debit - credit);
+      }
+    }
+    const toItemsList = (bucketItems) => Object.values(bucketItems)
+      .map(i => ({ ...i, amount: fmt(i.amount) }))
+      .filter(i => Math.abs(i.amount) >= 0.01)
+      .sort((a, b) => (a.accountName || '').localeCompare(b.accountName || ''));
 
     // Build monthly breakdown
     const monthlyBreakdown = [];
@@ -475,28 +569,36 @@ router.get('/cash-flow', async (req, res) => {
       success: true,
       data: {
         period: { start, end },
+        // Total cash movement across ALL activities — unchanged meaning,
+        // still what the dashboard's cash-flow tile relies on.
         summary: {
           openingBalance: fmt(openingBalance),
-          totalIncoming: fmt(operatingInflows),
-          totalOutgoing: fmt(operatingOutflows),
-          closingBalance: fmt(openingBalance + operatingInflows - operatingOutflows),
+          totalIncoming: fmt(totalInflows),
+          totalOutgoing: fmt(totalOutflows),
+          closingBalance: fmt(openingBalance + totalInflows - totalOutflows),
         },
         operating: {
           inflows: fmt(operatingInflows),
           outflows: fmt(operatingOutflows),
           net: fmt(operatingInflows - operatingOutflows),
-          items: [],
+          items: toItemsList(itemsByBucket.operating),
         },
         investing: {
-          inflows: "0.00",
-          outflows: "0.00",
-          net: "0.00",
+          inflows: fmt(investingInflows),
+          outflows: fmt(investingOutflows),
+          net: fmt(investingInflows - investingOutflows),
+          items: toItemsList(itemsByBucket.investing),
         },
         financing: {
-          inflows: "0.00",
-          outflows: "0.00",
-          net: "0.00",
+          inflows: fmt(financingInflows),
+          outflows: fmt(financingOutflows),
+          net: fmt(financingInflows - financingOutflows),
+          items: toItemsList(itemsByBucket.financing),
         },
+        // Same figure as summary.closingBalance - summary.openingBalance —
+        // the frontend's net-change row was reading this exact field name
+        // and silently showing 0.00 because it never existed before.
+        netCashChange: fmt(totalInflows - totalOutflows),
         monthlyBreakdown
       }
     });
@@ -565,48 +667,17 @@ router.get('/profit-loss-horizontal', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// Same report as /balance-sheet, laid out side-by-side (Liabilities & Equity
+// on the left, Assets on the right) instead of stacked — the real meaning of
+// "horizontal" for a balance sheet, matching Zoho's Horizontal Balance Sheet.
+// This used to return a 3-number current-vs-previous-period comparison,
+// which isn't the same report at all; now it shares the exact account tree
+// /balance-sheet uses, as of one date.
 router.get('/balance-sheet-horizontal', async (req, res) => {
   try {
     const { end } = parseDateRange(req.query);
-    const scope = orgScope(req);
-    const prevEnd = new Date(getFY(end).start - 1);
-    const fetchBS = async (e) => {
-      const accs = await ChartOfAccount.find({ accountType: { $in: [...ASSET_TYPES, ...LIABILITY_TYPES, ...EQUITY_TYPES] }, ...coaScope(req) }).lean();
-      const ids = accs.map(a => a._id);
-      const txns = await AccountTransaction.aggregate([
-        { $match: { accountId: { $in: ids }, date: { $lte: e }, ...scope } },
-        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
-      ]);
-      const m = {}; txns.forEach(t => { m[t._id.toString()] = t; });
-      let A = 0, L = 0, E = 0;
-      for (const a of accs) {
-        const t = m[a._id.toString()] || { dr: 0, cr: 0 };
-        const net = ASSET_TYPES.includes(a.accountType) ? t.dr - t.cr : t.cr - t.dr;
-        if (ASSET_TYPES.includes(a.accountType)) A += net;
-        else if (LIABILITY_TYPES.includes(a.accountType)) L += net;
-        else E += net;
-      }
-
-      // ✅ Add Net Profit to Equity (same as vertical balance sheet)
-      const plAccs = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, ...coaScope(req) }).lean();
-      const plIds = plAccs.map(a => a._id);
-      const plTxns = await AccountTransaction.aggregate([
-        { $match: { accountId: { $in: plIds }, date: { $lte: e }, ...scope } },
-        { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } },
-      ]);
-      const plMap = {}; plTxns.forEach(t => { plMap[t._id.toString()] = t; });
-      let netProfit = 0;
-      for (const a of plAccs) {
-        const t = plMap[a._id.toString()] || { dr: 0, cr: 0 };
-        if (INCOME_TYPES.includes(a.accountType)) netProfit += t.cr - t.dr;
-        else netProfit -= t.dr - t.cr;
-      }
-      E = fmt(E + netProfit);
-
-      return { assets: fmt(A), liabilities: fmt(L), equity: fmt(E) };
-    };
-    const [curr, prev] = await Promise.all([fetchBS(end), fetchBS(prevEnd)]);
-    res.json({ success: true, data: { current: { asOf: end, ...curr }, previous: { asOf: prevEnd, ...prev } } });
+    const data = await buildBalanceSheetTree(req, end);
+    res.json({ success: true, data });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -625,14 +696,17 @@ router.get('/performance-ratios', async (req, res) => {
     };
     const df = { date: { $gte: start, $lte: end } };
     const de = { date: { $lte: end } };
-    const [rev, exp, ast, lia] = await Promise.all([
+    const [rev, exp, cogs, ast, lia] = await Promise.all([
       sumTxns(INCOME_TYPES, 'credit', df), sumTxns(EXPENSE_TYPES, 'debit', df),
+      sumTxns(['Cost Of Goods Sold'], 'debit', df),
       sumTxns(ASSET_TYPES, 'debit', de), sumTxns(LIABILITY_TYPES, 'credit', de),
     ]);
-    const gp = rev - exp, eq = ast - lia;
-    // ✅ FIX: Use actual net profit (revenue - all expenses) not gross profit
+    const eq = ast - lia;
+    // Gross profit = revenue - COGS only; Net profit = revenue - all expenses
+    // (EXPENSE_TYPES already includes COGS, so these are genuinely different).
+    const gp = rev - cogs;
     const np = rev - exp;
-    res.json({ success: true, data: { period: { start, end }, grossProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0, netProfitMargin: rev > 0 ? fmt((np / rev) * 100) : 0, returnOnAssets: ast > 0 ? fmt((gp / ast) * 100) : 0, returnOnEquity: eq > 0 ? fmt((gp / eq) * 100) : 0, debtToEquityRatio: eq > 0 ? fmt(lia / eq) : 0, currentRatio: lia > 0 ? fmt(ast / lia) : 0, totalRevenue: fmt(rev), totalExpenses: fmt(exp), netProfit: fmt(gp) } });
+    res.json({ success: true, data: { period: { start, end }, grossProfitMargin: rev > 0 ? fmt((gp / rev) * 100) : 0, netProfitMargin: rev > 0 ? fmt((np / rev) * 100) : 0, returnOnAssets: ast > 0 ? fmt((np / ast) * 100) : 0, returnOnEquity: eq > 0 ? fmt((np / eq) * 100) : 0, debtToEquityRatio: eq > 0 ? fmt(lia / eq) : 0, currentRatio: lia > 0 ? fmt(ast / lia) : 0, totalRevenue: fmt(rev), totalExpenses: fmt(exp), netProfit: fmt(np) } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -654,8 +728,37 @@ router.get('/movement-of-equity', async (req, res) => {
       const p = pMap[a._id.toString()] || { dr: 0, cr: 0 };
       const opening = fmt(o.cr - o.dr);
       const change = fmt(p.cr - p.dr);
-      return { accountName: a.accountName, opening, change, closing: fmt(opening + change) };
+      return { accountId: a._id.toString(), accountName: a.accountName, opening, change, closing: fmt(opening + change) };
     });
+
+    // "Current Year Earnings" — not a real equity account, it's net profit
+    // for the period (same figure /balance-sheet folds into Equities), but
+    // Movement of Equity needs it split into an opening/change pair like
+    // every other row: opening = cumulative profit before this period,
+    // change = profit earned during it. Matches Zoho's Movement of Equity,
+    // which shows this as the main driver of "Changes in Equity."
+    const plAccs = await ChartOfAccount.find({ accountType: { $in: [...INCOME_TYPES, ...EXPENSE_TYPES] }, ...coaScope(req) }).lean();
+    const plIds = plAccs.map(a => a._id);
+    const [plOpenTxns, plPeriodTxns] = await Promise.all([
+      AccountTransaction.aggregate([{ $match: { accountId: { $in: plIds }, date: { $lt: start }, ...scope } }, { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } }]),
+      AccountTransaction.aggregate([{ $match: { accountId: { $in: plIds }, date: { $gte: start, $lte: end }, ...scope } }, { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } }]),
+    ]);
+    const netProfitFor = (txns) => {
+      const m = {}; txns.forEach(t => { m[t._id.toString()] = t; });
+      let np = 0;
+      for (const acc of plAccs) {
+        const t = m[acc._id.toString()] || { dr: 0, cr: 0 };
+        if (INCOME_TYPES.includes(acc.accountType)) np += t.cr - t.dr;
+        else np -= t.dr - t.cr;
+      }
+      return np;
+    };
+    const cyeOpening = fmt(netProfitFor(plOpenTxns));
+    const cyeChange = fmt(netProfitFor(plPeriodTxns));
+    if (cyeOpening !== 0 || cyeChange !== 0) {
+      rows.push({ accountName: 'Current Year Earnings', isCurrentYearEarnings: true, opening: cyeOpening, change: cyeChange, closing: fmt(cyeOpening + cyeChange) });
+    }
+
     res.json({ success: true, data: { period: { start, end }, accounts: rows, totals: { opening: fmt(rows.reduce((s, r) => s + r.opening, 0)), change: fmt(rows.reduce((s, r) => s + r.change, 0)), closing: fmt(rows.reduce((s, r) => s + r.closing, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
@@ -672,18 +775,83 @@ router.get('/trial-balance', async (req, res) => {
     ]);
     const tMap = {}; txns.forEach(t => { tMap[t._id.toString()] = t; });
     let grandDr = 0, grandCr = 0;
-    const rows = accounts.map(a => {
+    // Per-account debit/credit/balance computation is unchanged from before —
+    // only how these rows get grouped and displayed below is new.
+    const computed = accounts.map(a => {
       const t = tMap[a._id.toString()] || { dr: 0, cr: 0 };
       const dr = fmt(t.dr), cr = fmt(t.cr);
       grandDr += dr; grandCr += cr;
-      
+
       // Differentiate Debit vs Credit accounts so Liability/Income/Equity don't show negative
       const isDebitAccount = [...ASSET_TYPES, ...EXPENSE_TYPES, 'Bank'].includes(a.accountType);
       const balance = isDebitAccount ? fmt(dr - cr) : fmt(cr - dr);
-      
-      return { accountCode: a.accountCode, accountName: a.accountName, accountType: a.accountType, debit: dr, credit: cr, balance };
+
+      return { accountId: a._id.toString(), accountCode: a.accountCode, accountName: a.accountName, accountType: a.accountType, debit: dr, credit: cr, balance };
     }).filter(r => r.debit > 0 || r.credit > 0);
-    res.json({ success: true, data: { asOf: end, accounts: rows, totals: { debit: fmt(grandDr), credit: fmt(grandCr) }, balanced: Math.abs(grandDr - grandCr) < 0.02 } });
+
+    // Group into Assets / Liabilities / Equities / Income / Expense — same
+    // category boundaries buildBalanceSheetTree uses — plus the same GST
+    // Payable / Input Tax Credits sub-grouping heuristic, so Trial Balance
+    // shows the same hierarchy Zoho does instead of one flat account list.
+    const ALL_ASSET_TYPES = ['Asset', 'Accounts Receivable', 'Other Current Asset', 'Fixed Asset', 'Cash', 'Bank', 'Stock', 'Other Asset'];
+    const categoryOf = (type) => {
+      if (ALL_ASSET_TYPES.includes(type)) return 'Assets';
+      if (LIABILITY_TYPES.includes(type)) return 'Liabilities';
+      if (EQUITY_TYPES.includes(type)) return 'Equities';
+      if (INCOME_TYPES.includes(type)) return 'Income';
+      if (EXPENSE_TYPES.includes(type)) return 'Expense';
+      return 'Other';
+    };
+    const isGstPayable = (r) => {
+      const n = r.accountName.toLowerCase();
+      return r.accountType === 'Other Current Liability' && (n.includes('gst') || n.includes('cgst') || n.includes('sgst') || n.includes('igst'));
+    };
+    const isInputTaxCredit = (r) => {
+      const n = r.accountName.toLowerCase();
+      return ['Other Current Asset', 'Stock'].includes(r.accountType) && n.includes('input') && (n.includes('tax') || n.includes('gst') || n.includes('cgst') || n.includes('sgst') || n.includes('igst'));
+    };
+    // Group/subtotal rows reuse the frontend's existing "_isAccountHeader"
+    // convention (already used by the General Ledger view) so they render
+    // as distinct header-styled rows with no code changes needed on screen.
+    const headerRow = (label) => ({ accountCode: '', accountName: label, accountType: '', debit: '', credit: '', balance: '', _isAccountHeader: true });
+    const subtotalRow = (label, dr, cr) => ({ accountCode: '', accountName: `Total for ${label}`, accountType: '', debit: fmt(dr), credit: fmt(cr), balance: '', _isAccountHeader: true });
+    const sumDrCr = (arr) => arr.reduce((acc, r) => { acc.dr += r.debit; acc.cr += r.credit; return acc; }, { dr: 0, cr: 0 });
+
+    const buckets = { Assets: [], Liabilities: [], Equities: [], Income: [], Expense: [], Other: [] };
+    for (const r of computed) buckets[categoryOf(r.accountType)].push(r);
+
+    const out = [];
+    for (const cat of ['Assets', 'Liabilities', 'Equities', 'Income', 'Expense', 'Other']) {
+      const items = buckets[cat];
+      if (!items.length) continue;
+      out.push(headerRow(cat));
+      if (cat === 'Assets') {
+        const itc = items.filter(isInputTaxCredit);
+        items.filter(r => !isInputTaxCredit(r)).forEach(r => out.push(r));
+        if (itc.length) {
+          out.push(headerRow('Input Tax Credits'));
+          itc.forEach(r => out.push(r));
+          const s = sumDrCr(itc);
+          out.push(subtotalRow('Input Tax Credits', s.dr, s.cr));
+        }
+      } else if (cat === 'Liabilities') {
+        const gst = items.filter(isGstPayable);
+        items.filter(r => !isGstPayable(r)).forEach(r => out.push(r));
+        if (gst.length) {
+          out.push(headerRow('GST Payable'));
+          gst.forEach(r => out.push(r));
+          const s = sumDrCr(gst);
+          out.push(subtotalRow('GST Payable', s.dr, s.cr));
+        }
+      } else {
+        items.forEach(r => out.push(r));
+      }
+      const s = sumDrCr(items);
+      out.push(subtotalRow(cat, s.dr, s.cr));
+    }
+    out.push(subtotalRow('Trial Balance', grandDr, grandCr));
+
+    res.json({ success: true, data: { asOf: end, accounts: out, totals: { debit: fmt(grandDr), credit: fmt(grandCr) }, balanced: Math.abs(grandDr - grandCr) < 0.02 } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -693,12 +861,14 @@ router.get('/day-book', async (req, res) => {
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
     const scope = orgScope(req);
-    const txns = await AccountTransaction.find({ date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).limit(500).lean();
+    const baseFilter = { date: { $gte: start, $lte: end }, ...scope };
+    const txns = await AccountTransaction.find(baseFilter).sort({ date: -1 }).limit(500).lean();
     const accIds = [...new Set(txns.map(t => t.accountId?.toString()))].filter(Boolean);
     const accs = await ChartOfAccount.find({ _id: { $in: accIds } }).lean();
     const aMap = {}; accs.forEach(a => { aMap[a._id.toString()] = a; });
-    const enriched = txns.map(t => ({ ...t, accountName: aMap[t.accountId?.toString()]?.accountName || '', accountType: aMap[t.accountId?.toString()]?.accountType || '', atId: t.referenceId?.toString(), atType: t.referenceType, btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null, bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null }));
-    res.json({ success: true, data: { date: start, transactions: enriched, totals: { debit: fmt(enriched.reduce((s, t) => s + (t.debit || 0), 0)), credit: fmt(enriched.reduce((s, t) => s + (t.credit || 0), 0)) } } });
+    const enriched = txns.map(t => ({ ...t, accountName: aMap[t.accountId?.toString()]?.accountName || '', accountType: aMap[t.accountId?.toString()]?.accountType || '', atId: t.referenceId?.toString(), atType: normalizeAtType(t.referenceType), btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null, bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null }));
+    const totalsAgg = await sumFields(AccountTransaction, baseFilter, ['debit', 'credit']);
+    res.json({ success: true, data: { date: start, transactions: enriched, totals: { debit: fmt(totalsAgg.debit), credit: fmt(totalsAgg.credit) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -713,10 +883,12 @@ router.get('/sales-by-customer', async (req, res) => {
     const Invoice = col('Invoice', 'invoices');
     const rows = await Invoice.aggregate([
       { $match: { invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT', 'CANCELLED'] }, ...scope } },
-      { $group: { _id: '$customerId', customerName: { $first: '$customerName' }, customerEmail: { $first: '$customerEmail' }, invoiceCount: { $sum: 1 }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
+      { $group: { _id: '$customerId', customerName: { $first: '$customerName' }, customerEmail: { $first: '$customerEmail' }, invoiceCount: { $sum: 1 }, sales: { $sum: '$subTotal' }, totalAmount: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
       { $sort: { totalAmount: -1 } },
     ]);
-    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ ...r, totalAmount: fmt(r.totalAmount), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })), totals: { invoiceCount: rows.reduce((s, r) => s + r.invoiceCount, 0), totalAmount: fmt(rows.reduce((s, r) => s + r.totalAmount, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) } } });
+    // "sales" = pre-tax subtotal (Zoho's "SALES" column), "totalAmount" =
+    // tax-inclusive total (Zoho's "SALES WITH TAX") — both shown separately.
+    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ ...r, sales: fmt(r.sales), totalAmount: fmt(r.totalAmount), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue), customerId: r._id ? r._id.toString() : null })), totals: { invoiceCount: rows.reduce((s, r) => s + r.invoiceCount, 0), sales: fmt(rows.reduce((s, r) => s + r.sales, 0)), totalAmount: fmt(rows.reduce((s, r) => s + r.totalAmount, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -782,7 +954,11 @@ router.get('/ar-aging-summary', async (req, res) => {
     const Invoice = col('Invoice', 'invoices');
 
     const invoices = await Invoice.find({
-      invoiceDate: { $gte: start, $lte: end },
+      // Aging is a snapshot of everything still owed as of the period's end —
+      // not just invoices raised inside the selected window. A genuinely
+      // overdue invoice from an earlier period must not disappear just
+      // because a narrower period got selected.
+      invoiceDate: { $lte: end },
       status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] },
       amountDue: { $gt: 0 },
       ...scope
@@ -825,6 +1001,7 @@ router.get('/ar-aging-summary', async (req, res) => {
     const total = Object.values(buckets).reduce((s, v) => s + v, 0);
     const customers = Object.values(customerMap).map(c => ({
       _id: c.customerId,
+      customerId: c.customerId,
       customerName: c.customerName,
       currentBalance: fmt(c.current),
       '1-15 days': fmt(c.days1_15),
@@ -859,7 +1036,9 @@ router.get('/ar-aging-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const today = new Date();
     const scope = orgScope(req);
-    const query = { invoiceDate: { $gte: start, $lte: end }, status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, amountDue: { $gt: 0 }, ...scope };
+    // Same as AR Aging Summary — snapshot of everything still owed as of the
+    // period's end, not restricted to invoices raised inside the window.
+    const query = { invoiceDate: { $lte: end }, status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, amountDue: { $gt: 0 }, ...scope };
 
     if (req.query.customerId) {
       const cid = safeObjId(req.query.customerId);
@@ -885,7 +1064,7 @@ router.get('/ar-aging-details', async (req, res) => {
       else if (days <= 30) bucket = '16-30 days';
       else if (days <= 45) bucket = '31-45 days';
       else bucket = '> 45 days';
-      return { invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), daysOverdue: Math.max(0, days), bucket, status: inv.status };
+      return { invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), daysOverdue: Math.max(0, days), bucket, status: inv.status, atId: inv._id.toString(), atType: 'Invoice', customerId: inv.customerId ? inv.customerId.toString() : null };
     });
     res.json({ success: true, data: { asOf: today, invoices: rows, total: fmt(rows.reduce((s, r) => s + (parseFloat(r.amountDue) || 0), 0)) } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -896,12 +1075,14 @@ router.get('/customer-balance', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Invoice = col('Invoice', 'invoices');
+    // A customer's balance is what they owe as of now — not limited to
+    // invoices raised inside the selected period.
     const rows = await Invoice.aggregate([
-      { $match: { invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT', 'CANCELLED'] }, ...scope } },
+      { $match: { invoiceDate: { $lte: end }, status: { $nin: ['DRAFT', 'CANCELLED'] }, ...scope } },
       { $group: { _id: '$customerId', customerName: { $first: '$customerName' }, customerEmail: { $first: '$customerEmail' }, invoiceCount: { $sum: 1 }, totalInvoiced: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
       { $sort: { totalDue: -1 } },
     ]);
-    res.json({ success: true, data: { customers: rows.map(r => ({ customerName: r.customerName, customerEmail: r.customerEmail, invoiceCount: r.invoiceCount, totalInvoiced: fmt(r.totalInvoiced), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue) })), totals: { totalInvoiced: fmt(rows.reduce((s, r) => s + r.totalInvoiced, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) } } });
+    res.json({ success: true, data: { customers: rows.map(r => ({ customerName: r.customerName, customerEmail: r.customerEmail, invoiceCount: r.invoiceCount, totalInvoiced: fmt(r.totalInvoiced), totalPaid: fmt(r.totalPaid), totalDue: fmt(r.totalDue), customerId: r._id ? r._id.toString() : null })), totals: { totalInvoiced: fmt(rows.reduce((s, r) => s + r.totalInvoiced, 0)), totalPaid: fmt(rows.reduce((s, r) => s + r.totalPaid, 0)), totalDue: fmt(rows.reduce((s, r) => s + r.totalDue, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -910,29 +1091,60 @@ router.get('/invoice-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Invoice = col('Invoice', 'invoices');
-    const query = { invoiceDate: { $gte: start, $lte: end }, ...scope };
-    if (req.query.status) query.status = req.query.status;
+    // Only relax the date filter for an EXPLICIT balance-snapshot drill-down
+    // (AR Aging, Customer Balance, Receivable Details — all of which now
+    // correctly show a customer's full outstanding balance regardless of
+    // invoice age). customerId/customerName alone isn't enough of a signal:
+    // Sales by Customer also sends those, but it's an activity report and
+    // must stay scoped to the selected period to match its own summary
+    // (a customer-scoped-but-unbounded query silently inflated its invoice
+    // count past what the summary card showed).
+    const isBalanceSnapshot = req.query.balanceSnapshot === 'true';
+    const query = isBalanceSnapshot
+      ? { invoiceDate: { $lte: end }, ...scope }
+      : { invoiceDate: { $gte: start, $lte: end }, ...scope };
+    if (req.query.status) {
+      query.status = req.query.status;
+    } else {
+      // Drafts haven't been issued yet — not a real sale/receivable in any
+      // report that drills down here, unless a specific status was asked for.
+      query.status = { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
+    }
     // FIX-3: cast customerId to ObjectId
     if (req.query.customerId) {
       const cid = safeObjId(req.query.customerId);
       query.customerId = cid || req.query.customerId;
+    } else if (req.query.customerName) {
+      // customer-balance (and sales-by-customer/ar-aging/receivable-*) never
+      // get a real customerId from their summary row — this was silently
+      // ignored before, so the drill-down ran with no customer filter at all.
+      query.customerName = req.query.customerName;
     }
-    const invoices = await Invoice.find(query).sort({ invoiceDate: -1 }).limit(500).lean();
-    res.json({ success: true, data: { period: { start, end }, invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, subTotal: fmt(inv.subTotal), totalTax: fmt((inv.totalCGST || 0) + (inv.totalSGST || 0) + (inv.totalIGST || 0)), totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue) })), totals: { count: invoices.length, totalAmount: fmt(invoices.reduce((s, i) => s + (i.totalAmount || 0), 0)), totalPaid: fmt(invoices.reduce((s, i) => s + (i.amountPaid || 0), 0)), totalDue: fmt(invoices.reduce((s, i) => s + (i.amountDue || 0), 0)) } } });
+    // Fetch every matching invoice, uncapped — customerId in `query` may be a
+    // Mongoose-cast ObjectId while the field is actually stored as a string
+    // on many documents. Invoice.find() casts intelligently and matches
+    // correctly either way; Invoice.aggregate()'s $match does raw BSON
+    // comparison and silently matches nothing in that mismatch case (that's
+    // what caused totals to show 0 while the row list was correct). Only
+    // .find() is safe here, so totals come from the full uncapped list too.
+    const allInvoices = await Invoice.find(query).sort({ invoiceDate: -1 }).lean();
+    const invoices = allInvoices.slice(0, 500);
+    res.json({ success: true, data: { period: { start, end }, invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, customerEmail: inv.customerEmail, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, subTotal: fmt(inv.subTotal), totalTax: fmt((inv.totalCGST || 0) + (inv.totalSGST || 0) + (inv.totalIGST || 0)), totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), atId: inv._id.toString(), atType: 'Invoice', customerId: inv.customerId ? inv.customerId.toString() : null })), totals: { count: allInvoices.length, totalAmount: fmt(allInvoices.reduce((s, i) => s + (i.totalAmount || 0), 0)), totalPaid: fmt(allInvoices.reduce((s, i) => s + (i.amountPaid || 0), 0)), totalDue: fmt(allInvoices.reduce((s, i) => s + (i.amountDue || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 router.get('/receivable-summary', async (req, res) => {
   try {
+    const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Invoice = col('Invoice', 'invoices');
     const stats = await Invoice.aggregate([
-      { $match: scope },
+      { $match: { invoiceDate: { $gte: start, $lte: end }, ...scope } },
       { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$totalAmount' }, due: { $sum: '$amountDue' }, paid: { $sum: '$amountPaid' } } },
     ]);
     // FIX-4 pattern: also expose as 'invoices' so Flutter table renders
     const rows = stats.map(s => ({ status: s._id, count: s.count, amount: fmt(s.amount), due: fmt(s.due), paid: fmt(s.paid) }));
-    res.json({ success: true, data: { byStatus: rows, invoices: rows, totals: { totalInvoiced: fmt(stats.reduce((s, st) => s + st.amount, 0)), totalDue: fmt(stats.reduce((s, st) => s + st.due, 0)), totalPaid: fmt(stats.reduce((s, st) => s + st.paid, 0)) } } });
+    res.json({ success: true, data: { period: { start, end }, byStatus: rows, invoices: rows, totals: { totalInvoiced: fmt(stats.reduce((s, st) => s + st.amount, 0)), totalDue: fmt(stats.reduce((s, st) => s + st.due, 0)), totalPaid: fmt(stats.reduce((s, st) => s + st.paid, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -941,8 +1153,12 @@ router.get('/receivable-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Invoice = col('Invoice', 'invoices');
-    const invoices = await Invoice.find({ invoiceDate: { $gte: start, $lte: end }, status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, ...scope }).sort({ invoiceDate: -1 }).limit(500).lean();
-    res.json({ success: true, data: { period: { start, end }, invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), atId: inv._id.toString(), atType: 'Invoice' })), totals: { total: fmt(invoices.reduce((s, i) => s + (i.amountDue || 0), 0)) } } });
+    // Same reasoning as AR Aging / Customer Balance — these are still-owed
+    // receivables as of the period's end, not just invoices raised within it.
+    const receivableQuery = { invoiceDate: { $lte: end }, status: { $in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE', 'SENT'] }, ...scope };
+    const invoices = await Invoice.find(receivableQuery).sort({ invoiceDate: -1 }).limit(500).lean();
+    const totalsAgg = await sumFields(Invoice, receivableQuery, ['amountDue']);
+    res.json({ success: true, data: { period: { start, end }, invoices: invoices.map(inv => ({ invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, status: inv.status, totalAmount: fmt(inv.totalAmount), amountPaid: fmt(inv.amountPaid), amountDue: fmt(inv.amountDue), atId: inv._id.toString(), atType: 'Invoice', customerId: inv.customerId ? inv.customerId.toString() : null })), totals: { total: fmt(totalsAgg.amountDue) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -951,15 +1167,17 @@ router.get('/credit-note-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const CreditNote = col('CreditNote', 'creditnotes');
+    const statusFilter = req.query.status ? req.query.status : { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
     // Query by creditNoteDate OR createdAt to catch all records
     const notes = await CreditNote.find({
       $or: [
         { creditNoteDate: { $gte: start, $lte: end } },
         { createdAt: { $gte: start, $lte: end } },
       ],
+      status: statusFilter,
       ...scope
     }).sort({ creditNoteDate: -1 }).lean();
-    res.json({ success: true, data: { period: { start, end }, creditNotes: notes.map(cn => ({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, creditNoteDate: cn.creditNoteDate || cn.createdAt, reason: cn.reason, status: cn.status, totalAmount: fmt(cn.totalAmount), creditBalance: fmt(cn.creditBalance) })), totals: { count: notes.length, totalAmount: fmt(notes.reduce((s, n) => s + (n.totalAmount || 0), 0)) } } });
+    res.json({ success: true, data: { period: { start, end }, creditNotes: notes.map(cn => ({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, creditNoteDate: cn.creditNoteDate || cn.createdAt, reason: cn.reason, status: cn.status, totalAmount: fmt(cn.totalAmount), creditBalance: fmt(cn.creditBalance), atId: cn._id.toString(), atType: 'CreditNote', customerId: cn.customerId ? cn.customerId.toString() : null })), totals: { count: notes.length, totalAmount: fmt(notes.reduce((s, n) => s + (n.totalAmount || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -973,7 +1191,7 @@ router.get('/refund-history-receivables', async (req, res) => {
     for (const cn of notes) {
       for (const r of (cn.refunds || [])) {
         const rd = new Date(r.refundDate);
-        if (rd >= start && rd <= end) refunds.push({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, refundDate: rd, amount: fmt(r.amount), refundMethod: r.refundMethod, referenceNumber: r.referenceNumber });
+        if (rd >= start && rd <= end) refunds.push({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, refundDate: rd, amount: fmt(r.amount), refundMethod: r.refundMethod, referenceNumber: r.referenceNumber, atId: cn._id.toString(), atType: 'CreditNote', customerId: cn.customerId ? cn.customerId.toString() : null });
       }
     }
     res.json({ success: true, data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) } });
@@ -1051,6 +1269,8 @@ router.get('/payments-received', async (req, res) => {
       reference: p.reference || '',
       taxDeduction: p.taxDeduction || '', status: p.status || 'paid',
       hasProofs: (p.paymentProofs || []).length > 0, notes: p.notes || '',
+      atId: p._id.toString(), atType: 'PaymentReceived',
+      customerId: p.customerId ? p.customerId.toString() : null,
     }));
 
     res.json({ success: true, data: { period: { start, end }, payments: rows, totals: { count: rows.length, total: fmt(rows.reduce((s, r) => s + parseFloat(r.amount || 0), 0)), bankCharges: fmt(rows.reduce((s, r) => s + parseFloat(r.bankCharges || 0), 0)), netAmount: fmt(rows.reduce((s, r) => s + parseFloat(r.netAmount || 0), 0)) } } });
@@ -1066,7 +1286,7 @@ router.get('/time-to-get-paid', async (req, res) => {
     const rows = invoices.map(inv => {
       const fp = inv.payments?.[0];
       const days = fp ? Math.floor((new Date(fp.paymentDate || fp.recordedAt) - new Date(inv.invoiceDate)) / 86400000) : null;
-      return { invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, invoiceDate: inv.invoiceDate, paymentDate: fp?.paymentDate || fp?.recordedAt, daysToGetPaid: days, totalAmount: fmt(inv.totalAmount) };
+      return { invoiceNumber: inv.invoiceNumber, customerName: inv.customerName, invoiceDate: inv.invoiceDate, paymentDate: fp?.paymentDate || fp?.recordedAt, daysToGetPaid: days, totalAmount: fmt(inv.totalAmount), atId: inv._id.toString(), atType: 'Invoice', customerId: inv.customerId ? inv.customerId.toString() : null };
     }).filter(r => r.daysToGetPaid !== null && r.daysToGetPaid >= 0);
     const avgDays = rows.length > 0 ? fmt(rows.reduce((s, r) => s + r.daysToGetPaid, 0) / rows.length) : 0;
     res.json({ success: true, data: { period: { start, end }, invoices: rows, averageDaysToGetPaid: avgDays } });
@@ -1083,7 +1303,7 @@ router.get('/refund-history', async (req, res) => {
     for (const cn of notes) {
       for (const r of (cn.refunds || [])) {
         const rd = new Date(r.refundDate);
-        if (rd >= start && rd <= end) refunds.push({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, refundDate: rd, amount: fmt(r.amount), refundMethod: r.refundMethod });
+        if (rd >= start && rd <= end) refunds.push({ creditNoteNumber: cn.creditNoteNumber, customerName: cn.customerName, refundDate: rd, amount: fmt(r.amount), refundMethod: r.refundMethod, atId: cn._id.toString(), atType: 'CreditNote', customerId: cn.customerId ? cn.customerId.toString() : null });
       }
     }
     res.json({ success: true, data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) } });
@@ -1112,7 +1332,9 @@ router.get('/ap-aging-summary', async (req, res) => {
     const Bill = col('Bill', 'bills');
 
     const bills = await Bill.find({
-      billDate: { $gte: start, $lte: end },
+      // Same fix as AR Aging Summary — a snapshot of everything still owed
+      // as of the period's end, not just bills raised inside the window.
+      billDate: { $lte: end },
       status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] },
       amountDue: { $gt: 0 },
       ...scope
@@ -1176,7 +1398,9 @@ router.get('/ap-aging-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const today = end;
     const scope = orgScope(req);
-    const query = { billDate: { $gte: start, $lte: end }, status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope };
+    // Same fix as AR Aging Details — snapshot of everything still owed as of
+    // the period's end, not restricted to bills raised inside the window.
+    const query = { billDate: { $lte: end }, status: { $in: ['OPEN', 'OVERDUE', 'PARTIALLY_PAID'] }, amountDue: { $gt: 0 }, ...scope };
     
     if (req.query.vendorId) {
       const vid = safeObjId(req.query.vendorId);
@@ -1197,7 +1421,7 @@ router.get('/ap-aging-details', async (req, res) => {
       else if (days <= 60) bucket = '31-60 days';
       else if (days <= 90) bucket = '61-90 days';
       else bucket = 'Over 90 days';
-      return { billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), daysOverdue: Math.max(0, days), bucket, status: b.status };
+      return { billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), daysOverdue: Math.max(0, days), bucket, status: b.status, atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null };
     });
     res.json({ success: true, data: { asOf: today, bills: rows, total: fmt(rows.reduce((s, r) => s + (parseFloat(r.amountDue) || 0), 0)) } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -1208,8 +1432,10 @@ router.get('/vendor-balance', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Bill = col('Bill', 'bills');
+    // A vendor's balance is what we owe them as of now — not limited to
+    // bills raised inside the selected period. Same fix as Customer Balance.
     const rows = await Bill.aggregate([
-      { $match: { billDate: { $gte: start, $lte: end }, status: { $ne: 'DRAFT' }, ...scope } },
+      { $match: { billDate: { $lte: end }, status: { $ne: 'DRAFT' }, ...scope } },
       { $group: { _id: '$vendorId', vendorName: { $first: '$vendorName' }, vendorEmail: { $first: '$vendorEmail' }, billCount: { $sum: 1 }, totalBilled: { $sum: '$totalAmount' }, totalPaid: { $sum: '$amountPaid' }, totalDue: { $sum: '$amountDue' } } },
       { $sort: { totalDue: -1 } },
     ]);
@@ -1223,8 +1449,20 @@ router.get('/bill-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Bill = col('Bill', 'bills');
-    const query = { billDate: { $gte: start, $lte: end }, ...scope };
-    if (req.query.status) query.status = req.query.status;
+    // Same reasoning as invoice-details: only relax the date filter for an
+    // explicit balance-snapshot drill-down (Vendor Balance, AP Aging) —
+    // Purchases by Vendor is an activity report and must stay period-scoped.
+    const isBalanceSnapshot = req.query.balanceSnapshot === 'true';
+    const query = isBalanceSnapshot
+      ? { billDate: { $lte: end }, ...scope }
+      : { billDate: { $gte: start, $lte: end }, ...scope };
+    if (req.query.status) {
+      query.status = req.query.status;
+    } else {
+      // Drafts aren't real transactions yet — Zoho's own reports never
+      // show Draft-status documents unless explicitly asked for.
+      query.status = { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
+    }
     if (req.query.vendorId) {
       // FIX: try ObjectId first, fall back to string match
       const vid = safeObjId(req.query.vendorId);
@@ -1235,8 +1473,13 @@ router.get('/bill-details', async (req, res) => {
         query.vendorId = req.query.vendorId;
       }
     }
-    const bills = await Bill.find(query).sort({ billDate: -1 }).limit(500).lean();
-    res.json({ success: true, data: { period: { start, end }, bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, status: b.status, subTotal: fmt(b.subTotal), totalTax: fmt((b.cgst || 0) + (b.sgst || 0)), tdsAmount: fmt(b.tdsAmount), totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue) })), totals: { count: bills.length, totalAmount: fmt(bills.reduce((s, b) => s + (b.totalAmount || 0), 0)), totalPaid: fmt(bills.reduce((s, b) => s + (b.amountPaid || 0), 0)), totalDue: fmt(bills.reduce((s, b) => s + (b.amountDue || 0), 0)) } } });
+    // Same reasoning as invoice-details: vendorId in `query` may be a
+    // Mongoose-cast ObjectId while stored as a string on many documents —
+    // .find() casts correctly, .aggregate()'s $match doesn't, so totals must
+    // come from the same uncapped .find() the rows use.
+    const allBills = await Bill.find(query).sort({ billDate: -1 }).lean();
+    const bills = allBills.slice(0, 500);
+    res.json({ success: true, data: { period: { start, end }, bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, vendorEmail: b.vendorEmail, billDate: b.billDate, dueDate: b.dueDate, status: b.status, subTotal: fmt(b.subTotal), totalTax: fmt((b.cgst || 0) + (b.sgst || 0)), tdsAmount: fmt(b.tdsAmount), totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null })), totals: { count: allBills.length, totalAmount: fmt(allBills.reduce((s, b) => s + (b.totalAmount || 0), 0)), totalPaid: fmt(allBills.reduce((s, b) => s + (b.amountPaid || 0), 0)), totalDue: fmt(allBills.reduce((s, b) => s + (b.amountDue || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1247,18 +1490,19 @@ router.get('/vendor-credit-details', async (req, res) => {
     const scope = orgScope(req);
     // Try both possible collection names
     const db = getDB(req);
+    const statusFilter = req.query.status ? req.query.status : { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
     let credits = [];
     try {
       const VendorCredit = col('VendorCredit', 'vendorcredits');
-      credits = await VendorCredit.find({ creditDate: { $gte: start, $lte: end }, ...scope }).sort({ creditDate: -1 }).lean();
+      credits = await VendorCredit.find({ creditDate: { $gte: start, $lte: end }, status: statusFilter, ...scope }).sort({ creditDate: -1 }).lean();
     } catch (e1) {
       try {
-        credits = await db.collection('vendorcredits').find({ creditDate: { $gte: start, $lte: end }, ...scope }).toArray();
+        credits = await db.collection('vendorcredits').find({ creditDate: { $gte: start, $lte: end }, status: statusFilter, ...scope }).toArray();
       } catch (e2) {
         credits = [];
       }
     }
-    const rows = credits.map(vc => ({ creditNumber: vc.creditNumber, vendorName: vc.vendorName, creditDate: vc.creditDate, status: vc.status, reason: vc.reason, totalAmount: fmt(vc.totalAmount), appliedAmount: fmt(vc.appliedAmount || 0), balanceAmount: fmt(vc.balanceAmount || 0) }));
+    const rows = credits.map(vc => ({ creditNumber: vc.creditNumber, vendorName: vc.vendorName, creditDate: vc.creditDate, status: vc.status, reason: vc.reason, totalAmount: fmt(vc.totalAmount), appliedAmount: fmt(vc.appliedAmount || 0), balanceAmount: fmt(vc.balanceAmount || 0), atId: vc._id.toString(), atType: 'VendorCredit', vendorId: vc.vendorId ? vc.vendorId.toString() : null }));
     res.json({ success: true, data: { period: { start, end }, vendorCredits: rows, totals: { count: rows.length, total: fmt(rows.reduce((s, vc) => s + (parseFloat(vc.totalAmount) || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
@@ -1268,12 +1512,15 @@ router.get('/payments-made', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const db = getDB(req);
-    // Try multiple possible collection names
+    // Try multiple possible collection names. Fetch uncapped — the date
+    // filter below runs in JS (paymentDate isn't reliably indexed/typed
+    // the same way createdAt is), so capping before that filter would both
+    // cut off real matches and let non-matches occupy the cap.
     let payments = [];
     const collections = ['paymentsmade', 'payments_made', 'paymentmades'];
     for (const cname of collections) {
       try {
-        payments = await db.collection(cname).find({ ...scope }).sort({ createdAt: -1 }).limit(500).toArray();
+        payments = await db.collection(cname).find({ ...scope }).sort({ createdAt: -1 }).toArray();
         if (payments.length > 0) break;
       } catch (_) { }
     }
@@ -1283,8 +1530,9 @@ router.get('/payments-made', async (req, res) => {
       if (!d) return true;
       return d >= start && d <= end;
     });
-    const rows = filtered.map(p => ({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, paymentDate: p.paymentDate, paymentMode: p.paymentMode, amount: fmt(p.amount || p.totalAmount || 0), status: p.status || 'paid', referenceNumber: p.referenceNumber || '', billsApplied: (p.billsApplied || []).length }));
-    res.json({ success: true, data: { period: { start, end }, payments: rows, totals: { count: rows.length, total: fmt(rows.reduce((s, p) => s + parseFloat(p.amount || 0), 0)) } } });
+    // Totals reflect the full filtered set; only the returned rows are capped.
+    const rows = filtered.slice(0, 500).map(p => ({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, paymentDate: p.paymentDate, paymentMode: p.paymentMode, amount: fmt(p.amount || p.totalAmount || 0), status: p.status || 'paid', referenceNumber: p.referenceNumber || '', billsApplied: (p.billsApplied || []).length, atId: p._id.toString(), atType: 'PaymentMade', vendorId: p.vendorId ? p.vendorId.toString() : null }));
+    res.json({ success: true, data: { period: { start, end }, payments: rows, totals: { count: filtered.length, total: fmt(filtered.reduce((s, p) => s + parseFloat(p.amount || p.totalAmount || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1298,7 +1546,7 @@ router.get('/refund-history-payables', async (req, res) => {
     for (const p of payments) {
       for (const r of (p.refunds || [])) {
         const rd = new Date(r.refundDate || r.refundedAt);
-        if (rd >= start && rd <= end) refunds.push({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, refundDate: rd, amount: fmt(r.amount), refundMode: r.refundMode, referenceNumber: r.referenceNumber });
+        if (rd >= start && rd <= end) refunds.push({ paymentNumber: p.paymentNumber, vendorName: p.vendorName, refundDate: rd, amount: fmt(r.amount), refundMode: r.refundMode, referenceNumber: r.referenceNumber, atId: p._id.toString(), atType: 'PaymentMade', vendorId: p.vendorId ? p.vendorId.toString() : null });
       }
     }
     res.json({ success: true, data: { period: { start, end }, refunds, total: fmt(refunds.reduce((s, r) => s + r.amount, 0)) } });
@@ -1310,8 +1558,11 @@ router.get('/purchase-order-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const PO = col('PurchaseOrder', 'purchaseorders');
-    const pos = await PO.find({ purchaseOrderDate: { $gte: start, $lte: end }, ...scope }).sort({ purchaseOrderDate: -1 }).limit(500).lean();
-    res.json({ success: true, data: { period: { start, end }, purchaseOrders: pos.map(p => ({ purchaseOrderNumber: p.purchaseOrderNumber, vendorName: p.vendorName, purchaseOrderDate: p.purchaseOrderDate, expectedDeliveryDate: p.expectedDeliveryDate, status: p.status, subTotal: fmt(p.subTotal), totalAmount: fmt(p.totalAmount), receiveStatus: p.receiveStatus, billingStatus: p.billingStatus })), totals: { count: pos.length, totalAmount: fmt(pos.reduce((s, p) => s + (p.totalAmount || 0), 0)) } } });
+    const statusFilter = req.query.status ? req.query.status : { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
+    const poQuery = { purchaseOrderDate: { $gte: start, $lte: end }, status: statusFilter, ...scope };
+    const pos = await PO.find(poQuery).sort({ purchaseOrderDate: -1 }).limit(500).lean();
+    const totalsAgg = await sumFields(PO, poQuery, ['totalAmount']);
+    res.json({ success: true, data: { period: { start, end }, purchaseOrders: pos.map(p => ({ purchaseOrderNumber: p.purchaseOrderNumber, vendorName: p.vendorName, purchaseOrderDate: p.purchaseOrderDate, expectedDeliveryDate: p.expectedDeliveryDate, status: p.status, subTotal: fmt(p.subTotal), totalAmount: fmt(p.totalAmount), receiveStatus: p.receiveStatus, billingStatus: p.billingStatus, atId: p._id.toString(), atType: 'PurchaseOrder', vendorId: p.vendorId ? p.vendorId.toString() : null })), totals: { count: totalsAgg.count, totalAmount: fmt(totalsAgg.totalAmount) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1367,20 +1618,40 @@ router.get('/purchase-orders-by-vendor', async (req, res) => {
 });
 
 // FIX-4: payable-summary — adds 'bills' alias so Flutter table renders
+// Payable Summary — matches Zoho Books' real definition: "a detailed view of
+// all the purchase transactions (Bills, Vendor Credits and Expenses)", not a
+// status breakdown. Each row is one real transaction, newest first.
 router.get('/payable-summary', async (req, res) => {
   try {
+    const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
+    const statusFilter = req.query.status ? req.query.status : { $nin: ['DRAFT', 'CANCELLED', 'VOID'] };
+
     const Bill = col('Bill', 'bills');
-    const stats = await Bill.aggregate([
-      { $match: scope },
-      { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$totalAmount' }, due: { $sum: '$amountDue' }, paid: { $sum: '$amountPaid' } } },
+    const VendorCredit = col('VendorCredit', 'vendorcredits');
+    const Expense = col('Expense', 'expenses');
+
+    const [bills, credits, expenses] = await Promise.all([
+      Bill.find({ billDate: { $gte: start, $lte: end }, status: statusFilter, ...scope }).lean(),
+      VendorCredit.find({ creditDate: { $gte: start, $lte: end }, status: statusFilter, ...scope }).lean(),
+      Expense.find({ date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) }, ...scope }).lean(),
     ]);
-    const rows = stats.map(s => ({ status: s._id, count: s.count, amount: fmt(s.amount), due: fmt(s.due), paid: fmt(s.paid) }));
+
+    const rows = [
+      ...bills.map(b => ({ type: 'Bill', number: b.billNumber, vendorName: b.vendorName, date: b.billDate, status: b.status, totalAmount: fmt(b.totalAmount), amountDue: fmt(b.amountDue) })),
+      ...credits.map(c => ({ type: 'Vendor Credit', number: c.creditNumber, vendorName: c.vendorName, date: c.creditDate, status: c.status, totalAmount: fmt(c.totalAmount), amountDue: fmt(c.balanceAmount || 0) })),
+      ...expenses.map(e => ({ type: 'Expense', number: e.expenseNumber, vendorName: e.vendor || e.paidThrough || '', date: e.date, status: 'PAID', totalAmount: fmt(e.total), amountDue: 0 })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
     res.json({
       success: true, data: {
-        byStatus: rows,
-        bills: rows,  // FIX: Flutter listKeys includes 'bills' but not 'byStatus'
-        totals: { totalBilled: fmt(stats.reduce((s, st) => s + st.amount, 0)), totalDue: fmt(stats.reduce((s, st) => s + st.due, 0)), totalPaid: fmt(stats.reduce((s, st) => s + st.paid, 0)) }
+        period: { start, end },
+        transactions: rows,
+        totals: {
+          count: rows.length,
+          totalAmount: fmt(rows.reduce((s, r) => s + r.totalAmount, 0)),
+          totalDue: fmt(rows.reduce((s, r) => s + r.amountDue, 0)),
+        }
       }
     });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -1393,8 +1664,10 @@ router.get('/payable-details', async (req, res) => {
     const scope = orgScope(req);
     const Bill = col('Bill', 'bills');
     // FIX: removed status filter — all bills in period shown, not just OPEN/OVERDUE/PARTIALLY_PAID
-    const bills = await Bill.find({ billDate: { $gte: start, $lte: end }, ...scope }).sort({ billDate: -1 }).limit(500).lean();
-    res.json({ success: true, data: { period: { start, end }, bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, billDate: b.billDate, dueDate: b.dueDate, status: b.status, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), atId: b._id.toString(), atType: 'Bill' })), totals: { total: fmt(bills.reduce((s, b) => s + (b.amountDue || 0), 0)) } } });
+    const payableQuery = { billDate: { $gte: start, $lte: end }, ...scope };
+    const bills = await Bill.find(payableQuery).sort({ billDate: -1 }).limit(500).lean();
+    const totalsAgg = await sumFields(Bill, payableQuery, ['amountDue']);
+    res.json({ success: true, data: { period: { start, end }, bills: bills.map(b => ({ billNumber: b.billNumber, vendorName: b.vendorName, billDate: b.billDate, dueDate: b.dueDate, status: b.status, totalAmount: fmt(b.totalAmount), amountPaid: fmt(b.amountPaid), amountDue: fmt(b.amountDue), atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null })), totals: { total: fmt(totalsAgg.amountDue) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1436,8 +1709,8 @@ router.get('/expense-details', async (req, res) => {
     const { start, end } = parseDateRange(req.query);
     const scope = orgScope(req);
     const Expense = col('Expense', 'expenses');
-    const startStr = start.toISOString().split('T')[0];
-    const endStr = end.toISOString().split('T')[0];
+    const startStr = toLocalDateStr(start);
+    const endStr = toLocalDateStr(end);
     const query = { date: { $gte: startStr, $lte: endStr }, ...scope };
     if (req.query.vendor) query.vendor = new RegExp(req.query.vendor, 'i');
     if (req.query.expenseAccount) {
@@ -1450,8 +1723,12 @@ router.get('/expense-details', async (req, res) => {
     if (req.query.customerName) query.customerName = req.query.customerName;
     if (req.query.paidThrough) query.paidThrough = req.query.paidThrough;
 
-    // ✅ FIX: Fetch all expenses first
-    const allExpenses = await Expense.find(query).sort({ date: -1 }).limit(500).lean();
+    // Fetch every matching expense, uncapped — the account-type filter below
+    // and the totals need the true dataset, not just the first 500. A cap
+    // here before filtering could silently drop whole accounts out of the
+    // uniqueAccounts lookup, and totals were only ever a sum of survivors of
+    // that cap. Only the final display list gets capped, after filtering.
+    const allExpenses = await Expense.find(query).sort({ date: -1 }).lean();
 
     // Get unique expense account names
     const uniqueAccounts = [...new Set(allExpenses.map(e => e.expenseAccount).filter(Boolean))];
@@ -1483,7 +1760,9 @@ router.get('/expense-details', async (req, res) => {
     const bankAcctMap = {};
     bankAccounts.forEach(a => { bankAcctMap[a.accountName] = a._id.toString(); });
 
-    res.json({ success: true, data: { period: { start, end }, expenses: expenses.map(e => ({ id: e._id, expenseNumber: e.expenseNumber, date: e.date, expenseAccount: e.expenseAccount, amount: fmt(e.amount), tax: fmt(e.tax), total: fmt(e.total), paidThrough: e.paidThrough, vendor: e.vendor, customerName: e.customerName, isBillable: e.isBillable, project: e.project, notes: e.notes, atId: e._id.toString(), atType: 'Expense', btId: e.providerTransactionId?.toString() || null, bankAccountId: bankAcctMap[e.paidThrough] || null })), totals: { count: expenses.length, totalAmount: fmt(expenses.reduce((s, e) => s + (e.total || 0), 0)) } } });
+    // Totals reflect the full filtered set; only the returned rows are capped.
+    const displayExpenses = expenses.slice(0, 500);
+    res.json({ success: true, data: { period: { start, end }, expenses: displayExpenses.map(e => ({ id: e._id, expenseNumber: e.expenseNumber, date: e.date, expenseAccount: e.expenseAccount, amount: fmt(e.amount), tax: fmt(e.tax), total: fmt(e.total), paidThrough: e.paidThrough, vendor: e.vendor, customerName: e.customerName, isBillable: e.isBillable, project: e.project, notes: e.notes, atId: e._id.toString(), atType: 'Expense', btId: e.providerTransactionId?.toString() || null, bankAccountId: bankAcctMap[e.paidThrough] || null })), totals: { count: expenses.length, totalAmount: fmt(expenses.reduce((s, e) => s + (e.total || 0), 0)) } } });
   } catch (e) {
     console.error('❌ expense-details error:', e.message);
     res.status(500).json({ success: false, message: e.message });
@@ -1498,7 +1777,7 @@ router.get('/expenses-by-category', async (req, res) => {
 
     // ✅ FIX BUG 2: Get all expenses first
     const allExpenses = await Expense.find({
-      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) },
       ...scope
     }).lean();
 
@@ -1558,7 +1837,7 @@ router.get('/expenses-by-customer', async (req, res) => {
 
     // ✅ FIX: Fetch all expenses first, then filter by account type
     const allExpenses = await Expense.find({
-      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) },
       customerName: { $ne: null, $exists: true },
       ...scope
     }).lean();
@@ -1597,7 +1876,14 @@ router.get('/expenses-by-customer', async (req, res) => {
       .map(([customerName, data]) => ({ customerName, ...data }))
       .sort((a, b) => b.total - a.total);
 
-    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ customerName: r.customerName, count: r.count, total: fmt(r.total), billableTotal: fmt(r.billableTotal) })) } });
+    // Expense records only store customerName (no customerId field), so
+    // resolve names to ids by lookup for navigation.
+    const BillingCustomer = col('BillingCustomer', 'billing-customers');
+    const custDocs = await BillingCustomer.find({ customerName: { $in: rows.map(r => r.customerName) }, ...(scope.orgId ? { orgId: scope.orgId } : {}) }).select('_id customerName').lean();
+    const custIdByName = {};
+    custDocs.forEach(c => { custIdByName[c.customerName] = c._id.toString(); });
+
+    res.json({ success: true, data: { period: { start, end }, customers: rows.map(r => ({ customerName: r.customerName, count: r.count, total: fmt(r.total), billableTotal: fmt(r.billableTotal), customerId: custIdByName[r.customerName] || null })) } });
   } catch (e) {
     console.error('❌ expenses-by-customer error:', e.message);
     res.status(500).json({ success: false, message: e.message });
@@ -1612,7 +1898,7 @@ router.get('/expenses-by-project', async (req, res) => {
 
     // ✅ FIX: Fetch all expenses first, then filter by account type
     const allExpenses = await Expense.find({
-      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) },
       project: { $ne: null, $exists: true },
       ...scope
     }).lean();
@@ -1665,7 +1951,7 @@ router.get('/expenses-by-employee', async (req, res) => {
 
     // ✅ FIX: Fetch all expenses first, then filter by account type
     const allExpenses = await Expense.find({
-      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) },
       ...scope
     }).lean();
 
@@ -1718,7 +2004,7 @@ router.get('/billable-expenses', async (req, res) => {
     // ✅ FIX: Fetch all billable expenses first, then filter by account type
     const allExpenses = await Expense.find({
       isBillable: true,
-      date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] },
+      date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) },
       ...scope
     }).sort({ date: -1 }).lean();
 
@@ -1762,6 +2048,10 @@ router.get('/tds-summary', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// TDS Receivable Summary — grouped by TDS Section (matches Zoho Books' layout).
+// The ledger (AccountTransaction) rows don't carry a section, so we join back
+// to the invoice by referenceNumber to read invoice.tdsSection. This keeps the
+// COA posting logic untouched — the grouping happens only in the report layer.
 router.get('/tds-receivable', async (req, res) => {
   try {
     const { start, end } = parseDateRange(req.query);
@@ -1769,9 +2059,100 @@ router.get('/tds-receivable', async (req, res) => {
     const tdsAcc = await ChartOfAccount.findOne({ accountName: 'TDS Receivable', isSystemAccount: true, ...coaScope(req) }).lean();
     if (!tdsAcc) return res.json({ success: true, data: { period: { start, end }, transactions: [], totals: { totalTDSDeducted: 0 }, message: 'TDS Receivable account not seeded.' } });
     const txns = await AccountTransaction.find({ accountId: tdsAcc._id, date: { $gte: start, $lte: end }, ...scope }).sort({ date: -1 }).lean();
+
     const Invoice = col('Invoice', 'invoices');
-    const stats = await Invoice.aggregate([{ $match: { invoiceDate: { $gte: start, $lte: end }, tdsAmount: { $gt: 0 }, ...scope } }, { $group: { _id: null, totalTDS: { $sum: '$tdsAmount' }, count: { $sum: 1 } } }]);
-    res.json({ success: true, data: { period: { start, end }, transactions: txns.map(t => ({ date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit) })), totals: { totalTDSDeducted: fmt(txns.reduce((s, t) => s + (t.debit || 0), 0)), invoiceCount: stats[0]?.count || 0, totalFromInvoices: fmt(stats[0]?.totalTDS || 0) } } });
+    const invoiceNumbers = [...new Set(txns.map(t => t.referenceNumber).filter(Boolean))];
+    const invoices = await Invoice.find({ invoiceNumber: { $in: invoiceNumbers }, ...scope })
+      .select('invoiceNumber tdsSection tdsRate totalAmount tdsAmount').lean();
+    const invByNumber = {};
+    invoices.forEach(inv => { invByNumber[inv.invoiceNumber] = inv; });
+
+    const sectionMap = {};
+    for (const t of txns) {
+      const inv = invByNumber[t.referenceNumber];
+      const section = inv?.tdsSection?.trim() || 'Uncategorized';
+      if (!sectionMap[section]) {
+        sectionMap[section] = { section, ratePercent: inv?.tdsRate || 0, totalTDSDeducted: 0, invoiceCount: 0, totalFromInvoices: 0 };
+      }
+      sectionMap[section].totalTDSDeducted += (t.debit || 0);
+      sectionMap[section].invoiceCount     += 1;
+      sectionMap[section].totalFromInvoices += (inv?.totalAmount || 0);
+    }
+    const sections = Object.values(sectionMap).map(s => ({
+      section: s.section,
+      ratePercent: s.ratePercent,
+      totalTDSDeducted: fmt(s.totalTDSDeducted),
+      invoiceCount: s.invoiceCount,
+      totalFromInvoices: fmt(s.totalFromInvoices),
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        period: { start, end },
+        transactions: sections,
+        totals: {
+          totalTDSDeducted: fmt(txns.reduce((s, t) => s + (t.debit || 0), 0)),
+          invoiceCount: txns.length,
+          totalFromInvoices: fmt(invoices.reduce((s, i) => s + (i.totalAmount || 0), 0)),
+        },
+      },
+    });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// TDS Receivable Details — invoices under one specific TDS section, with the
+// customer's PAN joined in (the customer record already has panNumber; TDS
+// docs just never pulled it in before).
+router.get('/tds-receivable-details', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const section = (req.query.section || '').trim();
+
+    const Invoice = col('Invoice', 'invoices');
+    const query = { invoiceDate: { $gte: start, $lte: end }, tdsAmount: { $gt: 0 }, ...scope };
+    query.tdsSection = section === 'Uncategorized' ? { $in: ['', null] } : section;
+
+    const invoices = await Invoice.find(query).sort({ invoiceDate: -1 }).lean();
+
+    const BillingCustomer = col('BillingCustomer', 'billing-customers');
+    const custIds = [...new Set(invoices.map(i => i.customerId).filter(Boolean))];
+    const customers = await BillingCustomer.find({
+      $or: [{ _id: { $in: custIds.filter(id => /^[0-9a-fA-F]{24}$/.test(id)) } }, { customerId: { $in: custIds } }],
+    }).select('_id customerId panNumber').lean();
+    const panByCustomer = {};
+    customers.forEach(c => {
+      if (c._id) panByCustomer[c._id.toString()] = c.panNumber || '';
+      if (c.customerId) panByCustomer[c.customerId] = c.panNumber || '';
+    });
+
+    res.json({
+      success: true,
+      data: {
+        section,
+        period: { start, end },
+        invoices: invoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          customerName: inv.customerName,
+          panNumber: panByCustomer[inv.customerId] || '',
+          invoiceDate: inv.invoiceDate,
+          transactionType: 'Invoice',
+          reasonForHigherDeduction: inv.tdsReason || '-',
+          ratePercent: inv.tdsRate || 0,
+          totalAmount: fmt(inv.totalAmount),
+          taxDeductedAtSource: fmt(inv.tdsAmount),
+          totalAfterTdsDeduction: fmt((inv.totalAmount || 0) - (inv.tdsAmount || 0)),
+          atId: inv._id.toString(),
+          atType: 'Invoice',
+          customerId: inv.customerId ? inv.customerId.toString() : null,
+        })),
+        totals: {
+          count: invoices.length,
+          totalTDSDeducted: fmt(invoices.reduce((s, i) => s + (i.tdsAmount || 0), 0)),
+        },
+      },
+    });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1858,6 +2239,11 @@ router.get('/timesheet-details', async (req, res) => {
       .limit(500)
       .toArray();
 
+    const [totalAgg, billableAgg] = await Promise.all([
+      sumFields(db.collection('timesheets'), query, ['hours']),
+      sumFields(db.collection('timesheets'), { ...query, isBillable: true }, ['hours']),
+    ]);
+
     res.json({
       success: true, data: {
         period: { start, end },
@@ -1874,8 +2260,8 @@ router.get('/timesheet-details', async (req, res) => {
           notes: e.notes,
         })),
         totals: {
-          totalHours: fmt(entries.reduce((s, e) => s + (e.hours || 0), 0)),
-          billableHours: fmt(entries.filter(e => e.isBillable).reduce((s, e) => s + (e.hours || 0), 0)),
+          totalHours: fmt(totalAgg.hours),
+          billableHours: fmt(billableAgg.hours),
         },
       }
     });
@@ -1907,7 +2293,7 @@ router.get('/project-summary', async (req, res) => {
     const scope = orgScope(req);
     const db = getDB(req);
     const projects = await db.collection('projects').find({ ...scope, ...(req.query.status ? { status: req.query.status } : {}) }).sort({ createdAt: -1 }).toArray();
-    res.json({ success: true, data: { period: { start, end }, projects: projects.map(p => ({ projectNumber: p.projectNumber, projectName: p.projectName, customerName: p.customerName, billingMethod: p.billingMethod, status: p.status, startDate: p.startDate, endDate: p.endDate, totalLoggedHours: fmt(p.totalLoggedHours || 0), totalBilledAmount: fmt(p.totalBilledAmount || 0), budgetAmount: fmt(p.budgetAmount || 0) })), totals: { totalProjects: projects.length, activeProjects: projects.filter(p => p.status === 'Active').length, totalBilledAmount: fmt(projects.reduce((s, p) => s + (p.totalBilledAmount || 0), 0)) } } });
+    res.json({ success: true, data: { period: { start, end }, projects: projects.map(p => ({ projectId: p._id.toString(), projectNumber: p.projectNumber, projectName: p.projectName, customerName: p.customerName, billingMethod: p.billingMethod, status: p.status, startDate: p.startDate, endDate: p.endDate, totalLoggedHours: fmt(p.totalLoggedHours || 0), totalBilledAmount: fmt(p.totalBilledAmount || 0), budgetAmount: fmt(p.budgetAmount || 0) })), totals: { totalProjects: projects.length, activeProjects: projects.filter(p => p.status === 'Active').length, totalBilledAmount: fmt(projects.reduce((s, p) => s + (p.totalBilledAmount || 0), 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -1969,9 +2355,9 @@ router.get('/projects-cost-summary', async (req, res) => {
     const projects = await db.collection('projects').find(scope).toArray();
     const rows = [];
     for (const project of projects) {
-      const expenses = await Expense.find({ project: project.projectName, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).lean();
+      const expenses = await Expense.find({ project: project.projectName, date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) }, ...scope }).lean();
       const totalExpenses = expenses.reduce((s, e) => s + (e.total || 0), 0);
-      rows.push({ projectName: project.projectName, customerName: project.customerName, budgetAmount: fmt(project.budgetAmount || 0), actualCost: fmt(totalExpenses), variance: fmt((project.budgetAmount || 0) - totalExpenses), utilizationPercent: project.budgetAmount > 0 ? fmt((totalExpenses / project.budgetAmount) * 100) : 0 });
+      rows.push({ projectId: project._id.toString(), projectName: project.projectName, customerName: project.customerName, budgetAmount: fmt(project.budgetAmount || 0), actualCost: fmt(totalExpenses), variance: fmt((project.budgetAmount || 0) - totalExpenses), utilizationPercent: project.budgetAmount > 0 ? fmt((totalExpenses / project.budgetAmount) * 100) : 0 });
     }
     res.json({ success: true, data: { period: { start, end }, projects: rows } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -1988,7 +2374,7 @@ router.get('/projects-revenue-summary', async (req, res) => {
     for (const project of projects) {
       const invoices = await Invoice.find({ projectId: project._id.toString(), invoiceDate: { $gte: start, $lte: end }, status: { $nin: ['DRAFT', 'CANCELLED'] }, ...scope }).lean();
       const totalRevenue = invoices.reduce((s, i) => s + (i.totalAmount || 0), 0);
-      rows.push({ projectName: project.projectName, customerName: project.customerName, billingMethod: project.billingMethod, totalBilledAmount: fmt(project.totalBilledAmount || 0), totalInvoiced: fmt(totalRevenue), invoiceCount: invoices.length });
+      rows.push({ projectId: project._id.toString(), projectName: project.projectName, customerName: project.customerName, billingMethod: project.billingMethod, totalBilledAmount: fmt(project.totalBilledAmount || 0), totalInvoiced: fmt(totalRevenue), invoiceCount: invoices.length });
     }
     res.json({ success: true, data: { period: { start, end }, projects: rows } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2013,7 +2399,7 @@ router.get('/projects-performance', async (req, res) => {
       const totalCost = expenses.reduce((s, e) => s + (e.total || 0), 0);
       const totalRevenue = invoices.reduce((s, i) => s + (i.totalAmount || 0), 0);
       const profit = totalRevenue - totalCost;
-      rows.push({ projectName: project.projectName, customerName: project.customerName, status: project.status, totalHours: fmt(totalHours), totalCost: fmt(totalCost), totalRevenue: fmt(totalRevenue), profit: fmt(profit), profitMargin: totalRevenue > 0 ? fmt((profit / totalRevenue) * 100) : 0 });
+      rows.push({ projectId: project._id.toString(), projectName: project.projectName, customerName: project.customerName, status: project.status, totalHours: fmt(totalHours), totalCost: fmt(totalCost), totalRevenue: fmt(totalRevenue), profit: fmt(profit), profitMargin: totalRevenue > 0 ? fmt((profit / totalRevenue) * 100) : 0 });
     }
     res.json({ success: true, data: { period: { start, end }, projects: rows } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2035,13 +2421,14 @@ router.get('/general-ledger', async (req, res) => {
     const accounts = await ChartOfAccount.find(accQuery).sort({ accountCode: 1 }).lean();
     const ids = accounts.map(a => a._id);
     const txns = await AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ accountId: 1, date: 1 }).lean();
+    const refNumberMap = await resolveReferenceNumbers(txns);
     const grouped = {};
     accounts.forEach(a => { grouped[a._id.toString()] = { account: a, transactions: [] }; });
     txns.forEach(t => { const k = t.accountId.toString(); if (grouped[k]) grouped[k].transactions.push(t); });
     const result = Object.values(grouped).filter(g => g.transactions.length > 0).map(g => {
       let balance = 0;
-      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance) }; });
-      return { accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closing: fmt(balance) } };
+      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: refNumberMap[t.referenceNumber] || t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance), atId: t.referenceId?.toString(), atType: normalizeAtType(t.referenceType) }; });
+      return { accountId: g.account._id.toString(), accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closing: fmt(balance) } };
     });
     res.json({ success: true, data: { period: { start, end }, accounts: result } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2057,14 +2444,15 @@ router.get('/general-ledger-detailed', async (req, res) => {
       AccountTransaction.aggregate([{ $match: { accountId: { $in: ids }, date: { $lt: start }, ...scope } }, { $group: { _id: '$accountId', dr: { $sum: '$debit' }, cr: { $sum: '$credit' } } }]),
       AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ accountId: 1, date: 1 }).lean(),
     ]);
+    const refNumberMap = await resolveReferenceNumbers(periodTxns);
     const openMap = {}; openTxns.forEach(t => { openMap[t._id.toString()] = fmt(t.dr - t.cr); });
     const grouped = {}; accounts.forEach(a => { grouped[a._id.toString()] = { account: a, transactions: [] }; });
     periodTxns.forEach(t => { const k = t.accountId.toString(); if (grouped[k]) grouped[k].transactions.push(t); });
     const result = Object.values(grouped).filter(g => g.transactions.length > 0 || openMap[g.account._id.toString()]).map(g => {
       const opening = openMap[g.account._id.toString()] || 0;
       let balance = opening;
-      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance) }; });
-      return { accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, openingBalance: fmt(opening), transactions: rows, closingBalance: fmt(balance) };
+      const rows = g.transactions.map(t => { balance += (t.debit || 0) - (t.credit || 0); return { date: t.date, description: t.description, referenceType: t.referenceType, referenceNumber: refNumberMap[t.referenceNumber] || t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance), atId: t.referenceId?.toString(), atType: normalizeAtType(t.referenceType) }; });
+      return { accountId: g.account._id.toString(), accountCode: g.account.accountCode, accountName: g.account.accountName, accountType: g.account.accountType, openingBalance: fmt(opening), transactions: rows, closingBalance: fmt(balance) };
     });
     res.json({ success: true, data: { period: { start, end }, accounts: result } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2118,6 +2506,36 @@ async function resolveReferenceNumbers(txns) {
   return refNumberMap;
 }
 
+// AccountTransaction.referenceType is written inconsistently across the
+// codebase ("Credit Note" vs "VendorCredit" vs "Payment" for Payment
+// Received) — normalize to the PascalCase-no-space atType convention the
+// frontend's navigation switch expects everywhere else.
+function normalizeAtType(refType) {
+  const map = {
+    'Bill': 'Bill', 'Expense': 'Expense', 'Invoice': 'Invoice',
+    'Credit Note': 'CreditNote', 'VendorCredit': 'VendorCredit',
+    'Journal': 'JournalEntry', 'Payment': 'PaymentReceived', 'PaymentMade': 'PaymentMade',
+  };
+  return map[refType] || null;
+}
+
+// Every `.limit(500)` list-detail route below was computing its summary
+// totals by .reduce()-ing over the same capped array used for display rows —
+// correct as long as the true match count stayed under 500, silently wrong
+// (undercounted) once it didn't. This computes the real totals via a
+// $match+$group aggregate against the identical filter, independent of the
+// display cap. Works against a Mongoose model or a raw db collection —
+// both expose .aggregate() with the same call shape.
+async function sumFields(modelOrCollection, filter, fields) {
+  const group = { _id: null, count: { $sum: 1 } };
+  fields.forEach(f => { group[f] = { $sum: { $ifNull: [`$${f}`, 0] } }; });
+  const [result] = await modelOrCollection.aggregate([{ $match: filter }, { $group: group }]);
+  if (result) return result;
+  const zeroed = { count: 0 };
+  fields.forEach(f => { zeroed[f] = 0; });
+  return zeroed;
+}
+
 router.get('/account-transactions', async (req, res) => {
   try {
     const { start, end } = parseDateRange(req.query);
@@ -2129,20 +2547,55 @@ router.get('/account-transactions', async (req, res) => {
       const accounts = await ChartOfAccount.find({ isActive: true, ...coaScope(req) }).lean();
       const ids = accounts.map(a => a._id);
       const accMap = {}; accounts.forEach(a => { accMap[a._id.toString()] = a; });
-      const txns = await AccountTransaction.find({ accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).limit(500).lean();
+      const baseFilter = { accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope };
+      // Most recent 500 for display (matches every sibling report's convention);
+      // totals below are a real aggregate over the full match, independent of the cap.
+      const txns = await AccountTransaction.find(baseFilter).sort({ date: -1 }).limit(500).lean();
       const refNumberMap = await resolveReferenceNumbers(txns);
-      let balance = 0;
-      const rows = txns.map(t => {
+      // Running "balance" per row must be computed in chronological order —
+      // find the opening balance for whatever's NOT in this capped page (i.e.
+      // period transactions older than the oldest one we're displaying), then
+      // accumulate forward so each displayed row's balance is still accurate
+      // even though older, uncapped rows aren't shown.
+      const chronological = [...txns].reverse();
+      const earliestDate = chronological[0]?.date;
+      let openingBalance = 0;
+      if (earliestDate) {
+        const opening = await sumFields(AccountTransaction, { accountId: { $in: ids }, date: { $gte: start, $lt: earliestDate }, ...scope }, ['debit', 'credit']);
+        openingBalance = (opening.debit || 0) - (opening.credit || 0);
+      }
+      let balance = openingBalance;
+      const balanceByTxnId = {};
+      chronological.forEach(t => {
         balance += (t.debit || 0) - (t.credit || 0);
-        return { date: t.date, description: t.description, accountName: accMap[t.accountId?.toString()]?.accountName || '', accountType: accMap[t.accountId?.toString()]?.accountType || '', referenceType: t.referenceType, referenceNumber: refNumberMap[t.referenceNumber] || t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balance), atId: t.referenceId?.toString(), atType: t.referenceType, btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null, bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null };
+        balanceByTxnId[t._id.toString()] = balance;
       });
-      return res.json({ success: true, data: { period: { start, end }, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closingBalance: fmt(balance) } } });
+      const rows = txns.map(t => ({ date: t.date, description: t.description, accountName: accMap[t.accountId?.toString()]?.accountName || '', accountType: accMap[t.accountId?.toString()]?.accountType || '', referenceType: t.referenceType, referenceNumber: refNumberMap[t.referenceNumber] || t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balanceByTxnId[t._id.toString()]), atId: t.referenceId?.toString(), atType: normalizeAtType(t.referenceType), btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null, bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null }));
+      const totalsAgg = await sumFields(AccountTransaction, baseFilter, ['debit', 'credit']);
+      return res.json({ success: true, data: { period: { start, end }, transactions: rows, totals: { debit: fmt(totalsAgg.debit), credit: fmt(totalsAgg.credit), closingBalance: fmt(totalsAgg.debit - totalsAgg.credit) } } });
     }
 
     const account = await ChartOfAccount.findOne({ _id: accountId, ...coaScope(req) }).lean();
     if (!account) return res.status(404).json({ success: false, message: 'Account not found' });
+
+    const isCreditNormal = ['Income', 'Other Income', 'Liability', 'Other Current Liability', 'Long Term Liability', 'Equity'].includes(account.accountType);
+
+    // A Balance Sheet account's balance is cumulative from account
+    // inception (buildBalanceSheetTree queries date: {$lte: end} with no
+    // lower bound) — drilling into an account from the Balance Sheet must
+    // reconcile with that same figure, so fold everything before `start`
+    // into an opening balance instead of silently dropping it.
+    // sumFields() runs an aggregate() $match, which — unlike find() — does
+    // NOT auto-cast query values against the schema, so the raw string
+    // accountId from req.query must be cast to a real ObjectId by hand or
+    // this silently matches zero documents for every account.
+    const openingAgg = await sumFields(AccountTransaction, { accountId: new mongoose.Types.ObjectId(accountId), date: { $lt: start }, ...scope }, ['debit', 'credit']);
+    const openingBalance = isCreditNormal
+      ? (openingAgg.credit || 0) - (openingAgg.debit || 0)
+      : (openingAgg.debit || 0) - (openingAgg.credit || 0);
+
     const txns = await AccountTransaction.find({ accountId, date: { $gte: start, $lte: end }, ...scope }).sort({ date: 1 }).lean();
-    
+
     // Fetch related counter-party accounts using referenceNumber
     const refNumbers = txns.map(t => t.referenceNumber).filter(Boolean);
     const relatedTxns = await AccountTransaction.find({ 
@@ -2167,9 +2620,33 @@ router.get('/account-transactions', async (req, res) => {
 
     const refNumberMap = await resolveReferenceNumbers(txns);
 
-    const isCreditNormal = ['Income', 'Other Income', 'Liability', 'Other Current Liability', 'Long Term Liability', 'Equity'].includes(account.accountType);
-    let balance = 0;
-    const rows = txns.map(t => { 
+    // Matches Zoho's own Account Transactions view: even period-filtered,
+    // it still shows an explicit "Opening Balance" row as of the period
+    // start, rather than only surfacing it as a summary figure.
+    let obDebit = 0, obCredit = 0;
+    if (isCreditNormal) {
+      if (openingBalance >= 0) obCredit = openingBalance; else obDebit = -openingBalance;
+    } else {
+      if (openingBalance >= 0) obDebit = openingBalance; else obCredit = -openingBalance;
+    }
+    const openingRow = {
+      date: start,
+      description: 'Opening Balance',
+      accountName: '',
+      referenceType: '',
+      referenceNumber: '',
+      debit: fmt(obDebit),
+      credit: fmt(obCredit),
+      balance: fmt(openingBalance),
+      atId: null,
+      atType: null,
+      btId: null,
+      bankAccountId: null,
+      _isOpeningBalance: true,
+    };
+
+    let balance = openingBalance;
+    const rows = [openingRow, ...txns.map(t => {
       if (isCreditNormal) {
         balance += (t.credit || 0) - (t.debit || 0); 
       } else {
@@ -2187,12 +2664,53 @@ router.get('/account-transactions', async (req, res) => {
         credit: fmt(t.credit), 
         balance: fmt(balance),
         atId: t.referenceId?.toString(),
-        atType: t.referenceType,
+        atType: normalizeAtType(t.referenceType),
         btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null,
         bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null
-      }; 
+      };
+    })];
+    // Debit/Credit cards summarize this period's real movement only — the
+    // opening balance row is informational, not part of the period's
+    // activity, so it's excluded here even though it's in `rows`.
+    const periodDebit = rows.reduce((s, r) => s + (r._isOpeningBalance ? 0 : r.debit), 0);
+    const periodCredit = rows.reduce((s, r) => s + (r._isOpeningBalance ? 0 : r.credit), 0);
+    res.json({ success: true, data: { account: { id: account._id, name: account.accountName, code: account.accountCode, type: account.accountType }, period: { start, end }, openingBalance: fmt(openingBalance), transactions: rows, totals: { openingBalance: fmt(openingBalance), debit: fmt(periodDebit), credit: fmt(periodCredit), closingBalance: fmt(balance) } } });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// Drilling into a row of Account Type Summary needs "every transaction for
+// every account of this one type" — reuses the exact same shape/logic as
+// /account-transactions' no-accountId branch (general-ledger style), just
+// scoped to one accountType instead of every account.
+router.get('/account-type-transactions', async (req, res) => {
+  try {
+    const { start, end } = parseDateRange(req.query);
+    const scope = orgScope(req);
+    const { accountType } = req.query;
+    if (!accountType) return res.status(400).json({ success: false, message: 'accountType is required' });
+
+    const accounts = await ChartOfAccount.find({ isActive: true, accountType, ...coaScope(req) }).lean();
+    const ids = accounts.map(a => a._id);
+    const accMap = {}; accounts.forEach(a => { accMap[a._id.toString()] = a; });
+    const baseFilter = { accountId: { $in: ids }, date: { $gte: start, $lte: end }, ...scope };
+    const txns = await AccountTransaction.find(baseFilter).sort({ date: -1 }).limit(500).lean();
+    const refNumberMap = await resolveReferenceNumbers(txns);
+    const chronological = [...txns].reverse();
+    const earliestDate = chronological[0]?.date;
+    let openingBalance = 0;
+    if (earliestDate) {
+      const opening = await sumFields(AccountTransaction, { accountId: { $in: ids }, date: { $gte: start, $lt: earliestDate }, ...scope }, ['debit', 'credit']);
+      openingBalance = (opening.debit || 0) - (opening.credit || 0);
+    }
+    let balance = openingBalance;
+    const balanceByTxnId = {};
+    chronological.forEach(t => {
+      balance += (t.debit || 0) - (t.credit || 0);
+      balanceByTxnId[t._id.toString()] = balance;
     });
-    res.json({ success: true, data: { account: { id: account._id, name: account.accountName, code: account.accountCode, type: account.accountType }, period: { start, end }, transactions: rows, totals: { debit: fmt(rows.reduce((s, r) => s + r.debit, 0)), credit: fmt(rows.reduce((s, r) => s + r.credit, 0)), closingBalance: fmt(balance) } } });
+    const rows = txns.map(t => ({ date: t.date, description: t.description, accountName: accMap[t.accountId?.toString()]?.accountName || '', accountType: accMap[t.accountId?.toString()]?.accountType || '', accountId: t.accountId?.toString(), referenceType: t.referenceType, referenceNumber: refNumberMap[t.referenceNumber] || t.referenceNumber, debit: fmt(t.debit), credit: fmt(t.credit), balance: fmt(balanceByTxnId[t._id.toString()]), atId: t.referenceId?.toString(), atType: normalizeAtType(t.referenceType), btId: t.referenceType === 'ProviderTransaction' ? t.referenceId?.toString() : null, bankAccountId: t.referenceType === 'ProviderTransaction' ? t.accountId?.toString() : null }));
+    const totalsAgg = await sumFields(AccountTransaction, baseFilter, ['debit', 'credit']);
+    res.json({ success: true, data: { accountType, period: { start, end }, transactions: rows, totals: { debit: fmt(totalsAgg.debit), credit: fmt(totalsAgg.credit), closingBalance: fmt(totalsAgg.debit - totalsAgg.credit) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -2235,16 +2753,16 @@ router.get('/activity-logs', async (req, res) => {
     const PaymentMade = col('PaymentMade', 'paymentmades');
     const Expense = col('Expense', 'expenses');
     const [invoices, bills, payments, expenses] = await Promise.all([
-      Invoice.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('invoiceNumber customerName totalAmount status createdAt createdBy').limit(200).lean(),
-      Bill.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('billNumber vendorName totalAmount status createdAt createdBy').limit(200).lean(),
-      PaymentMade.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('paymentNumber vendorName amount status createdAt createdBy').limit(200).lean(),
-      Expense.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('expenseAccount total paidThrough createdAt').limit(200).lean(),
+      Invoice.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('invoiceNumber customerName customerId totalAmount status createdAt createdBy').limit(200).lean(),
+      Bill.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('billNumber vendorName vendorId totalAmount status createdAt createdBy').limit(200).lean(),
+      PaymentMade.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('paymentNumber vendorName vendorId amount status createdAt createdBy').limit(200).lean(),
+      Expense.find({ createdAt: { $gte: start, $lte: end }, ...scope }).select('expenseNumber expenseAccount total paidThrough createdAt').limit(200).lean(),
     ]);
     const logs = [
-      ...invoices.map(i => ({ type: 'Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.createdAt, by: i.createdBy })),
-      ...bills.map(b => ({ type: 'Bill', ref: b.billNumber, name: b.vendorName, amount: fmt(b.totalAmount), status: b.status, date: b.createdAt, by: b.createdBy })),
-      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName, amount: fmt(p.amount), status: p.status, date: p.createdAt, by: p.createdBy })),
-      ...expenses.map(e => ({ type: 'Expense', ref: e._id, name: e.expenseAccount, amount: fmt(e.total), status: 'Recorded', date: e.createdAt, by: 'system' })),
+      ...invoices.map(i => ({ type: 'Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), status: i.status, date: i.createdAt, by: i.createdBy, atId: i._id.toString(), atType: 'Invoice', customerId: i.customerId ? i.customerId.toString() : null })),
+      ...bills.map(b => ({ type: 'Bill', ref: b.billNumber, name: b.vendorName, amount: fmt(b.totalAmount), status: b.status, date: b.createdAt, by: b.createdBy, atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null })),
+      ...payments.map(p => ({ type: 'Payment Made', ref: p.paymentNumber, name: p.vendorName, amount: fmt(p.amount), status: p.status, date: p.createdAt, by: p.createdBy, atId: p._id.toString(), atType: 'PaymentMade', vendorId: p.vendorId ? p.vendorId.toString() : null })),
+      ...expenses.map(e => ({ type: 'Expense', ref: e.expenseNumber || e._id.toString(), name: e.expenseAccount, amount: fmt(e.total), status: 'Recorded', date: e.createdAt, by: 'system', atId: e._id.toString(), atType: 'Expense' })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
     res.json({ success: true, data: { period: { start, end }, logs, count: logs.length } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2266,7 +2784,7 @@ router.get('/budget-vs-actuals', async (req, res) => {
       const Expense = col('Expense', 'expenses');
       const rows = [];
       for (const p of projects) {
-        const expenses = await Expense.find({ project: p.projectName, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).lean();
+        const expenses = await Expense.find({ project: p.projectName, date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) }, ...scope }).lean();
         const actuals = expenses.reduce((s, e) => s + (e.total || 0), 0);
         rows.push({ name: p.projectName, budgeted: fmt(p.budgetAmount || 0), actuals: fmt(actuals), variance: fmt((p.budgetAmount || 0) - actuals), variancePercent: p.budgetAmount > 0 ? fmt(((p.budgetAmount - actuals) / p.budgetAmount) * 100) : 0 });
       }
@@ -2313,7 +2831,7 @@ router.get('/realized-gain-loss', async (req, res) => {
       const originalAmount = b.totalAmount;
       const baseCurrencyAmount = b.baseCurrencyAmount || b.totalAmount;
       const gainLoss = fmt(baseCurrencyAmount - originalAmount);
-      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, originalAmount: fmt(originalAmount), exchangeRate: fmt(b.exchangeRate || 1), baseCurrencyAmount: fmt(baseCurrencyAmount), gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss' };
+      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, originalAmount: fmt(originalAmount), exchangeRate: fmt(b.exchangeRate || 1), baseCurrencyAmount: fmt(baseCurrencyAmount), gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss', atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null };
     });
     res.json({ success: true, data: { period: { start, end }, transactions: rows, totals: { totalGain: fmt(rows.filter(r => r.gainLoss > 0).reduce((s, r) => s + r.gainLoss, 0)), totalLoss: fmt(rows.filter(r => r.gainLoss < 0).reduce((s, r) => s + Math.abs(r.gainLoss), 0)), netGainLoss: fmt(rows.reduce((s, r) => s + r.gainLoss, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2329,7 +2847,7 @@ router.get('/unrealized-gain-loss', async (req, res) => {
       const currentRate = b.exchangeRate || 1;
       const currentValue = fmt(originalAmount * currentRate);
       const gainLoss = fmt(currentValue - originalAmount);
-      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, amountDue: fmt(originalAmount), currentExchangeRate: fmt(currentRate), currentValue, unrealizedGainLoss: gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss' };
+      return { billNumber: b.billNumber, vendorName: b.vendorName, currency: b.currency, amountDue: fmt(originalAmount), currentExchangeRate: fmt(currentRate), currentValue, unrealizedGainLoss: gainLoss, type: gainLoss >= 0 ? 'Gain' : 'Loss', atId: b._id.toString(), atType: 'Bill', vendorId: b.vendorId ? b.vendorId.toString() : null };
     });
     res.json({ success: true, data: { asOf: new Date(), transactions: rows, totals: { totalUnrealizedGain: fmt(rows.filter(r => r.unrealizedGainLoss > 0).reduce((s, r) => s + r.unrealizedGainLoss, 0)), totalUnrealizedLoss: fmt(rows.filter(r => r.unrealizedGainLoss < 0).reduce((s, r) => s + Math.abs(r.unrealizedGainLoss), 0)), net: fmt(rows.reduce((s, r) => s + r.unrealizedGainLoss, 0)) } } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
@@ -2518,7 +3036,7 @@ router.get('/exception-report', async (req, res) => {
     largeInvoices.forEach(i => exceptions.push({ type: 'Large Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.totalAmount), date: i.invoiceDate, reason: 'Invoice amount > ₹1,00,000', severity: 'Medium' }));
     const overdueInvoices = await Invoice.find({ status: 'OVERDUE', dueDate: { $lt: new Date(new Date() - 90 * 86400000) }, ...scope }).select('invoiceNumber customerName amountDue dueDate').lean();
     overdueInvoices.forEach(i => exceptions.push({ type: 'Severely Overdue Invoice', ref: i.invoiceNumber, name: i.customerName, amount: fmt(i.amountDue), date: i.dueDate, reason: 'Invoice overdue by more than 90 days', severity: 'High' }));
-    const zeroExpenses = await Expense.find({ total: 0, date: { $gte: start.toISOString().split('T')[0], $lte: end.toISOString().split('T')[0] }, ...scope }).select('expenseAccount date paidThrough').lean();
+    const zeroExpenses = await Expense.find({ total: 0, date: { $gte: toLocalDateStr(start), $lte: toLocalDateStr(end) }, ...scope }).select('expenseAccount date paidThrough').lean();
     zeroExpenses.forEach(e => exceptions.push({ type: 'Zero Amount Expense', ref: e._id, name: e.expenseAccount, amount: 0, date: e.date, reason: 'Expense recorded with zero amount', severity: 'Low' }));
     exceptions.sort((a, b) => (a.severity === 'High' ? -1 : b.severity === 'High' ? 1 : 0));
     res.json({ success: true, data: { period: { start, end }, exceptions, count: exceptions.length, bySeverity: { High: exceptions.filter(e => e.severity === 'High').length, Medium: exceptions.filter(e => e.severity === 'Medium').length, Low: exceptions.filter(e => e.severity === 'Low').length } } });
@@ -2745,16 +3263,34 @@ router.post('/export/excel', async (req, res) => {
       ...reportData.map(row => headers.map(h => {
         const v = row[h];
         if (v === undefined || v === null) return '';
-        const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[₹,]/g, ''));
-        return isNaN(n) ? String(v) : n;
+        if (typeof v === 'number') return v;
+        // Only treat the cell as numeric if the WHOLE string (after
+        // stripping ₹/commas) is a number — parseFloat alone would happily
+        // read "31 Jul 2026" as 31, silently truncating dates and any other
+        // text that starts with digits.
+        const stripped = String(v).replace(/[₹,]/g, '').trim();
+        const isFullyNumeric = /^-?\d+(\.\d+)?$/.test(stripped);
+        return isFullyNumeric ? parseFloat(stripped) : String(v);
       })),
     ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
-    XLSX.utils.book_append_sheet(wb, ws, (reportName || 'Report').slice(0, 31));
+    // Excel sheet names can't contain \ / ? * [ ] : — strip those, keep everything else.
+    const safeSheetName = (reportName || 'Report').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Report';
+    XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const filename = `${(reportName || 'report').replace(/\s+/g, '-')}-${Date.now()}.xlsx`;
+    // HTTP header values only allow a narrow ASCII range — report names with
+    // an em dash, ₹, or any other non-ASCII character (e.g. "TDS Receivable
+    // Summary — Uncategorized") crash res.setHeader with "Invalid character
+    // in header content" if used raw. PDF export never hit this because
+    // res.download() encodes the filename properly; this doesn't, so strip
+    // anything outside safe ASCII before it goes into the header.
+    const safeName = (reportName || 'report')
+      .replace(/[^\x20-\x7E]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/[^A-Za-z0-9\-_.]/g, '') || 'report';
+    const filename = `${safeName}-${Date.now()}.xlsx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Length', buffer.length);

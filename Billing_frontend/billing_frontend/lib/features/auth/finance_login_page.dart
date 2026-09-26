@@ -389,6 +389,7 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
                 hint: 'you@company.com',
                 icon: Icons.email_outlined,
                 keyboard: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
                 autofillHints: const [AutofillHints.email],
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Email is required';
@@ -403,6 +404,10 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
                 hint: '••••••••',
                 icon: Icons.lock_outline_rounded,
                 obscure: _obscure,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) {
+                  if (!_loading) _login();
+                },
                 autofillHints: const [AutofillHints.password],
                 suffix: IconButton(
                   icon: Icon(
@@ -528,18 +533,22 @@ class _FinanceLoginPageState extends State<FinanceLoginPage>
     required String hint,
     required IconData icon,
     TextInputType keyboard = TextInputType.text,
+    TextInputAction? textInputAction,
     bool obscure = false,
     Widget? suffix,
     List<String>? autofillHints,
     String? Function(String?)? validator,
+    void Function(String)? onSubmitted,
   }) {
     return TextFormField(
       controller: ctrl,
       keyboardType: keyboard,
+      textInputAction: textInputAction,
       obscureText: obscure,
       autofillHints: autofillHints,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       validator: validator,
+      onFieldSubmitted: onSubmitted,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,

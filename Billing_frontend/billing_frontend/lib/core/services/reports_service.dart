@@ -20,6 +20,7 @@ import 'package:universal_html/html.dart' as html;
 
 import '../../app/config/api_config.dart';
 import '../services/api_service.dart';
+import '../finance_secure_storage.dart';
 
 // ─── Models ──────────────────────────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ class ReportsService {
       // ── Taxes (3) ────────────────────────────────────────────────────────
       'tds-summary': '/tds-summary',
       'tds-receivable': '/tds-receivable',
+      'tds-receivable-details': '/tds-receivable-details',
       'tcs-summary': '/tcs-summary',
       // ── Banking (1) ──────────────────────────────────────────────────────
       'reconciliation-status': '/reconciliation-status',
@@ -158,9 +160,11 @@ class ReportsService {
       // ── Accountant (6) ───────────────────────────────────────────────────
       'account-transactions': '/account-transactions',
       'account-type-summary': '/account-type-summary',
+      'account-type-transactions': '/account-type-transactions',
       'general-ledger': '/general-ledger',
       'general-ledger-detailed': '/general-ledger-detailed',
       'journal-report': '/journal-report',
+      'journal-entries-by-reference': '/journal-entries-by-reference',
       'activity-logs': '/activity-logs',
       // ── Budgets (1) ──────────────────────────────────────────────────────
       'budget-vs-actuals': '/budget-vs-actuals',
@@ -206,12 +210,15 @@ class ReportsService {
     final uri = Uri.parse('$_baseUrl/export/pdf');
     debugPrint('📤 POST PDF export → $uri');
 
+    final branchHeader = await FinanceSecureStorage.getBranchHeader();
+
     final response = await http
         .post(
           uri,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
+            'x-branch-ids': branchHeader,
           },
           body: jsonEncode({
             'reportName': reportName,
@@ -256,12 +263,15 @@ class ReportsService {
     final uri = Uri.parse('$_baseUrl/export/excel');
     debugPrint('📤 POST Excel export → $uri');
 
+    final branchHeader = await FinanceSecureStorage.getBranchHeader();
+
     final response = await http
         .post(
           uri,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
+            'x-branch-ids': branchHeader,
           },
           body: jsonEncode({
             'reportName': reportName,

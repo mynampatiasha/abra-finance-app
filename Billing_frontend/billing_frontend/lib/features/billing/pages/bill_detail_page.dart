@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // BILL DETAIL PAGE
 // ============================================================================
@@ -91,6 +92,18 @@ class _BillDetailPageState extends State<BillDetailPage> {
           title: Text(_bill?.billNumber ?? 'Bill Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.billId,
+                  pdfEndpoint: '/api/finance/bills',
+                  docNumber: _bill?.billNumber ?? 'Bill',
+                );
+              },
+            ),
             if (_bill != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

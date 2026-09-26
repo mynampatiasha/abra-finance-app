@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // CREDIT NOTE DETAIL PAGE
 // ============================================================================
@@ -95,6 +96,18 @@ class _CreditNoteDetailPageState extends State<CreditNoteDetailPage> {
           title: Text(_creditNote?.creditNoteNumber ?? 'Credit Note Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.creditNoteId,
+                  pdfEndpoint: '/api/finance/credit-notes',
+                  docNumber: _creditNote?.creditNoteNumber ?? 'Credit Note',
+                );
+              },
+            ),
             if (_creditNote != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

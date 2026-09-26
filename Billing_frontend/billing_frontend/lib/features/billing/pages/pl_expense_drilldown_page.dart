@@ -173,7 +173,16 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
               r['referenceNumber']?.toString() ?? '—',
               r['type']?.toString() ?? '—',
               _fmt(r['amount'], 'amount'),
-            ])
+            ]),
+        [
+          '',
+          '',
+          '',
+          '',
+          '',
+          'TOTAL',
+          '₹${NumberFormat('#,##,##0.00').format(_totalAmount)}',
+        ],
       ];
       await ExportHelper.exportToExcel(
         data: excelData,
@@ -201,16 +210,24 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
           'Ref No.',
           'Amount'
         ],
-        data: _rows
-            .map((r) => [
-                  _fmtPdf(r['date'], 'date'),
-                  r['bankAccount']?.toString() ?? '-',
-                  r['description']?.toString() ?? '-',
-                  r['payee']?.toString() ?? '-',
-                  r['referenceNumber']?.toString() ?? '-',
-                  _fmtPdf(r['amount'], 'amount'),
-                ])
-            .toList(),
+        data: [
+          ..._rows.map((r) => [
+                _fmtPdf(r['date'], 'date'),
+                r['bankAccount']?.toString() ?? '-',
+                r['description']?.toString() ?? '-',
+                r['payee']?.toString() ?? '-',
+                r['referenceNumber']?.toString() ?? '-',
+                _fmtPdf(r['amount'], 'amount'),
+              ]),
+          [
+            '',
+            '',
+            '',
+            '',
+            'TOTAL',
+            'Rs.${NumberFormat('#,##,##0.00').format(_totalAmount)}',
+          ],
+        ],
         filename: '${widget.accountName.replaceAll(' ', '_')}_transactions',
       );
       _snack('PDF downloaded', _green);
@@ -273,7 +290,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
               const Icon(Icons.calendar_today, size: 11, color: _navy),
               const SizedBox(width: 5),
               Text(
-                  '${DateFormat('dd/MM/yy').format(DateTime.parse(widget.startDate!))} - ${DateFormat('dd/MM/yy').format(DateTime.parse(widget.endDate!))}',
+                  '${DateFormat('dd/MM/yy').format(DateTime.parse(widget.startDate!).toLocal())} - ${DateFormat('dd/MM/yy').format(DateTime.parse(widget.endDate!).toLocal())}',
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
             ]),
@@ -374,11 +391,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
 
   Widget _buildSummaryCards(List<Map<String, dynamic>> rows) {
     final count = rows.length;
-    // Sum all amounts positively — matches Zoho Books behaviour.
-    // Individual rows already show green (Deposit) / red (Withdrawal) to indicate direction.
-    final total = rows.fold(
-        0.0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
-    // Use green for income (all deposits) and red when mixed/withdrawals dominate
+    final total = _totalAmount;
     final hasWithdrawal = rows.any((r) => r['type']?.toString() == 'Withdrawal');
     final totalColor = hasWithdrawal ? _red : _green;
     return Container(
@@ -407,7 +420,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
 
   String _fmtDateStr(String iso) {
     try {
-      return DateFormat('dd MMM yyyy').format(DateTime.parse(iso));
+      return DateFormat('dd MMM yyyy').format(DateTime.parse(iso).toLocal());
     } catch (_) {
       return iso;
     }
@@ -758,9 +771,7 @@ class _PlExpenseDrilldownPageState extends State<PlExpenseDrilldownPage> {
                             width: colW * (headers.length - 2),
                             child: const SizedBox()),
                         Builder(builder: (_) {
-                          final footerTotal = rows.fold(
-                              0.0,
-                              (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
+                          final footerTotal = _totalAmount;
                           final hasWd = rows.any((r) => r['type']?.toString() == 'Withdrawal');
                           return SizedBox(
                               width: colW,

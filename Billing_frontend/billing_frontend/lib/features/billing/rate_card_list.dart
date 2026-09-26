@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/create_rate_card_service.dart';
 import 'create_rate_card.dart' as CreateRateCardModule;
 import 'pages/rate_card_detail_screen.dart';
+import '../../core/permissions_finance.dart';
 
 // Colors
 const kPrimary = Color(0xFF2C3E50);
@@ -164,6 +165,9 @@ class _RateCardListScreenState extends State<RateCardListScreen> {
 
   // ── Delete ───────────────────────────────────────────────────────────────────
   Future<void> _deleteRateCard(RateCardModel rc) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'items');
+    if (!canDelete) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

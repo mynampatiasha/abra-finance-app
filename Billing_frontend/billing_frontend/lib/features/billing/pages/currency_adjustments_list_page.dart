@@ -19,6 +19,7 @@ import 'dart:convert';
 import '../../../../core/utils/export_helper.dart';
 import '../../../../core/services/currency_adjustment_service.dart';
 import '../../../../core/services/tms_service.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_currency_adjustment.dart';
 
@@ -287,6 +288,7 @@ class _CurrencyAdjustmentsListPageState
   }
 
   Future<void> _delete(CurrencyAdjustment a) async {
+    if (!await FinancePermissions.checkCanDelete(context, 'currency_adjustments')) return;
     final ok = await _confirmDialog(
         title: 'Delete Adjustment',
         message: 'Delete "${a.adjustmentNumber}"? This cannot be undone.',

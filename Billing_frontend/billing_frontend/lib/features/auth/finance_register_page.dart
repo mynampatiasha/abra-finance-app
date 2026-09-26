@@ -428,6 +428,8 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                             ctrl: _confirmPwCtrl,
                             label: 'Confirm',
                             obscure: _obscureConfirm,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) { if (!_loading) _register(); },
                             onToggle: () => setState(
                                 () => _obscureConfirm = !_obscureConfirm),
                             validator: (v) {
@@ -496,6 +498,8 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
                     ctrl: _confirmPwCtrl,
                     label: 'Confirm Password',
                     obscure: _obscureConfirm,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) { if (!_loading) _register(); },
                     onToggle: () =>
                         setState(() => _obscureConfirm = !_obscureConfirm),
                     validator: (v) {
@@ -565,13 +569,17 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     required String label,
     required IconData icon,
     TextInputType keyboard = TextInputType.text,
+    TextInputAction? textInputAction,
     bool required = false,
     String? Function(String?)? validator,
     String? hint, // ✅ NEW: Optional hint text
+    void Function(String)? onSubmitted,
   }) {
     return TextFormField(
       controller: ctrl,
       keyboardType: keyboard,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onSubmitted,
       style: const TextStyle(color: Colors.white, fontSize: 13),
       validator: validator,
       decoration: InputDecoration(
@@ -612,10 +620,14 @@ class _FinanceRegisterPageState extends State<FinanceRegisterPage>
     required bool obscure,
     required VoidCallback onToggle,
     String? Function(String?)? validator,
+    TextInputAction? textInputAction,
+    void Function(String)? onSubmitted,
   }) {
     return TextFormField(
       controller: ctrl,
       obscureText: obscure,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onSubmitted,
       style: const TextStyle(color: Colors.white, fontSize: 13),
       validator: validator,
       decoration: InputDecoration(

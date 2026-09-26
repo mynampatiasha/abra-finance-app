@@ -32,6 +32,7 @@ import '../app_top_bar.dart';
 import 'new_bill.dart';
 import 'bill_detail_page.dart';
 import 'new_payment_made.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -204,6 +205,9 @@ class _BillListPageState extends State<BillListPage> {
   }
 
   void _openEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'bills');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context, MaterialPageRoute(builder: (_) => NewBillScreen(billId: id)));
     if (ok == true) _loadAll();
@@ -238,7 +242,7 @@ class _BillListPageState extends State<BillListPage> {
       message:
           'Mark bill ${bill.billNumber} as Sent (Open) without sending an email?',
       confirmLabel: 'Mark as Sent',
-      confirmColor: _teal,
+      confirmColor: _navy,
     );
     if (ok != true) return;
     try {
@@ -268,6 +272,9 @@ class _BillListPageState extends State<BillListPage> {
   }
 
   Future<void> _delete(Bill bill) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'bills');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Bill',
       message: 'Delete bill ${bill.billNumber}? This cannot be undone.',

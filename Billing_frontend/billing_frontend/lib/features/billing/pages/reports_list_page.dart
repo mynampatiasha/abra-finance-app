@@ -87,7 +87,24 @@ class _ReportsListPageState extends State<ReportsListPage> {
   }
 
   Future<void> _loadOrg() async {
-    final n = await FinanceSecureStorage.getOrgName() ?? '';
+    final multiOrg = await FinanceSecureStorage.isMultiOrgMode();
+    String n;
+    if (multiOrg) {
+      // Mirrors the "All Organizations (N)" / "N Organizations" label already
+      // shown in the top-bar org switcher (billing_main_shell.dart) — reports
+      // previously always showed the single current-org name here even when
+      // several orgs (or "All") were selected, which was misleading since the
+      // report data itself already combines all selected orgs correctly.
+      final selectedIds = await FinanceSecureStorage.getSelectedOrgIds();
+      final allOrgs = await FinanceSecureStorage.getOrganizations();
+      if (selectedIds.length == 1 && selectedIds.first == 'ALL') {
+        n = 'All Organizations (${allOrgs.length})';
+      } else {
+        n = '${selectedIds.length} Organizations';
+      }
+    } else {
+      n = await FinanceSecureStorage.getOrgName() ?? '';
+    }
     if (mounted) setState(() => _orgName = n);
   }
 

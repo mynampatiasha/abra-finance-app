@@ -114,6 +114,12 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
   Map<String, double> invoiceWriteOffs = {}; // invoiceId → Rounding/Write Off
   List<dynamic> clearedInvoices = [];
   Map<String, dynamic> invoicePaymentsResolved = {};
+  // Read-only "Applied To" list — resolved invoice details for whatever this
+  // payment record already covers, shown in edit mode even when those
+  // invoices are no longer in the fresh unpaidInvoices fetch (i.e. this
+  // payment already paid them off).
+  Map<String, Invoice> _appliedInvoiceDetails = {};
+  bool _loadingAppliedInvoices = false;
   bool isLoading = true;
   bool isLoadingInvoices = false;
 
@@ -287,6 +293,11 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
       // Load unpaid invoices for the customer
       if (selectedCustomerId != null) await _loadUnpaidInvoices();
 
+      // Resolve invoice numbers/amounts for whatever this payment already
+      // covers — separate from unpaidInvoices, which won't include an
+      // invoice this payment already fully paid off.
+      await _loadAppliedInvoiceDetails();
+
       // Restore credits applied from saved payment
       if (p['creditsApplied'] != null) {
         setState(
@@ -425,6 +436,30 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
     }
   }
 
+  Future<void> _loadAppliedInvoiceDetails() async {
+    if (invoicePayments.isEmpty) return;
+    setState(() => _loadingAppliedInvoices = true);
+    final resolved = <String, Invoice>{};
+    for (final invId in invoicePayments.keys) {
+      // Already present in unpaidInvoices — no need to fetch again.
+      final already = unpaidInvoices.where((inv) => inv.id == invId).toList();
+      if (already.isNotEmpty) {
+        resolved[invId] = already.first;
+        continue;
+      }
+      try {
+        resolved[invId] = await InvoiceService.getInvoice(invId);
+      } catch (e) {
+        debugPrint('Failed to resolve applied invoice $invId: $e');
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _appliedInvoiceDetails = resolved;
+      _loadingAppliedInvoices = false;
+    });
+  }
+
   // ── calculations ─────────────────────────────────────────────────────────────
 
   String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
@@ -442,7 +477,13 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
     final used = _calculateTotal();
     final charges = _calculateBankCharges();
     // credits applied reduce the excess (they were already counted as "received")
-    return received - used - charges - _creditsToApply;
+    final raw = received - used - charges - _creditsToApply;
+    // Binary floating-point addition of the split amounts (e.g. 10 + 11.38)
+    // rarely lands on the total exactly — it can be off by ~1e-15. Left
+    // as-is, that noise shows as a red "-₹0.00" for a perfectly balanced
+    // allocation. Snap anything within a fraction of a cent to a clean
+    // zero (real excess/shortfall is always at least a full cent).
+    return raw.abs() < 0.005 ? 0.0 : raw;
   }
 
   // Tax helpers (applied on items subtotal — mirrors new_payment_made logic)
@@ -886,6 +927,10 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
           const SizedBox(height: 20),
           _buildPaymentDetailsSection(),
           const SizedBox(height: 20),
+          if (widget.paymentId != null && _appliedInvoiceDetails.isNotEmpty) ...[
+            _buildAppliedInvoicesSection(),
+            const SizedBox(height: 20),
+          ],
           if (widget.isAdvance)
             _buildAdvanceBanner()
           else
@@ -1529,6 +1574,91 @@ class _NewPaymentPageState extends State<NewPaymentPage> {
                     taxField,
                   ]);
           }),
+        ],
+      ));
+
+  // ============================================================================
+  // APPLIED TO SECTION — edit mode only. Shows the invoice(s) this payment
+  // record already covers, even after they're fully paid and no longer
+  // appear in the (always-fresh) Unpaid Invoices list below. The applied
+  // amount per invoice is editable here, matching Zoho's own Edit Payment
+  // screen — the backend's PUT /:id route now reconciles each affected
+  // invoice's amountPaid/amountDue/status by the delta when this changes,
+  // so this is no longer just a display list.
+  // ============================================================================
+
+  Widget _buildAppliedInvoicesSection() => _card(
+          child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle('Applied To', Icons.link),
+          const SizedBox(height: 4),
+          Text(
+            'Invoice(s) this payment was recorded against. Edit the amount to reallocate.',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 12),
+          if (_loadingAppliedInvoices)
+            const Center(
+                child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: CircularProgressIndicator()))
+          else
+            // Iterate the stable set of originally-applied invoices (fetched
+            // once on load), not invoicePayments.entries directly — clearing
+            // the field to type a new amount parses to 0 momentarily, and if
+            // the row list were driven by invoicePayments itself, that 0
+            // would immediately remove the entry and the row (and the field
+            // the user was typing into) would vanish before they could type
+            // a replacement value.
+            ..._appliedInvoiceDetails.entries.map((e) {
+              final invoiceId = e.key;
+              final inv = e.value;
+              final currentAmount = invoicePayments[invoiceId] ?? 0.0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  const Icon(Icons.receipt_long, size: 16, color: _navyMid),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(
+                    inv.invoiceNumber,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  )),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 140,
+                    child: TextFormField(
+                      key: ValueKey('applied_$invoiceId'),
+                      initialValue: currentAmount.toStringAsFixed(2),
+                      textAlign: TextAlign.right,
+                      decoration: InputDecoration(
+                        prefixText: '₹',
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                      ],
+                      onChanged: (v) {
+                        final amount = double.tryParse(v) ?? 0.0;
+                        setState(() {
+                          if (amount > 0) {
+                            invoicePayments[invoiceId] = amount;
+                          } else {
+                            invoicePayments.remove(invoiceId);
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                ]),
+              );
+            }),
         ],
       ));
 

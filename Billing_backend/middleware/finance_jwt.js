@@ -223,6 +223,25 @@ const verifyFinanceJWT = async (req, res, next) => {
         }
       }
       
+      // ─── Centralized Delete Permission Enforcement ─────────────────────────
+      // If an accountant or staff user attempts a DELETE request, check if delete is granted
+      if (req.method === 'DELETE' && req.user.role !== 'owner' && req.user.role !== 'admin') {
+        const pathParts = (req.baseUrl || req.path || '').split('/').filter(Boolean);
+        const moduleKey = pathParts[pathParts.length - 1];
+        if (moduleKey && req.user.permissions && req.user.permissions[moduleKey]) {
+          const modPerm = req.user.permissions[moduleKey];
+          const hasDeleteAccess = modPerm.can_delete === true || (modPerm.can_delete === undefined && modPerm.edit_delete === true);
+          if (!hasDeleteAccess) {
+            return res.status(403).json({
+              success: false,
+              error: 'RESTRICTED_ACTION',
+              message: 'You do not have permission to delete this record from the system. Please contact the management.',
+              code: 'DELETE_PERMISSION_DENIED',
+            });
+          }
+        }
+      }
+
       // expose allowedBranches for current org (for backward compatibility with single-org mode)
       const currentOrgEntry = (user.organizations || []).find(o => o.orgId === req.user.orgId);
       req.user.allowedBranches = currentOrgEntry?.allowedBranches || [];

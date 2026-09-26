@@ -163,6 +163,7 @@ class _NewInvoiceAutomationScreenState
   double _shippingCharges = 0;
   double _adjustment = 0;
   double _totalAmount = 0;
+  bool _autoRoundOff = true;
   List<TaxSlab> _taxSlabs = [];
 
   final List<String> _currencies = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
@@ -316,14 +317,18 @@ class _NewInvoiceAutomationScreenState
           : 0;
 
       _shippingCharges = double.tryParse(_shippingChargesController.text) ?? 0;
-      _adjustment = double.tryParse(_adjustmentController.text) ?? 0;
-      _totalAmount = double.parse((_taxableTotal +
-              _totalTax -
-              _tdsAmount +
-              _tcsAmount +
-              _shippingCharges +
-              _adjustment)
-          .toStringAsFixed(2));
+      
+      double rawTotal = _taxableTotal + _totalTax - _tdsAmount + _tcsAmount + _shippingCharges;
+      
+      if (_autoRoundOff) {
+        double roundedTotal = rawTotal.roundToDouble();
+        _adjustment = double.parse((roundedTotal - rawTotal).toStringAsFixed(2));
+        _adjustmentController.text = _adjustment.toStringAsFixed(2);
+      } else {
+        _adjustment = double.tryParse(_adjustmentController.text) ?? 0;
+      }
+      
+      _totalAmount = double.parse((rawTotal + _adjustment).toStringAsFixed(2));
     });
   }
 
@@ -427,6 +432,15 @@ class _NewInvoiceAutomationScreenState
                   igstAmount: item.igstAmount,
                   amount: item.amount,
                   expenseId: item.expenseId,
+                  // Was missing here — reopening a staging draft to review it
+                  // silently dropped every item's AL tracking number, so
+                  // saving/approving from this screen afterward produced an
+                  // invoice item with shipmentTrackingNumber permanently
+                  // null (the AL number only survived inside the itemDetails
+                  // text), which then got excluded from BilledShipment on
+                  // approval since that filter requires this field to be set.
+                  unbilledShipmentTrackingNumber:
+                      item.unbilledShipmentTrackingNumber,
                 ))
             .toList();
 
@@ -609,6 +623,7 @@ class _NewInvoiceAutomationScreenState
       'invoiceLevelDiscountType': _invoiceLevelDiscountType,
       'shippingCharges': _shippingCharges,
       'adjustment': _adjustment,
+      'autoRoundOff': _autoRoundOff,
       'tdsRate': _enableTDS ? _tdsRate : 0,
       'tcsRate': _enableTCS ? _tcsRate : 0,
       'subTotal': _subTotal,
@@ -619,8 +634,6 @@ class _NewInvoiceAutomationScreenState
       'totalTax': _totalTax,
       'totalAmount': _totalAmount,
       'invoiceDiscountAmount': _invoiceDiscountAmount,
-      'shippingCharges': _shippingCharges,
-      'adjustment': _adjustment,
       'status': status,
       if (_selectedPaymentAccount != null)
         'selectedPaymentAccount': _selectedPaymentAccount!.toJson(),
@@ -2137,7 +2150,31 @@ class _NewInvoiceAutomationScreenState
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
           keyboardType: const TextInputType.numberWithOptions(
               decimal: true, signed: true),
-          onChanged: (_) => _calculateAmounts()),
+          onChanged: (_) {
+            if (_autoRoundOff) {
+              setState(() => _autoRoundOff = false);
+            }
+            _calculateAmounts();
+          }),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: Checkbox(
+              value: _autoRoundOff,
+              onChanged: (v) {
+                setState(() => _autoRoundOff = v ?? false);
+                _calculateAmounts();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('Auto Round Off',
+              style: TextStyle(fontSize: 13, color: Colors.black87)),
+        ],
+      ),
     ]);
   }
 
@@ -2254,7 +2291,7 @@ class _NewInvoiceAutomationScreenState
       ],
       if (_adjustment != 0) ...[
         const SizedBox(height: 6),
-        _summaryRow('Adjustment', _adjustment,
+        _summaryRow(_autoRoundOff ? 'Round Off' : 'Adjustment', _adjustment,
             color: _adjustment < 0 ? Colors.red[700] : null)
       ],
       const Divider(thickness: 2),

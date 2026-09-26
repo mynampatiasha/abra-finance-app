@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // VENDOR CREDIT DETAIL PAGE
 // ============================================================================
@@ -275,6 +276,18 @@ class _VendorCreditDetailPageState extends State<VendorCreditDetailPage> {
               ),
             ),
             actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.creditId,
+                  pdfEndpoint: '/api/finance/vendor-credits',
+                  docNumber: _credit?.creditNumber ?? 'Vendor Credit',
+                );
+              },
+            ),
               TextButton(
                 onPressed: isLoading ? null : () => Navigator.pop(ctx),
                 child: const Text('Cancel'),

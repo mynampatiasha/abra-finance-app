@@ -1124,20 +1124,23 @@ const sendDeclineEmail = async (quote, reason, orgId = null, branchId = null) =>
 // GET /api/quotes - Get all quotes with filtering and pagination
 router.get('/', async (req, res) => {
   try {
-    const { 
-      status, 
-      page = 1, 
+    const {
+      status,
+      customerId,
+      page = 1,
       limit = 20,
       search,
       fromDate,
       toDate
     } = req.query;
-    
+
     // ? FIX: Use orgId from JWT token
     const query = {};
     if (req.user?.orgId) query.orgId = req.user.orgId;
     Object.assign(query, req.branchFilter || {});
-    
+
+    if (customerId) query.customerId = customerId;
+
     if (status && status !== 'All') {
       query.status = status;
     }

@@ -242,8 +242,8 @@ router.get('/', verifyToken, async (req, res) => {
   try {
     const { filter, sortBy, sortOrder = 'desc', search } = req.query;
 
-    let query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId; Object.assign(query, req.branchFilter || {});
+    let query = { ...(req.orgFilter || {}) };
+    Object.assign(query, req.branchFilter || {});
 
     // Apply filters
     if (filter && filter !== 'All Payments') {
@@ -637,6 +637,43 @@ router.get('/customer/:customerId/unused-credits', verifyToken, async (req, res)
   } catch (error) {
     console.error('❌ Error fetching customer unused credits:', error);
     res.status(500).json({ success: false, message: 'Error fetching unused credits', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET PAYMENTS FOR ONE INVOICE — authoritative source (payments_received),
+// not the invoice's own embedded `payments[]` array, which can carry stale
+// duplicate entries from past sync issues.
+// ============================================================================
+
+router.get('/for-invoice/:invoiceId', verifyToken, async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+    const orgFilter = req.user?.orgId ? { orgId: req.user.orgId } : {};
+
+    const query = { ...orgFilter };
+    query[`invoicePayments.${invoiceId}`] = { $exists: true };
+
+    const payments = await db.collection('payments_received')
+      .find(query)
+      .sort({ paymentDate: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      data: payments.map(p => ({
+        paymentNumber: p.paymentNumber,
+        amount: p.invoicePayments[invoiceId],
+        paymentDate: p.paymentDate,
+        paymentMode: p.paymentMode || p.paymentMethod || '',
+        referenceNumber: p.reference || p.referenceNumber || '',
+        recordedBy: p.createdBy || p.recordedBy || '',
+        status: p.status || '',
+      })),
+    });
+  } catch (error) {
+    console.error('❌ Error fetching payments for invoice:', error);
+    res.status(500).json({ success: false, message: 'Error fetching payments for invoice', error: error.message });
   }
 });
 
@@ -1624,6 +1661,114 @@ router.put('/:id', verifyToken, async (req, res) => {
     }
     // ── END COA ADJUSTMENT ───────────────────────────────────────────────────
 
+    // ── ADJUST INVOICE amountPaid/amountDue/status/payments[] ON UPDATE ──────
+    // The create-payment route pushes a payment record onto each affected
+    // invoice's payments[] array and updates amountPaid/amountDue/status;
+    // the delete route reverses both fully. This update route had neither —
+    // it adjusted the customer's unusedCredits below based on
+    // invoicePayments, but never touched the invoices themselves. So
+    // changing which invoice got how much (e.g. editing the "Applied To"
+    // allocation) silently left every invoice's own amountPaid/status AND
+    // its embedded payments[] entry for this payment stuck at the old
+    // value. Fix: for each affected invoice, adjust amountPaid/amountDue by
+    // the delta (not overwrite — may include TDS/write-off from other
+    // fields) and sync the matching payments[] entry the same way
+    // create/delete already do — push if newly added to this payment,
+    // pull if removed entirely, update-in-place if the amount changed.
+    try {
+      const paymentIdStr = id;
+      const oldInvoicePayments = oldPayment.invoicePayments || {};
+      const newInvoicePaymentsForInvoices = req.body.invoicePayments || oldInvoicePayments;
+      const affectedInvoiceIds = new Set([
+        ...Object.keys(oldInvoicePayments),
+        ...Object.keys(newInvoicePaymentsForInvoices),
+      ]);
+
+      for (const invoiceId of affectedInvoiceIds) {
+        if (!ObjectId.isValid(invoiceId)) continue;
+        const oldAlloc = parseFloat(oldInvoicePayments[invoiceId] || 0);
+        const newAlloc = parseFloat(newInvoicePaymentsForInvoices[invoiceId] || 0);
+        const delta = newAlloc - oldAlloc;
+        if (delta === 0) continue;
+
+        const invoice = await db.collection('invoices').findOne({ _id: new ObjectId(invoiceId) });
+        if (!invoice) continue;
+
+        const adjustedAmountPaid = Math.max(0, (invoice.amountPaid || 0) + delta);
+        const adjustedAmountDue = Math.max(0, parseFloat((invoice.totalAmount - adjustedAmountPaid).toFixed(2)));
+
+        let newStatus = invoice.status;
+        if (adjustedAmountPaid <= 0) {
+          newStatus = 'SENT';
+        } else if (adjustedAmountDue <= 0) {
+          newStatus = 'PAID';
+        } else {
+          newStatus = 'PARTIALLY_PAID';
+        }
+
+        await db.collection('invoices').updateOne(
+          { _id: new ObjectId(invoiceId) },
+          {
+            $set: {
+              amountPaid: adjustedAmountPaid,
+              amountDue: adjustedAmountDue,
+              status: newStatus,
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        // Sync the invoice's own payments[] entry for this specific payment.
+        if (newAlloc <= 0 && oldAlloc > 0) {
+          // Removed from this payment's allocation entirely.
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            { $pull: { payments: { paymentId: paymentIdStr } } }
+          );
+        } else if (newAlloc > 0 && oldAlloc <= 0) {
+          // Newly added to this payment's allocation.
+          const rawPaymentDate = req.body.paymentDate || oldPayment.paymentDate;
+          let pushedPaymentDate;
+          if (rawPaymentDate && typeof rawPaymentDate === 'string' && rawPaymentDate.includes('/')) {
+            const [day, month, year] = rawPaymentDate.split('/');
+            pushedPaymentDate = new Date(`${year}-${month}-${day}`);
+          } else {
+            pushedPaymentDate = new Date(rawPaymentDate);
+          }
+          if (isNaN(pushedPaymentDate)) pushedPaymentDate = new Date();
+
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId) },
+            { $push: { payments: {
+                paymentId: paymentIdStr,
+                amount: newAlloc,
+                tdsAmount: 0,
+                writeOffAmount: 0,
+                totalCleared: newAlloc,
+                paymentDate: pushedPaymentDate,
+                paymentMethod: req.body.paymentMode || oldPayment.paymentMode,
+                referenceNumber: req.body.reference || oldPayment.reference,
+                notes: `Payment #${req.body.paymentNumber || oldPayment.paymentNumber}`,
+                recordedBy: req.user?.email || req.user?.uid || 'system',
+                recordedAt: new Date()
+            } } }
+          );
+        } else if (newAlloc > 0 && oldAlloc > 0) {
+          // Already allocated to this payment, amount changed — update the
+          // existing array entry in place rather than push a duplicate.
+          await db.collection('invoices').updateOne(
+            { _id: new ObjectId(invoiceId), 'payments.paymentId': paymentIdStr },
+            { $set: { 'payments.$.amount': newAlloc, 'payments.$.totalCleared': newAlloc } }
+          );
+        }
+
+        console.log(`✅ Invoice ${invoice.invoiceNumber} allocation adjusted by ${delta > 0 ? '+' : ''}${delta} on payment update — status: ${newStatus}`);
+      }
+    } catch (invoiceAdjustErr) {
+      console.error('⚠️ Invoice allocation adjustment error (payment update):', invoiceAdjustErr.message);
+    }
+    // ── END INVOICE ADJUSTMENT ────────────────────────────────────────────────
+
     // ── ADJUST CUSTOMER UNUSED CREDITS ON UPDATE ─────────────────────────────
     try {
       const newAmount = parseFloat(req.body.amountReceived || oldAmount);
@@ -2378,6 +2523,17 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
 
+    // Fetch customer to get billing address and GSTIN
+    let customer = null;
+    if (payment.customerId && ObjectId.isValid(payment.customerId)) {
+      customer = await db.collection('billing_customers').findOne({ _id: new ObjectId(payment.customerId) });
+    }
+
+    function formatAddress(addr) {
+      if (!addr) return '';
+      return [addr.attention, addr.street, addr.city, addr.state, addr.zip || addr.pincode, addr.country].filter(Boolean).join(', ');
+    }
+
     // Fetch ALL linked invoices
     let linkedInvoices = [];
     let linkedInvoice = null; // keep for backward compat (first invoice)
@@ -2395,10 +2551,11 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     // Fetch org details — branch-aware
     let orgData = null;
     try {
+      const mongoose = require('mongoose');
       const { getEffectiveOrgData } = require('./branches');
       const db = mongoose.connection.db;
-      if (db) orgData = await getEffectiveOrgData(payment.orgId, payment.branchId || null, db);
-    } catch (_) { }
+      if (db) orgData = await getEffectiveOrgData(req.user?.orgId || payment.orgId, payment.branchId || req.branchFilter?.branchId || null, db);
+    } catch (err) { console.error('orgData fetch error:', err); }
     const orgName = orgData?.orgName || 'Billing Team';
     const orgGST = orgData?.gstNumber || '';
     const orgPhone = orgData?.phone || '';
@@ -2442,6 +2599,13 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     const filepath = path.join(uploadsDir, filename);
 
     const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    
+    const drawPageOutline = () => {
+      doc.rect(20, 20, 555, 802).lineWidth(1).strokeColor('#000000').stroke();
+    };
+    doc.on('pageAdded', drawPageOutline);
+    drawPageOutline();
+
     const stream = fs.createWriteStream(filepath);
     doc.pipe(stream);
 
@@ -2500,49 +2664,75 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     doc.fontSize(8).fillColor('#000000').font('Helvetica')
       .text(`Date: ${payment.paymentDate}`, 380, 74, { width: 170, align: 'right' });
 
-    // ── Divider ───────────────────────────────────────────────────────────────
-    const headerBottom = Math.max(cy + 4, 90);
-    doc.moveTo(40, headerBottom).lineTo(555, headerBottom).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
+    let addrToUse = null;
+    let gstToUse = '';
+    
+    if (linkedInvoice && linkedInvoice.billingAddress && Object.keys(linkedInvoice.billingAddress).length > 0) {
+      addrToUse = linkedInvoice.billingAddress;
+      gstToUse = linkedInvoice.customerGSTIN || '';
+    } else if (customer) {
+      addrToUse = customer.billingAddress || {
+        street: customer.addressLine1 || customer.address || '',
+        city: customer.city || '',
+        state: customer.state || '',
+        zip: customer.postalCode || customer.pincode || '',
+        country: customer.country || ''
+      };
+      gstToUse = customer.gstin || customer.taxPreference === 'taxable' ? customer.gstin : '';
+    }
+    
+    const billingStr = formatAddress(addrToUse) || (payment.customerEmail || '');
+    const custGST = gstToUse;
+    
+    // ── Meta Grid ───────────────────────────────────────────────────────────────
+    const metaY = Math.max(132, cy + 8);
+    const colW = pageW / 2;
+    doc.fontSize(10).font('Helvetica-Bold');
+    const custNameH = doc.heightOfString(payment.customerName || '', { width: colW - 16 });
+    doc.fontSize(8).font('Helvetica');
+    const addrH = billingStr ? doc.heightOfString(billingStr, { width: colW - 16 }) : 0;
+    const gstH = custGST ? 10 : 0;
+    const metaH = Math.max(90, 18 + custNameH + 2 + addrH + gstH + 10);
 
-    // ── Customer info ─────────────────────────────────────────────────────────
-    let y = headerBottom + 16;
-    doc.fontSize(9).fillColor('#666666').font('Helvetica-Bold').text('RECEIVED FROM', 40, y);
-    y += 14;
-    doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold').text(payment.customerName || '', 40, y);
-    y += 14;
-    if (payment.customerEmail) {
-      doc.fontSize(9).fillColor('#444444').font('Helvetica').text(payment.customerEmail, 40, y);
-      y += 12;
+    // ── Col 1: Received From ──────────────────────────────────────────────────
+    const billX = 40;
+    doc.rect(billX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+    doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+       .text('RECEIVED FROM', billX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(10).fillColor('#000000').font('Helvetica-Bold')
+       .text(payment.customerName || '', billX + 8, metaY + 18, { width: colW - 16 });
+       
+    const billAddrY = metaY + 18 + custNameH + 2;
+    if (billingStr) {
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(billingStr, billX + 8, billAddrY, { width: colW - 16, ellipsis: true });
+    }
+    if (custGST) {
+      doc.fontSize(8).fillColor('#000000').font('Helvetica')
+         .text(`GSTIN: ${custGST}`, billX + 8, billAddrY + addrH + 2, { width: colW - 16 });
     }
 
-    // ── Payment details table ─────────────────────────────────────────────────
-    y += 10;
-    doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
-    y += 12;
+    // ── Col 2: Payment Details ──────────────────────────────────────────
+    const detX = 40 + colW;
+    doc.rect(detX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#000000');
+    doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
+       .text('PAYMENT DETAILS', detX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
+    doc.fontSize(8).fillColor('#000000').font('Helvetica')
+       .text(`Payment #: ${payment.paymentNumber}`, detX + 8, metaY + 18, { width: colW - 16 });
+    doc.text(`Date: ${payment.paymentDate}`, detX + 8, metaY + 29, { width: colW - 16 });
+    doc.text(`Mode: ${payment.paymentMode}`, detX + 8, metaY + 39, { width: colW - 16 });
+    if (payment.reference) doc.text(`Ref: ${payment.reference}`, detX + 8, metaY + 49, { width: colW - 16 });
+    if (bankCharges > 0) doc.text(`Bank Charges: Rs.${bankCharges.toFixed(2)}`, detX + 8, metaY + 59, { width: colW - 16 });
 
-    const rows = [
-      ['Payment Number', payment.paymentNumber],
-      ['Payment Date', payment.paymentDate],
-      ['Payment Mode', payment.paymentMode],
-      payment.reference ? ['Reference Number', payment.reference] : null,
-      bankCharges > 0 ? ['Bank Charges', `Rs.${bankCharges.toFixed(2)}`] : null,
-    ].filter(Boolean);
-
-    rows.forEach(([label, value]) => {
-      doc.fontSize(9).fillColor('#666666').font('Helvetica').text(label, 40, y, { width: 200 });
-      doc.fontSize(9).fillColor('#000000').font('Helvetica').text(value, 250, y, { width: 305, align: 'right' });
-      y += 16;
-    });
-
-    y += 4;
-    doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).strokeColor('#CCCCCC').stroke();
-    y += 12;
-
+    let y = metaY + metaH + 16;
+    
     // ── Amount received ───────────────────────────────────────────────────────
+    doc.rect(40, y, 515, 30).fillAndStroke('#f7f9fc', '#000000');
     doc.fontSize(11).fillColor('#000000').font('Helvetica-Bold')
-      .text(payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received', 40, y, { width: 300 });
-    doc.fontSize(14).fillColor('#27AE60').font('Helvetica-Bold').text(`Rs.${amountReceived.toFixed(2)}`, 250, y - 2, { width: 305, align: 'right' });
-    y += 20;
+      .text(payment.paymentType === 'advance' ? 'Advance Amount' : 'Amount Received', 50, y + 9, { width: 300 });
+    doc.fontSize(14).fillColor('#27AE60').font('Helvetica-Bold')
+      .text(`Rs.${amountReceived.toFixed(2)}`, 250, y + 8, { width: 295, align: 'right' });
+    y += 42;
 
     // ── Advance-specific: show credit balance ─────────────────────────────────
     if (payment.paymentType === 'advance') {
@@ -2562,39 +2752,49 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
       y += 14;
 
       // Table header
-      doc.rect(40, y, 515, 18).fill('#0D1B3E');
-      doc.fontSize(8).fillColor('#FFFFFF').font('Helvetica-Bold')
-        .text('INVOICE #', 44, y + 5, { width: 120 })
-        .text('INVOICE DATE', 170, y + 5, { width: 100 })
-        .text('INVOICE AMT', 275, y + 5, { width: 100, align: 'right' })
-        .text('APPLIED', 380, y + 5, { width: 90, align: 'right' })
-        .text('BALANCE DUE', 475, y + 5, { width: 75, align: 'right' });
+      doc.rect(40, y, 515, 20).fill('#0f1e3d');
+      doc.fontSize(7).fillColor('#ffffff').font('Helvetica-Bold')
+        .text('INVOICE #', 42, y + 7, { width: 120 })
+        .text('INVOICE DATE', 170, y + 7, { width: 100 })
+        .text('INVOICE AMT', 275, y + 7, { width: 100, align: 'center' })
+        .text('APPLIED', 380, y + 7, { width: 90, align: 'center' })
+        .text('BALANCE DUE', 475, y + 7, { width: 78, align: 'center' });
       y += 20;
 
       linkedInvoices.forEach((inv, idx) => {
-        const rowBg = idx % 2 === 0 ? '#F8F9FA' : '#FFFFFF';
-        doc.rect(40, y, 515, 16).fill(rowBg);
+        const fill = idx % 2 === 0 ? '#ffffff' : '#f7f9fc';
+        const rowH = 24;
+        
+        doc.rect(40, y, 515, rowH).fill(fill);
+        doc.rect(40, y, 515, rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+
+        // Draw vertical column lines
+        [168, 273, 378, 473].forEach(x => {
+          doc.moveTo(x, y).lineTo(x, y + rowH).lineWidth(0.5).strokeColor('#000000').stroke();
+        });
+
         const invTotal = parseFloat(inv.totalAmount || 0);
         const invDue = parseFloat(inv.amountDue || 0);
         const applied = inv._appliedAmount || 0;
-        doc.fontSize(8).fillColor('#000000').font('Helvetica')
-          .text(inv.invoiceNumber || '-', 44, y + 4, { width: 120 })
-          .text(inv.invoiceDate ? String(inv.invoiceDate).slice(0, 10) : '-', 170, y + 4, { width: 100 })
-          .text(`Rs.${invTotal.toFixed(2)}`, 275, y + 4, { width: 100, align: 'right' })
-          .text(`Rs.${applied.toFixed(2)}`, 380, y + 4, { width: 90, align: 'right' });
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+          .text(inv.invoiceNumber || '-', 42, y + 8, { width: 120 })
+          .text(inv.invoiceDate ? String(inv.invoiceDate).slice(0, 10) : '-', 170, y + 8, { width: 100 })
+          .text(`Rs. ${invTotal.toFixed(2)}`, 275, y + 8, { width: 96, align: 'right' })
+          .text(`Rs. ${applied.toFixed(2)}`, 380, y + 8, { width: 86, align: 'right' });
         const dueColor = invDue > 0 ? '#DC2626' : '#27AE60';
-        doc.fontSize(8).fillColor(dueColor).font('Helvetica-Bold')
-          .text(`Rs.${invDue.toFixed(2)}`, 475, y + 4, { width: 75, align: 'right' });
-        y += 18;
+        doc.fontSize(7).fillColor(dueColor).font('Helvetica-Bold')
+          .text(invDue > 0 ? `Rs. ${invDue.toFixed(2)}` : 'PAID', 475, y + 8, { width: 76, align: 'right' });
+        y += rowH;
       });
 
       // Total applied row
       const totalApplied = linkedInvoices.reduce((s, inv) => s + (inv._appliedAmount || 0), 0);
-      doc.rect(40, y, 515, 18).fill('#E8F5E9');
+      doc.rect(40, y, 515, 24).fill('#E8F5E9');
+      doc.rect(40, y, 515, 24).lineWidth(0.5).strokeColor('#000000').stroke();
       doc.fontSize(8.5).fillColor('#1B5E20').font('Helvetica-Bold')
-        .text('Total Applied to Invoices', 44, y + 5, { width: 330 })
-        .text(`Rs.${totalApplied.toFixed(2)}`, 380, y + 5, { width: 90, align: 'right' });
-      y += 22;
+        .text('Total Applied to Invoices', 44, y + 8, { width: 330 })
+        .text(`Rs. ${totalApplied.toFixed(2)}`, 380, y + 8, { width: 86, align: 'right' });
+      y += 34;
     }
 
     // ── Remaining balance (overall) ───────────────────────────────────────────

@@ -547,6 +547,8 @@ class Invoice {
   // TDS / TCS
   final double tdsRate;
   final double tdsAmount;
+  final String tdsSection;
+  final String tdsReason;
   final double tcsRate;
   final double tcsAmount;
 
@@ -613,6 +615,8 @@ class Invoice {
     this.igst = 0,
     this.tdsRate = 0,
     this.tdsAmount = 0,
+    this.tdsSection = '',
+    this.tdsReason = '',
     this.tcsRate = 0,
     this.tcsAmount = 0,
     this.shippingCharges = 0,
@@ -684,6 +688,8 @@ class Invoice {
       igst: (json['igst'] ?? 0).toDouble(),
       tdsRate: (json['tdsRate'] ?? 0).toDouble(),
       tdsAmount: (json['tdsAmount'] ?? 0).toDouble(),
+      tdsSection: json['tdsSection'] ?? '',
+      tdsReason: json['tdsReason'] ?? '',
       tcsRate: (json['tcsRate'] ?? 0).toDouble(),
       tcsAmount: (json['tcsAmount'] ?? 0).toDouble(),
       shippingCharges: (json['shippingCharges'] ?? 0).toDouble(),

@@ -2,6 +2,7 @@
 // SALES ORDER DETAIL PAGE
 // ============================================================================
 import 'package:flutter/material.dart';
+import '../widgets/document_preview_buttons.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/sales_order_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
@@ -89,6 +90,18 @@ class _SalesOrderDetailPageState extends State<SalesOrderDetailPage> {
           title: Text(_order?.salesOrderNumber ?? 'Sales Order Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.salesOrderId,
+                  pdfEndpoint: '/api/finance/sales-orders',
+                  docNumber: _order?.salesOrderNumber ?? 'Sales Order',
+                );
+              },
+            ),
             if (_order != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

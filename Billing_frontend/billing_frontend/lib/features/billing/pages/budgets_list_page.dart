@@ -29,6 +29,7 @@ import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'new_budget.dart';
 import 'budget_detail.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -180,6 +181,9 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
   }
 
   Future<void> _goToEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'budgets');
+    if (!canEdit) return;
+
     final ok = await Navigator.push<bool>(context,
         MaterialPageRoute(builder: (_) => NewBudgetScreen(budgetId: id)));
     if (ok == true) _refresh();
@@ -193,6 +197,9 @@ class _BudgetsListPageState extends State<BudgetsListPage> {
   // ── budget actions ────────────────────────────────────────────────────────
 
   Future<void> _delete(Budget b) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'budgets');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Budget',
       message: 'Delete "${b.budgetName}"? This cannot be undone.',

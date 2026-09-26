@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // PAYMENT MADE DETAIL PAGE
 // ============================================================================
@@ -58,6 +59,18 @@ class _PaymentMadeDetailPageState extends State<PaymentMadeDetailPage> {
           title: Text(_payment.paymentNumber,
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: _payment.id,
+                  pdfEndpoint: '/api/finance/payments-made',
+                  docNumber: _payment.paymentNumber ?? 'Payment Made',
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.download, color: Colors.white),
               tooltip: 'Download PDF',

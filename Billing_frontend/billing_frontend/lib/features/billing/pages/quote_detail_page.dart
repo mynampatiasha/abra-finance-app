@@ -2,6 +2,7 @@
 // QUOTE DETAIL PAGE
 // ============================================================================
 import 'package:flutter/material.dart';
+import '../widgets/document_preview_buttons.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/quote_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
@@ -88,6 +89,18 @@ class _QuoteDetailPageState extends State<QuoteDetailPage> {
           title: Text(_quote?.quoteNumber ?? 'Quote Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.quoteId,
+                  pdfEndpoint: '/api/finance/quotes',
+                  docNumber: _quote?.quoteNumber ?? 'Quote',
+                );
+              },
+            ),
             if (_quote != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

@@ -321,6 +321,8 @@ const invoiceSchema = new mongoose.Schema({
   // Original GST fields (kept for backward compat)
   tdsRate:   { type: Number, default: 0, min: 0, max: 100 },
   tdsAmount: { type: Number, default: 0 },
+  tdsSection: { type: String, default: '' },   // e.g. "Commission or Brokerage" — which TDS section this deduction falls under
+  tdsReason:  { type: String, default: '' },   // Reason for higher deduction, if any
   tcsRate:   { type: Number, default: 0, min: 0, max: 100 },
   tcsAmount: { type: Number, default: 0 },
   gstRate:   { type: Number, default: 18, min: 0, max: 100 }, // legacy
@@ -900,6 +902,11 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
         doc.text('AMOUNT',   cols.amount.x+2, startY + 7, { width: cols.amount.w,  align: 'center' });
       };
 
+      // Comma-grouped Indian formatting (e.g. 1,23,456.78) — matches the
+      // reports export convention, applied across the whole invoice PDF
+      // (item rows + totals) instead of plain toFixed(2).
+      const fmtC = (n) => (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
       // Draw initial Header row
       drawTableHeader(tableStartY);
 
@@ -955,17 +962,17 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
         doc.text(hsnSac,                               cols.hsn.x  + 2, singleLineY, { width: cols.hsn.w - 2,  ellipsis: true, align: 'center' });
         doc.text(item.unit || 'Nos',                   cols.unit.x + 2, singleLineY, { width: cols.unit.w, align: 'center' });
         doc.text(String(item.quantity || 0),           cols.qty.x  + 2, singleLineY, { width: cols.qty.w,     align: 'center' });
-        doc.text(`${(item.rate || 0).toFixed(2)}`,  cols.rate.x + 2, singleLineY, { width: cols.rate.w - 4,    align: 'center' });
-        doc.text(`${(item.taxableAmount || 0).toFixed(2)}`, cols.taxable.x + 2, singleLineY, { width: cols.taxable.w - 4, align: 'center' });
+        doc.text(fmtC(item.rate),  cols.rate.x + 2, singleLineY, { width: cols.rate.w - 4,    align: 'center' });
+        doc.text(fmtC(item.taxableAmount), cols.taxable.x + 2, singleLineY, { width: cols.taxable.w - 4, align: 'center' });
         doc.text(`${item.itemGstRate || 0}%`,          cols.gst.x  + 2, singleLineY, { width: cols.gst.w,     align: 'center' });
         if (isInterState) {
-          doc.text(`${(item.igstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, singleLineY, { width: cols.tax1.w + cols.tax2.w - 4, align: 'center' });
+          doc.text(fmtC(item.igstAmount), cols.tax1.x + 2, singleLineY, { width: cols.tax1.w + cols.tax2.w - 4, align: 'center' });
         } else {
-          doc.text(`${(item.cgstAmount || 0).toFixed(2)}`, cols.tax1.x + 2, singleLineY, { width: cols.tax1.w - 4, align: 'center' });
-          doc.text(`${(item.sgstAmount || 0).toFixed(2)}`, cols.tax2.x + 2, singleLineY, { width: cols.tax2.w - 4, align: 'center' });
+          doc.text(fmtC(item.cgstAmount), cols.tax1.x + 2, singleLineY, { width: cols.tax1.w - 4, align: 'center' });
+          doc.text(fmtC(item.sgstAmount), cols.tax2.x + 2, singleLineY, { width: cols.tax2.w - 4, align: 'center' });
         }
         doc.font('Helvetica-Bold')
-           .text(`${(item.amount || 0).toFixed(2)}`, cols.amount.x + 2, singleLineY, { width: cols.amount.w - 4, align: 'center' });
+           .text(fmtC(item.amount), cols.amount.x + 2, singleLineY, { width: cols.amount.w - 4, align: 'center' });
         rowY += rowH;
       });
 
@@ -993,22 +1000,22 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
         totalsY += 14;
       };
 
-      tRow('Subtotal:', `Rs. ${(invoice.subTotal || 0).toFixed(2)}`);
+      tRow('Subtotal:', `Rs. ${fmtC(invoice.subTotal)}`);
       if ((invoice.invoiceDiscountAmount || 0) > 0) {
         tRow(`Discount (${invoice.invoiceLevelDiscountType === 'percentage' ? invoice.invoiceLevelDiscount + '%' : 'Rs.' + invoice.invoiceLevelDiscount}):`,
-             `-Rs. ${invoice.invoiceDiscountAmount.toFixed(2)}`);
+             `-Rs. ${fmtC(invoice.invoiceDiscountAmount)}`);
       }
       if (isInterState) {
-        if ((invoice.totalIGST || 0) > 0) tRow(`IGST:`, `Rs. ${invoice.totalIGST.toFixed(2)}`);
+        if ((invoice.totalIGST || 0) > 0) tRow(`IGST:`, `Rs. ${fmtC(invoice.totalIGST)}`);
       } else {
-        if ((invoice.totalCGST || 0) > 0) tRow(`CGST:`, `Rs. ${invoice.totalCGST.toFixed(2)}`);
-        if ((invoice.totalSGST || 0) > 0) tRow(`SGST:`, `Rs. ${invoice.totalSGST.toFixed(2)}`);
+        if ((invoice.totalCGST || 0) > 0) tRow(`CGST:`, `Rs. ${fmtC(invoice.totalCGST)}`);
+        if ((invoice.totalSGST || 0) > 0) tRow(`SGST:`, `Rs. ${fmtC(invoice.totalSGST)}`);
       }
-      if ((invoice.tdsAmount || 0) > 0) tRow('TDS Deducted:',  `- Rs. ${invoice.tdsAmount.toFixed(2)}`);
-      if ((invoice.tcsAmount || 0) > 0) tRow('TCS Collected:',  `Rs. ${invoice.tcsAmount.toFixed(2)}`);
-      if ((invoice.shippingCharges || 0) > 0) tRow('Shipping:', `Rs. ${invoice.shippingCharges.toFixed(2)}`);
+      if ((invoice.tdsAmount || 0) > 0) tRow('TDS Deducted:',  `- Rs. ${fmtC(invoice.tdsAmount)}`);
+      if ((invoice.tcsAmount || 0) > 0) tRow('TCS Collected:',  `Rs. ${fmtC(invoice.tcsAmount)}`);
+      if ((invoice.shippingCharges || 0) > 0) tRow('Shipping:', `Rs. ${fmtC(invoice.shippingCharges)}`);
       if (invoice.adjustment && invoice.adjustment !== 0) {
-        tRow('Adjustment:', `${invoice.adjustment > 0 ? '+' : ''}Rs. ${invoice.adjustment.toFixed(2)}`);
+        tRow('Adjustment:', `${invoice.adjustment > 0 ? '+' : ''}Rs. ${fmtC(invoice.adjustment)}`);
       }
 
       // Grand total box — dark navy (original)
@@ -1017,12 +1024,12 @@ async function generateInvoicePDF(invoice, orgId, branchId = null) {
       doc.fontSize(8).fillColor('rgba(255,255,255,0.75)').font('Helvetica')
          .text('Grand Total', labelX + 6, totalsY + 7);
       doc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
-         .text(`Rs. ${(invoice.totalAmount || 0).toFixed(2)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
+         .text(`Rs. ${fmtC(invoice.totalAmount)}`, labelX, totalsY + 5, { width: totalsW - 6, align: 'right' });
       totalsY += 32;
 
       if ((invoice.amountPaid || 0) > 0) {
-        tRow('Amount Paid:', `Rs. ${invoice.amountPaid.toFixed(2)}`);
-        tRow('Balance Due:', `Rs. ${(invoice.amountDue || 0).toFixed(2)}`, true);
+        tRow('Amount Paid:', `Rs. ${fmtC(invoice.amountPaid)}`);
+        tRow('Balance Due:', `Rs. ${fmtC(invoice.amountDue)}`, true);
       }
 
       // Amount in words (original)

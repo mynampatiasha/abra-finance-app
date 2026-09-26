@@ -30,6 +30,18 @@ import 'new_credit_note.dart';
 import 'new_payment_page.dart';
 import 'new_payment_made.dart';
 import 'new_manual_journal.dart';
+import 'invoice_detail_page.dart';
+import 'bill_detail_page.dart';
+import 'credit_note_detail_page.dart';
+import 'customer_detail_page.dart';
+import 'expense_detail_page.dart';
+import 'payment_made_detail_page.dart';
+import 'payment_received_detail_page.dart';
+import 'purchase_order_detail_page.dart';
+import 'vendor_credit_detail.dart';
+import 'vendor_detail_page.dart';
+import '../../../../core/services/payment_service.dart';
+import '../../../../core/services/payment_made_service.dart';
 
 // ─── Scroll behaviour ────────────────────────────────────────────────────────
 class _AllDeviceScroll extends MaterialScrollBehavior {
@@ -444,6 +456,10 @@ const Map<String, List<Map<String, String>>> _relatedReports = {
 // ─── Row drill-down target mapping ───────────────────────────────────────────
 String _drillDownKey(String reportKey) {
   if (reportKey.contains('reconciliation')) return '';
+  // Payable Summary is now a combined Bills/Vendor Credits/Expenses list in
+  // its own right (matches Zoho's real definition) — it's already a details
+  // level report, not a summary that drills further into bill-details.
+  if (reportKey.contains('payable-summary')) return '';
   if (reportKey.contains('sales-by-customer') ||
       reportKey.contains('customer-balance') ||
       reportKey.contains('ar-aging') ||
@@ -668,7 +684,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     final rk = widget.report.key;
     debugPrint('🔍 [PARSE] report=$rk | top-level keys=${d.keys.toList()}');
 
-    if (rk == 'general-ledger' || rk == 'detailed-general-ledger') {
+    if (rk == 'general-ledger' || rk == 'general-ledger-detailed') {
       final accounts = d['accounts'];
       if (accounts is List && accounts.isNotEmpty) {
         final flat = <Map<String, dynamic>>[];
@@ -688,8 +704,29 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
               'debit': '',
               'credit': '',
               'balance': '',
+              'accountId': acc['accountId'],
               '_isAccountHeader': true,
             });
+            // General Ledger Detailed's backend response carries a real
+            // opening balance (everything before the period start) that
+            // was never read here — same "Opening Balance" row pattern
+            // already used for the single-account drill-down.
+            if (rk == 'general-ledger-detailed' && acc['openingBalance'] != null) {
+              flat.add({
+                'accountCode': '',
+                'accountName': 'Opening Balance',
+                'accountType': '',
+                'date': '',
+                'description': '',
+                'referenceType': '',
+                'referenceNumber': '',
+                'debit': '',
+                'credit': '',
+                'balance': acc['openingBalance'],
+                'accountId': acc['accountId'],
+                '_isAccountHeader': true,
+              });
+            }
             for (final t in txns) {
               if (t is Map) {
                 flat.add({
@@ -703,8 +740,30 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                   'debit': t['debit'] ?? 0,
                   'credit': t['credit'] ?? 0,
                   'balance': t['balance'] ?? 0,
+                  'accountId': acc['accountId'],
+                  'atId': t['atId'],
+                  'atType': t['atType'],
                 });
               }
+            }
+            // general-ledger (non-detailed) carries per-account totals that
+            // otherwise never surface anywhere on screen or in export.
+            if (rk == 'general-ledger' && acc['totals'] is Map) {
+              final t = acc['totals'] as Map;
+              flat.add({
+                'accountCode': '',
+                'accountName': 'Total for ${acc['accountName'] ?? ''}',
+                'accountType': '',
+                'date': '',
+                'description': '',
+                'referenceType': '',
+                'referenceNumber': '',
+                'debit': t['debit'] ?? 0,
+                'credit': t['credit'] ?? 0,
+                'balance': t['closing'] ?? 0,
+                'accountId': acc['accountId'],
+                '_isAccountHeader': true,
+              });
             }
           }
         }
@@ -788,10 +847,13 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           hSet.addAll(r.keys.cast<String>().where((k) =>
               !k.startsWith('_') &&
               k != 'id' &&
+              k != 'accountId' &&
               k != 'atId' &&
               k != 'atType' &&
               k != 'btId' &&
               k != 'bankAccountId' &&
+              k != 'customerId' &&
+              k != 'vendorId' &&
               r[k] is! List &&
               r[k] is! Map));
         }
@@ -846,13 +908,23 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   }
 
   String _colLabel(String h) => h
-      .replaceAllMapped(RegExp(r'([A-Z])'), (m) => ' ${m.group(0)}')
+      // Keep acronyms (TDS, PAN, GST...) together as one word — only split
+      // at a lowercase→uppercase boundary or the end of an acronym run.
+      .replaceAllMapped(
+          RegExp(r'([A-Z]+)([A-Z][a-z])'), (m) => '${m.group(1)} ${m.group(2)}')
+      .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m.group(1)} ${m.group(2)}')
       .trim()
       .split(' ')
       .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
       .join(' ');
 
-  String _displayVal(String h, dynamic v) {
+  // `commas` is opt-in (default false) so the two on-screen ledger-table
+  // call sites (_buildLedgerTable's _cellOrLink) keep rendering exactly as
+  // before — only the PDF/Excel export call sites pass commas: true, so
+  // this only changes what ends up in downloaded files, never what's shown
+  // on screen.
+  String _displayVal(String h, dynamic v, {bool commas = false}) {
     if (v == null) return '-';
     final s = v.toString();
     if (s == 'null' || s.isEmpty) return '-';
@@ -864,6 +936,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     }
     final hl = h.toLowerCase();
     if ((hl.contains('day') || hl.contains('bucket')) && !hl.contains('1-15') && !hl.contains('16-30') && !hl.contains('31-45') && !hl.contains('45 days')) return s; // Prevent formatting 'Days Overdue' as currency
+    if (hl.contains('percent') || hl.contains('margin')) {
+      final n = double.tryParse(s.replaceAll(',', '').replaceAll('%', ''));
+      if (n != null) return '${n.toStringAsFixed(2)}%';
+      return s;
+    }
     if (hl.contains('amount') ||
         hl.contains('total') ||
         hl.contains('paid') ||
@@ -887,7 +964,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         hl.contains('billed')) {
       final n = double.tryParse(
           s.replaceAll(',', '').replaceAll('Rs. ', '').replaceAll('Rs.', ''));
-      if (n != null) return 'Rs. ${n.toStringAsFixed(2)}';
+      if (n != null) {
+        final formatted =
+            commas ? NumberFormat('#,##,##0.00').format(n) : n.toStringAsFixed(2);
+        return 'Rs. $formatted';
+      }
     }
     return s;
   }
@@ -931,14 +1012,45 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     }
   }
 
+  // Classifies one export row as header/subtotal/detail for the structured
+  // PDF/Excel renderer. Financial-statement reports already tag every row
+  // via `_rowType` (see _flattenFinancial). Trial Balance / General Ledger /
+  // General Ledger Detailed instead reuse the older `_isAccountHeader` flag
+  // — for those, a header row is a pure section label (every other column
+  // blank) while a subtotal row carries real debit/credit/balance values in
+  // those same columns, so the two are told apart by checking for that.
+  String _classifyExportRow(Map<String, dynamic> r, List<String> headers) {
+    final rt = r['_rowType'];
+    if (rt is String) return rt;
+    if (r['_isAccountHeader'] == true) {
+      // General Ledger's own account-header rows populate accountCode and
+      // accountType too, not just accountName — those are still identifying
+      // labels, not data, so they must be excluded here as well or every
+      // GL account-header row would be misread as a subtotal.
+      const labelCols = {'accountName', 'accountCode', 'accountType'};
+      final hasValue = headers.any((h) {
+        if (labelCols.contains(h)) return false;
+        final v = r[h];
+        return v != null && v.toString().isNotEmpty;
+      });
+      return hasValue ? 'subtotal' : 'header';
+    }
+    return 'detail';
+  }
+
   // ── Exports ────────────────────────────────────────────────────────────────
   Future<void> _exportPDF(
       {List<Map<String, dynamic>>? customRows,
       List<String>? customHeaders}) async {
     final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _filtered);
+    // Union keys across all rows (not just the first) — some financial
+    // shapes (e.g. cash-flow's monthly breakdown) add extra columns
+    // (Incoming/Outgoing) partway through that the first row doesn't have.
     final rawHeaders = customHeaders ??
         (_isFinancial && rows.isNotEmpty
-            ? rows.first.keys.where((k) => !k.startsWith('_')).toList()
+            ? (<String>{for (final r in rows) ...r.keys}
+                .where((k) => !k.startsWith('_')))
+                .toList()
             : _headers);
     if (rows.isEmpty && !_isFinancial) {
       _snackErr('No data to export');
@@ -959,7 +1071,10 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
               ? DateFormat('dd MMM yyyy')
                   .format(DateTime.parse(period['end'].toString()).toLocal())
               : '';
-          if (s.isNotEmpty || e.isNotEmpty) pl = '$s – $e';
+          // Plain ASCII hyphen, not an en dash — the PDF export's default
+          // font has no glyph for "–" and silently renders it as a missing-
+          // character box (same class of issue as the ₹ symbol elsewhere).
+          if (s.isNotEmpty || e.isNotEmpty) pl = '$s - $e';
         } catch (_) {}
       } else if (asOf != null) {
         try {
@@ -1005,9 +1120,20 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         }
 
         final visibleHeaders = rawHeaders.where((h) => h != '_isAccountHeader').toList();
+        // Previously this filtered _isAccountHeader rows out entirely —
+        // that's how Trial Balance/General Ledger's section headers,
+        // subtotals, and (for Trial Balance) the grand total silently never
+        // made it into the export at all. Keep them; rowTypes below makes
+        // sure they render as headers/subtotals instead of plain rows.
+        final filteredRows = rows;
+        final hasHeaderRows = rows.any((r) => r['_isAccountHeader'] == true);
         await ExportHelper.exportToPDF(
+          // Report names like "Account Transactions — X" carry an em dash
+          // that's fine on screen but has no glyph in the PDF's default
+          // font (same class of bug as the date-range en dash above) — swap
+          // both dash variants for a plain hyphen only for the PDF title.
           title: [
-            widget.report.name,
+            widget.report.name.replaceAll('—', '-').replaceAll('–', '-'),
             if (pl.isNotEmpty) pl
           ].join('\n'),
           orgName: widget.orgName.isNotEmpty ? widget.orgName : null,
@@ -1016,12 +1142,18 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
           orgPhone: orgPhone,
           orgGst: orgGst,
           headers: rawHeaders.map(_colLabel).toList(),
-          data: rows
-            .where((r) => r['_isAccountHeader'] != true)
-            .map((r) => rawHeaders
-                .map((h) => _displayVal(h, r[h]).replaceAll('Rs. ', 'Rs.'))
-                .toList())
-            .toList(),
+          data: filteredRows
+              .map((r) => rawHeaders
+                  .map((h) => _displayVal(h, r[h], commas: true)
+                      .replaceAll('Rs. ', 'Rs.'))
+                  .toList())
+              .toList(),
+          rowTypes: (_isFinancial || hasHeaderRows)
+              ? filteredRows
+                  .map((r) => _classifyExportRow(r, rawHeaders))
+                  .toList()
+              : null,
+          portrait: _isFinancial,
         filename: widget.report.name.replaceAll(' ', '_'),
       );
       _snackOk('PDF downloaded');
@@ -1036,9 +1168,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       {List<Map<String, dynamic>>? customRows,
       List<String>? customHeaders}) async {
     final rows = customRows ?? (_isFinancial ? _flattenFinancial() : _filtered);
+    // Union keys across all rows (not just the first) — some financial
+    // shapes (e.g. cash-flow's monthly breakdown) add extra columns
+    // (Incoming/Outgoing) partway through that the first row doesn't have.
     final rawHeaders = customHeaders ??
         (_isFinancial && rows.isNotEmpty
-            ? rows.first.keys.where((k) => !k.startsWith('_')).toList()
+            ? (<String>{for (final r in rows) ...r.keys}
+                .where((k) => !k.startsWith('_')))
+                .toList()
             : _headers);
     if (rows.isEmpty && !_isFinancial) {
       _snackErr('No data to export');
@@ -1052,10 +1189,15 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       await ReportsService.exportExcel(
         reportName: widget.report.name,
         companyName: widget.orgName,
-        reportData: rows.where((r) => r['_isAccountHeader'] != true).map((r) {
+        // Previously filtered _isAccountHeader rows out entirely — Excel
+        // can't render them bold like the PDF now does, but keeping the
+        // row (label + values) beats it being completely absent, which is
+        // what Trial Balance/General Ledger's section headers, subtotals,
+        // and grand total were doing before this fix.
+        reportData: rows.map((r) {
           final formatted = <String, dynamic>{};
           for (final h in rawHeaders) {
-            formatted[_colLabel(h)] = _displayVal(h, r[h]);
+            formatted[_colLabel(h)] = _displayVal(h, r[h], commas: true);
           }
           return formatted;
         }).toList(),
@@ -1148,7 +1290,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                       child: ListView(
                           padding: const EdgeInsets.all(16),
                           children: row.entries
-                              .where((e) => !e.key.startsWith('_'))
+                              .where((e) =>
+                                  !e.key.startsWith('_') &&
+                                  e.key != 'atId' &&
+                                  e.key != 'atType' &&
+                                  e.key != 'btId' &&
+                                  e.key != 'bankAccountId' &&
+                                  e.key != 'customerId' &&
+                                  e.key != 'vendorId')
                               .map((e) => Padding(
                                   padding: const EdgeInsets.only(bottom: 10),
                                   child: Row(
@@ -1163,9 +1312,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                                                     fontWeight: FontWeight.w600,
                                                     color: _navy))),
                                         Expanded(
-                                            child: Text(
+                                            child: _cellOrLink(row, e.key,
                                                 _displayVal(e.key, e.value),
-                                                style: const TextStyle(
+                                                baseStyle: const TextStyle(
                                                     fontSize: 14,
                                                     color: Color(0xFF374151)))),
                                       ])))
@@ -1571,6 +1720,7 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
               displayVal: _displayVal,
               cellStyle: _cellStyle,
               statusBadge: _statusBadge,
+              cellOrLink: _cellOrLink,
             ),
 
           // Export buttons for financial reports
@@ -1866,6 +2016,129 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   }
 
   // Balance Sheet
+  // ── Balance-sheet row renderers — shared between the vertical (_buildBS)
+  // and horizontal (_buildBSH) layouts, since both draw the identical tree,
+  // just arranged differently on the page.
+  Widget _bsHeader(String title, int depth) => Padding(
+      padding: EdgeInsets.only(left: 12.0 + (depth * 16), top: 12, bottom: 6),
+      child: Text(title,
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827))));
+
+  Widget _bsItemRow(Map item, int depth) => InkWell(
+      onTap: () => _openAccountTransactions(item),
+      child: Padding(
+          padding: EdgeInsets.only(
+              left: 12.0 + (depth * 16), top: 6, bottom: 6, right: 12),
+          child: Row(children: [
+            Expanded(
+                child: Text(item['accountName']?.toString() ?? '',
+                    style: const TextStyle(fontSize: 15, color: _blue))),
+            Text('Rs. ${_fmtNum(item['amount'] ?? 0)}',
+                style:
+                    const TextStyle(fontSize: 15, color: Color(0xFF374151))),
+          ])));
+
+  Widget _bsSubtotal(String title, dynamic total, int depth) => Padding(
+      padding: EdgeInsets.only(
+          left: 12.0 + (depth * 16), top: 6, bottom: 12, right: 12),
+      child: Row(children: [
+        Expanded(
+            child: Text('Total for $title',
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF374151)))),
+        Text('Rs. ${_fmtNum(total)}',
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF374151))),
+      ]));
+
+  Widget _bsRenderGroup(Map group, String title, int depth) {
+    final items = group['items'] as List? ?? [];
+    if (items.isEmpty && group['total'] == 0) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _bsHeader(title, depth),
+      ...items.map((i) => _bsItemRow(i, depth + 1)),
+      _bsSubtotal(title, group['total'], depth)
+    ]);
+  }
+
+  Widget _bsRenderCashBank(Map group, int depth) {
+    final cash = group['cash'] as List? ?? [];
+    final bank = group['bank'] as List? ?? [];
+    if (cash.isEmpty && bank.isEmpty) return const SizedBox.shrink();
+    final c = <Widget>[_bsHeader('Cash and Cash Equivalents', depth)];
+    if (cash.isNotEmpty) {
+      c.add(_bsHeader('Cash', depth + 1));
+      c.addAll(cash.map((i) => _bsItemRow(i, depth + 2)));
+      c.add(_bsSubtotal('Cash',
+          cash.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
+    }
+    if (bank.isNotEmpty) {
+      c.add(_bsHeader('Bank', depth + 1));
+      c.addAll(bank.map((i) => _bsItemRow(i, depth + 2)));
+      c.add(_bsSubtotal('Bank',
+          bank.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
+    }
+    c.add(_bsSubtotal('Cash and Cash Equivalents', group['total'], depth));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
+  }
+
+  Widget _bsRenderCurrentLiabilities(Map cl, int depth) {
+    final ap = cl['accountsPayable'] as Map? ?? {};
+    final ocl = cl['otherCurrentLiabilities'] as Map? ?? {};
+    if (cl['total'] == 0 &&
+        (ap['items'] as List? ?? []).isEmpty &&
+        (ocl['items'] as List? ?? []).isEmpty) return const SizedBox.shrink();
+
+    final c = <Widget>[_bsHeader('Current Liabilities', depth)];
+    if ((ap['items'] as List? ?? []).isNotEmpty || ap['total'] != 0) {
+      c.add(_bsRenderGroup(ap, 'Accounts Payable', depth + 1));
+    }
+
+    final oclItems = ocl['items'] as List? ?? [];
+    final gst = ocl['gstPayable'] as Map? ?? {};
+    if (oclItems.isNotEmpty ||
+        (gst['items'] as List? ?? []).isNotEmpty ||
+        ocl['total'] != 0) {
+      c.add(_bsHeader('Other Current Liabilities', depth + 1));
+      c.addAll(oclItems.map((i) => _bsItemRow(i, depth + 2)));
+      if ((gst['items'] as List? ?? []).isNotEmpty) {
+        c.add(_bsHeader('GST Payable', depth + 2));
+        c.addAll((gst['items'] as List).map((i) => _bsItemRow(i, depth + 3)));
+        c.add(_bsSubtotal('GST Payable', gst['total'], depth + 2));
+      }
+      c.add(_bsSubtotal('Other Current Liabilities', ocl['total'], depth + 1));
+    }
+    c.add(_bsSubtotal('Current Liabilities', cl['total'], depth));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
+  }
+
+  // Mirrors _bsRenderCurrentLiabilities' GST Payable breakout, but for the
+  // Input Tax Credits sub-group under Other Current Assets.
+  Widget _bsRenderOtherCurrentAssets(Map oca, int depth) {
+    final items = oca['items'] as List? ?? [];
+    final itc = oca['inputTaxCredits'] as Map? ?? {};
+    if (items.isEmpty &&
+        (itc['items'] as List? ?? []).isEmpty &&
+        oca['total'] == 0) return const SizedBox.shrink();
+
+    final c = <Widget>[_bsHeader('Other current assets', depth)];
+    c.addAll(items.map((i) => _bsItemRow(i, depth + 1)));
+    if ((itc['items'] as List? ?? []).isNotEmpty) {
+      c.add(_bsHeader('Input Tax Credits', depth + 1));
+      c.addAll((itc['items'] as List).map((i) => _bsItemRow(i, depth + 2)));
+      c.add(_bsSubtotal('Input Tax Credits', itc['total'], depth + 1));
+    }
+    c.add(_bsSubtotal('Other current assets', oca['total'], depth));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
+  }
+
   Widget _buildBS(Map<String, dynamic> d) {
     final tree = d['nestedTree'] as Map? ?? {};
     if (tree.isEmpty)
@@ -1877,138 +2150,38 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     final liabs = tree['liabilities'] as Map? ?? {};
     final eqs = tree['equities'] as Map? ?? {};
 
-    Widget header(String title, int depth) => Padding(
-        padding: EdgeInsets.only(left: 12.0 + (depth * 16), top: 12, bottom: 6),
-        child: Text(title,
-            style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF111827))));
-
-    Widget itemRow(Map item, int depth) => InkWell(
-        onTap: () => _openAccountTransactions(item),
-        child: Padding(
-            padding: EdgeInsets.only(
-                left: 12.0 + (depth * 16), top: 6, bottom: 6, right: 12),
-            child: Row(children: [
-              Expanded(
-                  child: Text(item['accountName']?.toString() ?? '',
-                      style: const TextStyle(fontSize: 15, color: _blue))),
-              Text('Rs. ${_fmtNum(item['amount'] ?? 0)}',
-                  style:
-                      const TextStyle(fontSize: 15, color: Color(0xFF374151))),
-            ])));
-
-    Widget subtotal(String title, dynamic total, int depth) => Padding(
-        padding: EdgeInsets.only(
-            left: 12.0 + (depth * 16), top: 6, bottom: 12, right: 12),
-        child: Row(children: [
-          Expanded(
-              child: Text('Total for $title',
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF374151)))),
-          Text('Rs. ${_fmtNum(total)}',
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF374151))),
-        ]));
-
-    Widget renderGroup(Map group, String title, int depth) {
-      final items = group['items'] as List? ?? [];
-      if (items.isEmpty && group['total'] == 0) return const SizedBox.shrink();
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        header(title, depth),
-        ...items.map((i) => itemRow(i, depth + 1)),
-        subtotal(title, group['total'], depth)
-      ]);
-    }
-
-    Widget renderCashBank(Map group, int depth) {
-      final cash = group['cash'] as List? ?? [];
-      final bank = group['bank'] as List? ?? [];
-      if (cash.isEmpty && bank.isEmpty) return const SizedBox.shrink();
-      final c = <Widget>[header('Cash and Cash Equivalents', depth)];
-      if (cash.isNotEmpty) {
-        c.add(header('Cash', depth + 1));
-        c.addAll(cash.map((i) => itemRow(i, depth + 2)));
-        c.add(subtotal('Cash',
-            cash.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
-      }
-      if (bank.isNotEmpty) {
-        c.add(header('Bank', depth + 1));
-        c.addAll(bank.map((i) => itemRow(i, depth + 2)));
-        c.add(subtotal('Bank',
-            bank.fold(0.0, (s, i) => s + (i['amount'] as num)), depth + 1));
-      }
-      c.add(subtotal('Cash and Cash Equivalents', group['total'], depth));
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
-    }
-
-    Widget renderCurrentLiabilities(Map cl, int depth) {
-      final ap = cl['accountsPayable'] as Map? ?? {};
-      final ocl = cl['otherCurrentLiabilities'] as Map? ?? {};
-      if (cl['total'] == 0 &&
-          (ap['items'] as List? ?? []).isEmpty &&
-          (ocl['items'] as List? ?? []).isEmpty) return const SizedBox.shrink();
-
-      final c = <Widget>[header('Current Liabilities', depth)];
-      if ((ap['items'] as List? ?? []).isNotEmpty || ap['total'] != 0) {
-        c.add(renderGroup(ap, 'Accounts Payable', depth + 1));
-      }
-
-      final oclItems = ocl['items'] as List? ?? [];
-      final gst = ocl['gstPayable'] as Map? ?? {};
-      if (oclItems.isNotEmpty ||
-          (gst['items'] as List? ?? []).isNotEmpty ||
-          ocl['total'] != 0) {
-        c.add(header('Other Current Liabilities', depth + 1));
-        c.addAll(oclItems.map((i) => itemRow(i, depth + 2)));
-        if ((gst['items'] as List? ?? []).isNotEmpty) {
-          c.add(header('GST Payable', depth + 2));
-          c.addAll((gst['items'] as List).map((i) => itemRow(i, depth + 3)));
-          c.add(subtotal('GST Payable', gst['total'], depth + 2));
-        }
-        c.add(subtotal('Other Current Liabilities', ocl['total'], depth + 1));
-      }
-      c.add(subtotal('Current Liabilities', cl['total'], depth));
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: c);
-    }
-
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       // ── ASSETS ──
       _fsSecHead('Assets', _blue),
       if (assets['currentAssets'] != null) ...[
-        header('Current Assets', 0),
-        renderCashBank(
+        _bsHeader('Current Assets', 0),
+        _bsRenderCashBank(
             assets['currentAssets']['cashAndCashEquivalents'] ?? {}, 1),
-        renderGroup(assets['currentAssets']['accountsReceivable'] ?? {},
+        _bsRenderGroup(assets['currentAssets']['accountsReceivable'] ?? {},
             'Accounts Receivable', 1),
-        renderGroup(assets['currentAssets']['otherCurrentAssets'] ?? {},
-            'Other current assets', 1),
-        subtotal('Current Assets', assets['currentAssets']['total'], 0),
+        _bsRenderOtherCurrentAssets(
+            assets['currentAssets']['otherCurrentAssets'] ?? {}, 1),
+        _bsSubtotal('Current Assets', assets['currentAssets']['total'], 0),
       ],
-      renderGroup(assets['fixedAssets'] ?? {}, 'Fixed Assets', 0),
-      renderGroup(assets['nonCurrentAssets'] ?? {}, 'Non Current Assets', 0),
-      renderGroup(assets['otherAssets'] ?? {}, 'Other Assets', 0),
+      _bsRenderGroup(assets['fixedAssets'] ?? {}, 'Fixed Assets', 0),
+      _bsRenderGroup(assets['nonCurrentAssets'] ?? {}, 'Non Current Assets', 0),
+      _bsRenderGroup(assets['otherAssets'] ?? {}, 'Other Assets', 0),
       _fsSubtotal('Total for Assets', assets['total']),
       const SizedBox(height: 20),
 
       // ── LIABILITIES ──
       _fsSecHead('Liabilities', _red),
       if (liabs['currentLiabilities'] != null)
-        renderCurrentLiabilities(liabs['currentLiabilities'], 0),
-      renderGroup(
+        _bsRenderCurrentLiabilities(liabs['currentLiabilities'], 0),
+      _bsRenderGroup(
           liabs['nonCurrentLiabilities'] ?? {}, 'Non Current Liabilities', 0),
-      renderGroup(liabs['otherLiabilities'] ?? {}, 'Other Liabilities', 0),
+      _bsRenderGroup(liabs['otherLiabilities'] ?? {}, 'Other Liabilities', 0),
       _fsSubtotal('Total for Liabilities', liabs['total']),
       const SizedBox(height: 20),
 
       // ── EQUITIES ──
       _fsSecHead('Equities', _purple),
-      ...((eqs['items'] as List? ?? []).map((i) => itemRow(i, 0))),
+      ...((eqs['items'] as List? ?? []).map((i) => _bsItemRow(i, 0))),
       if (eqs['currentYearEarnings'] != null && eqs['currentYearEarnings'] != 0)
         Padding(
             padding:
@@ -2028,6 +2201,117 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
 
       if (d['balanced'] == true) ...[
         const SizedBox(height: 10),
+        Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+                color: _green.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _green.withOpacity(0.3))),
+            child: const Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.check_circle, color: _green, size: 14),
+              SizedBox(width: 6),
+              Text('Balance Sheet is Balanced',
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: _green,
+                      fontWeight: FontWeight.w600)),
+            ])),
+      ],
+    ]);
+  }
+
+  // Same tree as _buildBS, laid out side-by-side (Liabilities & Equities on
+  // the left, Assets on the right) instead of stacked — matching Zoho's
+  // Horizontal Balance Sheet layout.
+  String _asOfDateLabel(dynamic raw) {
+    if (raw == null) return '';
+    try {
+      final s = raw.toString();
+      return DateFormat('dd MMM yyyy').format(DateTime.parse(s).toLocal());
+    } catch (_) {
+      return raw.toString();
+    }
+  }
+
+  Widget _buildBSH(Map<String, dynamic> d) {
+    final tree = d['nestedTree'] as Map? ?? {};
+    if (tree.isEmpty)
+      return const Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('No balance sheet data available.'));
+
+    final assets = tree['assets'] as Map? ?? {};
+    final liabs = tree['liabilities'] as Map? ?? {};
+    final eqs = tree['equities'] as Map? ?? {};
+
+    final leftCol = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fsSecHead('Liabilities & Equities', _red),
+      _bsHeader('Liabilities', 0),
+      if (liabs['currentLiabilities'] != null)
+        _bsRenderCurrentLiabilities(liabs['currentLiabilities'], 1),
+      _bsRenderGroup(
+          liabs['nonCurrentLiabilities'] ?? {}, 'Non Current Liabilities', 1),
+      _bsRenderGroup(liabs['otherLiabilities'] ?? {}, 'Other Liabilities', 1),
+      _bsSubtotal('Liabilities', liabs['total'], 0),
+      const SizedBox(height: 12),
+      _bsHeader('Equities', 0),
+      ...((eqs['items'] as List? ?? []).map((i) => _bsItemRow(i, 1))),
+      if (eqs['currentYearEarnings'] != null && eqs['currentYearEarnings'] != 0)
+        Padding(
+            padding:
+                const EdgeInsets.only(left: 28.0, top: 6, bottom: 6, right: 12),
+            child: Row(children: [
+              const Expanded(
+                  child: Text('Current Year Earnings',
+                      style: TextStyle(fontSize: 15, color: _blue))),
+              Text('Rs. ${_fmtNum(eqs['currentYearEarnings'])}',
+                  style:
+                      const TextStyle(fontSize: 15, color: Color(0xFF374151))),
+            ])),
+      _bsSubtotal('Equities', eqs['total'], 0),
+      const Divider(height: 28, thickness: 1, color: Color(0xFFE2E8F0)),
+      _fsNetRow(
+          'Total Liabilities & Equities', d['totalLiabilitiesAndEquity']),
+    ]);
+
+    final rightCol = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _fsSecHead('Assets', _blue),
+      if (assets['currentAssets'] != null) ...[
+        _bsHeader('Current Assets', 0),
+        _bsRenderCashBank(
+            assets['currentAssets']['cashAndCashEquivalents'] ?? {}, 1),
+        _bsRenderGroup(assets['currentAssets']['accountsReceivable'] ?? {},
+            'Accounts Receivable', 1),
+        _bsRenderOtherCurrentAssets(
+            assets['currentAssets']['otherCurrentAssets'] ?? {}, 1),
+        _bsSubtotal('Current Assets', assets['currentAssets']['total'], 0),
+      ],
+      _bsRenderGroup(assets['fixedAssets'] ?? {}, 'Fixed Assets', 0),
+      _bsRenderGroup(assets['nonCurrentAssets'] ?? {}, 'Non Current Assets', 0),
+      _bsRenderGroup(assets['otherAssets'] ?? {}, 'Other Assets', 0),
+      const Divider(height: 28, thickness: 1, color: Color(0xFFE2E8F0)),
+      _fsNetRow('Total Assets', assets['total']),
+    ]);
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+            'As of ${_asOfDateLabel(d['asOf'])}',
+            style: const TextStyle(
+                fontSize: 13, color: Color(0xFF6B7280), fontWeight: FontWeight.w500)),
+      ),
+      IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: leftCol),
+          const SizedBox(width: 16),
+          const VerticalDivider(width: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+          const SizedBox(width: 16),
+          Expanded(child: rightCol),
+        ]),
+      ),
+      if (d['balanced'] == true) ...[
+        const SizedBox(height: 14),
         Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -2111,19 +2395,6 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
     ]);
   }
 
-  // Balance Sheet Horizontal (comparative)
-  Widget _buildBSH(Map<String, dynamic> d) {
-    final curr = d['current'] as Map? ?? {};
-    final prev = d['previous'] as Map? ?? {};
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _fsCompHeader(['Current', 'Previous']),
-      _fsCompRow2('Total Assets', curr['assets'], prev['assets'], isBold: true),
-      _fsCompRow2('Total Liabilities', curr['liabilities'], prev['liabilities'],
-          isBold: true),
-      _fsCompRow2('Total Equity', curr['equity'], prev['equity'], isBold: true),
-    ]);
-  }
-
   // Movement of Equity
   Widget _buildMOE(Map<String, dynamic> d) {
     final accounts = d['accounts'] as List? ?? [];
@@ -2158,32 +2429,38 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
       // Rows
       ...accounts.asMap().entries.map<Widget>((e) {
         final a = e.value as Map;
-        return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            color: e.key % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
-            child: Row(children: [
-              Expanded(
-                  flex: 3,
-                  child: Text(a['accountName']?.toString() ?? '',
-                      style: const TextStyle(
-                          fontSize: 14, color: Color(0xFF374151)))),
-              Expanded(
-                  child: Text('Rs. ${_fmtNum(a['opening'])}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 14))),
-              Expanded(
-                  child: Text('Rs. ${_fmtNum(a['change'])}',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                          fontSize: 14, color: _amtColor(a['change'])))),
-              Expanded(
-                  child: Text('Rs. ${_fmtNum(a['closing'])}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: _navy))),
-            ]));
+        final isCYE = a['isCurrentYearEarnings'] == true;
+        return InkWell(
+            onTap: () =>
+                isCYE ? _openCurrentYearEarnings() : _openAccountTransactions(a),
+            child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                color: e.key % 2 == 0 ? Colors.white : const Color(0xFFF8FAFC),
+                child: Row(children: [
+                  Expanded(
+                      flex: 3,
+                      child: Text(a['accountName']?.toString() ?? '',
+                          style: const TextStyle(
+                              fontSize: 14,
+                              color: _blue,
+                              decoration: TextDecoration.underline))),
+                  Expanded(
+                      child: Text('Rs. ${_fmtNum(a['opening'])}',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(fontSize: 14))),
+                  Expanded(
+                      child: Text('Rs. ${_fmtNum(a['change'])}',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                              fontSize: 14, color: _amtColor(a['change'])))),
+                  Expanded(
+                      child: Text('Rs. ${_fmtNum(a['closing'])}',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _navy))),
+                ])));
       }),
       // Totals row
       Container(
@@ -2433,29 +2710,6 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         ]));
   }
 
-  Widget _fsCompRow2(String label, dynamic curr, dynamic prev,
-      {bool isBold = false}) {
-    final style = TextStyle(
-        fontSize: 14,
-        fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-        color: const Color(0xFF374151));
-    return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(children: [
-          Expanded(flex: 3, child: Text(label, style: style)),
-          Expanded(
-              flex: 2,
-              child: Text('Rs. ${_fmtNum(curr)}',
-                  textAlign: TextAlign.right,
-                  style: style.copyWith(color: _navy))),
-          Expanded(
-              flex: 2,
-              child: Text('Rs. ${_fmtNum(prev)}',
-                  textAlign: TextAlign.right,
-                  style: style.copyWith(color: Colors.grey[600]))),
-        ]));
-  }
-
   void _openAccountTransactions(Map item) {
     final accountName = item['accountName']?.toString() ?? '';
     if (accountName.isEmpty) return;
@@ -2495,155 +2749,278 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                 )));
   }
 
+  // Current Year Earnings on Movement of Equity is a rollup across every
+  // Income/Expense account, not one account — so unlike the other rows it
+  // can't drill into account-transactions. Points at Profit & Loss for the
+  // same period instead, matching Zoho's Movement of Equity link.
+  void _openCurrentYearEarnings() {
+    final meta = ReportMeta(key: 'profit-loss', name: 'Profit & Loss');
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ReportViewerPage(
+                  report: meta,
+                  orgName: widget.orgName,
+                  initialParams: _params,
+                )));
+  }
+
   // Flatten financial data for export
+  // Shared by both balance-sheet export cases below — walks the nestedTree
+  // recursively into flat {Account, Amount} rows for PDF/Excel. Every row
+  // carries a `_rowType` (header/subtotal/detail) so the exporter can render
+  // real section hierarchy instead of a flat table — `_rowType` is stripped
+  // from the header list by the `_`-prefix filter in _exportPDF/_exportExcel.
+  void _flattenBSGroup(
+      List<Map<String, dynamic>> rows, Map group, String title) {
+    rows.add({'Account': title, 'Amount': '', '_rowType': 'header'});
+    final items = group['items'] as List? ?? [];
+    for (final i in items) {
+      rows.add({
+        'Account': (i as Map)['accountName'],
+        'Amount': i['amount'],
+        '_rowType': 'detail'
+      });
+    }
+    // Cash and Bank live as plain lists (group['cash']/group['bank']), not
+    // {items: [...]} sub-groups like everything else in this tree — the
+    // generic Map-recursion below can't see them (List isn't a Map), so
+    // they need explicit handling here, matching _bsRenderCashBank's
+    // on-screen structure exactly (Cash sub-header, Bank sub-header, each
+    // with its own subtotal).
+    final cash = group['cash'] as List?;
+    final bank = group['bank'] as List?;
+    if (cash != null && cash.isNotEmpty) {
+      rows.add({'Account': 'Cash', 'Amount': '', '_rowType': 'header'});
+      for (final i in cash) {
+        rows.add({
+          'Account': (i as Map)['accountName'],
+          'Amount': i['amount'],
+          '_rowType': 'detail'
+        });
+      }
+      final cashTotal =
+          cash.fold(0.0, (s, i) => s + ((i as Map)['amount'] as num));
+      rows.add(
+          {'Account': 'Total Cash', 'Amount': cashTotal, '_rowType': 'subtotal'});
+    }
+    if (bank != null && bank.isNotEmpty) {
+      rows.add({'Account': 'Bank', 'Amount': '', '_rowType': 'header'});
+      for (final i in bank) {
+        rows.add({
+          'Account': (i as Map)['accountName'],
+          'Amount': i['amount'],
+          '_rowType': 'detail'
+        });
+      }
+      final bankTotal =
+          bank.fold(0.0, (s, i) => s + ((i as Map)['amount'] as num));
+      rows.add(
+          {'Account': 'Total Bank', 'Amount': bankTotal, '_rowType': 'subtotal'});
+    }
+    for (final key in group.keys) {
+      if (key != 'items' && key != 'total' && group[key] is Map) {
+        _flattenBSGroup(rows, group[key], _colLabel(key));
+      }
+    }
+    rows.add({
+      'Account': 'Total $title',
+      'Amount': group['total'] ?? 0,
+      '_rowType': 'subtotal'
+    });
+  }
+
   List<Map<String, dynamic>> _flattenFinancial() {
     if (_data == null) return [];
     final rows = <Map<String, dynamic>>[];
     final k = widget.report.key;
 
     if (k == 'profit-loss') {
-      for (final sec in ['income', 'costOfGoods', 'operatingExpenses']) {
+      for (final sec in [
+        'income',
+        'costOfGoods',
+        'operatingExpenses',
+        'nonOperatingIncome',
+        'nonOperatingExpenses'
+      ]) {
         final s = _data![sec] as Map? ?? {};
-        rows.add({
-          'Section': sec == 'income'
-              ? 'Operating Income'
-              : sec == 'costOfGoods'
-                  ? 'Cost of Goods Sold'
-                  : 'Operating Expenses',
-          'Account': '',
-          'Amount': ''
-        });
-        for (final i in (s['items'] as List? ?? [])) {
+        // Sections are omitted from the on-screen report too when there's
+        // nothing in them (see the widget renderer) — match that here so
+        // the export doesn't add empty "Non Operating Income" headers when
+        // there was never any non-operating activity.
+        final items = s['items'] as List? ?? [];
+        if (items.isEmpty && (s['total'] == null || s['total'] == 0)) continue;
+        final label = sec == 'income'
+            ? 'Operating Income'
+            : sec == 'costOfGoods'
+                ? 'Cost of Goods Sold'
+                : sec == 'operatingExpenses'
+                    ? 'Operating Expenses'
+                    : sec == 'nonOperatingIncome'
+                        ? 'Non Operating Income'
+                        : 'Non Operating Expenses';
+        rows.add({'Account': label, 'Amount': '', '_rowType': 'header'});
+        for (final i in items) {
           final amt = double.tryParse((i as Map)['amount']?.toString() ?? '0') ?? 0;
           if (amt == 0) continue;
           rows.add({
-            'Section': '',
             'Account': i['accountName'],
-            'Amount': i['amount']
+            'Amount': i['amount'],
+            '_rowType': 'detail'
           });
         }
-        rows.add({'Section': 'Subtotal', 'Account': '', 'Amount': s['total']});
+        rows.add({
+          'Account': 'Total for $label',
+          'Amount': s['total'],
+          '_rowType': 'subtotal'
+        });
+        if (sec == 'costOfGoods') {
+          rows.add({'Account': 'Gross Profit', 'Amount': _data!['grossProfit'], '_rowType': 'subtotal'});
+        } else if (sec == 'operatingExpenses') {
+          rows.add({'Account': 'Operating Profit', 'Amount': _data!['operatingProfit'], '_rowType': 'subtotal'});
+        }
       }
       rows.add({
-        'Section': 'Net Profit / Loss',
-        'Account': '',
-        'Amount': _data!['netProfit']
+        'Account': 'Net Profit / Loss',
+        'Amount': _data!['netProfit'],
+        '_rowType': 'subtotal'
       });
     } else if (k == 'profit-loss-horizontal') {
       final curr = _data!['current'] as Map? ?? {};
       final prev = _data!['previous'] as Map? ?? {};
       final chg = _data!['changes'] as Map? ?? {};
-      rows.add({
-        'Metric': 'Income',
-        'Current': curr['income'],
-        'Previous': prev['income'],
-        'Change': (chg['income'] as Map?)?['absolute'],
-        'Change %': (chg['income'] as Map?)?['percent']
-      });
-      rows.add({
-        'Metric': 'Expenses',
-        'Current': curr['expenses'],
-        'Previous': prev['expenses'],
-        'Change': (chg['expenses'] as Map?)?['absolute'],
-        'Change %': (chg['expenses'] as Map?)?['percent']
-      });
-      rows.add({
-        'Metric': 'Net Profit',
-        'Current': curr['netProfit'],
-        'Previous': prev['netProfit'],
-        'Change': (chg['netProfit'] as Map?)?['absolute'],
-        'Change %': (chg['netProfit'] as Map?)?['percent']
-      });
+      Map<String, dynamic> metricRow(String label, String field,
+              {bool isSubtotal = false}) =>
+          {
+            'Metric': label,
+            'Current': curr[field],
+            'Previous': prev[field],
+            'Change': (chg[field] as Map?)?['absolute'],
+            'Change %': (chg[field] as Map?)?['percent'],
+            '_rowType': isSubtotal ? 'subtotal' : 'detail'
+          };
+      rows.add(metricRow('Income', 'income'));
+      rows.add(metricRow('Cost of Goods Sold', 'cogs'));
+      rows.add(metricRow('Gross Profit', 'grossProfit', isSubtotal: true));
+      rows.add(metricRow('Expenses', 'expenses'));
+      rows.add(metricRow('Operating Profit', 'operatingProfit', isSubtotal: true));
+      if (curr.containsKey('nonOpInc')) rows.add(metricRow('Non Operating Income', 'nonOpInc'));
+      if (curr.containsKey('nonOpEx')) rows.add(metricRow('Non Operating Expense', 'nonOpEx'));
+      rows.add(metricRow('Net Profit', 'netProfit', isSubtotal: true));
     } else if (k == 'balance-sheet') {
       final tree = _data!['nestedTree'] as Map? ?? {};
       if (tree.isNotEmpty) {
-        void addGroup(Map group, String title) {
-          rows.add({'Section': title, 'Account': '', 'Amount': ''});
-          final items = group['items'] as List? ?? [];
-          for (final i in items) {
-            rows.add({
-              'Section': '',
-              'Account': (i as Map)['accountName'],
-              'Amount': i['amount']
-            });
-          }
-          for (final key in group.keys) {
-            if (key != 'items' && key != 'total' && group[key] is Map) {
-              addGroup(group[key], _colLabel(key));
-            }
-          }
-          rows.add({'Section': 'Total $title', 'Account': '', 'Amount': group['total'] ?? 0});
-        }
-
         final assets = tree['assets'] as Map? ?? {};
         final liabs = tree['liabilities'] as Map? ?? {};
         final eqs = tree['equities'] as Map? ?? {};
 
-        addGroup(assets, 'ASSETS');
-        addGroup(liabs, 'LIABILITIES');
-        addGroup(eqs, 'EQUITY');
+        _flattenBSGroup(rows, assets, 'ASSETS');
+        _flattenBSGroup(rows, liabs, 'LIABILITIES');
+        _flattenBSGroup(rows, eqs, 'EQUITY');
+        // _buildBS shows this combined grand-total row on screen right after
+        // Equities (see d['totalLiabilitiesAndEquity']) — the export was
+        // missing it, stopping at the three separate section subtotals.
+        rows.add({
+          'Account': 'Total for Liabilities & Equities',
+          'Amount': _data!['totalLiabilitiesAndEquity'] ?? 0,
+          '_rowType': 'subtotal'
+        });
       }
     } else if (k == 'balance-sheet-horizontal') {
-      final curr = _data!['current'] as Map? ?? {};
-      final prev = _data!['previous'] as Map? ?? {};
-      rows.add({
-        'Item': 'Total Assets',
-        'Current': curr['assets'],
-        'Previous': prev['assets']
-      });
-      rows.add({
-        'Item': 'Total Liabilities',
-        'Current': curr['liabilities'],
-        'Previous': prev['liabilities']
-      });
-      rows.add({
-        'Item': 'Total Equity',
-        'Current': curr['equity'],
-        'Previous': prev['equity']
-      });
+      final tree = _data!['nestedTree'] as Map? ?? {};
+      if (tree.isNotEmpty) {
+        final assets = tree['assets'] as Map? ?? {};
+        final liabs = tree['liabilities'] as Map? ?? {};
+        final eqs = tree['equities'] as Map? ?? {};
+
+        _flattenBSGroup(rows, liabs, 'LIABILITIES');
+        _flattenBSGroup(rows, eqs, 'EQUITY');
+        rows.add({
+          'Account': 'Total Liabilities & Equities',
+          'Amount': _data!['totalLiabilitiesAndEquity'] ?? 0,
+          '_rowType': 'subtotal'
+        });
+        _flattenBSGroup(rows, assets, 'ASSETS');
+      }
     } else if (k == 'cash-flow') {
-      // Backend returns summary + monthlyBreakdown (items[] is always empty)
+      // Mirrors _buildCF's on-screen structure (operating/investing/financing
+      // buckets, each with per-account items) — the export used to only read
+      // summary + monthlyBreakdown, silently dropping the entire Activities
+      // breakdown that's actually the bulk of a real cash flow statement.
       final summary = _data!['summary'] as Map? ?? {};
       rows.add({
         'Item': 'Opening Balance',
-        'Amount': summary['openingBalance'] ?? 0
+        'Amount': summary['openingBalance'] ?? 0,
+        '_rowType': 'subtotal'
       });
-      rows.add(
-          {'Item': 'Total Incoming', 'Amount': summary['totalIncoming'] ?? 0});
-      rows.add(
-          {'Item': 'Total Outgoing', 'Amount': summary['totalOutgoing'] ?? 0});
+
+      void addBucket(String label, Map bucket,
+          {String? inflowLabel, String? outflowLabel}) {
+        final items = bucket['items'] as List? ?? [];
+        rows.add({'Item': label, 'Amount': '', '_rowType': 'header'});
+        for (final i in items) {
+          if (i is Map)
+            rows.add({
+              'Item': i['accountName'] ?? '',
+              'Amount': i['amount'] ?? 0,
+              '_rowType': 'detail'
+            });
+        }
+        // Matches _buildCF's on-screen _fsKV rows — only Operating and
+        // Investing show these gross figures, Financing doesn't.
+        if (inflowLabel != null) {
+          rows.add({'Item': inflowLabel, 'Amount': bucket['inflows'] ?? 0, '_rowType': 'detail'});
+        }
+        if (outflowLabel != null) {
+          rows.add({'Item': outflowLabel, 'Amount': bucket['outflows'] ?? 0, '_rowType': 'detail'});
+        }
+        rows.add({
+          'Item': 'Net Cash from $label',
+          'Amount': bucket['net'] ?? 0,
+          '_rowType': 'subtotal'
+        });
+      }
+
+      addBucket('Operating Activities', _data!['operating'] as Map? ?? {},
+          inflowLabel: 'Cash Inflows', outflowLabel: 'Cash Outflows');
+      addBucket('Investing Activities', _data!['investing'] as Map? ?? {},
+          inflowLabel: 'Investing Inflows', outflowLabel: 'Investing Outflows');
+      addBucket('Financing Activities', _data!['financing'] as Map? ?? {});
+
+      rows.add({
+        'Item': 'Net Cash Change',
+        'Amount': _data!['netCashChange'] ?? 0,
+        '_rowType': 'subtotal'
+      });
       rows.add({
         'Item': 'Closing Balance',
-        'Amount': summary['closingBalance'] ?? 0
+        'Amount': summary['closingBalance'] ?? 0,
+        '_rowType': 'subtotal'
       });
       final monthly = _data!['monthlyBreakdown'] as List? ?? [];
       if (monthly.isNotEmpty) {
-        rows.add({'Item': '── Monthly Breakdown ──', 'Amount': ''});
+        rows.add({'Item': 'Monthly Breakdown', 'Amount': '', '_rowType': 'header'});
         for (final m in monthly) {
           if (m is Map)
             rows.add({
               'Item': m['month']?.toString() ?? '',
               'Amount': m['endingBalance'] ?? m['balance'] ?? 0,
               'Incoming': m['incoming'] ?? 0,
-              'Outgoing': m['outgoing'] ?? 0
+              'Outgoing': m['outgoing'] ?? 0,
+              '_rowType': 'detail'
             });
         }
       }
     } else if (k == 'movement-of-equity') {
       final accounts = _data!['accounts'] as List? ?? [];
-      rows.add({
-        'Account': 'Account',
-        'Opening': 'Opening',
-        'Change': 'Change',
-        'Closing': 'Closing'
-      });
       for (final a in accounts) {
         if (a is Map)
           rows.add({
             'Account': a['accountName'] ?? '',
             'Opening': a['opening'] ?? 0,
             'Change': a['change'] ?? 0,
-            'Closing': a['closing'] ?? 0
+            'Closing': a['closing'] ?? 0,
+            '_rowType': 'detail'
           });
       }
       final t = _data!['totals'] as Map? ?? {};
@@ -2651,7 +3028,8 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         'Account': 'TOTAL',
         'Opening': t['opening'] ?? 0,
         'Change': t['change'] ?? 0,
-        'Closing': t['closing'] ?? 0
+        'Closing': t['closing'] ?? 0,
+        '_rowType': 'subtotal'
       });
     } else {
       rows.addAll(_rows);
@@ -2743,7 +3121,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                                   fontWeight: FontWeight.w700,
                                   color: _navy)));
                     }
-                    if (isAccountRow && h != 'accountName')
+                    // Header-flagged rows blank out every column but the name
+                    // by default (General Ledger's header rows carry no
+                    // debit/credit data) — but a subtotal row reuses the same
+                    // flag while genuinely having real numbers to show, so
+                    // only blank a column when its value is actually empty.
+                    if (isAccountRow &&
+                        h != 'accountName' &&
+                        (v == null || v.toString().isEmpty))
                       return SizedBox(width: colW);
                     if (hl == 'links') {
                       return SizedBox(
@@ -2755,10 +3140,9 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                     }
                     return SizedBox(
                         width: colW,
-                        child: Text(_displayVal(h, v),
+                        child: _cellOrLink(r, h, _displayVal(h, v),
                             textAlign: isAmt ? TextAlign.right : TextAlign.left,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
+                            baseStyle: TextStyle(
                                 fontSize: 14,
                                 color: c ?? const Color(0xFF374151),
                                 fontWeight: isAccountRow || hl.contains('total')
@@ -2994,12 +3378,11 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
                                         ? _buildLinksCell(r)
                                         : hl == 'status'
                                           ? _statusBadge(v?.toString() ?? '')
-                                          : Text(_displayVal(h, v),
-                                              overflow: TextOverflow.ellipsis,
+                                          : _cellOrLink(r, h, _displayVal(h, v),
                                               textAlign: isAmt
                                                   ? TextAlign.right
                                                   : TextAlign.left,
-                                            style: _cellStyle(h, v) ??
+                                              baseStyle: _cellStyle(h, v) ??
                                                 const TextStyle(
                                                     fontSize: 14,
                                                     color: Color(0xFF374151))),
@@ -3019,6 +3402,142 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
         ),
       ]),
     );
+  }
+
+  // ── Cell-level navigation — invoice/bill/etc numbers and customer/vendor
+  // names jump straight to that record's detail page. Mirrors report_detail_page.dart.
+  VoidCallback? _navFor(Map<String, dynamic> row, String header) {
+    final hl = header.toLowerCase();
+    final atType = row['atType'];
+    final atId = row['atId']?.toString();
+    final customerId = row['customerId']?.toString();
+    final vendorId = row['vendorId']?.toString();
+
+    if (hl == 'invoicenumber' && atType == 'Invoice' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => InvoiceDetailPage(invoiceId: atId)));
+    }
+    if (hl == 'billnumber' && atType == 'Bill' && atId != null) {
+      return () => Navigator.push(
+          context, MaterialPageRoute(builder: (_) => BillDetailPage(billId: atId)));
+    }
+    if (hl == 'creditnotenumber' && atType == 'CreditNote' && atId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => CreditNoteDetailPage(creditNoteId: atId)));
+    }
+    if (hl == 'creditnumber' && atType == 'VendorCredit' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => VendorCreditDetailPage(creditId: atId)));
+    }
+    if (hl == 'purchaseordernumber' &&
+        atType == 'PurchaseOrder' &&
+        atId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => PurchaseOrderDetailPage(purchaseOrderId: atId)));
+    }
+    if (hl == 'expensenumber' && atType == 'Expense' && atId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => ExpenseDetailPage(expenseId: atId)));
+    }
+    if (hl == 'paymentnumber' && atType == 'PaymentMade' && atId != null) {
+      return () async {
+        final p = await PaymentMadeService.getPayment(atId);
+        if (!context.mounted) return;
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => PaymentMadeDetailPage(payment: p)));
+      };
+    }
+    if (hl == 'paymentnumber' && atType == 'PaymentReceived' && atId != null) {
+      return () async {
+        final p = await PaymentService.getPayment(atId);
+        if (!context.mounted) return;
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => PaymentReceivedDetailPage(payment: p)));
+      };
+    }
+    if (hl == 'customername' && customerId != null) {
+      return () => Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => CustomerDetailPage(customerId: customerId)));
+    }
+    if (hl == 'vendorname' && vendorId != null) {
+      return () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => VendorDetailPage(vendorId: vendorId)));
+    }
+    // Generic REFERENCE NUMBER / REF columns (Account Transactions, General
+    // Ledger, Activity Logs) — no type-specific header, so dispatch off atType.
+    if ((hl == 'referencenumber' || hl == 'ref') && atId != null && atType != null) {
+      switch (atType) {
+        case 'Invoice':
+          return () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => InvoiceDetailPage(invoiceId: atId)));
+        case 'Bill':
+          return () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => BillDetailPage(billId: atId)));
+        case 'Expense':
+          return () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => ExpenseDetailPage(expenseId: atId)));
+        case 'CreditNote':
+          return () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => CreditNoteDetailPage(creditNoteId: atId)));
+        case 'VendorCredit':
+          return () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => VendorCreditDetailPage(creditId: atId)));
+        case 'PurchaseOrder':
+          return () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => PurchaseOrderDetailPage(purchaseOrderId: atId)));
+        case 'PaymentMade':
+          return () async {
+            final p = await PaymentMadeService.getPayment(atId);
+            if (!context.mounted) return;
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => PaymentMadeDetailPage(payment: p)));
+          };
+        case 'PaymentReceived':
+          return () async {
+            final p = await PaymentService.getPayment(atId);
+            if (!context.mounted) return;
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => PaymentReceivedDetailPage(payment: p)));
+          };
+      }
+    }
+    return null;
+  }
+
+  Widget _cellOrLink(Map<String, dynamic> row, String header, String text,
+      {TextAlign textAlign = TextAlign.left, TextStyle? baseStyle}) {
+    final nav = _navFor(row, header);
+    if (nav == null) {
+      return Text(text,
+          overflow: TextOverflow.ellipsis,
+          textAlign: textAlign,
+          style: baseStyle);
+    }
+    return InkWell(
+        onTap: nav,
+        child: Text(text,
+            overflow: TextOverflow.ellipsis,
+            textAlign: textAlign,
+            style: const TextStyle(
+                color: _navy,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline)));
   }
 
   Widget _buildLinksCell(Map<String, dynamic> r) {
@@ -3619,10 +4138,14 @@ class _ReportViewerPageState extends State<ReportViewerPage> {
   // HELPERS
   // ==========================================================================
 
+  // Shared by every on-screen financial-statement widget (P&L, Balance
+  // Sheet, Cash Flow, Movement of Equity, P&L Horizontal) — nothing outside
+  // that group calls this, so adding commas here only affects Business
+  // Overview report screens, never the generic ledger-table reports.
   String _fmtNum(dynamic v) {
     if (v == null) return '0.00';
     final n = double.tryParse(v.toString());
-    return n != null ? n.toStringAsFixed(2) : v.toString();
+    return n != null ? NumberFormat('#,##,##0.00').format(n) : v.toString();
   }
 
   Color _amtColor(dynamic v) {
@@ -4339,7 +4862,12 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
   }
 
   String _colLabel(String h) => h
-      .replaceAllMapped(RegExp(r'([A-Z])'), (m) => ' ${m.group(0)}')
+      // Keep acronyms (TDS, PAN, GST...) together as one word — only split
+      // at a lowercase→uppercase boundary or the end of an acronym run.
+      .replaceAllMapped(
+          RegExp(r'([A-Z]+)([A-Z][a-z])'), (m) => '${m.group(1)} ${m.group(2)}')
+      .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m.group(1)} ${m.group(2)}')
       .trim()
       .split(' ')
       .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
@@ -4449,7 +4977,13 @@ class _LedgerTableWidgetState extends State<_LedgerTableWidget> {
                                     fontWeight: FontWeight.w700,
                                     color: _navy)));
                       }
-                      if (isAccountRow && h != 'accountName')
+                      // Same fix as the primary ledger table: only blank a
+                      // column when its value is actually empty, so subtotal
+                      // rows (which reuse the header flag but carry real
+                      // numbers) still show their debit/credit/balance.
+                      if (isAccountRow &&
+                          h != 'accountName' &&
+                          (v == null || v.toString().isEmpty))
                         return SizedBox(width: colW);
                       return SizedBox(
                           width: colW,
@@ -4586,6 +5120,8 @@ class _ListTableWidget extends StatefulWidget {
   final String Function(String, dynamic) displayVal;
   final TextStyle? Function(String, dynamic) cellStyle;
   final Widget Function(String) statusBadge;
+  final Widget Function(Map<String, dynamic>, String, String,
+      {TextAlign textAlign, TextStyle? baseStyle}) cellOrLink;
   const _ListTableWidget({
     required this.rows,
     required this.headers,
@@ -4596,6 +5132,7 @@ class _ListTableWidget extends StatefulWidget {
     required this.displayVal,
     required this.cellStyle,
     required this.statusBadge,
+    required this.cellOrLink,
   });
   @override
   State<_ListTableWidget> createState() => _ListTableWidgetState();
@@ -4773,7 +5310,9 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                                           FontWeight.bold,
                                                       color: _navy))));
                                     }
-                                    if (h == 'accountType') {
+                                    final vEmpty =
+                                        v == null || v.toString().isEmpty;
+                                    if (h == 'accountType' && !vEmpty) {
                                       return SizedBox(
                                           width: colW,
                                           child: Padding(
@@ -4801,7 +5340,16 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                                               FontWeight.w600,
                                                           color: _navy)))));
                                     }
-                                    return SizedBox(width: colW);
+                                    // Header rows normally have nothing in
+                                    // the remaining columns (General Ledger's
+                                    // account-header rows), but a subtotal
+                                    // row reuses this same flag while
+                                    // carrying real debit/credit/balance
+                                    // numbers — only blank a column when its
+                                    // value is genuinely empty, otherwise let
+                                    // it fall through to the normal cell
+                                    // rendering below.
+                                    if (vEmpty) return SizedBox(width: colW);
                                   }
                                   return SizedBox(
                                       width: colW,
@@ -4811,12 +5359,12 @@ class _ListTableWidgetState extends State<_ListTableWidget> {
                                             ? Align(
                                                 alignment: isAmt ? Alignment.centerRight : Alignment.centerLeft,
                                                 child: widget.statusBadge(v?.toString() ?? ''))
-                                            : Text(widget.displayVal(h, v),
-                                                overflow: TextOverflow.ellipsis,
+                                            : widget.cellOrLink(
+                                                r, h, widget.displayVal(h, v),
                                                 textAlign: isAmt
                                                     ? TextAlign.right
                                                     : TextAlign.left,
-                                                style: widget.cellStyle(h, v) ??
+                                                baseStyle: widget.cellStyle(h, v) ??
                                                     const TextStyle(
                                                         fontSize: 14,
                                                         color: Color(0xFF374151))),

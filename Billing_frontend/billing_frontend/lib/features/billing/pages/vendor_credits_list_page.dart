@@ -18,6 +18,7 @@ import '../../../../core/services/vendor_credit_service.dart';
 import '../app_top_bar.dart';
 import 'new_vendor_credit.dart';
 import 'vendor_credit_detail.dart';
+import '../../../../core/permissions_finance.dart';
 
 // Navy blue gradient colors
 const Color _navyDark = Color(0xFF0D1B3E);
@@ -473,6 +474,9 @@ class _VendorCreditsListPageState extends State<VendorCreditsListPage> {
   }
 
   Future<void> _deleteCredit(VendorCredit c) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'vendor_credits');
+    if (!canDelete) return;
+
     final ok = await _confirm(
         'Delete Credit',
         'Are you sure you want to delete ${c.creditNumber}?',

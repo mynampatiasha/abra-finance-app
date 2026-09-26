@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'new_fixed_asset.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── Model ───────────────────────────────────────────────────────────────────
 
@@ -233,6 +234,9 @@ class _FixedAssetsListPageState extends State<FixedAssetsListPage> {
   }
 
   Future<void> _deleteAsset(FixedAsset asset) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'assets');
+    if (!canDelete) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

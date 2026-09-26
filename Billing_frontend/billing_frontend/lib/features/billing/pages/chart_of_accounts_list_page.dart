@@ -29,6 +29,7 @@ import '../../../../core/services/tms_service.dart';
 import '../../../../core/utils/export_helper.dart';
 import 'new_chart_of_account.dart';
 import 'chart_of_account_detail.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 const _kNavyDark = Color(0xFF0F172A);
@@ -166,6 +167,9 @@ class _ChartOfAccountsListPageState extends State<ChartOfAccountsListPage> {
   }
 
   Future<void> _goToEdit(ChartOfAccount acc) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'chart_of_accounts');
+    if (!canEdit) return;
+
     final ok = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -207,6 +211,9 @@ class _ChartOfAccountsListPageState extends State<ChartOfAccountsListPage> {
   // ── Delete ────────────────────────────────────────────────────────────────
 
   Future<void> _delete(ChartOfAccount acc) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'chart_of_accounts');
+    if (!canDelete) return;
+
     if (acc.isSystemAccount) {
       _snack('System accounts cannot be deleted', Colors.orange);
       return;

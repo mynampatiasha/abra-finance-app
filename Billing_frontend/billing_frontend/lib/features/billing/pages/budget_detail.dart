@@ -12,6 +12,9 @@ import 'package:intl/intl.dart';
 import '../../../../core/services/budget_service.dart';
 import 'new_budget.dart';
 
+import 'package:open_file/open_file.dart';
+
+
 const Color _navyDark = Color(0xFF0D1B3E);
 const Color _navyMid = Color(0xFF1A3A6B);
 const Color _navyLight = Color(0xFF2463AE);
@@ -83,6 +86,43 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
         _error = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+
+  Future<void> _exportPdf() async {
+    if (_budget == null) return;
+    try {
+      AppSnackbar.show(context, message: 'Generating PDF...');
+      final path = await BudgetService.downloadBudgetPDF(
+        _budget!.id,
+        _budget!.budgetName,
+        startDate: _startDate?.toIso8601String(),
+        endDate: _endDate?.toIso8601String(),
+      );
+      if (path != 'web_downloaded') {
+        OpenFile.open(path);
+      }
+    } catch (e) {
+      if (mounted) AppSnackbar.show(context, message: e.toString(), isError: true);
+    }
+  }
+
+  Future<void> _exportExcel() async {
+    if (_budget == null) return;
+    try {
+      AppSnackbar.show(context, message: 'Generating Excel...');
+      final path = await BudgetService.downloadBudgetExcel(
+        _budget!.id,
+        _budget!.budgetName,
+        startDate: _startDate?.toIso8601String(),
+        endDate: _endDate?.toIso8601String(),
+      );
+      if (path != 'web_downloaded') {
+        OpenFile.open(path);
+      }
+    } catch (e) {
+      if (mounted) AppSnackbar.show(context, message: e.toString(), isError: true);
     }
   }
 
@@ -161,6 +201,16 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                   icon: const Icon(Icons.edit_outlined),
                   tooltip: 'Edit',
                   onPressed: _goEdit,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  tooltip: 'Export PDF',
+                  onPressed: _exportPdf,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.table_view_outlined),
+                  tooltip: 'Export Excel',
+                  onPressed: _exportExcel,
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh),

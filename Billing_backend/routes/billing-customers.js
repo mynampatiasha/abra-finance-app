@@ -359,8 +359,224 @@ function getCreditNoteModel() {
     || mongoose.model('CreditNote', new mongoose.Schema({}, { strict: false }), 'credit-notes');
 }
 function getPaymentReceivedModel() {
-  return mongoose.models.PaymentReceived 
+  return mongoose.models.PaymentReceived
     || mongoose.model('PaymentReceived', new mongoose.Schema({}, { strict: false }), 'payments_received');
+}
+function getSalesOrderModel() {
+  return mongoose.models.SalesOrder
+    || mongoose.model('SalesOrder', new mongoose.Schema({}, { strict: false }), 'salesorders');
+}
+function getQuoteModel() {
+  return mongoose.models.Quote
+    || mongoose.model('Quote', new mongoose.Schema({}, { strict: false }), 'quotes');
+}
+
+// payments_received.paymentDate is saved as a "DD/MM/YYYY" string, not a Date —
+// parse it safely, falling back to a plain Date parse for other formats.
+function parsePaymentDate(dateVal) {
+  if (!dateVal) return null;
+  if (dateVal instanceof Date) return dateVal;
+  const str = String(dateVal);
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      const d = new Date(parts[2], parts[1] - 1, parts[0]);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Groups payments_received records into ONE row per invoice a payment
+// touched (a payment covering 3 invoices produces 3 rows here).
+async function getPaymentRowsForInvoices(invoices, orgId) {
+  if (!invoices || !invoices.length) return [];
+  const invoiceById = {};
+  invoices.forEach(inv => { invoiceById[inv._id?.toString()] = inv; });
+
+  const customerIds = [...new Set(invoices.map(inv => inv.customerId?.toString()).filter(Boolean))];
+  if (!customerIds.length) return [];
+
+  const PaymentReceived = getPaymentReceivedModel();
+  const payments = await PaymentReceived.find({
+    customerId: { $in: customerIds },
+    paymentType: { $ne: 'advance' },
+    ...(orgId ? { orgId } : {}),
+  }).lean();
+
+  const rows = [];
+  for (const pr of payments) {
+    if (!pr.invoicePayments || typeof pr.invoicePayments !== 'object') continue;
+    for (const invId of Object.keys(pr.invoicePayments)) {
+      const inv = invoiceById[invId];
+      const amount = parseFloat(pr.invoicePayments[invId] || 0);
+      if (!inv || amount <= 0) continue;
+      rows.push({
+        invoiceId:     invId,
+        invoiceNumber: inv.invoiceNumber,
+        paymentId:     pr._id,
+        paymentNumber: pr.paymentNumber,
+        date:          parsePaymentDate(pr.paymentDate) || pr.createdAt || null,
+        amount,
+        method:        pr.paymentMode,
+      });
+    }
+  }
+  return rows;
+}
+
+// Formats a number with Indian-style digit grouping (last 3 digits, then groups of 2:
+// 9434328.36 -> "94,34,328.36"), matching the reference statement's number format.
+function fmtINR(amount) {
+  const num = Number(amount) || 0;
+  const isNeg = num < 0;
+  const [intPart, decPart] = Math.abs(num).toFixed(2).split('.');
+  const lastThree = intPart.length > 3 ? intPart.slice(-3) : intPart;
+  const otherDigits = intPart.length > 3 ? intPart.slice(0, -3) : '';
+  const groupedOther = otherDigits.replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+  const formatted = (groupedOther ? groupedOther + ',' : '') + lastThree + '.' + decPart;
+  return (isNeg ? '-' : '') + formatted;
+}
+
+// Groups payments_received records into ONE row per actual payment (matching
+// the customer-facing Statement of Accounts format) — unlike
+// getPaymentRowsForInvoices above (one row per invoice a payment touched),
+// this keeps each payment as a single entry carrying its full received
+// amount, with the per-invoice breakdown attached as detail lines. Any
+// portion not yet applied to an invoice shows as "in excess".
+async function getPaymentSummaryRows(invoices, orgId) {
+  if (!invoices || !invoices.length) return [];
+  const invoiceById = {};
+  invoices.forEach(inv => { invoiceById[inv._id?.toString()] = inv; });
+
+  const customerIds = [...new Set(invoices.map(inv => inv.customerId?.toString()).filter(Boolean))];
+  if (!customerIds.length) return [];
+
+  const PaymentReceived = getPaymentReceivedModel();
+  const payments = await PaymentReceived.find({
+    customerId: { $in: customerIds },
+    ...(orgId ? { orgId } : {}),
+  }).lean();
+
+  const rows = [];
+  for (const pr of payments) {
+    const totalReceived = parseFloat(pr.amountReceived ?? pr.netAmount ?? 0);
+    if (totalReceived <= 0) continue;
+
+    const breakdown = [];
+    let appliedTotal = 0;
+    if (pr.invoicePayments && typeof pr.invoicePayments === 'object') {
+      for (const invId of Object.keys(pr.invoicePayments)) {
+        const inv = invoiceById[invId];
+        const amt = parseFloat(pr.invoicePayments[invId] || 0);
+        if (!inv || amt <= 0) continue;
+        breakdown.push({ invoiceNumber: inv.invoiceNumber, amount: amt });
+        appliedTotal += amt;
+      }
+    }
+    const excessAmount = Math.max(0, parseFloat((totalReceived - appliedTotal).toFixed(2)));
+
+    rows.push({
+      date:          parsePaymentDate(pr.paymentDate) || pr.createdAt || null,
+      paymentNumber: pr.paymentNumber,
+      totalAmount:   totalReceived,
+      breakdown,
+      excessAmount,
+    });
+  }
+  return rows;
+}
+
+// Builds the full Statement entry list for a customer — Invoice rows AND Payment
+// Received rows merged together in chronological order, with a genuine running
+// Balance (every invoice adds its full amount, every payment subtracts its full
+// received amount), starting from openingBalance. Shared by the Statement tab's JSON
+// endpoint and the Statement PDF so the two can never drift apart from each other.
+async function buildStatementEntries(customer, from, to, orgFilter, orgId) {
+  const Invoice = getInvoiceModel();
+  const opening = customer.openingBalance || 0;
+  if (!Invoice) return { openingBalance: opening, entries: [], closingBalance: opening };
+
+  const custIdStr = customer._id?.toString();
+  const custId2   = customer.customerId;
+
+  // Fetch every real invoice once — needed both for the opening balance and to
+  // resolve payment-breakdown invoice numbers, regardless of whether the
+  // invoice itself falls inside the requested period. Drafts are excluded:
+  // they haven't been issued to the customer yet, so they aren't a real
+  // transaction or a real balance until sent (same rule as the Transactions PDF).
+  const allInvoices = await Invoice.find({
+    customerId: { $in: [custIdStr, custId2].filter(Boolean) },
+    status: { $nin: ['DRAFT', 'CANCELLED', 'VOID'] },
+    ...orgFilter,
+  }).lean();
+
+  const getPaidAndDue = (inv) => {
+    const invoiceAmt = parseFloat(inv.totalAmount || 0);
+    const paidAmt = parseFloat(inv.amountPaid || 0);
+    const dueAmt = (inv.amountDue !== undefined && inv.amountDue !== null)
+      ? parseFloat(inv.amountDue)
+      : (invoiceAmt - paidAmt);
+    return { invoiceAmt, paidAmt, dueAmt };
+  };
+
+  // ── Opening balance: net (invoice − paid) for everything before 'from' ──
+  let openingBalance = opening;
+  for (const inv of allInvoices) {
+    if (new Date(inv.invoiceDate) < from) {
+      const { dueAmt } = getPaidAndDue(inv);
+      openingBalance += dueAmt;
+    }
+  }
+
+  // ── Invoice entries within the period — full invoice amount, not net-of-payments ──
+  const raw = [];
+  for (const inv of allInvoices) {
+    const d = new Date(inv.invoiceDate);
+    if (d < from || d > to) continue;
+    const { invoiceAmt } = getPaidAndDue(inv);
+    const dueStr = inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-IN') : '';
+    raw.push({
+      date:     inv.invoiceDate,
+      type:     'Invoice',
+      number:   inv.invoiceNumber,
+      details:  dueStr ? `due on ${dueStr}` : '',
+      invoices: invoiceAmt,
+      payments: null,
+      delta:    invoiceAmt,
+    });
+  }
+
+  // ── Payment Received entries within the period — one row per payment ──
+  const paymentRows = await getPaymentSummaryRows(allInvoices, orgId);
+  for (const p of paymentRows) {
+    if (!p.date) continue;
+    const d = new Date(p.date);
+    if (d < from || d > to) continue;
+    const lines = p.breakdown.map(b => `Rs ${fmtINR(b.amount)} for payment of ${b.invoiceNumber}`);
+    if (p.excessAmount > 0) lines.push(`Rs ${fmtINR(p.excessAmount)} in excess payments`);
+    raw.push({
+      date:     p.date,
+      type:     'Payment',
+      number:   p.paymentNumber,
+      details:  lines.join('\n'),
+      invoices: null,
+      payments: p.totalAmount,
+      delta:    -p.totalAmount,
+    });
+  }
+
+  // ── Sort chronologically, then compute the running balance ──
+  raw.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = openingBalance;
+  const entries = raw.map(e => {
+    running += e.delta;
+    const { delta, ...rest } = e;
+    return { ...rest, balance: running };
+  });
+
+  return { openingBalance, entries, closingBalance: entries.length ? running : openingBalance };
 }
 
 // ============================================================================
@@ -708,20 +924,79 @@ const getCustomerTransactions = async (req, res) => {
         balance:  inv.amountDue,
       }));
 
-      // Payments from each invoice
-      for (const inv of invoices) {
-        for (const p of (inv.payments || [])) {
+      // Payments — sourced from payments_received (authoritative), not each
+      // invoice's own embedded `payments[]` array, which can carry duplicates.
+      const paymentRows = await getPaymentRowsForInvoices(invoices, req.user?.orgId);
+      for (const p of paymentRows) {
+        transactions.push({
+          type:   'Payment',
+          id:     p.paymentId,
+          number: p.invoiceNumber,
+          date:   p.date,
+          status: 'PAID',
+          amount: p.amount,
+          balance: 0,
+          method: p.method,
+        });
+      }
+
+      const custIdFilter = { customerId: { $in: [customer._id?.toString(), customer.customerId] } };
+
+      // Credit Notes, Sales Orders, Quotes — each independently guarded so a
+      // problem with any one of these newer sources can't take down Invoices/
+      // Payments, which already worked reliably before this was added.
+      try {
+        const CreditNote = getCreditNoteModel();
+        const creditNotes = await CreditNote.find({ ...custIdFilter, ...req.orgFilter }).lean();
+        for (const cn of creditNotes) {
           transactions.push({
-            type:   'Payment',
-            id:     p.paymentId,
-            number: inv.invoiceNumber,
-            date:   p.paymentDate || p.recordedAt,
-            status: 'PAID',
-            amount: p.amount,
-            balance: 0,
-            method: p.paymentMethod,
+            type:    'Credit Note',
+            id:      cn._id,
+            number:  cn.creditNoteNumber,
+            date:    cn.creditNoteDate,
+            status:  cn.status,
+            amount:  cn.totalAmount,
+            balance: cn.creditBalance || 0,
           });
         }
+      } catch (e) {
+        console.error('getCustomerTransactions: Credit Note lookup failed:', e.message);
+      }
+
+      try {
+        const SalesOrder = getSalesOrderModel();
+        const salesOrders = await SalesOrder.find({ ...custIdFilter, ...req.orgFilter }).lean();
+        for (const so of salesOrders) {
+          transactions.push({
+            type:    'Sales Order',
+            id:      so._id,
+            number:  so.salesOrderNumber,
+            date:    so.salesOrderDate,
+            status:  so.status,
+            amount:  so.totalAmount,
+            balance: 0,
+          });
+        }
+      } catch (e) {
+        console.error('getCustomerTransactions: Sales Order lookup failed:', e.message);
+      }
+
+      try {
+        const Quote = getQuoteModel();
+        const quotes = await Quote.find({ ...custIdFilter, ...req.orgFilter }).lean();
+        for (const q of quotes) {
+          transactions.push({
+            type:    'Quote',
+            id:      q._id,
+            number:  q.quoteNumber,
+            date:    q.quoteDate,
+            status:  q.status,
+            amount:  q.totalAmount,
+            balance: 0,
+          });
+        }
+      } catch (e) {
+        console.error('getCustomerTransactions: Quote lookup failed:', e.message);
       }
 
       // Sort by date desc
@@ -731,6 +1006,53 @@ const getCustomerTransactions = async (req, res) => {
     res.json({ success: true, data: transactions });
   } catch (error) {
     console.error('? getCustomerTransactions:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// GET /:id/payments — one row per real payment (not fragmented per invoice),
+// for the Transactions tab's "Customer Payments" section. Reuses the same
+// consolidation already built for the Statement.
+const getCustomerPayments = async (req, res) => {
+  try {
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const Invoice = getInvoiceModel();
+    let rows = [];
+
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        ...req.orgFilter,
+      }).lean();
+
+      const summaryRows = await getPaymentSummaryRows(invoices, req.user?.orgId);
+      rows = summaryRows.map(r => ({
+        type:    'Payment',
+        number:  r.paymentNumber,
+        date:    r.date,
+        status:  'PAID',
+        amount:  r.totalAmount,
+        balance: 0,
+        breakdown: r.breakdown,
+        excessAmount: r.excessAmount,
+      }));
+      rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+
+    const page  = parseInt(req.query.page)  || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const start = (page - 1) * limit;
+    const paged = rows.slice(start, start + limit);
+
+    res.json({
+      success: true,
+      data: paged,
+      pagination: { total: rows.length, page, limit, pages: Math.ceil(rows.length / limit) },
+    });
+  } catch (error) {
+    console.error('getCustomerPayments:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -830,77 +1152,29 @@ const getCustomerStatement = async (req, res) => {
     to.setHours(23, 59, 59, 999);
     from.setHours(0, 0, 0, 0);
 
-    const Invoice = getInvoiceModel();
-    let entries = [];
-    let openingBalance = customer.openingBalance || 0;
-    let closingBalance = openingBalance;
-    const custIdStr = customer._id?.toString();
-    const custId2   = customer.customerId;
+    const { openingBalance, entries, closingBalance } =
+      await buildStatementEntries(customer, from, to, req.orgFilter, req.user?.orgId);
 
-
-
-    if (Invoice) {
-      // ── Helper: read the invoice's own paid/due fields (same source the
-      //    Invoice list & edit pages use — avoids re-deriving from payment history) ──
-      const getPaidAndDue = (inv) => {
-        const invoiceAmt = parseFloat(inv.totalAmount || 0);
-        const paidAmt = parseFloat(inv.amountPaid || 0);
-        const dueAmt = (inv.amountDue !== undefined && inv.amountDue !== null)
-          ? parseFloat(inv.amountDue)
-          : (invoiceAmt - paidAmt);
-        return { invoiceAmt, paidAmt, dueAmt };
-      };
-
-      // ── Calculate Dynamic Opening Balance (invoices BEFORE 'from' date) ───
-      let dynamicOpeningBalance = customer.openingBalance || 0;
-      const pastInvoices = await Invoice.find({
-        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
-        invoiceDate: { $lt: from },
-        status: { $nin: ['CANCELLED', 'VOID'] },
-        ...req.orgFilter,
-      }).lean();
-
-      for (const inv of pastInvoices) {
-        const { dueAmt } = getPaidAndDue(inv);
-        dynamicOpeningBalance += dueAmt;
-      }
-      openingBalance = dynamicOpeningBalance;
-
-      // ── Fetch invoices in date range ──────────────────────────────────────
-      const invoices = await Invoice.find({
-        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
-        invoiceDate: { $gte: from, $lte: to },
-        status: { $nin: ['CANCELLED', 'VOID'] },
-        ...req.orgFilter,
-      }).sort({ invoiceDate: 1 }).lean();
-
-      // ── Build ONE row per invoice ─────────────────────────────────────────
-      closingBalance = openingBalance;
-      for (const inv of invoices) {
-        const { invoiceAmt, paidAmt, dueAmt } = getPaidAndDue(inv);
-        closingBalance += dueAmt;
-
-        entries.push({
-          date:        inv.invoiceDate,
-          type:        'Invoice',
-          number:      inv.invoiceNumber,
-          details:     inv.subject || inv.orderNumber || '',
-          invoices:    invoiceAmt,
-          payments:    paidAmt > 0 ? paidAmt : null,
-          balance:     dueAmt,
-        });
-      }
-    }
+    // Send dates as plain "YYYY-MM-DD" strings, not Date objects — res.json()
+    // auto-converts Date objects to UTC, which can shift a local calendar date
+    // back a day once the frontend parses it (e.g. midnight IST -> previous
+    // day in UTC). A bare date string has no timezone to get shifted by.
+    const toLocalDateStr = (d) => {
+      if (!d) return null;
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    };
+    const entriesForClient = entries.map(e => ({ ...e, date: toLocalDateStr(e.date) }));
 
     res.json({
       success: true,
       data: {
         customer: { name: customer.customerDisplayName, email: customer.primaryEmail },
         openingBalance,
-        entries,
+        entries: entriesForClient,
         closingBalance,
-        fromDate: from,
-        toDate:   to,
+        fromDate: toLocalDateStr(from),
+        toDate:   toLocalDateStr(to),
       },
     });
   } catch (error) {
@@ -1147,10 +1421,13 @@ router.delete('/:id', deleteCustomer);
 // Detail sub-routes
 router.get('/:id/overview',       getCustomerOverview);
 router.get('/:id/transactions',   getCustomerTransactions);
+router.get('/:id/payments',       getCustomerPayments);
 router.get('/:id/mails',          getCustomerMails);
 router.get('/:id/statement',      getCustomerStatement);
 router.get('/:id/statement/pdf',  getCustomerStatementPDF);
+router.get('/:id/statement/excel', getCustomerStatementExcel);
 router.get('/:id/transactions/pdf', getCustomerTransactionsPDF);
+router.get('/:id/transactions/excel', getCustomerTransactionsExcel);
 router.post('/:id/comments',      addComment);
 router.delete('/:id/comments/:commentId', deleteComment);
 
@@ -1267,65 +1544,8 @@ async function getCustomerStatementPDF(req, res) {
     to.setHours(23, 59, 59, 999);
     from.setHours(0, 0, 0, 0);
 
-    const Invoice = getInvoiceModel();
-    let entries = [];
-    let openingBalance = customer.openingBalance || 0;
-    let closingBalance = openingBalance;
-    const custIdStr = customer._id?.toString();
-    const custId2   = customer.customerId;
-
-    if (Invoice) {
-
-      // ── Helper: read the invoice's own paid/due fields (same source the
-      //    Invoice list & edit pages use — avoids re-deriving from payment history) ──
-      const getPaidAndDue = (inv) => {
-        const invoiceAmt = parseFloat(inv.totalAmount || 0);
-        const paidAmt = parseFloat(inv.amountPaid || 0);
-        const dueAmt = (inv.amountDue !== undefined && inv.amountDue !== null)
-          ? parseFloat(inv.amountDue)
-          : (invoiceAmt - paidAmt);
-        return { invoiceAmt, paidAmt, dueAmt };
-      };
-
-      // ── Dynamic Opening Balance (invoices before 'from' date) ────────────
-      let dynamicOpeningBalance = customer.openingBalance || 0;
-      const pastInvoices = await Invoice.find({
-        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
-        invoiceDate: { $lt: from },
-        status: { $nin: ['CANCELLED', 'VOID'] },
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
-      }).lean();
-      for (const inv of pastInvoices) {
-        const { dueAmt } = getPaidAndDue(inv);
-        dynamicOpeningBalance += dueAmt;
-      }
-      openingBalance = dynamicOpeningBalance;
-
-      // ── Fetch invoices in date range ──────────────────────────────────────
-      const invoices = await Invoice.find({
-        customerId: { $in: [custIdStr, custId2].filter(Boolean) },
-        invoiceDate: { $gte: from, $lte: to },
-        status: { $nin: ['CANCELLED', 'VOID'] },
-        ...(req.user?.orgId ? { orgId: req.user.orgId } : {}),
-      }).sort({ invoiceDate: 1 }).lean();
-
-      // ── Build ONE row per invoice ─────────────────────────────────────────
-      closingBalance = openingBalance;
-      for (const inv of invoices) {
-        const { invoiceAmt, paidAmt, dueAmt } = getPaidAndDue(inv);
-        closingBalance += dueAmt;
-        entries.push({
-          date:     inv.invoiceDate,
-          type:     'Invoice',
-          number:   inv.invoiceNumber,
-          details:  inv.subject || inv.orderNumber || '',
-          invoices: invoiceAmt,
-          payments: paidAmt > 0 ? paidAmt : null,
-          balance:  dueAmt,
-        });
-      }
-    }
-
+    const { openingBalance, entries, closingBalance } =
+      await buildStatementEntries(customer, from, to, req.orgFilter || (req.user?.orgId ? { orgId: req.user.orgId } : {}), req.user?.orgId);
 
     // Now generate PDF
     let orgName  = 'Your Company';
@@ -1438,8 +1658,8 @@ async function getCustomerStatementPDF(req, res) {
       
       doc.fontSize(10).fillColor('#000000').font('Helvetica')
          .text('Opening Balance:', summX + 8, metaY + 20)
-         .text('Rs ' + openingBalance.toFixed(2), summX + 8, metaY + 20, { align: 'right', width: colW - 24 });
-      
+         .text('Rs ' + fmtINR(openingBalance), summX + 8, metaY + 20, { align: 'right', width: colW - 24 });
+
       let totalInvoiced = 0, totalPaid = 0;
       entries.forEach(e => {
          if (e.invoices) totalInvoiced += e.invoices;
@@ -1447,12 +1667,12 @@ async function getCustomerStatementPDF(req, res) {
       });
 
       doc.text('Invoiced Amount:', summX + 8, metaY + 35)
-         .text('Rs ' + totalInvoiced.toFixed(2), summX + 8, metaY + 35, { align: 'right', width: colW - 24 });
+         .text('Rs ' + fmtINR(totalInvoiced), summX + 8, metaY + 35, { align: 'right', width: colW - 24 });
       doc.text('Amount Paid:', summX + 8, metaY + 50)
-         .text('Rs ' + totalPaid.toFixed(2), summX + 8, metaY + 50, { align: 'right', width: colW - 24 });
-      
+         .text('Rs ' + fmtINR(totalPaid), summX + 8, metaY + 50, { align: 'right', width: colW - 24 });
+
       doc.font('Helvetica-Bold').text('Balance Due:', summX + 8, metaY + 65)
-         .text('Rs ' + closingBalance.toFixed(2), summX + 8, metaY + 65, { align: 'right', width: colW - 24 });
+         .text('Rs ' + fmtINR(closingBalance), summX + 8, metaY + 65, { align: 'right', width: colW - 24 });
     }
 
     const ensureSpace = (currentY, neededHeight = 20) => {
@@ -1466,19 +1686,21 @@ async function getCustomerStatementPDF(req, res) {
     let tableStartY = ensureSpace(metaY + 95, 40);
 
     const cols = {
-      date:    { x: 40,  w: 60  },
-      details: { x: 100, w: 220 },
-      amount:  { x: 320, w: 75  },
-      paid:    { x: 395, w: 75  },
-      balance: { x: 470, w: 85  },
+      date:    { x: 40,  w: 50  },
+      type:    { x: 90,  w: 85  },
+      details: { x: 175, w: 160 },
+      amount:  { x: 335, w: 70  },
+      paid:    { x: 405, w: 70  },
+      balance: { x: 475, w: 80  },
     };
 
     doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
     doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
     doc.text('DATE',       cols.date.x + 4, tableStartY + 6, { width: cols.date.w });
+    doc.text('TRANSACTIONS', cols.type.x + 4, tableStartY + 6, { width: cols.type.w });
     doc.text('DETAILS',    cols.details.x + 4, tableStartY + 6, { width: cols.details.w });
-    doc.text('INVOICE AMOUNT', cols.amount.x + 4, tableStartY + 6, { width: cols.amount.w - 8, align: 'right' });
-    doc.text('PAID',       cols.paid.x + 4, tableStartY + 6, { width: cols.paid.w - 8, align: 'right' });
+    doc.text('AMOUNT',     cols.amount.x + 4, tableStartY + 6, { width: cols.amount.w - 8, align: 'right' });
+    doc.text('PAYMENTS',   cols.paid.x + 4, tableStartY + 6, { width: cols.paid.w - 8, align: 'right' });
     doc.text('BALANCE',    cols.balance.x + 4, tableStartY + 6, { width: cols.balance.w - 8, align: 'right' });
 
     let rowY = tableStartY + 20;
@@ -1490,12 +1712,23 @@ async function getCustomerStatementPDF(req, res) {
       doc.fontSize(8).fillColor('#000000').font('Helvetica');
       doc.text(from.toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 8);
       doc.text('Opening Balance', cols.details.x + 4, rowY + 8);
-      doc.font('Helvetica-Bold').text(openingBalance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+      doc.font('Helvetica-Bold').text(fmtINR(openingBalance), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
       rowY += 24;
     }
 
     entries.forEach((e, i) => {
-      const rowH = 24;
+      // Transaction type gets its own column now (matching the reference format);
+      // Details holds just the number/reference plus any extra line (due date for
+      // invoices; which invoice(s) it covered for payments).
+      const typeLabel = e.type === 'Payment' ? 'Payment Received' : 'Invoice';
+      const detailsText = e.type === 'Payment'
+        ? (e.number + (e.details ? '\n' + e.details : ''))
+        : (e.number + (e.details ? ' - ' + e.details : ''));
+
+      doc.font('Helvetica').fontSize(8);
+      const detailsH = doc.heightOfString(detailsText, { width: cols.details.w - 8, lineGap: 2 });
+      const rowH = Math.max(24, detailsH + 16);
+
       rowY = ensureSpace(rowY, rowH);
       const fill = i % 2 === 0 ? '#f7f9fc' : '#ffffff';
       doc.rect(40, rowY, 515, rowH).fill(fill);
@@ -1503,14 +1736,13 @@ async function getCustomerStatementPDF(req, res) {
 
       doc.fontSize(8).fillColor('#000000').font('Helvetica');
       doc.text(new Date(e.date).toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 8);
-      
-      const details = e.number + (e.details ? ' - ' + e.details : '');
-      doc.text(details, cols.details.x + 4, rowY + 8, { width: cols.details.w - 8, ellipsis: true });
-      
-      if (e.invoices) doc.text(e.invoices.toFixed(2), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
-      if (e.payments) doc.text(e.payments.toFixed(2), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
-      
-      doc.font('Helvetica-Bold').text(e.balance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+      doc.text(typeLabel, cols.type.x + 4, rowY + 8, { width: cols.type.w - 8 });
+      doc.text(detailsText, cols.details.x + 4, rowY + 8, { width: cols.details.w - 8, lineGap: 2 });
+
+      if (e.invoices) doc.text(fmtINR(e.invoices), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
+      if (e.payments) doc.text(fmtINR(e.payments), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
+
+      doc.font('Helvetica-Bold').text(fmtINR(e.balance), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
 
       rowY += rowH;
     });
@@ -1528,9 +1760,9 @@ async function getCustomerStatementPDF(req, res) {
       doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(8).fillColor('#000000').font('Helvetica-Bold');
       doc.text('TOTAL', cols.details.x + 4, rowY + 8, { width: cols.details.w - 8 });
-      doc.text(totalInvoiced.toFixed(2), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
-      doc.text(totalPaid.toFixed(2), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
-      doc.text(closingBalance.toFixed(2), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
+      doc.text(fmtINR(totalInvoiced), cols.amount.x + 4, rowY + 8, { width: cols.amount.w - 8, align: 'right' });
+      doc.text(fmtINR(totalPaid), cols.paid.x + 4, rowY + 8, { width: cols.paid.w - 8, align: 'right' });
+      doc.text(fmtINR(closingBalance), cols.balance.x + 4, rowY + 8, { width: cols.balance.w - 8, align: 'right' });
       rowY += rowH;
     }
 
@@ -1542,6 +1774,83 @@ async function getCustomerStatementPDF(req, res) {
   }
 };
 
+// GET /:id/statement/excel — same ledger as the Statement PDF (Date / Transactions /
+// Details / Invoices / Payments / Balance), built from the same buildStatementEntries
+// source so the two exports can never drift apart from each other.
+async function getCustomerStatementExcel(req, res) {
+  try {
+    const XLSX = require('xlsx');
+
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const { fromDate, toDate } = req.query;
+    const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    const to   = toDate   ? new Date(toDate)   : new Date();
+    to.setHours(23, 59, 59, 999);
+    from.setHours(0, 0, 0, 0);
+
+    const { openingBalance, entries, closingBalance } =
+      await buildStatementEntries(customer, from, to, req.orgFilter || (req.user?.orgId ? { orgId: req.user.orgId } : {}), req.user?.orgId);
+
+    const rows = [];
+    rows.push({
+      Date: from.toLocaleDateString('en-IN'),
+      Transactions: '',
+      Details: 'Opening Balance',
+      Invoices: '',
+      Payments: '',
+      Balance: openingBalance.toFixed(2),
+    });
+
+    let totalInvoiced = 0, totalPaid = 0;
+    entries.forEach(e => {
+      if (e.invoices) totalInvoiced += e.invoices;
+      if (e.payments) totalPaid += e.payments;
+
+      const typeLabel = e.type === 'Payment' ? 'Payment Received' : 'Invoice';
+      const detailsText = e.type === 'Payment'
+        ? (e.number + (e.details ? '\n' + e.details : ''))
+        : (e.number + (e.details ? ' - ' + e.details : ''));
+
+      rows.push({
+        Date: new Date(e.date).toLocaleDateString('en-IN'),
+        Transactions: typeLabel,
+        Details: detailsText,
+        Invoices: e.invoices ? e.invoices.toFixed(2) : '',
+        Payments: e.payments ? e.payments.toFixed(2) : '',
+        Balance: e.balance.toFixed(2),
+      });
+    });
+
+    if (entries.length > 0) {
+      rows.push({
+        Date: '',
+        Transactions: '',
+        Details: 'TOTAL',
+        Invoices: totalInvoiced.toFixed(2),
+        Payments: totalPaid.toFixed(2),
+        Balance: closingBalance.toFixed(2),
+      });
+    }
+
+    const header = ['Date', 'Transactions', 'Details', 'Invoices', 'Payments', 'Balance'];
+    const ws = XLSX.utils.json_to_sheet(rows, { header });
+    ws['!cols'] = [ {wch:12}, {wch:16}, {wch:45}, {wch:14}, {wch:14}, {wch:14} ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Statement');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const safeCustomerName = (customer.customerDisplayName || 'Customer').replace(/[^a-z0-9]+/gi, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Statement_${safeCustomerName}.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('getCustomerStatementExcel error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 // GET /:id/transactions/pdf — exports exactly what the Transactions tab shows
 // (DATE / NUMBER / TYPE / STATUS / AMOUNT / BALANCE, per-row — not a running statement)
 async function getCustomerTransactionsPDF(req, res) {
@@ -1549,7 +1858,8 @@ async function getCustomerTransactionsPDF(req, res) {
     const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    const { fromDate, toDate } = req.query;
+    const { fromDate, toDate, types } = req.query;
+    let allowedTypes = types ? types.split(',').map(t=>t.trim().toLowerCase()) : null;
     const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
     const to   = toDate   ? new Date(toDate)   : new Date();
     to.setHours(23, 59, 59, 999);
@@ -1573,23 +1883,83 @@ async function getCustomerTransactionsPDF(req, res) {
         balance: parseFloat(inv.amountDue || 0),
       }));
 
-      for (const inv of invoices) {
-        for (const p of (inv.payments || [])) {
+      // Payments — one row per real payment (not fragmented per invoice it
+      // touched), matching the Customer Payments section. The "Balance"
+      // column carries the invoice breakdown for this row instead.
+      const paymentSummaryRows = await getPaymentSummaryRows(invoices, req.user?.orgId);
+      for (const r of paymentSummaryRows) {
+        const applied = r.breakdown.length
+          ? 'Applied to: ' + r.breakdown.map(b => `${b.invoiceNumber} (Rs.${b.amount.toFixed(2)})`).join(', ')
+          : (r.excessAmount > 0 ? `Unapplied / excess: Rs.${r.excessAmount.toFixed(2)}` : '');
+        transactions.push({
+          type:    'Payment',
+          number:  r.paymentNumber,
+          date:    r.date,
+          status:  'PAID',
+          amount:  parseFloat(r.totalAmount || 0),
+          balance: 0,
+          balanceText: applied,
+        });
+      }
+
+      const custIdFilter = { customerId: { $in: [customer._id?.toString(), customer.customerId] } };
+
+      try {
+        const CreditNote = getCreditNoteModel();
+        const validIds = [customer._id?.toString()].filter(id => mongoose.isValidObjectId(id));
+        const creditNotes = await CreditNote.find({ customerId: { $in: validIds }, ...req.orgFilter }).lean();
+        for (const cn of creditNotes) {
           transactions.push({
-            type:    'Payment',
-            number:  inv.invoiceNumber,
-            date:    p.paymentDate || p.recordedAt,
-            status:  'PAID',
-            amount:  parseFloat(p.amount || 0),
+            type:    'Credit Note',
+            number:  cn.creditNoteNumber,
+            date:    cn.creditNoteDate,
+            status:  cn.status,
+            amount:  parseFloat(cn.totalAmount || 0),
+            balance: parseFloat(cn.creditBalance || 0),
+          });
+        }
+      } catch (e) {}
+
+      try {
+        const SalesOrder = getSalesOrderModel();
+        const salesOrders = await SalesOrder.find({ ...custIdFilter, ...req.orgFilter }).lean();
+        for (const so of salesOrders) {
+          transactions.push({
+            type:    'Sales Order',
+            number:  so.salesOrderNumber,
+            date:    so.salesOrderDate,
+            status:  so.status,
+            amount:  parseFloat(so.totalAmount || 0),
             balance: 0,
           });
         }
-      }
+      } catch (e) {}
+
+      try {
+        const Quote = getQuoteModel();
+        const quotes = await Quote.find({ ...custIdFilter, ...req.orgFilter }).lean();
+        for (const q of quotes) {
+          transactions.push({
+            type:    'Quote',
+            number:  q.quoteNumber,
+            date:    q.quoteDate,
+            status:  q.status,
+            amount:  parseFloat(q.totalAmount || 0),
+            balance: 0,
+          });
+        }
+      } catch (e) {}
     }
 
+    const typeKeyMap = {
+      'Invoice': 'invoices', 'Payment': 'payments', 'Credit Note': 'credit-notes',
+      'Sales Order': 'sales-orders', 'Quote': 'quotes',
+    };
     transactions = transactions.filter(t => {
       const d = new Date(t.date);
-      return d >= from && d <= to;
+      if (d < from || d > to) return false;
+      if (allowedTypes && !allowedTypes.includes(typeKeyMap[t.type])) return false;
+      return true;
     });
     transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -1713,47 +2083,87 @@ async function getCustomerTransactionsPDF(req, res) {
       return currentY;
     };
 
-    let tableStartY = ensureSpace(metaY + 95, 40);
+    let rowY = ensureSpace(metaY + 95, 40);
 
+    // TYPE column is dropped here — with each type getting its own labeled
+    // section below, repeating it on every row is redundant.
     const cols = {
-      date:    { x: 40,  w: 60  },
-      number:  { x: 100, w: 100 },
-      type:    { x: 200, w: 65  },
-      status:  { x: 265, w: 90  },
-      amount:  { x: 355, w: 95  },
-      balance: { x: 450, w: 105 },
+      date:    { x: 40,  w: 70  },
+      number:  { x: 110, w: 130 },
+      status:  { x: 240, w: 90  },
+      amount:  { x: 330, w: 90  },
+      balance: { x: 420, w: 135 },
     };
 
-    doc.rect(40, tableStartY, 515, 20).fill('#0f1e3d');
-    doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
-    doc.text('DATE',    cols.date.x + 4,   tableStartY + 6, { width: cols.date.w });
-    doc.text('NUMBER',  cols.number.x + 4, tableStartY + 6, { width: cols.number.w });
-    doc.text('TYPE',    cols.type.x + 4,   tableStartY + 6, { width: cols.type.w });
-    doc.text('STATUS',  cols.status.x + 4, tableStartY + 6, { width: cols.status.w });
-    doc.text('AMOUNT',  cols.amount.x + 4, tableStartY + 6, { width: cols.amount.w - 8, align: 'right' });
-    doc.text('BALANCE', cols.balance.x + 4, tableStartY + 6, { width: cols.balance.w - 8, align: 'right' });
+    const drawColumnHeader = (y) => {
+      doc.rect(40, y, 515, 20).fill('#0f1e3d');
+      doc.fontSize(8).fillColor('#ffffff').font('Helvetica-Bold');
+      doc.text('DATE',    cols.date.x + 4,   y + 6, { width: cols.date.w });
+      doc.text('NUMBER',  cols.number.x + 4, y + 6, { width: cols.number.w });
+      doc.text('STATUS',  cols.status.x + 4, y + 6, { width: cols.status.w });
+      doc.text('AMOUNT',  cols.amount.x + 4, y + 6, { width: cols.amount.w - 8, align: 'right' });
+      doc.text('BALANCE', cols.balance.x + 4, y + 6, { width: cols.balance.w - 8, align: 'right' });
+    };
 
-    let rowY = tableStartY + 20;
+    // Group by type — each type gets its own heading and its own mini-table,
+    // instead of being interleaved into one flat chronological list.
+    const typeOrder = ['Invoice', 'Payment', 'Credit Note', 'Sales Order', 'Quote'];
+    const typeLabels = {
+      Invoice: 'INVOICES', Payment: 'CUSTOMER PAYMENTS', 'Credit Note': 'CREDIT NOTES',
+      'Sales Order': 'SALES ORDERS', Quote: 'QUOTES',
+    };
+    const grouped = {};
+    transactions.forEach(t => { (grouped[t.type] = grouped[t.type] || []).push(t); });
 
-    transactions.forEach((t, i) => {
-      const rowH = 22;
-      rowY = ensureSpace(rowY, rowH);
-      const fill = i % 2 === 0 ? '#f7f9fc' : '#ffffff';
-      doc.rect(40, rowY, 515, rowH).fill(fill);
-      doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+    for (const type of typeOrder) {
+      const group = grouped[type];
+      if (!group || !group.length) continue;
 
-      doc.fontSize(8).fillColor('#000000').font('Helvetica');
-      doc.text(new Date(t.date).toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 7, { width: cols.date.w });
-      doc.fillColor('#1d4ed8').text(t.number || '', cols.number.x + 4, rowY + 7, { width: cols.number.w - 8, ellipsis: true });
-      doc.fillColor('#000000').text(t.type || '', cols.type.x + 4, rowY + 7, { width: cols.type.w });
-      doc.text(String(t.status || '').replace(/_/g, ' '), cols.status.x + 4, rowY + 7, { width: cols.status.w });
-      doc.text((t.amount || 0).toFixed(2), cols.amount.x + 4, rowY + 7, { width: cols.amount.w - 8, align: 'right' });
-      doc.font('Helvetica-Bold')
-         .fillColor(t.balance > 0 ? '#dc2626' : '#6b7280')
-         .text(t.balance > 0 ? (t.balance).toFixed(2) : '-', cols.balance.x + 4, rowY + 7, { width: cols.balance.w - 8, align: 'right' });
+      rowY = ensureSpace(rowY, 30);
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f1e3d')
+         .text(typeLabels[type], 40, rowY, { width: 515 });
+      rowY += 18;
 
-      rowY += rowH;
-    });
+      rowY = ensureSpace(rowY, 20);
+      drawColumnHeader(rowY);
+      rowY += 20;
+
+      group.forEach((t, i) => {
+        // Payment rows carry a text breakdown (which invoices this payment
+        // covered) in the Balance column instead of a number — that text can
+        // wrap to multiple lines, so size the row to fit it instead of using
+        // a fixed height (a fixed height clipped this exact kind of text before).
+        doc.fontSize(8).font('Helvetica');
+        const balanceCellHeight = t.balanceText
+          ? doc.heightOfString(t.balanceText, { width: cols.balance.w - 8 })
+          : 10;
+        const rowH = Math.max(22, balanceCellHeight + 12);
+
+        rowY = ensureSpace(rowY, rowH);
+        const fill = i % 2 === 0 ? '#f7f9fc' : '#ffffff';
+        doc.rect(40, rowY, 515, rowH).fill(fill);
+        doc.rect(40, rowY, 515, rowH).lineWidth(0.5).strokeColor('#dde4ef').stroke();
+
+        doc.fontSize(8).fillColor('#000000').font('Helvetica');
+        doc.text(new Date(t.date).toLocaleDateString('en-IN'), cols.date.x + 4, rowY + 7, { width: cols.date.w });
+        doc.fillColor('#1d4ed8').text(t.number || '', cols.number.x + 4, rowY + 7, { width: cols.number.w - 8, ellipsis: true });
+        doc.fillColor('#000000').text(String(t.status || '').replace(/_/g, ' '), cols.status.x + 4, rowY + 7, { width: cols.status.w });
+        doc.text((t.amount || 0).toFixed(2), cols.amount.x + 4, rowY + 7, { width: cols.amount.w - 8, align: 'right' });
+
+        if (t.balanceText) {
+          doc.font('Helvetica').fillColor('#374151')
+             .text(t.balanceText, cols.balance.x + 4, rowY + 7, { width: cols.balance.w - 8, align: 'left' });
+        } else {
+          doc.font('Helvetica-Bold')
+             .fillColor(t.balance > 0 ? '#dc2626' : '#6b7280')
+             .text(t.balance > 0 ? (t.balance).toFixed(2) : '-', cols.balance.x + 4, rowY + 7, { width: cols.balance.w - 8, align: 'right' });
+        }
+
+        rowY += rowH;
+      });
+
+      rowY += 14; // gap before the next section's heading
+    }
 
     doc.end();
 
@@ -1764,9 +2174,182 @@ async function getCustomerTransactionsPDF(req, res) {
 };
 
 
+
+async function getCustomerTransactionsExcel(req, res) {
+  try {
+    const XLSX = require('xlsx');
+    // getPaymentRowsForInvoices, BillingCustomer, mongoose are already in
+    // scope in this module — no need to require this file from itself.
+
+    const customer = await BillingCustomer.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const { fromDate, toDate, types } = req.query;
+    const from = fromDate ? new Date(fromDate) : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    const to   = toDate   ? new Date(toDate)   : new Date();
+    to.setHours(23, 59, 59, 999);
+    from.setHours(0, 0, 0, 0);
+
+    let allowedTypes = types ? types.split(',').map(t => t.trim().toLowerCase()) : null;
+
+    const Invoice = mongoose.models.Invoice;
+    let transactions = [];
+
+    if (Invoice) {
+      const invoices = await Invoice.find({
+        customerId: { $in: [customer._id?.toString(), customer.customerId] },
+        ...req.orgFilter,
+      }).lean();
+
+      if (!allowedTypes || allowedTypes.includes('invoices')) {
+        invoices.forEach(inv => {
+          transactions.push({
+            type:    'Invoice',
+            number:  inv.invoiceNumber,
+            date:    inv.invoiceDate,
+            status:  inv.status,
+            amount:  parseFloat(inv.totalAmount || 0),
+            balance: parseFloat(inv.amountDue || 0),
+          });
+        });
+      }
+
+      if (!allowedTypes || allowedTypes.includes('payments')) {
+        // One row per real payment (not fragmented per invoice it touched),
+        // matching the Customer Payments section — the "Balance / Extra"
+        // column carries the invoice breakdown for this row instead.
+        const paymentSummaryRows = await getPaymentSummaryRows(invoices, req.user?.orgId);
+        paymentSummaryRows.forEach(r => {
+          const applied = r.breakdown.length
+            ? 'Applied to: ' + r.breakdown.map(b => `${b.invoiceNumber} (₹${b.amount.toFixed(2)})`).join(', ')
+            : (r.excessAmount > 0 ? `Unapplied / excess: ₹${r.excessAmount.toFixed(2)}` : '');
+          transactions.push({
+            type:    'Payment',
+            number:  r.paymentNumber,
+            date:    r.date,
+            status:  'PAID',
+            amount:  parseFloat(r.totalAmount || 0),
+            balance: 0,
+            balanceText: applied,
+          });
+        });
+      }
+
+      const custIdFilter = { customerId: { $in: [customer._id?.toString(), customer.customerId] } };
+
+      if (!allowedTypes || allowedTypes.includes('credit-notes')) {
+        try {
+          const CreditNote = mongoose.models.CreditNote;
+          const validIds = [customer._id?.toString()].filter(id => mongoose.isValidObjectId(id));
+          const creditNotes = await CreditNote.find({ customerId: { $in: validIds }, ...req.orgFilter }).lean();
+          creditNotes.forEach(cn => {
+            transactions.push({
+              type:    'Credit Note',
+              number:  cn.creditNoteNumber,
+              date:    cn.creditNoteDate,
+              status:  cn.status,
+              amount:  parseFloat(cn.totalAmount || 0),
+              balance: parseFloat(cn.creditBalance || 0),
+            });
+          });
+        } catch (e) {}
+      }
+
+      if (!allowedTypes || allowedTypes.includes('sales-orders')) {
+        try {
+          const SalesOrder = mongoose.models.SalesOrder;
+          const salesOrders = await SalesOrder.find({ ...custIdFilter, ...req.orgFilter }).lean();
+          salesOrders.forEach(so => {
+            transactions.push({
+              type:    'Sales Order',
+              number:  so.salesOrderNumber,
+              date:    so.salesOrderDate,
+              status:  so.status,
+              amount:  parseFloat(so.totalAmount || 0),
+              balance: 0,
+            });
+          });
+        } catch (e) {}
+      }
+
+      if (!allowedTypes || allowedTypes.includes('quotes')) {
+        try {
+          const Quote = mongoose.models.Quote;
+          const quotes = await Quote.find({ ...custIdFilter, ...req.orgFilter }).lean();
+          quotes.forEach(q => {
+            transactions.push({
+              type:    'Quote',
+              number:  q.quoteNumber,
+              date:    q.quoteDate,
+              status:  q.status,
+              amount:  parseFloat(q.totalAmount || 0),
+              balance: 0,
+            });
+          });
+        } catch (e) {}
+      }
+    }
+
+    transactions = transactions.filter(t => {
+      const d = new Date(t.date);
+      if (d < from || d > to) return false;
+      if (allowedTypes) {
+        if (t.type === 'Invoice' && !allowedTypes.includes('invoices')) return false;
+        if (t.type === 'Payment' && !allowedTypes.includes('payments')) return false;
+        if (t.type === 'Credit Note' && !allowedTypes.includes('credit-notes')) return false;
+        if (t.type === 'Sales Order' && !allowedTypes.includes('sales-orders')) return false;
+        if (t.type === 'Quote' && !allowedTypes.includes('quotes')) return false;
+      }
+      return true;
+    });
+    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // One sheet per type, instead of one flat sheet mixing everything
+    // together — same "each type gets its own section" idea as the PDF.
+    const typeOrder = ['Invoice', 'Payment', 'Credit Note', 'Sales Order', 'Quote'];
+    const sheetNames = {
+      Invoice: 'Invoices', Payment: 'Customer Payments', 'Credit Note': 'Credit Notes',
+      'Sales Order': 'Sales Orders', Quote: 'Quotes',
+    };
+    const grouped = {};
+    transactions.forEach(t => { (grouped[t.type] = grouped[t.type] || []).push(t); });
+
+    const wb = XLSX.utils.book_new();
+    for (const type of typeOrder) {
+      const group = grouped[type];
+      if (!group || !group.length) continue;
+
+      const rows = group.map(t => ({
+        Date: new Date(t.date).toLocaleDateString('en-IN'),
+        Number: t.number,
+        Status: t.status,
+        Amount: (t.amount || 0).toFixed(2),
+        'Balance / Extra': t.balanceText || (t.balance || 0).toFixed(2)
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows, { header: ['Date', 'Number', 'Status', 'Amount', 'Balance / Extra'] });
+      ws['!cols'] = [ {wch:12}, {wch:20}, {wch:12}, {wch:15}, {wch:45} ];
+      XLSX.utils.book_append_sheet(wb, ws, sheetNames[type]);
+    }
+    if (wb.SheetNames.length === 0) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([]), 'Transactions');
+    }
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    
+    const safeCustomerName = (customer.customerDisplayName || 'Customer').replace(/[^a-z0-9]+/gi, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Transactions_${safeCustomerName}.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('getCustomerTransactionsExcel error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 module.exports = router;
 module.exports.BillingCustomer = BillingCustomer;
 module.exports.INDIAN_STATES   = INDIAN_STATES;
+module.exports.getPaymentSummaryRows    = getPaymentSummaryRows;
+module.exports.getPaymentRowsForInvoices = getPaymentRowsForInvoices;
 
 console.log('? Billing Customers module loaded (Zoho Books style)');      
 

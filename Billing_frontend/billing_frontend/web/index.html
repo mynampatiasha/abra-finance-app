@@ -31,6 +31,15 @@
 
   <title>billing_frontend</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Stops the browser's swipe-back/forward navigation gesture from firing
+       when a two-finger horizontal scroll reaches the edge of a scrollable
+       table/list inside the app (e.g. the Invoices table). -->
+  <style>
+    html, body {
+      overscroll-behavior-x: none;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

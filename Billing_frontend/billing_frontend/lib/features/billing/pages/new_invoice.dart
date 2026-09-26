@@ -18,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/invoice_service.dart';
+import '../../../../core/services/tds_section_service.dart';
 import '../../../../app/config/api_config.dart';
 import 'new_customer.dart';
 import '../widgets/document_preview_buttons.dart';
@@ -89,8 +90,18 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   final _shippingChargesController = TextEditingController();
   final _adjustmentController = TextEditingController();
 
-  // ── Per-item description controllers (to support multiline) ───────────────
+  // ── Per-item controllers, kept in lockstep with _items by index ────────────
+  // Every one of these MUST be added/removed/disposed together, in the same
+  // places _descControllers already is — otherwise deleting a row from the
+  // middle of the list leaves the remaining rows' text fields showing stale
+  // values from whatever used to sit at that screen position (Flutter reuses
+  // a TextFormField's internal state across rebuilds when nothing keys it to
+  // a specific item, and initialValue is only read the first time).
   final List<TextEditingController> _descControllers = [];
+  final List<TextEditingController> _hsnControllers = [];
+  final List<TextEditingController> _qtyControllers = [];
+  final List<TextEditingController> _rateControllers = [];
+  final List<TextEditingController> _discControllers = [];
 
   // ── Customer ───────────────────────────────────────────────────────────────
   String? _selectedCustomerId;
@@ -122,6 +133,9 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   double _tcsRate = 0;
   bool _enableTDS = false;
   bool _enableTCS = false;
+  List<TdsSection> _tdsSections = [];
+  String? _selectedTdsSection;
+  String _tdsReason = '';
 
   // ── Invoice-level discount ─────────────────────────────────────────────────
   double _invoiceLevelDiscount = 0;
@@ -163,7 +177,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   double _totalTdsDeducted = 0;
   double _totalWriteOff = 0;
   
-  bool _autoRoundOff = false;
+  bool _autoRoundOff = true;
   String? _originalStatus;
   List<TaxSlab> _taxSlabs = [];
 
@@ -183,7 +197,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
     } else if (widget.initialItems != null && widget.initialItems!.isNotEmpty) {
       _items = List.from(widget.initialItems!);
       for (final item in _items) {
-        _descControllers.add(TextEditingController(text: item.itemDetails));
+        _addRowControllers(item);
       }
       _selectedCustomerName = widget.initialCustomerName;
       // Note: User still needs to select the customer from dropdown to get the customerId!
@@ -194,6 +208,47 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
 
     _loadOrgState();
     _loadPaymentAccounts();
+    _loadTdsSections();
+  }
+
+  Future<void> _loadTdsSections() async {
+    final sections = await TdsSectionService.getSections();
+    if (mounted) setState(() => _tdsSections = sections);
+  }
+
+  Future<void> _showAddTdsSectionDialog() async {
+    final nameCtrl = TextEditingController();
+    final rateCtrl = TextEditingController();
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Add TDS Section'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Section name')),
+          const SizedBox(height: 12),
+          TextField(
+              controller: rateCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Rate (%)')),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                final ok = await TdsSectionService.addSection(
+                    nameCtrl.text.trim(), double.tryParse(rateCtrl.text) ?? 0);
+                Navigator.pop(context, ok);
+              },
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (added == true) await _loadTdsSections();
   }
 
   @override
@@ -208,7 +263,61 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
     for (final c in _descControllers) {
       c.dispose();
     }
+    for (final c in _hsnControllers) {
+      c.dispose();
+    }
+    for (final c in _qtyControllers) {
+      c.dispose();
+    }
+    for (final c in _rateControllers) {
+      c.dispose();
+    }
+    for (final c in _discControllers) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  // Creates and appends the full set of per-row controllers for one item —
+  // call this everywhere an item is added to _items, in the same order.
+  void _addRowControllers(InvoiceItem item) {
+    _descControllers.add(TextEditingController(text: item.itemDetails));
+    _hsnControllers.add(TextEditingController(
+        text: item.hsnCode.isNotEmpty ? item.hsnCode : item.sacCode));
+    _qtyControllers.add(TextEditingController(
+        text: item.quantity > 0 ? item.quantity.toString() : ''));
+    _rateControllers.add(TextEditingController(
+        text: item.rate > 0 ? item.rate.toStringAsFixed(2) : ''));
+    _discControllers.add(TextEditingController(
+        text: item.discount > 0 ? item.discount.toString() : ''));
+  }
+
+  // Disposes and removes the full set of per-row controllers at index —
+  // call this everywhere an item is removed from _items, before removeAt.
+  void _removeRowControllers(int index) {
+    _descControllers[index].dispose();
+    _descControllers.removeAt(index);
+    _hsnControllers[index].dispose();
+    _hsnControllers.removeAt(index);
+    _qtyControllers[index].dispose();
+    _qtyControllers.removeAt(index);
+    _rateControllers[index].dispose();
+    _rateControllers.removeAt(index);
+    _discControllers[index].dispose();
+    _discControllers.removeAt(index);
+  }
+
+  void _clearRowControllers() {
+    for (final c in _descControllers) c.dispose();
+    for (final c in _hsnControllers) c.dispose();
+    for (final c in _qtyControllers) c.dispose();
+    for (final c in _rateControllers) c.dispose();
+    for (final c in _discControllers) c.dispose();
+    _descControllers.clear();
+    _hsnControllers.clear();
+    _qtyControllers.clear();
+    _rateControllers.clear();
+    _discControllers.clear();
   }
 
   // ==========================================================================
@@ -375,11 +484,8 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
     setState(() => _isLoading = true);
     try {
       final invoice = await InvoiceService.getInvoice(widget.invoiceId!);
-      // Dispose old desc controllers before rebuilding
-      for (final c in _descControllers) {
-        c.dispose();
-      }
-      _descControllers.clear();
+      // Dispose old row controllers before rebuilding
+      _clearRowControllers();
       setState(() {
         _selectedCustomerId = invoice.customerId;
         _selectedCustomerName = invoice.customerName;
@@ -414,6 +520,9 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
         _tcsRate = invoice.tcsRate;
         _enableTDS = invoice.tdsRate > 0;
         _enableTCS = invoice.tcsRate > 0;
+        _selectedTdsSection =
+            invoice.tdsSection.isNotEmpty ? invoice.tdsSection : null;
+        _tdsReason = invoice.tdsReason;
         _items = invoice.items
             .map((item) => InvoiceItem(
                   itemDetails: item.itemDetails,
@@ -438,9 +547,9 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
         _totalTdsDeducted = invoice.totalTdsDeducted;
         _totalWriteOff = invoice.totalWriteOff;
         
-        // Create a desc controller per loaded item
+        // Create the row controllers per loaded item
         for (final item in _items) {
-          _descControllers.add(TextEditingController(text: item.itemDetails));
+          _addRowControllers(item);
         }
         _updateInterState();
         _calculateAmounts();
@@ -458,16 +567,16 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
 
   void _addNewItem() {
     setState(() {
-      _items.add(InvoiceItem(itemGstRate: 18));
-      _descControllers.add(TextEditingController());
+      final item = InvoiceItem(itemGstRate: 18);
+      _items.add(item);
+      _addRowControllers(item);
     });
   }
 
   void _removeItem(int index) {
     setState(() {
       _items.removeAt(index);
-      _descControllers[index].dispose();
-      _descControllers.removeAt(index);
+      _removeRowControllers(index);
       _calculateAmounts();
     });
   }
@@ -694,6 +803,8 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       'adjustment': _adjustment,
       'autoRoundOff': _autoRoundOff,
       'tdsRate': _enableTDS ? _tdsRate : 0,
+      'tdsSection': _enableTDS ? (_selectedTdsSection ?? '') : '',
+      'tdsReason': _enableTDS ? _tdsReason : '',
       'tcsRate': _enableTCS ? _tcsRate : 0,
       'status': status,
       if (_selectedPaymentAccount != null)
@@ -1593,8 +1704,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                   child: TextFormField(
-                    initialValue:
-                        item.hsnCode.isNotEmpty ? item.hsnCode : item.sacCode,
+                    controller: _hsnControllers[index],
                     decoration: _cellDecoration('HSN/SAC'),
                     style: const TextStyle(fontSize: 13, color: Colors.black87),
                     onChanged: (v) => setState(() {
@@ -1633,8 +1743,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                   child: TextFormField(
-                    initialValue:
-                        item.quantity > 0 ? item.quantity.toString() : '',
+                    controller: _qtyControllers[index],
                     decoration: _cellDecoration('0'),
                     style: const TextStyle(fontSize: 13, color: Colors.black87),
                     textAlign: TextAlign.center,
@@ -1657,8 +1766,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                   child: TextFormField(
-                    initialValue:
-                        item.rate > 0 ? item.rate.toStringAsFixed(2) : '',
+                    controller: _rateControllers[index],
                     decoration: _cellDecoration('0.00'),
                     style: const TextStyle(fontSize: 13, color: Colors.black87),
                     textAlign: TextAlign.right,
@@ -1681,8 +1789,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   child: Row(children: [
                     Expanded(
                         child: TextFormField(
-                      initialValue:
-                          item.discount > 0 ? item.discount.toString() : '',
+                      controller: _discControllers[index],
                       decoration: _cellDecoration('0'),
                       style:
                           const TextStyle(fontSize: 13, color: Colors.black87),
@@ -1913,24 +2020,22 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                 setState(() {
                   exp.isSelected = !exp.isSelected;
                   if (exp.isSelected) {
-                    _items.add(InvoiceItem(
+                    final item = InvoiceItem(
                       itemDetails:
                           'Expense: ${exp.expenseAccount}${exp.vendor != null ? ' (${exp.vendor})' : ''}',
                       quantity: 1,
                       rate: exp.billableAmount,
                       amount: exp.billableAmount,
                       itemGstRate: 18,
-                    ));
-                    _descControllers.add(TextEditingController(
-                        text:
-                            'Expense: ${exp.expenseAccount}${exp.vendor != null ? ' (${exp.vendor})' : ''}'));
+                    );
+                    _items.add(item);
+                    _addRowControllers(item);
                     _calculateAmounts();
                   } else {
                     final idx = _items.indexWhere((i) => i.itemDetails
                         .startsWith('Expense: ${exp.expenseAccount}'));
                     if (idx != -1) {
-                      _descControllers[idx].dispose();
-                      _descControllers.removeAt(idx);
+                      _removeRowControllers(idx);
                       _items.removeAt(idx);
                       _calculateAmounts();
                     }
@@ -2190,7 +2295,12 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
           keyboardType: const TextInputType.numberWithOptions(
               decimal: true, signed: true),
-          onChanged: (_) => _calculateAmounts()),
+          onChanged: (_) {
+            if (_autoRoundOff) {
+              setState(() => _autoRoundOff = false);
+            }
+            _calculateAmounts();
+          }),
       const SizedBox(height: 8),
       Row(
         children: [
@@ -2234,20 +2344,52 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
               })),
       if (_enableTDS) ...[
         const SizedBox(height: 8),
-        TextFormField(
-            initialValue: _tdsRate.toString(),
+        DropdownButtonFormField<String>(
+            value: _tdsSections.any((s) => s.name == _selectedTdsSection)
+                ? _selectedTdsSection
+                : null,
             decoration: InputDecoration(
-                labelText: 'TDS Rate (%)',
+                labelText: 'TDS Section',
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                suffixText: '%',
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (v) => setState(() {
-                  _tdsRate = double.tryParse(v) ?? 0;
-                  _calculateAmounts();
-                })),
+            hint: const Text('Select section'),
+            items: [
+              ..._tdsSections.map((s) => DropdownMenuItem(
+                  value: s.name, child: Text('${s.name} [${s.rate}%]'))),
+              const DropdownMenuItem(
+                  value: '__add_new__',
+                  child: Text('+ Add new section',
+                      style: TextStyle(color: _navyAccent))),
+            ],
+            onChanged: (v) async {
+              if (v == '__add_new__') {
+                await _showAddTdsSectionDialog();
+                return;
+              }
+              setState(() {
+                _selectedTdsSection = v;
+                final section = _tdsSections.firstWhere((s) => s.name == v);
+                _tdsRate = section.rate;
+                _calculateAmounts();
+              });
+            }),
+        if (_selectedTdsSection != null) ...[
+          const SizedBox(height: 6),
+          Text('TDS Deducted: ₹${_tdsAmount.toStringAsFixed(2)}',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        ],
+        const SizedBox(height: 8),
+        TextFormField(
+            initialValue: _tdsReason,
+            decoration: InputDecoration(
+                labelText: 'Reason for Higher Deduction (optional)',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+            onChanged: (v) => _tdsReason = v),
       ],
       const SizedBox(height: 8),
       SwitchListTile(
@@ -2326,7 +2468,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       ],
       if (_adjustment != 0) ...[
         const SizedBox(height: 6),
-        _summaryRow('Adjustment', _adjustment,
+        _summaryRow(_autoRoundOff ? 'Round Off' : 'Adjustment', _adjustment,
             color: _adjustment < 0 ? Colors.red[700] : null)
       ],
       const Divider(thickness: 2),
@@ -2441,7 +2583,8 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
               fontWeight:
                   isBold || isTotal ? FontWeight.bold : FontWeight.normal,
               color: color ?? (isTotal ? _navyDark : Colors.grey[700]))),
-      Text('${amount < 0 ? '-' : ''}₹${amount.abs().toStringAsFixed(2)}',
+      Text(
+          '${amount < 0 ? '-' : ''}₹${NumberFormat('#,##,##0.00').format(amount.abs())}',
           style: TextStyle(
               fontSize: isTotal ? 17 : 13,
               fontWeight: isBold || isTotal ? FontWeight.bold : FontWeight.w500,

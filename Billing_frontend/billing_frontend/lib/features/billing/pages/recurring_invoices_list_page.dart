@@ -29,6 +29,7 @@ import '../../../../core/services/recurring_invoice_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_recurring_invoice.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette (same as customers_list_page) ────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -232,6 +233,9 @@ class _RecurringInvoicesListPageState extends State<RecurringInvoicesListPage> {
   }
 
   void _openEdit(RecurringInvoice p) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'recurring_invoices');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -281,6 +285,9 @@ class _RecurringInvoicesListPageState extends State<RecurringInvoicesListPage> {
   }
 
   Future<void> _delete(RecurringInvoice p) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'recurring_invoices');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Profile',
       message: 'Delete "${p.profileName}"? This cannot be undone.',

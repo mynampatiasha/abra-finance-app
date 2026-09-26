@@ -33,6 +33,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/services/invoice_service.dart' as invoice_svc;
 import '../../../../core/services/credit_note_service.dart';
 import '../../../../core/services/tms_service.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_credit_note.dart';
 import 'credit_note_detail_page.dart';
@@ -213,6 +214,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   }
 
   void _openEditCreditNote(String creditNoteId) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'credit_notes');
+    if (!canEdit) return;
+
     final result = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -225,6 +229,9 @@ class _CreditNotesListPageState extends State<CreditNotesListPage> {
   // ==========================================================================
 
   Future<void> _deleteCreditNote(CreditNote cn) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'credit_notes');
+    if (!canDelete) return;
+
     if (cn.status != 'DRAFT') {
       _snackError('Only draft credit notes can be deleted');
       return;

@@ -26,6 +26,7 @@ import '../../../../core/services/billing_vendors_service.dart';
 import '../../../../core/services/tms_service.dart';
 import 'new_vendor.dart';
 import 'vendor_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ──────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -292,6 +293,9 @@ class _VendorsListPageState extends State<VendorsListPage> {
   }
 
   void _openEdit(VendorData v) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'vendors');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => NewVendorPage(vendorId: v.id)));
     if (ok == true) _loadVendors();
@@ -309,6 +313,9 @@ class _VendorsListPageState extends State<VendorsListPage> {
   }
 
   Future<void> _deleteVendor(VendorData v) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'vendors');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Vendor',
       message: 'Delete "${v.name}"? This cannot be undone.',

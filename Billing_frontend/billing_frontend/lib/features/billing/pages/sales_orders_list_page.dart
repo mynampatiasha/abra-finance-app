@@ -31,6 +31,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_sales_order.dart';
 import 'sales_order_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -204,6 +205,9 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
   }
 
   void _openEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'sales_orders');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -226,6 +230,9 @@ class _SalesOrdersListPageState extends State<SalesOrdersListPage> {
   // ── delete ────────────────────────────────────────────────────────────────
 
   Future<void> _delete(SalesOrder so) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'sales_orders');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Sales Order',
       message: 'Delete ${so.salesOrderNumber}? This cannot be undone.',

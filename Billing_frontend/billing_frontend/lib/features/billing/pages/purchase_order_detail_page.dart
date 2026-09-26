@@ -2,6 +2,7 @@
 // PURCHASE ORDER DETAIL PAGE
 // ============================================================================
 import 'package:flutter/material.dart';
+import '../widgets/document_preview_buttons.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/purchase_order_service.dart';
 import '../../../../core/utils/detail_page_actions.dart';
@@ -91,6 +92,18 @@ class _PurchaseOrderDetailPageState extends State<PurchaseOrderDetailPage> {
           title: Text(_po?.purchaseOrderNumber ?? 'Purchase Order Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.purchaseOrderId,
+                  pdfEndpoint: '/api/finance/purchase-orders',
+                  docNumber: _po?.purchaseOrderNumber ?? 'Purchase Order',
+                );
+              },
+            ),
             if (_po != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

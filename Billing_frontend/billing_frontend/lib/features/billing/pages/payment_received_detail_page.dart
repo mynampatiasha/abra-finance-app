@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // PAYMENT RECEIVED DETAIL PAGE — Fixed keys + inline proof images + upload
 // ============================================================================
@@ -453,6 +454,18 @@ class _PaymentReceivedDetailPageState extends State<PaymentReceivedDetailPage> {
           title:
               Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: _paymentId,
+                  pdfEndpoint: '/api/finance/payments-received',
+                  docNumber: _payment['paymentNumber']?.toString() ?? widget.payment['paymentNumber']?.toString() ?? 'Payment Received',
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.edit_outlined, color: Colors.white),
               tooltip: 'Edit Payment',

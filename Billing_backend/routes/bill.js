@@ -1203,8 +1203,7 @@ async function sendPaymentConfirmationEmail(bill, payment, orgId = null, branchI
 router.get('/', async (req, res) => {
   try {
     const { status, vendorId, fromDate, toDate, search, page = 1, limit = 20 } = req.query;
-    const query = {};
-    if (req.user?.orgId) query.orgId = req.user.orgId;
+    const query = { ...(req.orgFilter || {}) };
     Object.assign(query, req.branchFilter || {});
 
     if (status && status !== 'All') query.status = status;

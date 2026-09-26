@@ -1036,20 +1036,23 @@ const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null, br
 // GET /api/sales-orders - Get all sales orders
 router.get('/', async (req, res) => {
   try {
-    const { 
-      status, 
-      page = 1, 
+    const {
+      status,
+      customerId,
+      page = 1,
       limit = 20,
       search,
       fromDate,
       toDate
     } = req.query;
-    
+
     const orgId = req.user?.orgId;
-    
+
     const query = { orgId };
     Object.assign(query, req.branchFilter || {});
-    
+
+    if (customerId) query.customerId = customerId;
+
     if (status && status !== 'All') {
       query.status = status;
     }

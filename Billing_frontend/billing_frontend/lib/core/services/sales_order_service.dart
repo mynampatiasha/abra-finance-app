@@ -42,6 +42,7 @@ class SalesOrderService {
 
   static Future<SalesOrderListResponse> getSalesOrders({
     String? status,
+    String? customerId,
     int page = 1,
     int limit = 20,
     String? search,
@@ -56,6 +57,10 @@ class SalesOrderService {
 
       if (status != null && status != 'All') {
         queryParams['status'] = status;
+      }
+
+      if (customerId != null) {
+        queryParams['customerId'] = customerId;
       }
 
       if (search != null && search.isNotEmpty) {

@@ -28,6 +28,7 @@ import '../../../../core/utils/export_helper.dart';
 import '../app_top_bar.dart';
 import 'new_payment_page.dart';
 import 'payment_received_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -305,6 +306,9 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
   }
 
   Future<void> _delete(Map<String, dynamic> p) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'payments_received');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Payment #${p['paymentNumber']}?',
       message: 'This cannot be undone.',
@@ -328,7 +332,10 @@ class _PaymentsReceivedPageState extends State<PaymentsReceivedPage> {
     );
   }
 
-  void _editPayment(Map<String, dynamic> p) {
+  void _editPayment(Map<String, dynamic> p) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'payments_received');
+    if (!canEdit) return;
+
     final paymentId = p['id']?.toString() ?? p['_id']?.toString() ?? '';
     if (paymentId.isEmpty) {
       _showError('Payment ID not available');

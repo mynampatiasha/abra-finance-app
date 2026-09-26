@@ -32,6 +32,7 @@ import 'dart:convert';
 import '../../../../core/services/item_billing_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../../../../core/utils/export_helper.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_item_billing.dart';
 
@@ -227,6 +228,9 @@ class _ItemsBillingState extends State<ItemsBilling> {
   }
 
   void _openEdit(ItemData item) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'items');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -239,6 +243,9 @@ class _ItemsBillingState extends State<ItemsBilling> {
   // ==========================================================================
 
   Future<void> _deleteItem(ItemData item) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'items');
+    if (!canDelete) return;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

@@ -29,6 +29,7 @@ import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
 import 'new_purchase_order.dart';
 import 'purchase_order_detail_page.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ─── colour palette ──────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -216,6 +217,9 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
   }
 
   void _openEdit(String id) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'purchase_orders');
+    if (!canEdit) return;
+
     final ok = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -236,6 +240,9 @@ class _PurchaseOrdersListPageState extends State<PurchaseOrdersListPage> {
   }
 
   Future<void> _deletePO(PurchaseOrder po) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'purchase_orders');
+    if (!canDelete) return;
+
     final ok = await _confirmDialog(
       title: 'Delete Purchase Order',
       message: 'Delete ${po.purchaseOrderNumber}? This cannot be undone.',

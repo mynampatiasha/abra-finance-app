@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // DELIVERY CHALLAN DETAIL PAGE
 // ============================================================================
@@ -92,6 +93,18 @@ class _DeliveryChallanDetailPageState extends State<DeliveryChallanDetailPage> {
           title: Text(_challan?.challanNumber ?? 'Challan Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.challanId,
+                  pdfEndpoint: '/api/finance/delivery-challans',
+                  docNumber: _challan?.challanNumber ?? 'Delivery Challan',
+                );
+              },
+            ),
             if (_challan != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

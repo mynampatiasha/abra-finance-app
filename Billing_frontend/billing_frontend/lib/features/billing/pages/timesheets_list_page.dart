@@ -17,6 +17,7 @@ import '../../../../core/utils/export_helper.dart';
 import '../../../../core/services/timesheet_service.dart';
 import '../../../../core/services/project_service.dart';
 import '../../../../core/services/tms_service.dart';
+import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import 'new_time_entry.dart';
 
@@ -250,6 +251,7 @@ class _TimesheetsListPageState extends State<TimesheetsListPage> {
   }
 
   Future<void> _delete(TimeEntry e) async {
+    if (!await FinancePermissions.checkCanDelete(context, 'time_tracking')) return;
     final ok = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(

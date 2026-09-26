@@ -28,6 +28,7 @@ import 'account_detail_page.dart';
 import 'bulk_import_bank_statement_dialog.dart';
 import '../../../core/services/add_account_service.dart';
 import '../../../core/services/bank_transaction_service.dart';
+import '../../../core/permissions_finance.dart';
 
 // ─── colour palette ───────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -1474,6 +1475,9 @@ class _BankingDashboardPageState extends State<BankingDashboardPage> {
   }
 
   Future<void> _confirmDelete(_AccountSummary acct) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'banking');
+    if (!canDelete) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

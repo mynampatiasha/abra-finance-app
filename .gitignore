@@ -5,3 +5,5 @@ build/
 *.salive
 android/app/build/
 ios/build/
+Billing_backend/backups/
+verify_receivable_mismatch.js

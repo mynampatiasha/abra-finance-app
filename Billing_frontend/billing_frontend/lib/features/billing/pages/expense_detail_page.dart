@@ -1,4 +1,5 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import '../widgets/document_preview_buttons.dart';
 // ============================================================================
 // EXPENSE DETAIL PAGE — with PDF/Image download, Share, Proof viewer + upload
 // ============================================================================
@@ -374,6 +375,18 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           title: Text(_expense?.expenseNumber ?? 'Expense Detail',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
+              tooltip: 'View PDF',
+              onPressed: () async {
+                await openDocumentPdf(
+                  context: context,
+                  docId: widget.expenseId,
+                  pdfEndpoint: '/api/finance/expenses',
+                  docNumber: _expense?.expenseNumber ?? 'Expense',
+                );
+              },
+            ),
             if (_expense != null) ...[
               IconButton(
                 icon: const Icon(Icons.download, color: Colors.white),

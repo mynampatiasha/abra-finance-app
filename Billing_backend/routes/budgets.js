@@ -672,6 +672,353 @@ Please review and take necessary action.`;
   }
 }
 
+
+// ============================================================================
+// PDF & EXCEL EXPORT ROUTES
+// ============================================================================
+const fsCore = require('fs');
+const path = require('path');
+const PDFDocument = require('pdfkit');
+const xlsx = require('xlsx');
+const { getEffectiveOrgData } = require('./branches');
+
+// Helper to format currency
+const formatCurr = (num) => {
+  if (num === null || num === undefined) return '0.00';
+  return parseFloat(num).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+// -- PDF Export -------------------------------------------------------------
+router.get('/:id/export-pdf', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    let budget = await Budget.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    if (!budget) return res.status(404).json({ success: false, error: 'Budget not found' });
+    
+    // Enrich with actuals matching the UI
+    budget = await enrichWithActuals(budget, req.user?.orgId, startDate, endDate);
+    budget.variance = budget.totalVariance || 0;
+    budget.percentUsed = budget.totalBudgeted > 0 ? (budget.totalActual / budget.totalBudgeted) * 100 : 0;
+    
+    // Get organization data for header
+    const orgData = await getEffectiveOrgData(budget.orgId, budget.branchId, mongoose.connection.db);
+    
+    // Helper for robust logo extraction (like invoices.js)
+    function getOrgLogoPath(orgId) {
+      if (orgId) {
+        const orgPath = path.join(__dirname, '..', 'public', 'uploads', orgId.toString(), 'logo.png');
+        if (fs.existsSync(orgPath)) return orgPath;
+        const orgJpg = path.join(__dirname, '..', 'public', 'uploads', orgId.toString(), 'logo.jpg');
+        if (fs.existsSync(orgJpg)) return orgJpg;
+      }
+      return path.join(__dirname, '..', 'public', 'logo.png');
+    }
+    
+    // Build PDF
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Budget_${budget.budgetName.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf"`);
+    doc.pipe(res);
+    
+    const pageW = doc.page.width;
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // HEADER — robust like invoices.js
+    // ═══════════════════════════════════════════════════════════════════════
+    let logoData = null;
+    if (orgData?.logoBase64) {
+      const match = orgData.logoBase64.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) logoData = Buffer.from(match[2], 'base64');
+    }
+    if (!logoData && orgData?.logoUrl) {
+      const lp = path.join(__dirname, '..', orgData.logoUrl.replace(/^\//, ''));
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+    if (!logoData) {
+      const lp = getOrgLogoPath(budget.orgId || null);
+      try { if (fs.existsSync(lp) && fs.statSync(lp).size > 0) logoData = lp; } catch (_) {}
+    }
+
+    const textX = logoData ? 166 : 50;
+    const textStartY = 35;
+    const logoY = textStartY;
+
+    if (logoData) {
+      try {
+        doc.image(logoData, 44, logoY, { width: 110, height: 82, fit: [110, 82] });
+      } catch (e) { console.warn('Logo load failed:', e.message); }
+    }
+
+    const orgName = orgData.orgName || 'ABRA FINANCE';
+    doc.fontSize(13).fillColor('#000000').font('Helvetica-Bold')
+       .text(orgName.toUpperCase(), textX, textStartY, { width: 200 });
+
+    const orgNameH = doc.heightOfString(orgName.toUpperCase(), { width: 200 });
+    const subtitleY = textStartY + orgNameH + 2;
+    doc.fontSize(8).fillColor('#444444').font('Helvetica')
+       .text('BILLING & FINANCE', textX, subtitleY, { width: 200, characterSpacing: 1 });
+
+    doc.fontSize(8).fillColor('#000000');
+    let contactY = subtitleY + 12;
+    const orgAddr = orgData.address || '';
+    const orgPhone = orgData.phone;
+    const orgEmail = orgData.email;
+    const orgGST = orgData.gstNumber;
+
+    const contactLines = [orgAddr, orgGST ? `GSTIN: ${orgGST}` : '', orgPhone, orgEmail].filter(Boolean);
+    contactLines.forEach(line => {
+      doc.text(line, textX, contactY, { width: 200 });
+      // Measure actual rendered height so the next line never overlaps
+      const lineH = doc.heightOfString(line, { width: 200 });
+      contactY += Math.max(lineH, 9) + 1;
+    });
+
+    // Right side text
+    doc.fontSize(8).fillColor('#444444').font('Helvetica-Bold')
+       .text('BUDGET VS ACTUALS', pageW - 210, 40, { width: 170, align: 'right', characterSpacing: 1 });
+    doc.fontSize(16).fillColor('#000000').font('Helvetica-Bold')
+       .text(budget.financialYear, pageW - 210, 52, { width: 170, align: 'right' });
+    doc.fontSize(8).fillColor('#666666').font('Helvetica')
+       .text(`FY ${budget.financialYear} Expenses Budget`, pageW - 210, 72, { width: 170, align: 'right' });
+       
+    // Keeps the original 160 for the common short-address case, but pushes
+    // down when the address wraps to multiple lines (contactY now reflects
+    // real height instead of a fixed per-line step) so the summary boxes
+    // never start on top of the contact info.
+    let startY = Math.max(contactY + 40, 160);
+
+    // Top Summary Blocks — each card gets a tinted background + matching
+    // accent color so they read as highlighted cards, not plain outlines.
+    const cardW = (pageW - 80) / 4 - 5;
+    const variancePositive = budget.variance >= 0;
+    const summaryCards = [
+      { label: 'TOTAL BUDGETED', value: `Rs.${formatCurr(budget.totalBudgeted)}`, fill: '#EFF6FF', border: '#BFDBFE', accent: '#1D4ED8' },
+      { label: 'TOTAL ACTUAL', value: `Rs.${formatCurr(budget.totalActual)}`, fill: '#ECFDF5', border: '#A7F3D0', accent: '#27AE60' },
+      { label: 'VARIANCE', value: `Rs.${formatCurr(budget.variance)}`, fill: variancePositive ? '#ECFDF5' : '#FEF2F2', border: variancePositive ? '#A7F3D0' : '#FECACA', accent: variancePositive ? '#27AE60' : '#E74C3C' },
+      { label: '% UTILISED', value: `${budget.percentUsed.toFixed(1)}%`, fill: '#F5F3FF', border: '#DDD6FE', accent: '#7C3AED' },
+    ];
+    summaryCards.forEach((card, i) => {
+      const x = 40 + i * (pageW - 80) / 4;
+      doc.rect(x, startY - 20, cardW, 40).fillAndStroke(card.fill, card.border);
+      doc.fillColor(card.accent).fontSize(8).font('Helvetica-Bold')
+         .text(card.label, x, startY - 10, { width: cardW, align: 'center' });
+      doc.fillColor('#000000').fontSize(10).font('Helvetica-Bold')
+         .text(card.value, x, startY + 2, { width: cardW, align: 'center' });
+    });
+
+    startY += 40;
+
+    // Single source of truth for column positions — used by the header (both
+    // the initial one and the one repeated after a page break), every data
+    // row, and the total row, so they can never drift out of alignment with
+    // each other the way the old hardcoded per-call coordinates did.
+    const cols = {
+      account:  { x: 50,  w: 170 },
+      type:     { x: 230, w: 80  },
+      budgeted: { x: 320, w: 110 },
+      actual:   { x: 440, w: 110 },
+      variance: { x: 560, w: 110 },
+      pct:      { x: 680, w: 80  },
+    };
+
+    const drawTableHeader = (y) => {
+      doc.rect(40, y, pageW - 80, 20).fill('#0D1B3E');
+      doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+      doc.text('ACCOUNT',  cols.account.x,  y + 6, { width: cols.account.w });
+      doc.text('TYPE',     cols.type.x,     y + 6, { width: cols.type.w });
+      doc.text('BUDGETED', cols.budgeted.x, y + 6, { width: cols.budgeted.w, align: 'right' });
+      doc.text('ACTUAL',   cols.actual.x,   y + 6, { width: cols.actual.w,   align: 'right' });
+      doc.text('VARIANCE', cols.variance.x, y + 6, { width: cols.variance.w, align: 'right' });
+      doc.text('% USED',   cols.pct.x,      y + 6, { width: cols.pct.w,      align: 'right' });
+    };
+
+    // Draw Main Table Header
+    drawTableHeader(startY);
+
+    startY += 20;
+
+    // Draw Table Rows
+    doc.fillColor('#000000').fontSize(8).font('Helvetica');
+    budget.accountLines.forEach((line, i) => {
+      if (startY > doc.page.height - 80) {
+        doc.addPage();
+        startY = 40;
+        drawTableHeader(startY);
+        startY += 20;
+        doc.fillColor('#000000').fontSize(8).font('Helvetica');
+      }
+
+      const isEven = i % 2 === 0;
+      if (isEven) {
+        doc.rect(40, startY, pageW - 80, 20).fill('#f8f9fa');
+        doc.fillColor('#000000');
+      }
+
+      doc.fillColor('#000000');
+      doc.text(line.accountName, cols.account.x, startY + 6, { width: cols.account.w, height: 12, ellipsis: true });
+      doc.text(line.accountType, cols.type.x, startY + 6, { width: cols.type.w });
+      doc.fillColor('#1D4ED8').text(`Rs.${formatCurr(line.totalBudgeted)}`, cols.budgeted.x, startY + 6, { width: cols.budgeted.w, align: 'right' });
+      doc.fillColor('#000000').text(`Rs.${formatCurr(line.totalActual)}`, cols.actual.x, startY + 6, { width: cols.actual.w, align: 'right' });
+      doc.fillColor(line.variance < 0 ? '#E74C3C' : '#27AE60').text(`Rs.${formatCurr(line.variance)}`, cols.variance.x, startY + 6, { width: cols.variance.w, align: 'right' });
+      doc.fillColor('#000000').text(`${line.percentUsed.toFixed(1)}%`, cols.pct.x, startY + 6, { width: cols.pct.w, align: 'right' });
+
+      startY += 20;
+    });
+
+    // Draw Main Table TOTAL ROW
+    if (startY > doc.page.height - 80) {
+        doc.addPage();
+        startY = 40;
+    }
+    doc.rect(40, startY, pageW - 80, 20).fill('#e9ecef');
+    doc.fillColor('#000000').fontSize(8).font('Helvetica-Bold');
+    doc.text('TOTAL', cols.account.x, startY + 6, { width: cols.account.w });
+    doc.text(`Rs.${formatCurr(budget.totalBudgeted)}`, cols.budgeted.x, startY + 6, { width: cols.budgeted.w, align: 'right', color: '#1D4ED8' });
+    doc.text(`Rs.${formatCurr(budget.totalActual)}`, cols.actual.x, startY + 6, { width: cols.actual.w, align: 'right', color: '#27AE60' });
+    doc.text(`Rs.${formatCurr(budget.variance)}`, cols.variance.x, startY + 6, { width: cols.variance.w, align: 'right', color: budget.variance < 0 ? '#E74C3C' : '#27AE60' });
+
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // LANDSCAPE PAGE — MONTHLY BREAKDOWN
+    // ═══════════════════════════════════════════════════════════════════════
+    doc.addPage({ size: 'A4', layout: 'landscape', margin: 40 });
+    const lsPageW = doc.page.width;
+    
+    doc.fontSize(12).fillColor('#000000').font('Helvetica-Bold').text('Monthly Breakdown (Budgeted vs Actual)', 40, 40);
+    
+    let msY = 70;
+    doc.rect(40, msY, lsPageW - 80, 20).fill('#0D1B3E');
+    doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+    doc.text('ACCOUNT', 45, msY + 6, { width: 120 });
+    
+    const colW = (lsPageW - 160 - 40) / 12;
+    FY_MONTHS.forEach((m, i) => {
+      doc.text(m.label, 160 + (i * colW), msY + 6, { width: colW, align: 'center' });
+    });
+    
+    msY += 20;
+    
+    budget.accountLines.forEach((line, i) => {
+      if (msY > doc.page.height - 80) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 40 });
+        msY = 40;
+        doc.rect(40, msY, lsPageW - 80, 20).fill('#0D1B3E');
+        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
+        doc.text('ACCOUNT', 45, msY + 6, { width: 120 });
+        FY_MONTHS.forEach((m, i) => {
+          doc.text(m.label, 160 + (i * colW), msY + 6, { width: colW, align: 'center' });
+        });
+        msY += 20;
+      }
+      
+      const isEven = i % 2 === 0;
+      if (isEven) {
+        doc.rect(40, msY, lsPageW - 80, 24).fill('#f8f9fa');
+      }
+      
+      doc.fillColor('#000000').fontSize(7).font('Helvetica-Bold');
+      doc.text(line.accountName, 45, msY + 6, { width: 110, height: 20, ellipsis: true });
+      
+      FY_MONTHS.forEach((m, mi) => {
+        const bdg = line.monthlyAmounts[mi] || 0;
+        const act = line.actualMonthly[mi] || 0;
+        
+        doc.fontSize(6).font('Helvetica-Bold').fillColor('#000000');
+        doc.text(formatCurr(bdg), 160 + (mi * colW), msY + 4, { width: colW, align: 'center' });
+        
+        doc.fontSize(6).font('Helvetica').fillColor('#27AE60');
+        doc.text(formatCurr(act), 160 + (mi * colW), msY + 12, { width: colW, align: 'center' });
+      });
+      
+      msY += 24;
+    });
+    
+    // Monthly Totals Row
+    if (msY > doc.page.height - 80) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 40 });
+        msY = 40;
+    }
+    doc.rect(40, msY, lsPageW - 80, 24).fill('#e9ecef');
+    doc.fillColor('#000000').fontSize(8).font('Helvetica-Bold');
+    doc.text('TOTAL', 45, msY + 8);
+    
+    FY_MONTHS.forEach((m, mi) => {
+      let mBdg = 0;
+      let mAct = 0;
+      budget.accountLines.forEach(line => {
+        mBdg += line.monthlyAmounts[mi] || 0;
+        mAct += line.actualMonthly[mi] || 0;
+      });
+      
+      doc.fontSize(6).font('Helvetica-Bold').fillColor('#000000');
+      doc.text(formatCurr(mBdg), 160 + (mi * colW), msY + 4, { width: colW, align: 'center' });
+      
+      doc.fontSize(6).font('Helvetica').fillColor('#27AE60');
+      doc.text(formatCurr(mAct), 160 + (mi * colW), msY + 12, { width: colW, align: 'center' });
+    });
+    
+    doc.end();
+  } catch (err) {
+    console.error('Export PDF Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+router.get('/:id/export-excel', authenticate, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    let budget = await Budget.findOne({ _id: req.params.id, orgId: req.user?.orgId });
+    if (!budget) return res.status(404).json({ success: false, error: 'Budget not found' });
+    
+    budget = await enrichWithActuals(budget, req.user?.orgId, startDate, endDate);
+    budget.variance = budget.totalVariance || 0;
+    budget.percentUsed = budget.totalBudgeted > 0 ? (budget.totalActual / budget.totalBudgeted) * 100 : 0;
+    
+    const rows = budget.accountLines.map(line => ({
+      'Account': line.accountName,
+      'Type': line.accountType,
+      'Budgeted Amount': line.totalBudgeted,
+      'Actual Amount': line.totalActual,
+      'Variance': line.variance,
+      '% Used': parseFloat(line.percentUsed.toFixed(2))
+    }));
+    
+    // Add summary row
+    rows.push({
+      'Account': 'TOTAL',
+      'Type': '',
+      'Budgeted Amount': budget.totalBudgeted,
+      'Actual Amount': budget.totalActual,
+      'Variance': budget.variance,
+      '% Used': parseFloat(budget.percentUsed.toFixed(2))
+    });
+    
+    const ws = xlsx.utils.json_to_sheet(rows);
+    
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 30 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 10 }
+    ];
+    
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, 'Budget vs Actuals');
+    
+    const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Budget_${budget.budgetName.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('Excel Export Error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 module.exports = router;
 module.exports.Budget = Budget;
 module.exports.checkBudgetExceedance = checkBudgetExceedance;

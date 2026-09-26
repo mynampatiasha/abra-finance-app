@@ -551,8 +551,6 @@ async function generateCreditNotePDF(creditNote, orgId, branchId = null) {
          .text(creditNote.creditNoteNumber, 380, 52, { width: 170, align: 'right' });
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(creditNote.creditNoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`${(creditNote.status || 'DRAFT').replace(/_/g,' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // 3-column meta grid (like invoices.js)
       const metaY = Math.max(132, contactY + 8);
@@ -2256,14 +2254,12 @@ router.get('/:id/pdf', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Credit note not found' });
     }
     
-    if (!creditNote.pdfPath || !fs.existsSync(creditNote.pdfPath)) {
-      const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
-      creditNote.pdfPath = pdfInfo.filepath;
-      creditNote.pdfGeneratedAt = new Date();
-      await creditNote.save();
-    }
+    const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
+    creditNote.pdfPath = pdfInfo.filepath;
+    creditNote.pdfGeneratedAt = new Date();
+    await creditNote.save();
     
-    res.download(creditNote.pdfPath, `CreditNote-${creditNote.creditNoteNumber}.pdf`);
+    res.download(pdfInfo.filepath, `CreditNote-${creditNote.creditNoteNumber}.pdf`);
   } catch (error) {
     console.error('Error downloading PDF:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -2283,12 +2279,10 @@ router.get('/:id/download-url', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Credit note not found' });
     }
     
-    if (!creditNote.pdfPath || !fs.existsSync(creditNote.pdfPath)) {
-      const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
-      creditNote.pdfPath = pdfInfo.filepath;
-      creditNote.pdfGeneratedAt = new Date();
-      await creditNote.save();
-    }
+    const pdfInfo = await generateCreditNotePDF(creditNote, creditNote.orgId, creditNote.branchId);
+    creditNote.pdfPath = pdfInfo.filepath;
+    creditNote.pdfGeneratedAt = new Date();
+    await creditNote.save();
     
     const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
     const downloadUrl = `${baseUrl}/uploads/credit-notes/${path.basename(creditNote.pdfPath)}`;

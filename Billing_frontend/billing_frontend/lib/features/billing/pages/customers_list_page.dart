@@ -22,6 +22,7 @@ import '../app_top_bar.dart';
 import 'new_customer.dart';
 import 'customer_detail_page.dart';
 import '../../../../core/services/billing_customers_service.dart';
+import '../../../../core/permissions_finance.dart';
 
 // ── Brand palette ─────────────────────────────────────────────────────────────
 const Color _navy = Color(0xFF1e3a8a);
@@ -213,6 +214,9 @@ class _CustomersListPageState extends State<CustomersListPage> {
   }
 
   void _openEditPage(BillingCustomer c) async {
+    final canEdit = await FinancePermissions.checkCanEdit(context, 'customers');
+    if (!canEdit) return;
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => NewCustomerPage(customerId: c.id)),
@@ -223,6 +227,9 @@ class _CustomersListPageState extends State<CustomersListPage> {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   Future<void> _deleteCustomer(BillingCustomer c) async {
+    final canDelete = await FinancePermissions.checkCanDelete(context, 'customers');
+    if (!canDelete) return;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
