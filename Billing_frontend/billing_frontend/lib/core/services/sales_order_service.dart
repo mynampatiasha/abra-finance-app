@@ -10,6 +10,17 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/config/api_config.dart';
 import '../finance_secure_storage.dart';
+import 'billing_customers_service.dart' show CustomerAddress;
+
+// Reads a saved address; older sales orders stored the PIN as `pincode`.
+CustomerAddress _soAddressFromJson(dynamic v) {
+  if (v is! Map) return const CustomerAddress();
+  final m = Map<String, dynamic>.from(v);
+  if ((m['zip'] == null || m['zip'] == '') && m['pincode'] != null) {
+    m['zip'] = m['pincode'];
+  }
+  return CustomerAddress.fromJson(m);
+}
 
 class SalesOrderService {
   static String get baseUrl => ApiConfig.baseUrl;
@@ -355,6 +366,8 @@ class SalesOrder {
   final double totalAmount;
   final String? customerNotes;
   final String? termsAndConditions;
+  final CustomerAddress billingAddress;
+  final CustomerAddress shippingAddress;
   final String status;
   final String customerGSTIN;
   final String customerPAN;
@@ -396,6 +409,8 @@ class SalesOrder {
     required this.totalAmount,
     this.customerNotes,
     this.termsAndConditions,
+    this.billingAddress = const CustomerAddress(),
+    this.shippingAddress = const CustomerAddress(),
     required this.status,
     this.customerGSTIN = '',
     this.customerPAN = '',
@@ -443,6 +458,8 @@ class SalesOrder {
       totalAmount: (json['totalAmount'] ?? 0).toDouble(),
       customerNotes: json['customerNotes'],
       termsAndConditions: json['termsAndConditions'],
+      billingAddress: _soAddressFromJson(json['billingAddress']),
+      shippingAddress: _soAddressFromJson(json['shippingAddress']),
       status: json['status'] ?? 'DRAFT',
       customerGSTIN: json['customerGSTIN'] ?? '',
       customerPAN: json['customerPAN'] ?? '',

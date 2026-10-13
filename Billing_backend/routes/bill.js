@@ -115,12 +115,18 @@ const billSchema = new mongoose.Schema({
   vendorEmail: String,
   vendorPhone: String,
   vendorGSTIN: String,
+  // `pincode` is kept for existing bills; `zip` etc. match the vendor address shape.
   billingAddress: {
+    attention: String,
     street: String,
+    street2: String,
     city: String,
     state: String,
     pincode: String,
-    country: { type: String, default: 'India' }
+    zip: String,
+    country: { type: String, default: 'India' },
+    phone: String,
+    fax: String
   },
 
   // Bill Details
@@ -746,16 +752,25 @@ async function generateBillPDF(bill, orgId, branchId = null) {
          .text(bill.billNumber, 380, 52, { width: 170, align: 'right' });
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(bill.billDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`${(bill.status || 'DRAFT').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+      // The internal status (DRAFT / OPEN / ...) is deliberately not printed on the PDF.
 
       // META GRID - 3 columns (same as invoices.js)
       const metaY = Math.max(132, cY + 8);
       const colW = pageW / 3;
 
-      const billingStr = [bill.billingAddress?.street, bill.billingAddress?.city,
-                          bill.billingAddress?.state, bill.billingAddress?.pincode]
-                         .filter(Boolean).join(', ');
+      // Address saved on the bill; if the bill has none (older bills), fall back
+      // to the vendor's saved billing address.
+      const _fmtAddr = (a) => [a?.street, a?.street2, a?.city, a?.state, a?.pincode || a?.zip]
+        .filter(Boolean).join(', ');
+      let _billAddr = bill.billingAddress;
+      if (!_fmtAddr(_billAddr) && bill.vendorId) {
+        try {
+          const _vend = await mongoose.connection.collection('billingvendors')
+            .findOne({ _id: new mongoose.Types.ObjectId(String(bill.vendorId)) });
+          if (_vend) _billAddr = _vend.billingAddress;
+        } catch (_) { /* no fallback address — print the bill as before */ }
+      }
+      const billingStr = _fmtAddr(_billAddr);
 
       // Dynamic box height based on vendor name + address content
       doc.fontSize(9).font('Helvetica-Bold');
@@ -1161,7 +1176,7 @@ async function sendPaymentConfirmationEmail(bill, payment, orgId = null, branchI
   <div class="body">
     <div class="success-badge">
       <h2>? Payment of ?${payment.amount.toFixed(2)} recorded</h2>
-      <p>For Bill: ${bill.billNumber} � ${bill.vendorName}</p>
+      <p>For Bill: ${bill.billNumber} — ${bill.vendorName}</p>
     </div>
 
     <div class="section-title">Payment Details</div>
@@ -1175,7 +1190,7 @@ async function sendPaymentConfirmationEmail(bill, payment, orgId = null, branchI
       <tr class="balance-row"><td>Remaining Balance</td><td>?${bill.amountDue.toFixed(2)}</td></tr>
     </table>
 
-    ${bill.amountDue <= 0 ? `<div class="paid-badge">?? Bill Fully Paid � Thank You!</div>` : ''}
+    ${bill.amountDue <= 0 ? `<div class="paid-badge">Bill Fully Paid - Thank You!</div>` : ''}
   </div>
   <div class="footer">
     <strong>${orgName}</strong><br>
@@ -1962,7 +1977,7 @@ ${bill.notes ? `<div class="st">Notes</div><p style="font-size:12px;line-height:
   }
 });
 
-// PATCH /:id/email-preview � save custom email content
+// PATCH /:id/email-preview - save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;

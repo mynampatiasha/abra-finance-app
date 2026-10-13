@@ -257,6 +257,18 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
   const orgEmail   = orgData?.email      || '';
   const orgAddress = orgData?.address    || '';
 
+  // The vendor's saved address, printed under "PAID TO".
+  let vendorAddrStr = '';
+  try {
+    if (payment.vendorId) {
+      const _vend = await mongoose.connection.collection('billingvendors')
+        .findOne({ _id: new mongoose.Types.ObjectId(String(payment.vendorId)) });
+      const _a = _vend?.billingAddress;
+      vendorAddrStr = [_a?.street, _a?.street2, _a?.city, _a?.state, _a?.pincode || _a?.zip]
+        .filter(Boolean).join(', ');
+    }
+  } catch (_) { /* no address — print the voucher as before */ }
+
   return new Promise((resolve, reject) => {
     try {
       const uploadsDir = path.join(__dirname, '..', 'uploads', 'payments');
@@ -324,14 +336,19 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(payment.paymentDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`✓ ${(payment.status || 'RECORDED').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+         .text(`${(payment.status || 'RECORDED').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
 
       // ═══════════════════════════════════════════════════════════════════════
       // META GRID — Paid To | Payment Details (invoice.js style)
       // ═══════════════════════════════════════════════════════════════════════
       const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 2;
-      const metaH = 80;
+      // Grow the "Paid To" box when the vendor address needs extra lines.
+      doc.fontSize(7).font('Helvetica');
+      const _vAddrH = vendorAddrStr ? doc.heightOfString(vendorAddrStr, { width: colW - 16 }) : 0;
+      doc.fontSize(9).font('Helvetica-Bold');
+      const _vNameH = doc.heightOfString(payment.vendorName || 'N/A', { width: colW - 16 });
+      const metaH = Math.max(80, 18 + _vNameH + 2 + (_vAddrH ? _vAddrH + 2 : 0) + (payment.vendorEmail ? 10 : 0) + 10);
 
       // Col 1: Paid To
       const col1X = 40;
@@ -342,9 +359,15 @@ async function generatePaymentPDF(payment, orgId, branchId = null) {
          .text(payment.vendorName || 'N/A', col1X + 8, metaY + 18, { width: colW - 16 });
       doc.fontSize(9).font('Helvetica-Bold');
       const vendorNameH = doc.heightOfString(payment.vendorName || 'N/A', { width: colW - 16 });
+      let _vendY = metaY + 18 + vendorNameH + 2;
+      if (vendorAddrStr) {
+        doc.fontSize(7).fillColor('#000000').font('Helvetica')
+           .text(vendorAddrStr, col1X + 8, _vendY, { width: colW - 16 });
+        _vendY += _vAddrH + 2;
+      }
       if (payment.vendorEmail) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(payment.vendorEmail, col1X + 8, metaY + 18 + vendorNameH + 2, { width: colW - 16, ellipsis: true });
+           .text(payment.vendorEmail, col1X + 8, _vendY, { width: colW - 16, ellipsis: true });
       }
 
       // Col 2: Payment Details

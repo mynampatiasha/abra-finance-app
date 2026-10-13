@@ -241,7 +241,7 @@ const attachUpload = multer({
 });
 
 // ============================================================================
-// ROUTES � STATS
+// ROUTES - STATS
 // ============================================================================
 
 router.get('/stats', authenticate, async (req, res) => {
@@ -265,7 +265,7 @@ const [total, draft, published, voided, agg] = await Promise.all([
 });
 
 // ============================================================================
-// ROUTES � LIST
+// ROUTES - LIST
 // ============================================================================
 
 router.get('/', authenticate, async (req, res) => {
@@ -307,7 +307,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � SINGLE
+// ROUTES - SINGLE
 // ============================================================================
 
 router.get('/:id', authenticate, async (req, res) => {
@@ -324,7 +324,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � CREATE
+// ROUTES - CREATE
 // ============================================================================
 
 router.post('/', authenticate, async (req, res) => {
@@ -352,7 +352,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � UPDATE
+// ROUTES - UPDATE
 // ============================================================================
 
 router.put('/:id', authenticate, async (req, res) => {
@@ -377,7 +377,7 @@ router.put('/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � PUBLISH
+// ROUTES - PUBLISH
 // ============================================================================
 
 router.post('/:id/publish', authenticate, async (req, res) => {
@@ -415,7 +415,7 @@ router.post('/:id/publish', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � VOID
+// ROUTES - VOID
 // ============================================================================
 
 router.post('/:id/void', authenticate, async (req, res) => {
@@ -447,7 +447,7 @@ router.post('/:id/void', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � CLONE
+// ROUTES - CLONE
 // ============================================================================
 
 router.post('/:id/clone', authenticate, async (req, res) => {
@@ -459,7 +459,7 @@ router.post('/:id/clone', authenticate, async (req, res) => {
     if (!source) return res.status(404).json({ success: false, message: 'Journal not found' });
 
     const newNumber = await generateJournalNumber(req.user?.orgId, req.branchIds?.length > 0 ? req.branchIds[0] : null);
-// REPLACE WITH � add orgId:
+// REPLACE WITH - add orgId:
 const clone = await ManualJournal.create({
   journalNumber:    newNumber,
   date:             new Date(),
@@ -491,7 +491,7 @@ const clone = await ManualJournal.create({
 });
 
 // ============================================================================
-// ROUTES � APPLY CREDITS (Link to Invoice or Bill)
+// ROUTES - APPLY CREDITS (Link to Invoice or Bill)
 // ============================================================================
 
 router.post('/:id/apply-credits', authenticate, async (req, res) => {
@@ -524,7 +524,7 @@ router.post('/:id/apply-credits', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � PDF
+// ROUTES - PDF
 // ============================================================================
 
 router.get('/:id/pdf', authenticate, async (req, res) => {
@@ -627,7 +627,7 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
       y += 16;
       journal.appliedCredits.forEach(c => {
         doc.fontSize(9).fillColor('#374151').font('Helvetica');
-        doc.text(`${c.type} ${c.referenceNumber} � ?${c.amount.toFixed(2)}`, 60, y);
+        doc.text(`${c.type} ${c.referenceNumber} - Rs. ${c.amount.toFixed(2)}`, 60, y);
         y += 15;
       });
     }
@@ -643,7 +643,7 @@ async function generateJournalPDF(journal, filepath, orgName = 'Your Organisatio
 }
 
 // ============================================================================
-// ROUTES � ATTACHMENTS
+// ROUTES - ATTACHMENTS
 // ============================================================================
 
 router.post('/:id/attachments', authenticate, attachUpload.array('files', 5), async (req, res) => {
@@ -695,7 +695,7 @@ router.delete('/:id/attachments/:attachId', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � TEMPLATES
+// ROUTES - TEMPLATES
 // ============================================================================
 
 router.get('/templates/list', authenticate, async (req, res) => {
@@ -726,7 +726,7 @@ router.delete('/templates/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================================
-// ROUTES � IMPORT
+// ROUTES - IMPORT
 // ============================================================================
 
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -762,7 +762,7 @@ await ManualJournal.create(item);
 });
 
 // ============================================================================
-// ROUTES � DELETE (Draft only)
+// ROUTES - DELETE (Draft only)
 // ============================================================================
 
 router.delete('/:id', authenticate, async (req, res) => {

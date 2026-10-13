@@ -261,13 +261,16 @@ const salesOrderSchema = new mongoose.Schema({
   totalSGST:     { type: Number, default: 0 },
   totalIGST:     { type: Number, default: 0 },
   placeOfSupply: { type: String, default: '' },
+  // `pincode` is kept for existing orders; `zip` etc. match the customer / quote address shape.
   billingAddress: {
-    street: String, city: String, state: String,
-    pincode: String, country: { type: String, default: 'India' },
+    attention: String, street: String, street2: String, city: String, state: String,
+    pincode: String, zip: String, country: { type: String, default: 'India' },
+    phone: String, fax: String,
   },
   shippingAddress: {
-    street: String, city: String, state: String,
-    pincode: String, country: { type: String, default: 'India' },
+    attention: String, street: String, street2: String, city: String, state: String,
+    pincode: String, zip: String, country: { type: String, default: 'India' },
+    phone: String, fax: String,
   },
   totalAmount: {
     type: Number,
@@ -347,7 +350,7 @@ const salesOrderSchema = new mongoose.Schema({
     required: true,
   },
   updatedBy: String,
-  // Custom email fields � saved when user edits email preview before sending
+  // Custom email fields - saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -587,19 +590,30 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(salesOrder.salesOrderDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`,
                380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`${(salesOrder.status || 'DRAFT')}`, 380, 92, { width: 170, align: 'right' });
+      // The internal status (DRAFT / CONFIRMED / ...) is deliberately not printed on the customer's PDF.
 
-      // -- META GRID � 3 columns: Bill To | Ship To | SO Details -------------
+      // -- META GRID - 3 columns: Bill To | Ship To | SO Details -------------
       const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 3;
 
-      const billingStr = [
-        salesOrder.billingAddress?.street,
-        salesOrder.billingAddress?.city,
-        salesOrder.billingAddress?.state,
-        salesOrder.billingAddress?.pincode,
-      ].filter(Boolean).join(', ');
+      // Address saved on the order; if the order has none (older orders), fall
+      // back to the customer's saved billing/shipping address.
+      const _fmtAddr = (a) => [a?.street, a?.street2, a?.city, a?.state, a?.pincode || a?.zip]
+        .filter(Boolean).join(', ');
+      let _billAddr = salesOrder.billingAddress;
+      let _shipAddr = salesOrder.shippingAddress;
+      if (!_fmtAddr(_billAddr) && salesOrder.customerId) {
+        try {
+          const _cust = await mongoose.connection.collection('billing-customers')
+            .findOne({ _id: new mongoose.Types.ObjectId(String(salesOrder.customerId)) });
+          if (_cust) {
+            _billAddr = _cust.billingAddress;
+            if (!_fmtAddr(_shipAddr)) _shipAddr = _cust.shippingAddress;
+          }
+        } catch (_) { /* no fallback address — print the order as before */ }
+      }
+      const billingStr  = _fmtAddr(_billAddr);
+      const shippingStr = _fmtAddr(_shipAddr);
 
       // Dynamic box height
       doc.fontSize(9).font('Helvetica-Bold');
@@ -634,9 +648,10 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
       doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('SHIP TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
-      if (billingStr) {
+      const _shipText = shippingStr || billingStr;
+      if (_shipText) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+           .text(_shipText, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
       } else {
         doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
            .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
@@ -665,7 +680,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
 
       let tableStartY = metaY + metaH + 12;
 
-      // -- ITEMS TABLE � same columns as invoices.js -------------------------
+      // -- ITEMS TABLE - same columns as invoices.js -------------------------
       const isInterState = salesOrder.isInterState || false;
 
       const cols = {
@@ -718,7 +733,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '�';
+          : '-';
 
         const gstRate  = item.itemGstRate !== undefined ? item.itemGstRate : (salesOrder.gstRate || 18);
         const taxable  = item.taxableAmount || item.amount || 0;
@@ -871,7 +886,7 @@ const generateSalesOrderPDF = async (salesOrder, orgId = null, branchId = null) 
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${salesOrder.salesOrderNumber}`,
+         .text(`${orgName} | ${orgGST ? 'GSTIN: ' + orgGST + ' | ' : ''}${salesOrder.salesOrderNumber}`,
                40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
                40, footY + 6, { width: pageW, align: 'right' });
@@ -903,7 +918,7 @@ const getEmailTransporter = () => {
   });
 };
 
-// Send sales order email � styled identical to invoices.js
+// Send sales order email - styled identical to invoices.js
 const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
@@ -1018,7 +1033,7 @@ const sendSalesOrderEmail = async (salesOrder, pdfPathOrBuffer, orgId = null, br
     await transporter.sendMail({
       from: `"Accounts" <${process.env.SMTP_USER}>`,
       to: salesOrder.customerEmail,
-      subject: `Sales Order ${salesOrder.salesOrderNumber} � Rs.${(salesOrder.totalAmount || 0).toFixed(2)}`,
+      subject: `Sales Order ${salesOrder.salesOrderNumber} — Rs.${(salesOrder.totalAmount || 0).toFixed(2)}`,
       html: htmlBody,
       attachments: [attachment],
     });
@@ -1510,13 +1525,13 @@ router.get('/:id/email-preview', async (req, res) => {
 </div>
 </body>
 </html>`;
-    res.json({ success: true, data: { subject: `Sales Order ${so.salesOrderNumber} � Rs.${(so.totalAmount || 0).toFixed(2)}`, html, to: so.customerEmail } });
+    res.json({ success: true, data: { subject: `Sales Order ${so.salesOrderNumber} — Rs.${(so.totalAmount || 0).toFixed(2)}`, html, to: so.customerEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview � save custom email content
+// PATCH /:id/email-preview - save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;

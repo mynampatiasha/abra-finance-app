@@ -428,8 +428,7 @@ async function generateChallanPDF(challan, orgId, branchId = null) {
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(challan.challanDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`,
                380, 76, { width: 170, align: 'right' });
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`Status: ${challan.status.replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+      // The internal status is deliberately not printed on the customer's PDF.
 
       // -- Meta boxes ------------------------------------------------------
       const metaY    = Math.max(132, cY + 8);
@@ -602,7 +601,7 @@ async function generateChallanPDF(challan, orgId, branchId = null) {
       doc.moveTo(40, footY).lineTo(555, footY)
          .lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${challan.challanNumber}`,
+         .text(`${orgName} | ${orgGST ? 'GSTIN: ' + orgGST + ' | ' : ''}${challan.challanNumber}`,
                40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
                40, footY + 6, { width: pageW, align: 'right' });
@@ -1054,7 +1053,7 @@ router.post('/:id/convert-to-invoice', async (req, res) => {
     let allItemsInvoiced = true;
 
     if (itemsToInvoice && Array.isArray(itemsToInvoice)) {
-      // Partial invoicing � user specified which items + rates
+      // Partial invoicing - user specified which items + rates
       itemsToInvoice.forEach(invoiceItem => {
         const challanItem = challan.items.id(invoiceItem.itemId);
         if (challanItem) {
@@ -1087,7 +1086,7 @@ router.post('/:id/convert-to-invoice', async (req, res) => {
         }
       });
     } else {
-      // Full invoicing � use all remaining un-invoiced quantities
+      // Full invoicing - use all remaining un-invoiced quantities
       challan.items.forEach(item => {
         const remainingQty = item.quantity - (item.quantityInvoiced || 0);
 
@@ -1095,7 +1094,7 @@ router.post('/:id/convert-to-invoice', async (req, res) => {
           invoiceItems.push({
             itemDetails:  item.itemDetails,
             quantity:     remainingQty,
-            rate:         0,  // ?? No rate on challan � user edits invoice later
+            rate:         0,  // ?? No rate on challan - user edits invoice later
             discount:     0,
             discountType: 'percentage',
             amount:       0,
@@ -1119,7 +1118,7 @@ const subTotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
 // ? If all rates are 0, invoice is created as DRAFT with 0 amount
 // User must edit invoice to add rates
 if (subTotal === 0) {
-  console.log(`?? Challan ${challan.challanNumber} � all item rates are 0. Invoice created as DRAFT, please add rates.`);
+  console.log(`?? Challan ${challan.challanNumber} - all item rates are 0. Invoice created as DRAFT, please add rates.`);
 }
     const gstRate     = 18;
     const gstAmount   = (subTotal * gstRate) / 100;
@@ -1245,7 +1244,7 @@ if (subTotal === 0) {
       console.log(`? COA posted for challan converted invoice: ${invoiceNumber}`);
     } catch (coaErr) {
       console.error('?? COA post error (challan convert):', coaErr.message);
-      // Non-critical � invoice already saved
+      // Non-critical - invoice already saved
     }
 
     console.log(`? Delivery challan ${challan.challanNumber} converted to invoice ${invoiceNumber}`);

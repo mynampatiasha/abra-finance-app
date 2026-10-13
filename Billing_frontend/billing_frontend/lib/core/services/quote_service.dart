@@ -8,6 +8,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
+import 'billing_customers_service.dart' show CustomerAddress;
 
 // ============================================================================
 // DATA MODELS
@@ -42,6 +43,8 @@ class Quote {
   final double totalAmount;
   final String? customerNotes;
   final String? termsAndConditions;
+  final CustomerAddress billingAddress;
+  final CustomerAddress shippingAddress;
   final String status;
   final DateTime? sentDate;
   final DateTime? acceptedDate;
@@ -82,6 +85,8 @@ class Quote {
     required this.totalAmount,
     this.customerNotes,
     this.termsAndConditions,
+    this.billingAddress = const CustomerAddress(),
+    this.shippingAddress = const CustomerAddress(),
     required this.status,
     this.sentDate,
     this.acceptedDate,
@@ -127,6 +132,14 @@ class Quote {
       totalAmount: (json['totalAmount'] ?? 0).toDouble(),
       customerNotes: json['customerNotes'],
       termsAndConditions: json['termsAndConditions'],
+      billingAddress: CustomerAddress.fromJson(
+          json['billingAddress'] is Map<String, dynamic>
+              ? json['billingAddress'] as Map<String, dynamic>
+              : null),
+      shippingAddress: CustomerAddress.fromJson(
+          json['shippingAddress'] is Map<String, dynamic>
+              ? json['shippingAddress'] as Map<String, dynamic>
+              : null),
       status: json['status'] ?? 'DRAFT',
       sentDate:
           json['sentDate'] != null ? DateTime.parse(json['sentDate']) : null,

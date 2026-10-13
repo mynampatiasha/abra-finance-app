@@ -50,6 +50,9 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
   String _customerGSTIN = '';
   String _customerPAN = '';
   String _gstRegistrationType = '';
+  CustomerAddress _billingAddress = const CustomerAddress();
+  CustomerAddress _shippingAddress = const CustomerAddress();
+  bool _sameAsBilling = true;
   DateTime _salesOrderDate = DateTime.now();
   DateTime? _expectedShipmentDate;
   String _paymentTerms = 'Net 30';
@@ -166,6 +169,11 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
         _customerGSTIN = salesOrder.customerGSTIN;
         _customerPAN = salesOrder.customerPAN;
         _gstRegistrationType = salesOrder.gstRegistrationType;
+        _billingAddress = salesOrder.billingAddress;
+        _shippingAddress = salesOrder.shippingAddress;
+        _sameAsBilling = salesOrder.shippingAddress.isEmpty ||
+            salesOrder.billingAddress.formatted ==
+                salesOrder.shippingAddress.formatted;
         _referenceNumberController.text = salesOrder.referenceNumber ?? '';
         _salesOrderDate = salesOrder.salesOrderDate;
         _expectedShipmentDate = salesOrder.expectedShipmentDate;
@@ -235,6 +243,9 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
       'customerName': _selectedCustomerName,
       'customerEmail': _selectedCustomerEmail,
       'customerPhone': _selectedCustomerPhone ?? '',
+      'billingAddress': _billingAddress.toJson(),
+      'shippingAddress':
+          _sameAsBilling ? _billingAddress.toJson() : _shippingAddress.toJson(),
       'customerGSTIN': _customerGSTIN,
       'customerPAN': _customerPAN,
       'gstRegistrationType': _gstRegistrationType,
@@ -477,6 +488,8 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
                         children: [
                           _buildCustomerSection(),
                           const SizedBox(height: 16),
+                          _buildAddressSection(),
+                          const SizedBox(height: 16),
                           _buildSalesOrderDetailsSection(),
                           const SizedBox(height: 16),
                           _buildItemsSection(),
@@ -500,6 +513,8 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 _buildCustomerSection(),
+                                const SizedBox(height: 20),
+                                _buildAddressSection(),
                                 const SizedBox(height: 20),
                                 _buildSalesOrderDetailsSection(),
                                 const SizedBox(height: 20),
@@ -529,6 +544,160 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
                     ),
             ),
     );
+  }
+
+  // ==========================================================================
+  // BILLING & SHIPPING ADDRESS — filled from the selected customer, like the
+  // invoice screen; printed on the sales order PDF.
+  // ==========================================================================
+  Widget _buildAddressSection() {
+    final addrBox = BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!));
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                  gradient:
+                      const LinearGradient(colors: [_navyDark, _navyLight]),
+                  borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.location_city,
+                  color: Colors.white, size: 18)),
+          const SizedBox(width: 10),
+          const Text('Billing & Shipping Address',
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.bold, color: _navyDark)),
+        ]),
+        const SizedBox(height: 16),
+        Text('Billing Address',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[700])),
+        const SizedBox(height: 6),
+        Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: addrBox,
+            child: Text(
+                _billingAddress.isEmpty
+                    ? 'No billing address — select a customer to auto-fill'
+                    : _billingAddress.formatted,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: _billingAddress.isEmpty
+                        ? Colors.grey[500]
+                        : Colors.grey[800],
+                    fontStyle: _billingAddress.isEmpty
+                        ? FontStyle.italic
+                        : FontStyle.normal))),
+        const SizedBox(height: 16),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('Ship To',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700])),
+          Row(children: [
+            Text('Same as Billing',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+            Switch(
+                value: _sameAsBilling,
+                activeColor: _navyAccent,
+                onChanged: (v) => setState(() {
+                      _sameAsBilling = v;
+                      if (v) _shippingAddress = _billingAddress;
+                    })),
+          ]),
+        ]),
+        if (!_sameAsBilling)
+          _buildAddressFields(
+              address: _shippingAddress,
+              onChanged: (addr) => setState(() => _shippingAddress = addr))
+        else
+          Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: addrBox,
+              child: Text(
+                  _billingAddress.isEmpty
+                      ? 'Same as billing address'
+                      : _billingAddress.formatted,
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: _billingAddress.isEmpty
+                          ? Colors.grey[500]
+                          : Colors.grey[800],
+                      fontStyle: _billingAddress.isEmpty
+                          ? FontStyle.italic
+                          : FontStyle.normal))),
+      ]),
+    );
+  }
+
+  Widget _buildAddressFields(
+      {required CustomerAddress address,
+      required ValueChanged<CustomerAddress> onChanged}) {
+    InputDecoration dec(String label) => InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        isDense: true);
+    // Keyed by customer so the boxes refill when another customer is picked.
+    final k = _selectedCustomerId ?? 'none';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 8),
+      TextFormField(
+          key: ValueKey('soship-street-$k'),
+          initialValue: address.street,
+          decoration: dec('Street'),
+          onChanged: (v) => onChanged(address.copyWith(street: v))),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+            child: TextFormField(
+                key: ValueKey('soship-city-$k'),
+                initialValue: address.city,
+                decoration: dec('City'),
+                onChanged: (v) => onChanged(address.copyWith(city: v)))),
+        const SizedBox(width: 8),
+        Expanded(
+            child: TextFormField(
+                key: ValueKey('soship-state-$k'),
+                initialValue: address.state,
+                decoration: dec('State'),
+                onChanged: (v) => onChanged(address.copyWith(state: v)))),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+            child: TextFormField(
+                key: ValueKey('soship-zip-$k'),
+                initialValue: address.zip,
+                decoration: dec('PIN/ZIP'),
+                onChanged: (v) => onChanged(address.copyWith(zip: v)))),
+        const SizedBox(width: 8),
+        Expanded(
+            child: TextFormField(
+                key: ValueKey('soship-country-$k'),
+                initialValue: address.country,
+                decoration: dec('Country'),
+                onChanged: (v) => onChanged(address.copyWith(country: v)))),
+      ]),
+    ]);
   }
 
   Widget _buildCustomerSection() {
@@ -1640,6 +1809,24 @@ class _NewSalesOrderScreenState extends State<NewSalesOrderScreen> {
                                             _customerPAN = customer.panNumber;
                                             _gstRegistrationType =
                                                 customer.gstRegistrationType;
+                                            // Copy the customer's address, as
+                                            // the invoice screen does.
+                                            _billingAddress =
+                                                customer.billingAddress;
+                                            if (customer
+                                                .shippingAddress.isEmpty) {
+                                              _shippingAddress =
+                                                  customer.billingAddress;
+                                              _sameAsBilling = true;
+                                            } else {
+                                              _shippingAddress =
+                                                  customer.shippingAddress;
+                                              _sameAsBilling = customer
+                                                      .billingAddress
+                                                      .formatted ==
+                                                  customer.shippingAddress
+                                                      .formatted;
+                                            }
                                           });
                                           Navigator.pop(context);
                                         },

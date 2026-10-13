@@ -316,7 +316,7 @@ const purchaseOrderSchema = new mongoose.Schema({
   createdBy: { type: String, required: true },
   updatedBy: String,
 
-  // Custom email fields � saved when user edits email preview before sending
+  // Custom email fields - saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -568,9 +568,9 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(po.purchaseOrderDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`, 380, 76, { width: 170, align: 'right' });
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`${(po.status || 'DRAFT').replace(/_/g,' ')}${po.expectedDeliveryDate ? ' � Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}`, 380, 92, { width: 170, align: 'right' });
+         .text(`${po.expectedDeliveryDate ? 'Del: ' + new Date(po.expectedDeliveryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : ''}`, 380, 92, { width: 170, align: 'right' });
 
-      // -- Meta boxes � 3-column invoice style ----------------------------------
+      // -- Meta boxes - 3-column invoice style ----------------------------------
       const metaY = Math.max(132, cY + 8);
       const colW  = pageW / 3;
 
@@ -645,7 +645,7 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
 
       let tableStartY = metaY + metaH + 12;
 
-      // -- Items table � invoice style columns ----------------------------------
+      // -- Items table - invoice style columns ----------------------------------
       const cols = {
         num:    { x: 40,  w: 16  },
         desc:   { x: 56,  w: 130 },
@@ -688,7 +688,7 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '�';
+          : '-';
         const taxable = item.taxableAmount || 0;
         const gstRate = item.itemGstRate !== undefined ? item.itemGstRate : (po.gstRate || 0);
         const cellY   = rowY + vPad;
@@ -806,7 +806,7 @@ async function generatePurchaseOrderPDF(po, orgId, branchId = null) {
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${po.purchaseOrderNumber}`, 40, footY + 6, { width: pageW / 2 });
+         .text(`${orgName} | ${orgGST ? 'GSTIN: ' + orgGST + ' | ' : ''}${po.purchaseOrderNumber}`, 40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
@@ -966,7 +966,7 @@ async function sendPurchaseOrderEmail(po, pdfPath, orgId, branchId = null) {
   return emailTransporter.sendMail({
     from: `"${orgName} - Purchase" <${process.env.SMTP_USER}>`,
     to: po.vendorEmail,
-    subject: `Purchase Order ${po.purchaseOrderNumber} � Rs. ${po.totalAmount.toFixed(2)}`,
+    subject: `Purchase Order ${po.purchaseOrderNumber} — Rs. ${po.totalAmount.toFixed(2)}`,
     html: emailHtml,
     attachments: [{
       filename: `PO-${po.purchaseOrderNumber}.pdf`,
@@ -1580,7 +1580,7 @@ router.post('/:id/convert-to-bill', async (req, res) => {
       savedBill = new BillModel(billData);
       await savedBill.save();
     } catch (billModelError) {
-      // Bill model may not be available � create a raw document
+      // Bill model may not be available - create a raw document
       const dynamicBillSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
       let DynamicBill;
       try {
@@ -1866,13 +1866,13 @@ router.get('/:id/email-preview', async (req, res) => {
 </div>
 </body>
 </html>`;
-    res.json({ success: true, data: { subject: `Purchase Order ${po.purchaseOrderNumber} � Rs.${(po.totalAmount || 0).toFixed(2)}`, html, to: po.vendorEmail } });
+    res.json({ success: true, data: { subject: `Purchase Order ${po.purchaseOrderNumber} — Rs.${(po.totalAmount || 0).toFixed(2)}`, html, to: po.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview � save custom email content
+// PATCH /:id/email-preview - save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;

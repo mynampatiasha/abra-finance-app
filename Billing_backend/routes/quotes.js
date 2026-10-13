@@ -113,6 +113,20 @@ const quoteItemSchema = new mongoose.Schema({
   },
 }, { _id: false });
 
+// Address copied from the customer when the quote is made (same shape as the
+// customer / invoice address), so the quote PDF can print it.
+const quoteAddressSchema = new mongoose.Schema({
+  attention: { type: String, trim: true, default: '' },
+  street:    { type: String, trim: true, default: '' },
+  street2:   { type: String, trim: true, default: '' },
+  city:      { type: String, trim: true, default: '' },
+  state:     { type: String, trim: true, default: '' },
+  zip:       { type: String, trim: true, default: '' },
+  country:   { type: String, trim: true, default: 'India' },
+  phone:     { type: String, trim: true, default: '' },
+  fax:       { type: String, trim: true, default: '' },
+}, { _id: false });
+
 const quoteSchema = new mongoose.Schema({
   organizationId: {
     type: String,
@@ -150,6 +164,8 @@ const quoteSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  billingAddress:  { type: quoteAddressSchema, default: undefined },
+  shippingAddress: { type: quoteAddressSchema, default: undefined },
   quoteDate: {
     type: Date,
     required: true,
@@ -279,7 +295,7 @@ const quoteSchema = new mongoose.Schema({
   updatedBy: {
     type: String,
   },
-  // Custom email fields � saved when user edits email preview before sending
+  // Custom email fields - saved when user edits email preview before sending
   customEmailTo:      { type: String, default: null },
   customEmailSubject: { type: String, default: null },
   customEmailHtml:    { type: String, default: null },
@@ -461,7 +477,7 @@ const calculateQuoteTotals = (items, tdsRate = 0, tcsRate = 0, gstRate = 18) => 
   };
 };
 
-// Generate PDF for quote � styled identical to invoices.js
+// Generate PDF for quote - styled identical to invoices.js
 const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
   return new Promise(async (resolve, reject) => {
     try {
@@ -555,21 +571,33 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       doc.fontSize(8).fillColor('#000000').font('Helvetica')
          .text(`Date: ${new Date(quote.quoteDate).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' })}`,
                380, 76, { width: 170, align: 'right' });
-      const status = quote.status || 'DRAFT';
+      // The internal status (DRAFT / SENT / ...) is deliberately not printed on the customer's PDF.
       doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`Valid Until: ${new Date(quote.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })} � ${status}`,
+         .text(`Valid Until: ${new Date(quote.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}`,
                380, 92, { width: 170, align: 'right' });
 
-      // -- META GRID � 3 columns: Quote To | Ship To | Quote Details ---------
+      // -- META GRID - 3 columns: Quote To | Ship To | Quote Details ---------
       const metaY = Math.max(132, contactY + 8);
       const colW  = pageW / 3;
 
-      const billingStr = [
-        quote.billingAddress?.street,
-        quote.billingAddress?.city,
-        quote.billingAddress?.state,
-        quote.billingAddress?.pincode || quote.billingAddress?.zip,
-      ].filter(Boolean).join(', ');
+      // Address saved on the quote; if the quote has none (older quotes), fall
+      // back to the customer's saved billing/shipping address.
+      const _fmtAddr = (a) => [a?.street, a?.street2, a?.city, a?.state, a?.pincode || a?.zip]
+        .filter(Boolean).join(', ');
+      let _billAddr = quote.billingAddress;
+      let _shipAddr = quote.shippingAddress;
+      if (!_fmtAddr(_billAddr) && quote.customerId) {
+        try {
+          const _cust = await mongoose.connection.collection('billing-customers')
+            .findOne({ _id: new mongoose.Types.ObjectId(String(quote.customerId)) });
+          if (_cust) {
+            _billAddr = _cust.billingAddress;
+            if (!_fmtAddr(_shipAddr)) _shipAddr = _cust.shippingAddress;
+          }
+        } catch (_) { /* no fallback address — print the quote as before */ }
+      }
+      const billingStr  = _fmtAddr(_billAddr);
+      const shippingStr = _fmtAddr(_shipAddr);
 
       // Col 1: Quote To
       const billX = 40;
@@ -604,9 +632,10 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       doc.rect(shipX, metaY, colW, metaH).fillAndStroke('#f7f9fc', '#dde4ef');
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica-Bold')
          .text('SHIP TO', shipX + 8, metaY + 7, { width: colW - 16, characterSpacing: 0.8 });
-      if (billingStr) {
+      const _shipText = shippingStr || billingStr;
+      if (_shipText) {
         doc.fontSize(7).fillColor('#000000').font('Helvetica')
-           .text(billingStr, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
+           .text(_shipText, shipX + 8, metaY + 18, { width: colW - 16, ellipsis: true });
       } else {
         doc.fontSize(7).fillColor('#aaaaaa').font('Helvetica')
            .text('Same as billing address', shipX + 8, metaY + 18, { width: colW - 16 });
@@ -630,7 +659,7 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
 
       let tableStartY = metaY + metaH + 12;
 
-      // -- ITEMS TABLE � full invoice-style columns --------------------------
+      // -- ITEMS TABLE - full invoice-style columns --------------------------
       const cols = {
         num:     { x: 40,  w: 16  },
         desc:    { x: 56,  w: 90  },
@@ -677,7 +706,7 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '�';
+          : '-';
 
         // Calculate GST for display (quotes use single gstRate, always intra-state CGST+SGST)
         const gstRate  = item.itemGstRate !== undefined ? item.itemGstRate : (quote.gstRate || 18);
@@ -833,7 +862,7 @@ const generateQuotePDF = async (quote, orgId = null, branchId = null) => {
       doc.moveTo(40, footY).lineTo(555, footY)
          .lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${quote.quoteNumber}`,
+         .text(`${orgName} | ${orgGST ? 'GSTIN: ' + orgGST + ' | ' : ''}${quote.quoteNumber}`,
                40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`,
                40, footY + 6, { width: pageW, align: 'right' });
@@ -865,7 +894,7 @@ const getEmailTransporter = () => {
   });
 };
 
-// Send quote email � styled identical to invoices.js
+// Send quote email - styled identical to invoices.js
 const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null, branchId = null) => {
   try {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
@@ -996,7 +1025,7 @@ const sendQuoteEmail = async (quote, pdfBufferOrPath, orgId = null, branchId = n
     const mailOptions = {
       from: `"Accounts" <${process.env.SMTP_USER}>`,
       to: quote.customerEmail,
-      subject: `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`,
+      subject: `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`,
       html: htmlBody,
       attachments: [attachment],
     };
@@ -1647,13 +1676,13 @@ router.get('/:id/email-preview', async (req, res) => {
 </body>
 </html>`;
 
-    res.json({ success: true, data: { subject: `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`, html, to: quote.customerEmail } });
+    res.json({ success: true, data: { subject: `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`, html, to: quote.customerEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// PATCH /:id/email-preview � save custom email content
+// PATCH /:id/email-preview - save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
@@ -1751,7 +1780,7 @@ router.post('/:id/send', [
       await transporter.sendMail({
         from: `"Accounts" <${process.env.SMTP_USER}>`,
         to: sendTo,
-        subject: customSubject || `Quotation ${quote.quoteNumber} � Rs.${(quote.totalAmount || 0).toFixed(2)}`,
+        subject: customSubject || `Quotation ${quote.quoteNumber} — Rs.${(quote.totalAmount || 0).toFixed(2)}`,
         html: customHtml,
         attachments: [{ filename: `${quote.quoteNumber}.pdf`, path: pdfInfo.filepath }],
       });

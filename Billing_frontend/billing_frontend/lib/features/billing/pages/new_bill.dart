@@ -104,6 +104,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
   String? _selectedVendorName;
   String? _selectedVendorEmail;
   String? _selectedVendorGSTIN;
+  VendorAddress _vendorAddress = const VendorAddress();
 
   // Bill Details — unchanged
   DateTime _billDate = DateTime.now();
@@ -365,6 +366,13 @@ class _NewBillScreenState extends State<NewBillScreen> {
         _selectedVendorName = bill.vendorName;
         _selectedVendorEmail = bill.vendorEmail;
         _selectedVendorGSTIN = bill.vendorGSTIN;
+        _vendorAddress = VendorAddress(
+          street: bill.billingAddress?.street ?? '',
+          city: bill.billingAddress?.city ?? '',
+          state: bill.billingAddress?.state ?? '',
+          zip: bill.billingAddress?.pincode ?? '',
+          country: bill.billingAddress?.country ?? 'India',
+        );
         _purchaseOrderController.text = bill.purchaseOrderNumber ?? '';
         _billDate = bill.billDate;
         _selectedPaymentTerms = bill.paymentTerms;
@@ -435,6 +443,10 @@ class _NewBillScreenState extends State<NewBillScreen> {
       'vendorName': _selectedVendorName,
       'vendorEmail': _selectedVendorEmail,
       'vendorGSTIN': _selectedVendorGSTIN,
+      'billingAddress': {
+        ..._vendorAddress.toJson(),
+        'pincode': _vendorAddress.zip, // existing bills read `pincode`
+      },
       'purchaseOrderNumber': _purchaseOrderController.text.trim(),
       'billDate': DateFormat('yyyy-MM-dd').format(_billDate),
       'paymentTerms': _selectedPaymentTerms,
@@ -755,6 +767,10 @@ class _NewBillScreenState extends State<NewBillScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildVendorSection(),
+          if (_selectedVendorId != null) ...[
+            const SizedBox(height: 20),
+            _buildVendorAddressSection(),
+          ],
           const SizedBox(height: 20),
           _buildBillDetailsSection(),
           const SizedBox(height: 20),
@@ -772,6 +788,38 @@ class _NewBillScreenState extends State<NewBillScreen> {
   // ============================================================================
   // VENDOR SECTION
   // ============================================================================
+
+  // The selected vendor's saved address — copied on selection and printed on
+  // the bill PDF ("Bill From").
+  Widget _buildVendorAddressSection() {
+    return _card(
+        child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Vendor Address', Icons.location_city),
+        const SizedBox(height: 12),
+        Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!)),
+            child: Text(
+                _vendorAddress.isEmpty
+                    ? 'No address saved for this vendor — add one in the vendor record'
+                    : _vendorAddress.formatted,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: _vendorAddress.isEmpty
+                        ? Colors.grey[500]
+                        : Colors.grey[800],
+                    fontStyle: _vendorAddress.isEmpty
+                        ? FontStyle.italic
+                        : FontStyle.normal))),
+      ],
+    ));
+  }
 
   Widget _buildVendorSection() {
     return _card(
@@ -2352,6 +2400,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
                                               vendor.vendorName;
                                           _selectedVendorEmail = vendor.email;
                                           _selectedVendorGSTIN = null;
+                                          // Copy the vendor's saved address.
+                                          _vendorAddress =
+                                              vendor.billingAddress;
                                         });
                                         Navigator.pop(context);
                                       },
@@ -2404,6 +2455,10 @@ class _NewBillScreenState extends State<NewBillScreen> {
         _selectedVendorName = result['vendorName'];
         _selectedVendorEmail = result['email'];
         _selectedVendorGSTIN = result['gstNumber'];
+        _vendorAddress = result['billingAddress'] is Map<String, dynamic>
+            ? VendorAddress.fromJson(
+                result['billingAddress'] as Map<String, dynamic>)
+            : const VendorAddress();
       });
       _showSuccessSnackbar(
           'Vendor "${result['vendorName']}" added successfully');

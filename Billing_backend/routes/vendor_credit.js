@@ -611,7 +611,7 @@ try {
   const txnDate = new Date(credit.creditDate);
   const branchId = req.branchIds?.length > 0 ? req.branchIds[0] : null;
 
-  // Debit AP � reduces what we owe vendor
+  // Debit AP - reduces what we owe vendor
   if (apId) await postTransactionToCOA({
     accountId:       apId,
     orgId:           currentOrgId,
@@ -970,7 +970,7 @@ if (billId) {
   }
 }
 
-    // ? COA: Debit AP � credit applied reduces AP balance
+    // ? COA: Debit AP - credit applied reduces AP balance
     try {
       const apId = await getSystemAccountId('Accounts Payable', req.user?.orgId || null);
       const txnDate = new Date();
@@ -1091,7 +1091,7 @@ router.post('/:id/refund', async (req, res) => {
     return errorResponse(res, 'Failed to record refund', 500, err);
   }
 });
-// TEMP FIX ROUTE � remove after use
+// TEMP FIX ROUTE - remove after use
 router.post('/fix-bill/:billId', async (req, res) => {
   try {
     const Bill = mongoose.models.Bill ||
@@ -1248,8 +1248,7 @@ const generateVendorCreditPDF = async (credit, orgId = null, branchId = null) =>
       if (credit.billNumber) {
         doc.text(`Against Bill: ${credit.billNumber}`, 380, 82, { width: 170, align: 'right' });
       }
-      doc.fontSize(7).fillColor('#000000').font('Helvetica-Bold')
-         .text(`? ${(credit.status || 'OPEN').replace(/_/g, ' ')}`, 380, 92, { width: 170, align: 'right' });
+      // The internal status (OPEN / CLOSED / ...) is deliberately not printed on the PDF.
 
       // -- META GRID: Vendor | Ship To | Credit Details ----------------------
       const metaY  = Math.max(132, contactY + 8);
@@ -1357,7 +1356,7 @@ const generateVendorCreditPDF = async (credit, orgId = null, branchId = null) =>
         const hsnSac  = item.hsnCode || item.sacCode || '';
         const discStr = item.discount > 0
           ? (item.discountType === 'percentage' ? `${item.discount}%` : `${item.discount}`)
-          : '�';
+          : '-';
 
         doc.fontSize(7).fillColor('#000000');
         doc.font('Helvetica-Bold').text(String(idx + 1), cols.num.x + 2, cellY, { width: cols.num.w });
@@ -1478,7 +1477,7 @@ const generateVendorCreditPDF = async (credit, orgId = null, branchId = null) =>
       const footY = 760;
       doc.moveTo(40, footY).lineTo(555, footY).lineWidth(1.5).strokeColor('#dde4ef').stroke();
       doc.fontSize(7).fillColor('#8a9ab5').font('Helvetica')
-         .text(`${orgName} � ${orgGST ? 'GSTIN: ' + orgGST + ' � ' : ''}${credit.creditNumber}`, 40, footY + 6, { width: pageW / 2 });
+         .text(`${orgName} | ${orgGST ? 'GSTIN: ' + orgGST + ' | ' : ''}${credit.creditNumber}`, 40, footY + 6, { width: pageW / 2 });
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 40, footY + 6, { width: pageW, align: 'right' });
 
       doc.end();
@@ -1547,7 +1546,7 @@ ${credit.notes ? `<div class="st">Notes</div><p style="font-size:12px;line-heigh
   }
 });
 
-// PATCH /:id/email-preview � save custom email content
+// PATCH /:id/email-preview - save custom email content
 router.patch('/:id/email-preview', async (req, res) => {
   try {
     const { to, subject, html } = req.body;
@@ -1644,7 +1643,7 @@ router.delete('/:id', async (req, res) => {
             .filter(vc => vc.creditId?.toString() !== credit._id.toString());
 
           await bill.save();
-          console.log(`? Bill ${bill.billNumber} reversed � status: ${bill.status}`);
+          console.log(`? Bill ${bill.billNumber} reversed - status: ${bill.status}`);
         } catch (billErr) {
           console.error(`?? Bill reversal error for ${app.billId}:`, billErr.message);
         }
@@ -1660,7 +1659,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // GET /api/vendor-credits/:id/vendor-phone
-// Looks up vendor phone directly from DB � no need to store it on the credit
+// Looks up vendor phone directly from DB - no need to store it on the credit
 router.get('/:id/vendor-phone', async (req, res) => {
   try {
     const credit = await VendorCredit.findOne({
