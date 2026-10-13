@@ -361,6 +361,7 @@ function shouldGenerateExpense(profile) {
 
 // Run every hour to check for expenses to generate
 cron.schedule('0 * * * *', async () => {
+  if (String(process.env.DISABLE_SCHEDULERS || '').toLowerCase() === 'true') return; // local switch
   console.log('?? Running automatic expense generation check...');
   
   try {
@@ -398,7 +399,7 @@ async function generateExpenseFromProfile(profile, createdBy = 'system') {
   const gstAmount   = gstBase * (gstRate / 100);
   const totalAmount = profile.amount + taxAmount + gstAmount;
 
-  // ? Handle vendorId safely � convert to ObjectId only if valid
+  // ? Handle vendorId safely - convert to ObjectId only if valid
   let vendorId;
   try {
     vendorId = mongoose.Types.ObjectId.isValid(profile.vendorId)
@@ -990,7 +991,7 @@ ${profile.tax > 0 ? `<tr><td>Tax</td><td>?${profile.tax.toFixed(2)}</td></tr>` :
 </div>
 <div class="footer"><strong>${orgName}</strong><br>${orgGST ? 'GST: ' + orgGST + ' | ' : ''}${orgPhone ? 'Ph: ' + orgPhone + ' | ' : ''}${orgEmail}</div>
 </div></body></html>`;
-    res.json({ success: true, data: { subject: `Recurring Expense � ${profile.profileName}`, html, to: profile.vendorEmail } });
+    res.json({ success: true, data: { subject: `Recurring Expense — ${profile.profileName}`, html, to: profile.vendorEmail } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

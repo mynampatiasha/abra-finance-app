@@ -299,6 +299,7 @@ try {
 // ============================================================================
 
 cron.schedule('0 8 * * *', async () => {
+  if (String(process.env.DISABLE_SCHEDULERS || '').toLowerCase() === 'true') return; // local switch
   console.log('?? Running recurring bills scheduler...');
   try {
     const today = new Date();

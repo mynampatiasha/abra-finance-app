@@ -778,6 +778,24 @@ async function runReminderJob() {
         const freshInvoice = await Invoice.findById(invoice._id).lean();
         if (!freshInvoice || freshInvoice.status === 'PAID' || freshInvoice.status === 'CANCELLED') continue;
 
+        // ── Safety lock ────────────────────────────────────────────────────
+        // If two backends share this database (e.g. the live server and a
+        // local one), both read "not sent yet" in the same second. Only the
+        // process that wins this atomic claim may send; the other skips.
+        const lastClaim = freshInvoice.lastReminderSentAt ? new Date(freshInvoice.lastReminderSentAt) : null;
+        if (lastClaim && (now - lastClaim) < 10 * 60 * 1000) {
+          console.log(`🔒 Skipping ${invoice.invoiceNumber} — reminder just claimed by another process`);
+          continue;
+        }
+        const claim = await Invoice.collection.updateOne(
+          { _id: invoice._id, lastReminderSentAt: freshInvoice.lastReminderSentAt || null },
+          { $set: { lastReminderSentAt: now } },
+        );
+        if (claim.modifiedCount !== 1) {
+          console.log(`🔒 Skipping ${invoice.invoiceNumber} — claimed by another process`);
+          continue;
+        }
+
         const logEntries = await processInvoice(invoice, settings, orgData, 'overdue');
         await Invoice.updateOne(
           { _id: invoice._id },
@@ -830,6 +848,18 @@ async function runReminderJob() {
           // Re-check status before sending
           const freshInvoice = await Invoice.findById(invoice._id).lean();
           if (!freshInvoice || freshInvoice.status === 'PAID' || freshInvoice.status === 'CANCELLED') continue;
+
+          // Safety lock — one pre-due send per invoice per day, even if two
+          // backends run the job at the same moment.
+          const preDueKey = `${preDueDays}|${now.toDateString()}`;
+          const preDueClaim = await Invoice.collection.updateOne(
+            { _id: invoice._id, preDueClaim: { $ne: preDueKey } },
+            { $set: { preDueClaim: preDueKey } },
+          );
+          if (preDueClaim.modifiedCount !== 1) {
+            console.log(`🔒 Skipping pre-due ${invoice.invoiceNumber} — already claimed`);
+            continue;
+          }
 
           const logEntries = await processInvoice(invoice, settings, orgData, 'predue');
           // Tag each log entry with preDueDays for dedup
@@ -1136,10 +1166,50 @@ settingsRouter.post('/test-email', async (req, res) => {
 // INIT CRON
 // ============================================================================
 
+// ── Daily overdue status check (6:00 AM IST) ────────────────────────────────
+// Marks UNPAID/SENT invoices with nothing paid and a past due date as OVERDUE.
+// Mirrors the invoice pre-save rule, but runs daily so status never goes stale.
+// Only `status` is written (no hooks, no totals recalculated, updatedAt untouched).
+async function runOverdueStatusJob({ dryRun = false } = {}) {
+  const Invoice = getInvoiceModel();
+  if (!Invoice) return { matched: 0, updated: 0, dryRun, invoices: [] };
+
+  // Today's date in IST, as UTC midnight (due dates are stored as UTC midnight)
+  const istNow    = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const todayIST  = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()));
+
+  const filter = {
+    status:     { $in: ['UNPAID', 'SENT'] },
+    dueDate:    { $lt: todayIST },
+    amountPaid: { $in: [0, null] },
+  };
+
+  const invoices = await Invoice.find(filter).select('invoiceNumber status dueDate orgId').lean();
+  if (dryRun || invoices.length === 0) {
+    return { matched: invoices.length, updated: 0, dryRun, invoices };
+  }
+
+  const res = await Invoice.updateMany(filter, { $set: { status: 'OVERDUE' } }, { timestamps: false });
+  console.log(`📅 Overdue status job: ${res.modifiedCount} invoice(s) marked OVERDUE`);
+  return { matched: invoices.length, updated: res.modifiedCount, dryRun, invoices };
+}
+
 function initReminderScheduler() {
+  // Local switch: set DISABLE_SCHEDULERS=true in .env on a machine that shares
+  // the live database (e.g. a developer laptop) so it never runs the jobs.
+  if (String(process.env.DISABLE_SCHEDULERS || '').toLowerCase() === 'true') {
+    console.log('⏸️  Schedulers disabled (DISABLE_SCHEDULERS=true) — reminder & overdue jobs will NOT run on this machine');
+    return;
+  }
   console.log('🕐 Initializing invoice reminder scheduler...');
   cron.schedule('* * * * *', async () => { await runReminderJob(); });
   console.log('✅ Reminder scheduler started — runs every hour at :00');
+
+  cron.schedule('0 6 * * *', async () => {
+    try { await runOverdueStatusJob(); }
+    catch (err) { console.error('❌ Overdue status job failed:', err.message); }
+  }, { timezone: 'Asia/Kolkata' });
+  console.log('✅ Overdue status job scheduled — daily at 6:00 AM IST');
 }
 
 // ============================================================================
@@ -1159,6 +1229,7 @@ module.exports = {
   settingsRouter,
   ReminderSettings,
   runReminderJob,
+  runOverdueStatusJob,
   buildOverdueEmailHtml,
   buildPreDueEmailHtml,
   buildOverdueWhatsAppMessage,

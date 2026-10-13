@@ -664,6 +664,7 @@ async function sendInvoiceEmail(invoice) {
 // ============================================================================
 
 cron.schedule('0 6 * * *', async () => {
+  if (String(process.env.DISABLE_SCHEDULERS || '').toLowerCase() === 'true') return; // local switch
   console.log('?? Running recurring invoice cron job...');
   
   try {
