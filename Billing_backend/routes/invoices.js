@@ -361,6 +361,17 @@ const invoiceSchema = new mongoose.Schema({
     sentAt:    Date,
     emailType: { type: String, enum: ['invoice','reminder','payment_receipt'] },
   }],
+  // Every attempt to email this invoice via "Send" — success or failure — with
+  // the actual sending address, so delivery problems can be traced afterwards.
+  sendLog: [{
+    at:        Date,
+    to:        String,
+    from:      String,
+    success:   Boolean,
+    error:     String,
+    messageId: String,
+    source:    String,
+  }],
 
   // ── Reminder Automation Fields ────────────────────────────────────────────
   reminderPaused:     { type: Boolean, default: false },
@@ -2005,6 +2016,14 @@ router.put('/:id', async (req, res) => {
 });
 
 // ── POST /:id/send (original) ─────────────────────────────────────────────────
+// Sends currently running: "invoiceId|recipient" → start time. Stops a second
+// click (or the other Send button) from starting a duplicate while the first is
+// still waiting on a slow mail server.
+const _invoiceSendsInFlight = new Map();
+const INVOICE_SEND_DEDUPE_MS = 60 * 1000;   // same invoice → same address
+const INVOICE_SEND_WAIT_MS   = 8 * 1000;    // how long the request waits before replying "sending…"
+const INVOICE_SEND_STALE_MS  = 3 * 60 * 1000;
+
 router.post('/:id/send', async (req, res) => {
   try {
     const invoice = await Invoice.findOne({ _id: req.params.id, orgId: req.user?.orgId, ...(req.branchFilter || {}) });
@@ -2019,8 +2038,40 @@ router.post('/:id/send', async (req, res) => {
     const customSubject = invoice.customEmailSubject;
     const customHtml    = invoice.customEmailHtml;
     const sendTo        = customTo || invoice.customerEmail;
+
+    // ── Duplicate-send guard ──────────────────────────────────────────────────
+    const sendKey = `${invoice._id}|${String(sendTo || '').toLowerCase()}`;
+    const force   = req.body?.force === true;
+    if (!force) {
+      const startedAt = _invoiceSendsInFlight.get(sendKey);
+      if (startedAt && (Date.now() - startedAt) < INVOICE_SEND_STALE_MS) {
+        console.log(`🔒 Invoice ${invoice.invoiceNumber} → ${sendTo}: a send is already in progress — skipped duplicate`);
+        return res.json({
+          success: true, inProgress: true,
+          message: `This invoice is already being sent to ${sendTo} — please wait.`,
+          data: invoice,
+        });
+      }
+      const justSent = (invoice.emailsSent || []).some(e =>
+        e.emailType === 'invoice' &&
+        String(e.sentTo || '').toLowerCase() === String(sendTo || '').toLowerCase() &&
+        e.sentAt && (Date.now() - new Date(e.sentAt).getTime()) < INVOICE_SEND_DEDUPE_MS);
+      if (justSent) {
+        console.log(`🔒 Invoice ${invoice.invoiceNumber} → ${sendTo}: already emailed in the last minute — skipped duplicate`);
+        return res.json({
+          success: true, alreadySent: true,
+          message: `This invoice was already emailed to ${sendTo} a moment ago — duplicate send skipped.`,
+          data: invoice,
+        });
+      }
+    }
+
+    // Everything below runs as one unit: send the mail, and ONLY if it was
+    // accepted, mark the invoice SENT, record it and post to the ledger.
+    const doSend = async () => {
+    let sendResult = null;
     if (customHtml) {
-      await sendMail({
+      sendResult = await sendMail({
         orgId:    req.user?.orgId,
         branchId: invoice.branchId,
         db:       require('mongoose').connection.db,
@@ -2030,11 +2081,16 @@ router.post('/:id/send', async (req, res) => {
         attachments: [{ filename: `Invoice-${invoice.invoiceNumber}.pdf`, path: invoice.pdfPath }],
       });
     } else {
-      await sendInvoiceEmail(invoice, invoice.pdfPath, req.user?.orgId, invoice.branchId);
+      sendResult = await sendInvoiceEmail(invoice, invoice.pdfPath, req.user?.orgId, invoice.branchId);
     }
     const oldStatus = invoice.status;
     if (oldStatus === 'DRAFT') invoice.status = 'SENT';
     invoice.emailsSent.push({ sentTo: sendTo, sentAt: new Date(), emailType: 'invoice' });
+    invoice.sendLog.push({
+      at: new Date(), to: sendTo, success: true, source: 'invoice-send',
+      from:      sendResult?.envelope?.from || '',
+      messageId: sendResult?.messageId || '',
+    });
     await invoice.save();
 
     if (oldStatus === 'DRAFT') {
@@ -2069,7 +2125,41 @@ router.post('/:id/send', async (req, res) => {
     }
 
     console.log(`✅ Invoice sent: ${invoice.invoiceNumber}`);
-    res.json({ success: true, message: 'Invoice sent successfully', data: invoice });
+    }; // end doSend
+
+    _invoiceSendsInFlight.set(sendKey, Date.now());
+    const work = doSend().then(
+      () => ({ ok: true }),
+      async (err) => {
+        console.error(`❌ Invoice send failed (${invoice.invoiceNumber} → ${sendTo}):`, err.message);
+        try {
+          await Invoice.updateOne({ _id: invoice._id }, { $push: { sendLog: {
+            at: new Date(), to: sendTo, success: false, error: err.message, source: 'invoice-send',
+          } } }, { timestamps: false });
+        } catch (logErr) { console.error('⚠️ Could not record send failure:', logErr.message); }
+        return { ok: false, err };
+      },
+    ).finally(() => _invoiceSendsInFlight.delete(sendKey));
+
+    // Reply as soon as the result is known. If the mail server is slow, reply
+    // after a few seconds with "sending…" and let the send finish in the
+    // background (the invoice is still only marked SENT after the mail succeeds).
+    const outcome = await Promise.race([
+      work,
+      new Promise(resolve => setTimeout(() => resolve(null), INVOICE_SEND_WAIT_MS)),
+    ]);
+    if (outcome === null) {
+      console.log(`⏳ Invoice ${invoice.invoiceNumber} → ${sendTo}: mail server is slow, replying now, send continues in background`);
+      return res.json({
+        success: true, queued: true,
+        message: `Invoice is being sent to ${sendTo} — the mail server is slow, it will arrive shortly.`,
+        data: invoice,
+      });
+    }
+    if (!outcome.ok) {
+      return res.status(500).json({ success: false, error: outcome.err.message });
+    }
+    return res.json({ success: true, message: 'Invoice sent successfully', data: invoice });
   } catch (error) {
     console.error('Error sending invoice:', error);
     res.status(500).json({ success: false, error: error.message });

@@ -187,9 +187,16 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
   // LIFECYCLE
   // ==========================================================================
 
+  // Rebuild when the email-preview window starts/ends a send, so the
+  // "Save & Send" buttons here are disabled while it is sending.
+  void _onSendFlagChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
+    documentSendInProgress.addListener(_onSendFlagChanged);
     _dueDate = _invoiceDate;
 
     if (widget.invoiceId != null) {
@@ -253,6 +260,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
 
   @override
   void dispose() {
+    documentSendInProgress.removeListener(_onSendFlagChanged);
     _orderNumberController.dispose();
     _referenceNumberController.dispose();
     _subjectController.dispose();
@@ -694,7 +702,13 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       _showError('Customer email is required to send invoice');
       return;
     }
+    // One send at a time — the email-preview window's "Send Now" shares this flag.
+    if (_isSaving || documentSendInProgress.value) {
+      _showError('An email is already being sent — please wait.');
+      return;
+    }
     setState(() => _isSaving = true);
+    documentSendInProgress.value = true;
     try {
       final data = await _buildInvoiceData('SENT');
       Invoice invoice;
@@ -703,13 +717,21 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       } else {
         invoice = await InvoiceService.createInvoice(data);
       }
-      await InvoiceService.sendInvoice(invoice.id);
-      _showSuccess('Invoice sent to $_selectedCustomerEmail');
+      final res = await InvoiceService.sendInvoiceRaw(invoice.id);
+      if (res['queued'] == true ||
+          res['alreadySent'] == true ||
+          res['inProgress'] == true) {
+        _showSuccess((res['message'] as String?) ??
+            'Invoice is being sent to $_selectedCustomerEmail');
+      } else {
+        _showSuccess('Invoice sent to $_selectedCustomerEmail');
+      }
       Navigator.pop(context, true);
     } catch (e) {
       _showError(e.toString());
     } finally {
-      setState(() => _isSaving = false);
+      documentSendInProgress.value = false;
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -992,7 +1014,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
-              onPressed: _isSaving ? null : _saveAndSend,
+              onPressed: (_isSaving || documentSendInProgress.value) ? null : _saveAndSend,
               icon: _isSaving
                   ? const SizedBox(
                       width: 16,
@@ -2496,7 +2518,7 @@ class _NewInvoiceScreenState extends State<NewInvoiceScreen> {
       SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-              onPressed: _isSaving ? null : _saveAndSend,
+              onPressed: (_isSaving || documentSendInProgress.value) ? null : _saveAndSend,
               icon: _isSaving
                   ? const SizedBox(
                       width: 16,

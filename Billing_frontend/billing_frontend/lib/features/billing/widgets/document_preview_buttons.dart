@@ -122,6 +122,11 @@ Future<void> openDocumentPdf({
   }
 }
 
+/// True while a document email is being sent — from the preview window's
+/// "Send Now" OR a page's "Save & Send" — so the two buttons can never start a
+/// duplicate send at the same time.
+final ValueNotifier<bool> documentSendInProgress = ValueNotifier<bool>(false);
+
 Future<void> openEmailPreview({
   required BuildContext context,
   required String? docId,
@@ -758,17 +763,29 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
   }
 
   Future<void> _send() async {
+    if (_sending || documentSendInProgress.value) {
+      _snack(context, 'An email is already being sent — please wait.');
+      return;
+    }
     setState(() => _sending = true);
+    documentSendInProgress.value = true;
     try {
       final api = ApiService();
       final result =
           await api.post('${widget.sendEndpoint}/${widget.docId}/send');
       if (!mounted) return;
       if (result['success'] == true) {
+        // The server may answer "still sending", "already sent a moment ago"
+        // or "already in progress" — show what really happened.
+        final note = (result['queued'] == true ||
+                result['alreadySent'] == true ||
+                result['inProgress'] == true)
+            ? (result['message'] as String?)
+            : null;
         Navigator.pop(context);
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
-          content: Text('Email sent successfully'),
-          backgroundColor: _green,
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+          content: Text(note ?? 'Email sent successfully'),
+          backgroundColor: note == null ? _green : const Color(0xFFE67E22),
           behavior: SnackBarBehavior.floating,
         ));
       } else {
@@ -781,6 +798,8 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
         setState(() => _sending = false);
         _snack(context, 'Error: $e', color: _red);
       }
+    } finally {
+      documentSendInProgress.value = false;
     }
   }
 
@@ -994,22 +1013,25 @@ class _EmailPreviewDialogState extends State<_EmailPreviewDialog> {
           // Preview tab → Send Now (always enabled)
           if (_tab == _EmailTab.preview)
             Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _sending ? null : _send,
-                icon: _sending
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.send, size: 16),
-                label: Text(_sending ? 'Sending...' : 'Send Now'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: documentSendInProgress,
+                builder: (_, busy, __) => ElevatedButton.icon(
+                  onPressed: (_sending || busy) ? null : _send,
+                  icon: (_sending || busy)
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.send, size: 16),
+                  label: Text((_sending || busy) ? 'Sending...' : 'Send Now'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
                 ),
               ),
             ),

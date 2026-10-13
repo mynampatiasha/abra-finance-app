@@ -137,8 +137,14 @@ class InvoiceService {
     return Invoice.fromJson(data['data']);
   }
 
+  /// Same call as [sendInvoice] but returns the server's full reply, so callers
+  /// can tell "sent" from "still sending" / "already sent a moment ago".
+  static Future<Map<String, dynamic>> sendInvoiceRaw(String invoiceId) async {
+    return await _api.post('$_baseEndpoint/$invoiceId/send');
+  }
+
   static Future<Invoice> sendInvoice(String invoiceId) async {
-    final data = await _api.post('$_baseEndpoint/$invoiceId/send');
+    final data = await sendInvoiceRaw(invoiceId);
     return Invoice.fromJson(data['data']);
   }
 
