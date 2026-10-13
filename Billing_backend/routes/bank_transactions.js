@@ -1779,6 +1779,14 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const importBatchId = `IMPORT-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
     const results = { imported: 0, errors: 0, skipped: 0, errorDetails: [] };
 
+    // validateOnly=true → check every row exactly as a real import would, but
+    // save NOTHING (no rows created, rules engine not run). `imported` then
+    // counts the rows that WOULD be imported. `seenInFile` stands in for the
+    // rows a real import would already have saved earlier in the same file,
+    // so in-file duplicates are counted the same way in both modes.
+    const validateOnly = String(req.body.validateOnly || '').toLowerCase() === 'true';
+    const seenInFile   = [];
+
     for (let i = 0; i < records.length; i++) {
       const row    = records[i];
       const rowNum = i + 2;
@@ -1863,9 +1871,21 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         const existing = await ProviderTransaction.findOne(dupFilter).lean();
 
-        if (existing) {
+        // Same rule as dupFilter, applied to earlier rows of this file (only
+        // needed in validateOnly mode, where earlier rows are not saved).
+        const dupKey = `${parsedDate.getTime()}|${amount}|${txnType}`;
+        const dupInFile = validateOnly && seenInFile.some(s =>
+          s.key === dupKey && (!referenceNum || s.ref === (referenceNum || null)));
+
+        if (existing || dupInFile) {
           console.log(`⏭️  Row ${rowNum}: Duplicate skipped (${parsedDate.toISOString().split('T')[0]} ₹${amount})`);
           results.skipped++;
+          continue;
+        }
+
+        if (validateOnly) {
+          seenInFile.push({ key: dupKey, ref: referenceNum || null });
+          results.imported++;
           continue;
         }
 
@@ -1892,6 +1912,21 @@ router.post('/import', upload.single('file'), async (req, res) => {
         results.errors++;
         results.errorDetails.push({ row: rowNum, error: rowErr.message });
       }
+    }
+
+    if (validateOnly) {
+      console.log(`🔎 Import check (nothing saved): ${results.imported} valid, ${results.skipped} skipped, ${results.errors} failed`);
+      return res.json({
+        success: true,
+        message: `Check complete. ${results.imported} valid, ${results.skipped} skipped (duplicates), ${results.errors} failed. Nothing was saved.`,
+        data: {
+          validateOnly: true,
+          valid:        results.imported,
+          skipped:      results.skipped,
+          errors:       results.errors,
+          errorDetails: results.errorDetails,
+        },
+      });
     }
 
     try {

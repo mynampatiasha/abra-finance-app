@@ -152,6 +152,9 @@ class _AccountDetailPageState extends State<AccountDetailPage>
   String _allTxnsFilter = 'All';
   bool _multiSelect = false;
   Set<String> _selectedIds = {};
+  bool _bulkDeleting = false;
+  int _bulkDeleteDone = 0;
+  int _bulkDeleteTotal = 0;
 
   Map<String, dynamic>? _selectedTxn;
   bool _panelOpen = false;
@@ -288,6 +291,8 @@ class _AccountDetailPageState extends State<AccountDetailPage>
     setState(() {
       _uncatPage = page;
       _txnsLoading = true;
+      // Ticked rows belong to the page being left — never carry them over.
+      _selectedIds.clear();
     });
     try {
       final r = await _svc.getUncategorized(
@@ -1030,6 +1035,7 @@ class _AccountDetailPageState extends State<AccountDetailPage>
 
   Widget _buildUncatContent() => Column(children: [
         _buildFilterRow(),
+        if (_selectedIds.isNotEmpty || _bulkDeleting) _buildBulkDeleteBar(),
         Expanded(
             child: _txnsLoading
                 ? const Center(
@@ -1051,7 +1057,10 @@ class _AccountDetailPageState extends State<AccountDetailPage>
               '${_txns.where((t) => t['isRecognized'] == true).length}'),
           const Spacer(),
           GestureDetector(
-            onTap: () => setState(() => _filter = 'Excluded'),
+            onTap: () => setState(() {
+              _filter = 'Excluded';
+              _selectedIds.clear();
+            }),
             child: Text('Excluded',
                 style: TextStyle(
                     fontSize: 13,
@@ -1068,7 +1077,10 @@ class _AccountDetailPageState extends State<AccountDetailPage>
   Widget _chip(String label, String count) {
     final sel = _filter == label;
     return InkWell(
-      onTap: () => setState(() => _filter = label),
+      onTap: () => setState(() {
+        _filter = label;
+        _selectedIds.clear();
+      }),
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
@@ -3332,6 +3344,158 @@ class _AccountDetailPageState extends State<AccountDetailPage>
                 ),
               ],
             ));
+  }
+
+  // ── Bulk delete (Uncategorized tab) ────────────────────────────────────────
+  // Rows ticked in the Uncategorized table that are still on screen.
+  List<Map<String, dynamic>> get _selectedRows => _filtered
+      .where((t) => _selectedIds.contains(t['_id'].toString()))
+      .toList();
+
+  Widget _buildBulkDeleteBar() {
+    final count = _selectedRows.length;
+    return Container(
+      width: double.infinity,
+      color: _red.withOpacity(0.05),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(children: [
+        if (_bulkDeleting) ...[
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: _red)),
+          const SizedBox(width: 10),
+          Text('Deleting $_bulkDeleteDone of $_bulkDeleteTotal…',
+              style: const TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: _red)),
+        ] else ...[
+          Text('$count selected',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF2C3E50))),
+          const SizedBox(width: 8),
+          TextButton(
+              onPressed: () => setState(() => _selectedIds.clear()),
+              child: const Text('Clear', style: TextStyle(fontSize: 12))),
+          const Spacer(),
+          ElevatedButton.icon(
+            onPressed: count == 0 ? null : _confirmBulkDelete,
+            icon: const Icon(Icons.delete_outline, size: 16),
+            label: Text('Delete Selected ($count)',
+                style: const TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _red, foregroundColor: Colors.white),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  void _confirmBulkDelete() {
+    final rows = _selectedRows;
+    if (rows.isEmpty || _bulkDeleting) return;
+    final catCount =
+        rows.where((t) => t['reconciliationStatus'] == 'CATEGORIZED').length;
+    showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+              title: Text(
+                  'Delete ${rows.length} Transaction${rows.length == 1 ? '' : 's'}',
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.bold, color: _red)),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (catCount > 0)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                        color: _red.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: _red.withOpacity(0.2))),
+                    child: Row(children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: _red, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: Text(
+                              '$catCount of the selected transactions are categorized. Deleting will permanently reverse all COA journal entries, remove the linked expense/payment record, and update the account balance.',
+                              style:
+                                  const TextStyle(fontSize: 11, color: _red))),
+                    ]),
+                  ),
+                Text(
+                    'This will permanently delete ${rows.length} selected transaction${rows.length == 1 ? '' : 's'}. This cannot be undone.',
+                    style: const TextStyle(fontSize: 13)),
+              ]),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: _red),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _runBulkDelete(rows);
+                  },
+                  child: const Text('Delete',
+                      style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ));
+  }
+
+  // Deletes one row at a time through the SAME call as the single delete
+  // (so categorized rows are fully reversed server-side), then reports.
+  Future<void> _runBulkDelete(List<Map<String, dynamic>> rows) async {
+    if (_bulkDeleting) return;
+    setState(() {
+      _bulkDeleting = true;
+      _bulkDeleteDone = 0;
+      _bulkDeleteTotal = rows.length;
+    });
+
+    final deleted = <String>{};
+    final failed = <String>{};
+    String? lastError;
+    for (final t in rows) {
+      final id = t['_id'].toString();
+      final r = await _svc.deleteTransaction(id);
+      if (r['success'] == true) {
+        deleted.add(id);
+      } else {
+        failed.add(id);
+        lastError = r['message']?.toString();
+      }
+      if (!mounted) return;
+      setState(() => _bulkDeleteDone++);
+    }
+
+    if (!mounted) return;
+    final wholePageGone = deleted.length >= _txns.length;
+    setState(() {
+      _bulkDeleting = false;
+      _selectedIds = failed; // failed rows stay ticked so they can be retried
+      if (_selectedTxn != null &&
+          deleted.contains(_selectedTxn!['_id']?.toString())) {
+        _panelOpen = false;
+        _selectedTxn = null;
+        _showingEmbeddedPage = false;
+        _selectedCat = null;
+        _panelSaving = false;
+      }
+      // If every row of the current page was deleted, step back a page.
+      if (wholePageGone && _uncatPage > 1) _uncatPage--;
+    });
+
+    if (failed.isEmpty) {
+      _showSuccess(
+          '${deleted.length} transaction${deleted.length == 1 ? '' : 's'} deleted');
+    } else {
+      _showError(
+          '${deleted.length} deleted, ${failed.length} failed${lastError != null ? ' — $lastError' : ''}');
+    }
+    _loadAll();
   }
 
   void _confirmDeleteTransaction(Map<String, dynamic> txn) {

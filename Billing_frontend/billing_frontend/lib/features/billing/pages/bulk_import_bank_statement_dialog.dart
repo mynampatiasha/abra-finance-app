@@ -185,34 +185,84 @@ class _BulkImportBankStatementDialogState
       final apiService = ApiService();
       final headers = await apiService.getHeaders();
 
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse(
-            '${apiService.baseUrl}/api/finance/banking/transactions/import'),
-      );
+      // validateOnly = true asks the server to check every row WITHOUT saving
+      // anything. validateOnly = false is the normal import.
+      Future<Map<String, dynamic>> sendImport(
+          {required bool validateOnly}) async {
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse(
+              '${apiService.baseUrl}/api/finance/banking/transactions/import'),
+        );
 
-      // Add accountId as form field
-      request.fields['accountId'] = widget.accountId;
+        // Add accountId as form field
+        request.fields['accountId'] = widget.accountId;
+        if (validateOnly) request.fields['validateOnly'] = 'true';
 
-      headers.forEach((k, v) {
-        if (k.toLowerCase() != 'content-type') request.headers[k] = v;
-      });
+        headers.forEach((k, v) {
+          if (k.toLowerCase() != 'content-type') request.headers[k] = v;
+        });
 
-      if (kIsWeb) {
-        request.files.add(http.MultipartFile.fromBytes('file', file.bytes!,
-            filename: file.name));
-      } else {
-        request.files.add(await http.MultipartFile.fromPath('file', file.path!,
-            filename: file.name));
+        if (kIsWeb) {
+          request.files.add(http.MultipartFile.fromBytes('file', file.bytes!,
+              filename: file.name));
+        } else {
+          request.files.add(await http.MultipartFile.fromPath(
+              'file', file.path!,
+              filename: file.name));
+        }
+
+        final streamed = await request.send();
+        final response = await http.Response.fromStream(streamed);
+
+        debugPrint(
+            '📥 Bank Import (validateOnly=$validateOnly) status: ${response.statusCode}');
+        debugPrint('📥 Bank Import body  : ${response.body}');
+
+        return jsonDecode(response.body) as Map<String, dynamic>;
       }
 
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
+      // Step 1 — check the file first (nothing is saved yet).
+      var decoded = await sendImport(validateOnly: true);
+      final checkData = decoded['data'] as Map<String, dynamic>? ?? {};
 
-      debugPrint('📥 Bank Import status: ${response.statusCode}');
-      debugPrint('📥 Bank Import body  : ${response.body}');
+      // Only when the server confirms it ran in check-only mode do we offer
+      // the choice. If it did not (older server, or an error response such as
+      // a CSV parse error), `decoded` is treated exactly as the final import
+      // result below — the same behaviour as before this change.
+      if (checkData['validateOnly'] == true) {
+        final failedCount = (checkData['errors'] as num?)?.toInt() ?? 0;
+        final validCount = (checkData['valid'] as num?)?.toInt() ?? 0;
 
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        // The choice is shown every time — whether or not any row failed.
+        if (mounted) setState(() => _isUploading = false);
+        final importValid = await _askImportValidOnly(
+          validCount: validCount,
+          failedCount: failedCount,
+          skippedCount: (checkData['skipped'] as num?)?.toInt() ?? 0,
+          errorDetails: (checkData['errorDetails'] as List?) ?? [],
+        );
+        if (importValid != true) {
+          // Cancelled (or nothing to import) — nothing was saved.
+          if (mounted) {
+            setState(() {
+              _uploadedFileName = null;
+              _showResults = false;
+            });
+          }
+          _toast(
+              validCount == 0
+                  ? 'No new transactions to import.'
+                  : 'Import cancelled — no transactions were imported.',
+              success: false);
+          return;
+        }
+        if (mounted) setState(() => _isUploading = true);
+
+        // Step 2 — the real import (the user chose to import; any failed rows
+        // are skipped again).
+        decoded = await sendImport(validateOnly: false);
+      }
 
       final data = decoded['data'] as Map<String, dynamic>? ?? {};
       final imported = (data['imported'] as num?)?.toInt() ?? 0;
@@ -253,6 +303,123 @@ class _BulkImportBankStatementDialogState
       });
       _toast('Failed to import: $e', success: false);
     }
+  }
+
+  // ── Some rows failed the check: import the good ones, or cancel everything ──
+  // Returns true  → import only the successful rows (failed rows are skipped)
+  //         false → cancel, nothing is imported
+  Future<bool?> _askImportValidOnly({
+    required int validCount,
+    required int failedCount,
+    required int skippedCount,
+    required List<dynamic> errorDetails,
+  }) {
+    final canImport = validCount > 0;
+    final hasFailures = failedCount > 0;
+    final accent = hasFailures ? _kRed : (canImport ? _kGreen : _kOrange);
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: accent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(
+                hasFailures
+                    ? Icons.warning_amber_rounded
+                    : (canImport
+                        ? Icons.check_circle_outline
+                        : Icons.info_outline),
+                color: accent,
+                size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+                hasFailures
+                    ? '$failedCount row(s) failed'
+                    : (canImport ? 'Ready to import' : 'Nothing new to import'),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ),
+        ]),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 360),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  canImport
+                      ? '$validCount transaction(s) ${hasFailures ? 'are valid' : 'will be imported'}'
+                          '${skippedCount > 0 ? ' ($skippedCount duplicate/empty row(s) will be skipped)' : ''}.\n'
+                          'Nothing has been imported yet. Choose what to do:'
+                      : (hasFailures
+                          ? 'None of the rows in this file can be imported.\n'
+                              'Nothing has been imported.'
+                          : 'All $skippedCount row(s) in this file are duplicates or empty, '
+                              'so there is nothing new to import.'),
+                  style: TextStyle(
+                      fontSize: 13, color: Colors.grey[700], height: 1.5),
+                ),
+                if (hasFailures) const SizedBox(height: 12),
+                if (hasFailures)
+                  Flexible(
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: _kRed.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _kRed.withOpacity(0.2))),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: errorDetails.map<Widget>((e) {
+                            final msg = e is Map
+                                ? 'Row ${e['row']}: ${e['error'] ?? e['message'] ?? e}'
+                                : e.toString();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Text(msg,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: _kRed)),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(canImport
+                ? (hasFailures ? 'Cancel — import nothing' : 'Cancel')
+                : 'Close'),
+          ),
+          if (canImport)
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.check_circle_outline, size: 16),
+              label: Text(hasFailures
+                  ? 'Import $validCount successful'
+                  : 'Import $validCount transaction(s)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kNavy,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   void _toast(String msg, {required bool success}) {
