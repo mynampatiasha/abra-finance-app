@@ -1210,6 +1210,22 @@ function initReminderScheduler() {
     catch (err) { console.error('❌ Overdue status job failed:', err.message); }
   }, { timezone: 'Asia/Kolkata' });
   console.log('✅ Overdue status job scheduled — daily at 6:00 AM IST');
+
+  // Catch-up: the job only fires at 6:00 AM IST. If the server starts after that
+  // (a deploy / restart / it was down at 6 AM), today's run was missed — run it
+  // once now. Safe to repeat: it only flips UNPAID/SENT, past-due, nothing-paid
+  // invoices, so a second run finds nothing to change.
+  setTimeout(async () => {
+    try {
+      const istHour = new Date(Date.now() + 5.5 * 60 * 60 * 1000).getUTCHours();
+      if (istHour >= 6) {
+        console.log('📅 Overdue status catch-up (server started after 6:00 AM IST)');
+        await runOverdueStatusJob();
+      }
+    } catch (err) {
+      console.error('❌ Overdue status catch-up failed:', err.message);
+    }
+  }, 20000).unref();
 }
 
 // ============================================================================
