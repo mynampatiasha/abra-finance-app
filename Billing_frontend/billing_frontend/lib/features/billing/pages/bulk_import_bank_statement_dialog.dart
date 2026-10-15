@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:intl/intl.dart';
 import 'package:universal_html/html.dart' as html;
 import '../../../core/services/api_service.dart';
 
@@ -56,18 +57,39 @@ class _BulkImportBankStatementDialogState
   bool _showResults = false;
   bool _importSuccess = false;
 
+  // The format the dates in the user's file are written in. Sent to the server
+  // so a date is never guessed (03/10/2026 = 3 Oct or 10 Mar?). 2026-10-03
+  // (year-month-day) is unambiguous and always accepted, whatever is chosen.
+  static const List<String> _dateFormats = [
+    'DD/MM/YYYY',
+    'MM/DD/YYYY',
+    'YYYY-MM-DD',
+    'DD-MM-YYYY',
+    'MM-DD-YYYY',
+    'DD-MMM-YYYY',
+  ];
+  static const Map<String, String> _dateFormatExamples = {
+    'DD/MM/YYYY': '03/10/2026 = 3 October 2026',
+    'MM/DD/YYYY': '10/03/2026 = 3 October 2026',
+    'YYYY-MM-DD': '2026-10-03 = 3 October 2026',
+    'DD-MM-YYYY': '03-10-2026 = 3 October 2026',
+    'MM-DD-YYYY': '10-03-2026 = 3 October 2026',
+    'DD-MMM-YYYY': '03-Oct-2026 = 3 October 2026',
+  };
+  String _dateFormat = 'DD/MM/YYYY';
+
   // ── Download CSV template ─────────────────────────────────────────────────
   Future<void> _downloadTemplate() async {
     setState(() => _isDownloading = true);
     try {
       const csvContent =
-          '''Date,Withdrawal,Deposit,Payee,Description,Reference Number
-01/03/2026,,,,Opening Balance,
-05/03/2026,,50000.00,,Salary Credit,SAL-001
-10/03/2026,2500.00,,Power Corp,Electricity Bill,REF-101
-15/03/2026,,15000.00,Acme Corp,Customer Payment - Acme Corp,PAY-001
-20/03/2026,800.00,,,Office Supplies,REF-202
-25/03/2026,12000.00,,ABC Traders,Vendor Payment - ABC Traders,VND-001
+          '''Date,Withdrawals,Deposits,Payee,Description,Reference Number
+2026-03-01,0,0,,Opening Balance,
+2026-03-05,0,50000.00,,Salary Credit,SAL-001
+2026-03-10,2500.00,0,Power Corp,Electricity Bill,REF-101
+2026-03-15,0,15000.00,Acme Corp,Customer Payment - Acme Corp,PAY-001
+2026-03-20,800.00,0,,Office Supplies,REF-202
+2026-03-25,12000.00,0,ABC Traders,Vendor Payment - ABC Traders,VND-001
 ''';
 
       final bytes = utf8.encode(csvContent);
@@ -197,6 +219,7 @@ class _BulkImportBankStatementDialogState
 
         // Add accountId as form field
         request.fields['accountId'] = widget.accountId;
+        request.fields['dateFormat'] = _dateFormat;
         if (validateOnly) request.fields['validateOnly'] = 'true';
 
         headers.forEach((k, v) {
@@ -241,6 +264,14 @@ class _BulkImportBankStatementDialogState
           failedCount: failedCount,
           skippedCount: (checkData['skipped'] as num?)?.toInt() ?? 0,
           errorDetails: (checkData['errorDetails'] as List?) ?? [],
+          dateFormat: (checkData['dateFormat'] as String?) ?? 'AUTO',
+          preview: (checkData['preview'] as List?) ?? [],
+          warnings: ((checkData['warnings'] as List?) ?? [])
+              .map((w) => w.toString())
+              .toList(),
+          dateRange: checkData['dateRange'] is Map
+              ? Map<String, dynamic>.from(checkData['dateRange'] as Map)
+              : null,
         );
         if (importValid != true) {
           // Cancelled (or nothing to import) — nothing was saved.
@@ -305,6 +336,148 @@ class _BulkImportBankStatementDialogState
     }
   }
 
+  // The date format used, how the first dates will be SAVED, and any warning
+  // (format looks wrong, dates far from today ...).
+  // "2026-05-03" → "03 May 2026" (the month as a word, so it cannot be misread)
+  String _niceDay(dynamic iso) {
+    try {
+      return DateFormat('dd MMM yyyy').format(DateTime.parse('$iso'));
+    } catch (_) {
+      return '$iso';
+    }
+  }
+
+  // 50000 → "₹50,000.00"
+  String _money(dynamic v) {
+    final n = v is num ? v : num.tryParse('$v');
+    if (n == null) return '$v';
+    return NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2)
+        .format(n);
+  }
+
+  List<Widget> _checkInfoWidgets({
+    required String dateFormat,
+    required List<dynamic> preview,
+    required List<String> warnings,
+    Map<String, dynamic>? dateRange,
+  }) {
+    final widgets = <Widget>[];
+    widgets.add(const SizedBox(height: 10));
+    widgets.add(Text(
+        dateFormat == 'AUTO'
+            ? 'Date format: detected automatically'
+            : 'Date format used: $dateFormat',
+        style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[800])));
+    if (dateRange != null) {
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+            'Dates run from ${_niceDay(dateRange['from'])} to ${_niceDay(dateRange['to'])}',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+      ));
+    }
+    if (preview.isNotEmpty) {
+      widgets.add(const SizedBox(height: 8));
+      widgets.add(Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+            color: _kBlue.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _kBlue.withOpacity(0.25))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Preview — how the first rows will be saved',
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w700, color: _kBlue)),
+          const SizedBox(height: 6),
+          // column headings
+          Row(children: [
+            SizedBox(
+                width: 84,
+                child: Text('In your file',
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[600]))),
+            const SizedBox(width: 18),
+            SizedBox(
+                width: 92,
+                child: Text('Will be saved as',
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[600]))),
+            Expanded(
+                child: Text('Description',
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[600]))),
+            Text('Amount',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600])),
+          ]),
+          const Divider(height: 8),
+          ...preview.map<Widget>((p) {
+            final m = p is Map ? p : const {};
+            final isCredit = m['type'] == 'CREDIT';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(children: [
+                SizedBox(
+                    width: 84,
+                    child: Text('${m['rawDate']}',
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey[700]))),
+                const Icon(Icons.arrow_forward, size: 12, color: Colors.grey),
+                const SizedBox(width: 6),
+                SizedBox(
+                    width: 92,
+                    child: Text(_niceDay(m['date']),
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w700))),
+                Expanded(
+                    child: Text('${m['description'] ?? ''}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12))),
+                Text('${isCredit ? '+' : '-'}${_money(m['amount'])}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isCredit ? _kGreen : _kRed)),
+              ]),
+            );
+          }),
+        ]),
+      ));
+    }
+    for (final w in warnings) {
+      widgets.add(const SizedBox(height: 8));
+      widgets.add(Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+            color: _kOrange.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _kOrange.withOpacity(0.4))),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.warning_amber_rounded, color: _kOrange, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+              child:
+                  Text(w, style: const TextStyle(fontSize: 12, height: 1.4))),
+        ]),
+      ));
+    }
+    return widgets;
+  }
+
   // ── Some rows failed the check: import the good ones, or cancel everything ──
   // Returns true  → import only the successful rows (failed rows are skipped)
   //         false → cancel, nothing is imported
@@ -313,6 +486,10 @@ class _BulkImportBankStatementDialogState
     required int failedCount,
     required int skippedCount,
     required List<dynamic> errorDetails,
+    String dateFormat = 'AUTO',
+    List<dynamic> preview = const [],
+    List<String> warnings = const [],
+    Map<String, dynamic>? dateRange,
   }) {
     final canImport = validCount > 0;
     final hasFailures = failedCount > 0;
@@ -348,11 +525,12 @@ class _BulkImportBankStatementDialogState
           ),
         ]),
         content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 360),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 480),
+          child: SingleChildScrollView(
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 Text(
                   canImport
                       ? '$validCount transaction(s) ${hasFailures ? 'are valid' : 'will be imported'}'
@@ -366,9 +544,15 @@ class _BulkImportBankStatementDialogState
                   style: TextStyle(
                       fontSize: 13, color: Colors.grey[700], height: 1.5),
                 ),
+                ..._checkInfoWidgets(
+                    dateFormat: dateFormat,
+                    preview: preview,
+                    warnings: warnings,
+                    dateRange: dateRange),
                 if (hasFailures) const SizedBox(height: 12),
                 if (hasFailures)
-                  Flexible(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 150),
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(10),
@@ -394,7 +578,7 @@ class _BulkImportBankStatementDialogState
                       ),
                     ),
                   ),
-              ]),
+              ])),
         ),
         actions: [
           TextButton(
@@ -463,6 +647,8 @@ class _BulkImportBankStatementDialogState
                     (_isDownloading || _isUploading) ? null : _downloadTemplate,
               ),
               const SizedBox(height: 14),
+              _buildDateFormatPicker(),
+              const SizedBox(height: 14),
               _buildStep(
                 step: '2',
                 color: _kGreen,
@@ -523,6 +709,49 @@ class _BulkImportBankStatementDialogState
         ]),
       );
 
+  // "Which format are the dates in your file?" — never guessed by the server.
+  Widget _buildDateFormatPicker() => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: _kOrange.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _kOrange.withOpacity(0.35))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.event_outlined, color: _kOrange, size: 18),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Date format in your file',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _dateFormat,
+            isDense: true,
+            decoration: InputDecoration(
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            items: _dateFormats
+                .map((f) => DropdownMenuItem(
+                    value: f,
+                    child: Text('$f   (${_dateFormatExamples[f]})',
+                        style: const TextStyle(fontSize: 13))))
+                .toList(),
+            onChanged: _isUploading
+                ? null
+                : (v) => setState(() => _dateFormat = v ?? _dateFormat),
+          ),
+          const SizedBox(height: 6),
+          Text(
+              'You will see how your dates will be saved before anything is imported.',
+              style: TextStyle(fontSize: 11.5, color: Colors.grey[700])),
+        ]),
+      );
+
   Widget _buildInfoBox() => Container(
         margin: const EdgeInsets.only(top: 20),
         padding: const EdgeInsets.all(16),
@@ -541,9 +770,9 @@ class _BulkImportBankStatementDialogState
           const SizedBox(height: 10),
           const Text(
             'Required columns:\n'
-            '• Date (DD/MM/YYYY)\n'
-            '• Withdrawal (debit/money out — leave blank if deposit)\n'
-            '• Deposit (credit/money in — leave blank if withdrawal)\n'
+            '• Date — choose its format below (2026-10-03 always works)\n'
+            '• Withdrawals (debit/money out — 0 or blank if deposit)\n'
+            '• Deposits (credit/money in — 0 or blank if withdrawal)\n'
             '• Payee (optional — vendor/customer name)\n'
             '• Description\n'
             '• Reference Number',

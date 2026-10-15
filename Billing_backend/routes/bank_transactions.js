@@ -1742,6 +1742,69 @@ router.get('/stats/:accountId', async (req, res) => {
 // ROUTE 17 — POST /import
 // Import bank statement CSV → saves as ProviderTransactions (UNCATEGORIZED)
 // ============================================================================
+// ── Statement date handling ──────────────────────────────────────────────────
+// The user tells us the date format of the file (dropdown on the import screen)
+// so a date is never guessed. Year-month-day (2026-10-03) is unambiguous and is
+// always accepted. Every parsed date is a real calendar date stored at UTC
+// midnight; an impossible date (e.g. month 13, 31 Feb) is a failed row.
+const STATEMENT_DATE_FORMATS = [
+  'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD', 'YYYY/MM/DD',
+  'DD-MM-YYYY', 'MM-DD-YYYY', 'DD-MMM-YYYY',
+];
+const _MONTH_NUM = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+function _utcDateOrNull(y, m, d) {
+  if (!(y >= 1900 && y <= 2100) || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt;
+}
+function parseStatementDate(raw, fmt) {
+  let s = String(raw || '').trim();
+  if (!s) return null;
+  // drop a trailing time ("2026-10-03 10:15:00", "03/10/2026 10:15 AM")
+  s = s.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?(\s*[AaPp][Mm])?\s*(Z|[+-]\d{2}:?\d{2})?$/, '').trim();
+  const yr = (y) => (y.length === 2 ? 2000 + Number(y) : Number(y));
+  let m;
+  // year-month-day can only mean one thing — always accepted
+  if ((m = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/.exec(s))) return _utcDateOrNull(+m[1], +m[2], +m[3]);
+  switch (fmt) {
+    case 'DD/MM/YYYY':
+      return (m = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(s)) ? _utcDateOrNull(yr(m[3]), +m[2], +m[1]) : null;
+    case 'MM/DD/YYYY':
+      return (m = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(s)) ? _utcDateOrNull(yr(m[3]), +m[1], +m[2]) : null;
+    case 'DD-MM-YYYY':
+      return (m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s)) ? _utcDateOrNull(yr(m[3]), +m[2], +m[1]) : null;
+    case 'MM-DD-YYYY':
+      return (m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s)) ? _utcDateOrNull(yr(m[3]), +m[1], +m[2]) : null;
+    case 'DD-MMM-YYYY':
+      if ((m = /^(\d{1,2})[-\s\/]+([A-Za-z]{3,9})\.?[-\s,\/]+(\d{2}|\d{4})$/.exec(s))) {
+        const mon = _MONTH_NUM[m[2].toLowerCase()];
+        return mon ? _utcDateOrNull(yr(m[3]), mon, +m[1]) : null;
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
+// Duplicate checks compare the CALENDAR DAY, not the exact instant. Existing rows
+// are stored either at UTC midnight (current importer) or at IST midnight, i.e.
+// 18:30 UTC the day before (what the older live importer wrote) — both count as
+// the same day, so re-importing an overlapping statement never double-imports.
+const _IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+function dupInstants(d) {
+  const isIstMidnight = d.getUTCHours() === 18 && d.getUTCMinutes() === 30 &&
+                        d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+  const base = isIstMidnight ? new Date(d.getTime() + _IST_OFFSET_MS) : d;
+  const dayStart = Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate());
+  return [new Date(dayStart), new Date(dayStart - _IST_OFFSET_MS)];
+}
+
 router.post('/import', upload.single('file'), async (req, res) => {
   try {
     const { accountId } = req.body;
@@ -1787,9 +1850,25 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const validateOnly = String(req.body.validateOnly || '').toLowerCase() === 'true';
     const seenInFile   = [];
 
+    // dateFormat (optional): the format the user says the file's dates are in.
+    // Not sent (older app) → the previous behaviour is kept unchanged.
+    const dateFormatReq = String(req.body.dateFormat || '').trim().toUpperCase();
+    const dateFormat    = STATEMENT_DATE_FORMATS.includes(dateFormatReq) ? dateFormatReq : null;
+    if (dateFormatReq && !dateFormat) {
+      return res.status(400).json({ success: false, message: `Unknown date format "${req.body.dateFormat}". Use one of: ${STATEMENT_DATE_FORMATS.join(', ')}` });
+    }
+    const previewRows  = [];   // first valid rows, for the preview box
+    const validDays    = [];   // calendar day of every valid row
+    const allRawDates  = [];   // every date cell, to suggest a better format
+    let numericDates = 0, ambiguousDates = 0, dateErrors = 0;
+
     for (let i = 0; i < records.length; i++) {
       const row    = records[i];
       const rowNum = i + 2;
+      // A row with nothing in any cell (e.g. a line of only commas left at the
+      // bottom of an Excel sheet) is ignored — it is not a transaction and must
+      // not show up as a failed row. A row with ANY value but no date still fails.
+      if (Object.values(row).every(v => String(v == null ? '' : v).trim() === '')) continue;
       try {
         const rawDate       = row['Date']             || row['date']             || '';
         const description   = row['Description']      || row['description']      || '';
@@ -1814,8 +1893,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
+        allRawDates.push(rawDate);
         let parsedDate;
-        if (rawDate.includes('/')) {
+        if (dateFormat) {
+          parsedDate = parseStatementDate(rawDate, dateFormat);
+        } else if (rawDate.includes('/')) {
           const parts = rawDate.split('/');
           let day, month, year;
           if (parts.length === 3) {
@@ -1834,9 +1916,15 @@ router.post('/import', upload.single('file'), async (req, res) => {
         } else {
           parsedDate = new Date(rawDate);
         }
-        if (isNaN(parsedDate.getTime())) {
+        if (!parsedDate || isNaN(parsedDate.getTime())) {
           results.errors++;
-          results.errorDetails.push({ row: rowNum, error: `Invalid date: ${rawDate}` });
+          dateErrors++;
+          results.errorDetails.push({
+            row: rowNum,
+            error: dateFormat
+              ? `Invalid date "${rawDate}" — does not match ${dateFormat}`
+              : `Invalid date: ${rawDate}`,
+          });
           continue;
         }
 
@@ -1862,7 +1950,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         const dupFilter = {
           accountId: accountObjId,
-          transactionDate: parsedDate,
+          // same calendar day, whether stored at UTC midnight or IST midnight
+          transactionDate: { $in: dupInstants(parsedDate) },
           amount,
           transactionType: txnType,
           ...orgFilter(req),
@@ -1873,7 +1962,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         // Same rule as dupFilter, applied to earlier rows of this file (only
         // needed in validateOnly mode, where earlier rows are not saved).
-        const dupKey = `${parsedDate.getTime()}|${amount}|${txnType}`;
+        const dupKey = `${dupInstants(parsedDate)[0].getTime()}|${amount}|${txnType}`;
         const dupInFile = validateOnly && seenInFile.some(s =>
           s.key === dupKey && (!referenceNum || s.ref === (referenceNum || null)));
 
@@ -1886,6 +1975,17 @@ router.post('/import', upload.single('file'), async (req, res) => {
         if (validateOnly) {
           seenInFile.push({ key: dupKey, ref: referenceNum || null });
           results.imported++;
+          const dayStart = dupInstants(parsedDate)[0];
+          validDays.push(dayStart.getTime());
+          const dm = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}/.exec(String(rawDate).trim());
+          if (dm) { numericDates++; if (+dm[1] <= 12 && +dm[2] <= 12 && dm[1] !== dm[2]) ambiguousDates++; }
+          if (previewRows.length < 5) {
+            previewRows.push({
+              row: rowNum, rawDate: String(rawDate), date: dayStart.toISOString().slice(0, 10),
+              description: description || (isCredit ? 'Credit' : 'Debit'),
+              amount, type: txnType,
+            });
+          }
           continue;
         }
 
@@ -1916,6 +2016,36 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
     if (validateOnly) {
       console.log(`🔎 Import check (nothing saved): ${results.imported} valid, ${results.skipped} skipped, ${results.errors} failed`);
+
+      // Help the user spot a wrong date format BEFORE anything is saved.
+      const warnings = [];
+      let suggestedFormat = null;
+      let suggestedFormats = [];
+      if (dateFormat && dateErrors > 0) {
+        const nonEmpty = allRawDates.filter(Boolean);
+        // every OTHER format that fits all the dates in the file
+        suggestedFormats = STATEMENT_DATE_FORMATS.filter(f => f !== dateFormat &&
+          nonEmpty.length > 0 && nonEmpty.every(r => parseStatementDate(r, f)));
+        suggestedFormat = suggestedFormats[0] || null;   // kept for older app versions
+        if (suggestedFormats.length === 1) {
+          warnings.push(`Some dates do not match ${dateFormat}, but every date fits ${suggestedFormats[0]} — your file may be in that format.`);
+        } else if (suggestedFormats.length > 1) {
+          warnings.push(`Some dates do not match ${dateFormat}, but every date fits ${suggestedFormats.join(' and ')}. Pick the one that matches your bank statement (check the preview).`);
+        }
+      }
+      let dateRange = null;
+      if (validDays.length) {
+        const min = Math.min(...validDays), max = Math.max(...validDays);
+        dateRange = { from: new Date(min).toISOString().slice(0, 10), to: new Date(max).toISOString().slice(0, 10) };
+        const now = Date.now();
+        if (max > now + 31 * 86400000) warnings.push(`Some dates are in the future (latest ${dateRange.to}). Check the date format.`);
+        if (min < now - 5 * 366 * 86400000) warnings.push(`Some dates are more than 5 years old (earliest ${dateRange.from}). Check the date format.`);
+      }
+      if (numericDates > 0 && ambiguousDates === numericDates &&
+          ['DD/MM/YYYY', 'MM/DD/YYYY', 'DD-MM-YYYY', 'MM-DD-YYYY'].includes(dateFormat)) {
+        warnings.push('Every date has a day and month of 12 or less, so day-first and month-first cannot be told apart. Check that the preview dates match your statement.');
+      }
+
       return res.json({
         success: true,
         message: `Check complete. ${results.imported} valid, ${results.skipped} skipped (duplicates), ${results.errors} failed. Nothing was saved.`,
@@ -1925,6 +2055,12 @@ router.post('/import', upload.single('file'), async (req, res) => {
           skipped:      results.skipped,
           errors:       results.errors,
           errorDetails: results.errorDetails,
+          dateFormat:   dateFormat || 'AUTO',
+          preview:      previewRows,
+          dateRange,
+          warnings,
+          suggestedFormat,
+          suggestedFormats,
         },
       });
     }
