@@ -11,6 +11,9 @@ import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/services/budget_service.dart';
 import 'new_budget.dart';
+import '../../../../core/finance_secure_storage.dart';
+import '../../../../core/services/reports_service.dart' show ReportMeta;
+import 'report_detail_page.dart';
 
 import 'package:open_file/open_file.dart';
 
@@ -499,6 +502,118 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
 
   // ── Comparison Table ──────────────────────────────────────────────────────
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DRILL-DOWN — open the Expense Details report behind an "Actual" figure.
+  // The budget's actual is built from the ledger of each expense account; the
+  // Expense Details report lists the expenses that make it up: same account,
+  // same dates (the financial year or one month, narrowed by the date filter
+  // above — exactly as the actuals themselves are).
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Only expense accounts that actually have an amount can be opened.
+  bool _canDrill(BudgetAccountLine line, double actual) =>
+      actual != 0 && !const ['Income', 'Other Income'].contains(line.accountType);
+
+  // "2026-27" → 1 Apr 2026 .. 31 Mar 2027
+  List<DateTime>? _fyDates(Budget b) {
+    final parts = b.financialYear.split('-');
+    if (parts.length != 2) return null;
+    final sy = int.tryParse(parts[0]);
+    final ey = parts[1].length == 2
+        ? int.tryParse('${parts[0].substring(0, 2)}${parts[1]}')
+        : int.tryParse(parts[1]);
+    if (sy == null || ey == null) return null;
+    return [DateTime(sy, 4, 1), DateTime(ey, 3, 31)];
+  }
+
+  // month column 0..11 = Apr..Mar → first and last day of that month
+  List<DateTime>? _monthDates(Budget b, int idx) {
+    final fy = _fyDates(b);
+    if (fy == null) return null;
+    final month = ((idx + 3) % 12) + 1;
+    final year = idx < 9 ? fy[0].year : fy[1].year; // Apr–Dec / Jan–Mar
+    return [DateTime(year, month, 1), DateTime(year, month + 1, 0)];
+  }
+
+  // Narrow a range by the page's From / To filter (null = nothing left).
+  List<DateTime>? _clipToFilter(List<DateTime> range) {
+    var from = range[0];
+    var to = range[1];
+    if (_startDate != null) {
+      final s = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+      if (s.isAfter(from)) from = s;
+    }
+    if (_endDate != null) {
+      final e = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+      if (e.isBefore(to)) to = e;
+    }
+    return from.isAfter(to) ? null : [from, to];
+  }
+
+  // Same organisation label the Reports screens show.
+  Future<String> _orgNameForReport() async {
+    try {
+      if (await FinanceSecureStorage.isMultiOrgMode()) {
+        final selected = await FinanceSecureStorage.getSelectedOrgIds();
+        final all = await FinanceSecureStorage.getOrganizations();
+        if (selected.length == 1 && selected.first == 'ALL') {
+          return 'All Organizations (${all.length})';
+        }
+        return '${selected.length} Organizations';
+      }
+      return await FinanceSecureStorage.getOrgName() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _openExpenseDetails(
+      BudgetAccountLine line, List<DateTime>? range) async {
+    if (range == null) return;
+    final clipped = _clipToFilter(range);
+    if (clipped == null) return;
+    final orgName = await _orgNameForReport();
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReportDetailPage(
+          // the report page filters by expense account when the parent report is
+          // "Expenses by Category" and the row's category is the account name
+          parentReport:
+              ReportMeta(key: 'expenses-by-category', name: 'Expenses by Category'),
+          rowData: {'category': line.accountName, 'accountName': line.accountName},
+          orgName: orgName,
+          periodParams: {
+            'fromDate': clipped[0].toIso8601String(),
+            'toDate': clipped[1].toIso8601String(),
+          },
+        ),
+      ),
+    );
+  }
+
+  // An "Actual" figure; when [onTap] is given it looks and acts like a link.
+  Widget _drillText(String text, TextStyle style, VoidCallback? onTap,
+      {TextAlign align = TextAlign.right}) {
+    if (onTap == null) return Text(text, style: style, textAlign: align);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Tooltip(
+        message: 'View the expenses behind this figure',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Text(text,
+              textAlign: align,
+              style: style.copyWith(
+                  decoration: TextDecoration.underline,
+                  decorationStyle: TextDecorationStyle.dotted)),
+        ),
+      ),
+    );
+  }
+
   Widget _buildComparisonTable(Budget b) => Container(
         margin: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -617,10 +732,15 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                           DataCell(Text('₹${_fmt(line.totalBudgeted)}',
                               style: const TextStyle(
                                   fontWeight: FontWeight.w600))),
-                          DataCell(Text('₹${_fmt(line.totalActual)}',
-                              style: TextStyle(
+                          DataCell(_drillText(
+                              '₹${_fmt(line.totalActual)}',
+                              TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.teal.shade700))),
+                                  color: Colors.teal.shade700),
+                              _canDrill(line, line.totalActual)
+                                  ? () => _openExpenseDetails(line, _fyDates(b))
+                                  : null,
+                              align: TextAlign.left)),
                           DataCell(Text(
                             '${over ? '-' : ''}₹${_fmt(variance.abs())}',
                             style: TextStyle(
@@ -758,15 +878,18 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                           textAlign: TextAlign.right,
                         ),
                         const SizedBox(height: 6),
-                        Text(
+                        _drillText(
                           _fmt(act),
-                          style: TextStyle(
+                          TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                               color: over
                                   ? Colors.red.shade600
                                   : const Color(0xFF00796B)),
-                          textAlign: TextAlign.right,
+                          _canDrill(line, act)
+                              ? () => _openExpenseDetails(
+                                  line, _monthDates(b, m))
+                              : null,
                         ),
                       ],
                     ),
@@ -799,13 +922,15 @@ class _BudgetDetailPageState extends State<BudgetDetailPage> {
                         textAlign: TextAlign.right,
                       ),
                       const SizedBox(height: 6),
-                      Text(
+                      _drillText(
                         _fmt(line.totalActual),
-                        style: const TextStyle(
+                        const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF00796B)),
-                        textAlign: TextAlign.right,
+                        _canDrill(line, line.totalActual)
+                            ? () => _openExpenseDetails(line, _fyDates(b))
+                            : null,
                       ),
                     ],
                   ),
