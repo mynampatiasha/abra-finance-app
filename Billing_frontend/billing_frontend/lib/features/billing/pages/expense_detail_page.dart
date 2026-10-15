@@ -1,16 +1,15 @@
 import 'package:abra_finance/core/utils/app_snackbar.dart';
+import 'package:abra_finance/core/utils/file_mime.dart';
 import '../widgets/document_preview_buttons.dart';
+import '../widgets/expense_proof_manager.dart';
 // ============================================================================
 // EXPENSE DETAIL PAGE — with PDF/Image download, Share, Proof viewer + upload
 // ============================================================================
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_file/open_file.dart';
@@ -40,6 +39,15 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   bool _isLoading = true;
   String? _error;
   bool _changed = false;
+  // Proofs shown straight from an upload / delete reply — no reload of the page.
+  List<ProofFile>? _proofsOverride;
+  bool _proofsChanged = false;
+  final Map<String, Future<Uint8List?>> _imgFutures = {};
+  List<ProofFile> get _proofs =>
+      _proofsOverride ?? _expense?.proofFiles ?? const <ProofFile>[];
+  // What the list page is told when we go back: a full reload only if something
+  // other than proofs changed; otherwise just the new proof list.
+  Object _popResult() => _changed ? true : (_proofsChanged ? _proofs : false);
   final ExpenseService _service = ExpenseService();
   final ApiService _api = ApiService();
 
@@ -49,18 +57,23 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       final resp = await _service.getExpenseById(widget.expenseId);
+      if (!mounted) return;
       setState(() {
         _expense = Expense.fromJson(resp['data']);
+        _proofsOverride = null; // the reloaded expense has the latest proofs
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted || silent) return; // a quiet refresh never replaces the screen with an error
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -79,8 +92,10 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
         throw Exception('Server returned ${response.statusCode}');
 
       final bytes = response.bodyBytes;
-      final ct = response.headers['content-type'] ?? 'application/octet-stream';
-      final mimeType = ct.split(';').first.trim();
+      // If the server says "unknown type", a browser would download the file
+      // instead of showing it — so work the type out from the file name.
+      final mimeType =
+          mimeForDownload(response.headers['content-type'], filename);
 
       if (kIsWeb) {
         final blob = html.Blob([bytes], mimeType);
@@ -113,185 +128,59 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   }
 
   // ── Fetch image bytes for inline display ───────────────────────────────────
-  Future<Uint8List?> _fetchImageBytes(String url) async {
-    try {
-      final headers = await _api.getHeaders();
-      final response = await http.get(Uri.parse(url), headers: headers);
-      if (response.statusCode == 200) return response.bodyBytes;
-    } catch (_) {}
-    return null;
-  }
+  // One download per picture, reused on every redraw / refresh / reopen.
+  Future<Uint8List?> _imageFuture(String url) => _imgFutures.putIfAbsent(
+      url, () => ProofImageCache.instance.fetch(_api, url));
 
   // ── Upload / Replace proof ─────────────────────────────────────────────────
   Future<void> _uploadProof() async {
     if (_expense == null) return;
-    final hasExisting = _expense!.proofFile != null;
-
-    // Confirm replacement if proof already exists
-    if (hasExisting) {
-      final replace = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Replace Existing Proof',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Text(
-              'A proof file "${_expense!.proofFile!.originalName}" is already attached. Replace it?'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white),
-              child: const Text('Replace'),
-            ),
-          ],
-        ),
-      );
-      if (replace != true) return;
-    }
-
-    // Show source picker dialog
+    // Choose camera / several files, check (max 10 per expense, 10 MB each) and
+    // upload them all in one request — they are ADDED to the existing proofs.
+    final result = await pickAndUploadProofs(
+      context,
+      api: _api,
+      expenseId: widget.expenseId,
+      existingCount: _proofs.length,
+      onError: (m) => _snack(m, Colors.red),
+      onSuccess: (m) => _snack(m, Colors.green),
+    );
+    if (result == null) return;
+    // The server's reply already has the full list — show it right away.
+    // (An older server's reply has none: ask once, lightly, without a spinner.)
+    final list = result.proofs ?? await fetchExpenseProofs(_api, widget.expenseId);
     if (!mounted) return;
-    final source = await showDialog<String>(
+    setState(() {
+      _proofsChanged = true;
+      if (list != null) _proofsOverride = list;
+    });
+    if (list == null) _load(silent: true);
+  }
+
+  // View, delete or add proofs (up to 10 per expense)
+  Future<void> _manageProofs() async {
+    if (_expense == null) return;
+    final number = '${_expense!.expenseNumber ?? ''}';
+    final list = await showDialog<List<ProofFile>>(
       context: context,
-      barrierDismissible: true,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: _DetailProofSourceSheet(hasExisting: hasExisting),
+      barrierDismissible: false, // closes through Done / X / back, which hand back the list
+      builder: (_) => ExpenseProofManagerDialog(
+        api: _api,
+        expenseId: widget.expenseId,
+        title: number.isEmpty
+            ? _expense!.expenseAccount
+            : '${_expense!.expenseAccount} • $number',
+        initialProofs: _proofs,
+        onError: (m) => _snack(m, Colors.red),
+        onSuccess: (m) => _snack(m, Colors.green),
       ),
     );
-    if (source == null) return;
-
-    Uint8List? bytes;
-    String? fileName;
-    String? mimeType;
-
-    if (source == 'camera') {
-      if (kIsWeb) {
-        final completer = Completer<void>();
-        final input = html.FileUploadInputElement()
-          ..accept = 'image/*'
-          ..setAttribute('capture', 'environment');
-        input.click();
-        input.onChange.listen((e) {
-          final file = input.files?.first;
-          if (file == null) {
-            completer.complete();
-            return;
-          }
-          final reader = html.FileReader();
-          reader.readAsArrayBuffer(file);
-          reader.onLoad.listen((_) {
-            bytes = Uint8List.fromList(reader.result as List<int>);
-            fileName = file.name.isNotEmpty
-                ? file.name
-                : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
-            mimeType = file.type.isNotEmpty ? file.type : 'image/jpeg';
-            completer.complete();
-          });
-          reader.onError.listen((_) => completer.complete());
-        });
-        await completer.future;
-        if (bytes == null) return;
-      } else {
-        try {
-          final picker = ImagePicker();
-          final picked = await picker.pickImage(
-            source: ImageSource.camera,
-            imageQuality: 85,
-            maxWidth: 2048,
-            maxHeight: 2048,
-          );
-          if (picked == null) return;
-          bytes = await picked.readAsBytes();
-          fileName = picked.name.isNotEmpty
-              ? picked.name
-              : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
-          mimeType = 'image/jpeg';
-        } catch (e) {
-          _snack('Could not open camera: $e', Colors.red);
-          return;
-        }
-      }
-    } else {
-      try {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
-          allowMultiple: false,
-          withData: true,
-        );
-        if (result == null || result.files.isEmpty) return;
-        final file = result.files.first;
-        bytes = file.bytes;
-        fileName = file.name;
-        final ext = (file.extension ?? '').toLowerCase();
-        mimeType = ext == 'pdf' ? 'application/pdf' : 'image/$ext';
-        if (bytes == null) {
-          _snack('Could not read file', Colors.red);
-          return;
-        }
-      } catch (e) {
-        _snack('File picker error: $e', Colors.red);
-        return;
-      }
-    }
-
-    // 10 MB size check
-    const maxBytes = 10 * 1024 * 1024;
-    final nonNullBytes = bytes!;
-    if (nonNullBytes.length > maxBytes) {
-      _snack(
-          'File too large (${(nonNullBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Max 10 MB.',
-          Colors.red);
-      return;
-    }
-
-    // Upload
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
+      _proofsChanged = true;
+      if (list != null) _proofsOverride = list;
     });
-    try {
-      final headers = await _api.getHeaders();
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse(
-            '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof'),
-      );
-      headers.forEach((k, v) {
-        if (k.toLowerCase() != 'content-type') request.headers[k] = v;
-      });
-      request.files.add(http.MultipartFile.fromBytes('proof', nonNullBytes,
-          filename: fileName));
-
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
-      setState(() {
-        _isLoading = false;
-        _changed = true;
-      });
-
-      if (response.statusCode == 200) {
-        final body = json.decode(response.body);
-        _snack('✅ Proof uploaded: ${body['data']?['originalName'] ?? fileName}',
-            Colors.green);
-        _load(); // Reload to show updated proof inline
-      } else {
-        final err = json.decode(response.body);
-        _snack('Upload failed: ${err['message'] ?? response.statusCode}',
-            Colors.red);
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      _snack('Upload error: $e', Colors.red);
-    }
+    if (list == null) _load(silent: true);
   }
 
   // ── Download expense PDF ───────────────────────────────────────────────────
@@ -342,7 +231,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        Navigator.pop(context, _changed);
+        Navigator.pop(context, _popResult());
         return false;
       },
       child: Scaffold(
@@ -568,7 +457,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       ],
 
       // Proof / Receipt attachments
-      if (e.proofFile != null || e.receiptFile != null) ...[
+      if (_proofs.isNotEmpty || e.receiptFile != null) ...[
         const SizedBox(height: 16),
         _detailCard(
           title: 'Attachments',
@@ -576,15 +465,17 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(children: [
-              if (e.proofFile != null)
-                _attachmentWidget(
-                  label: 'Proof: ${e.proofFile!.originalName}',
-                  url:
-                      '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof',
-                  filename: e.proofFile!.originalName,
-                  isImage: _isImageFile(e.proofFile!.originalName),
-                ),
-              if (e.proofFile != null && e.receiptFile != null)
+              ..._proofs.expand((p) => [
+                    _attachmentWidget(
+                      label: 'Proof: ${p.originalName}',
+                      url:
+                          '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof/${Uri.encodeComponent(p.filename)}',
+                      filename: p.originalName,
+                      isImage: _isImageFile(p.originalName),
+                    ),
+                    const SizedBox(height: 12),
+                  ]),
+              if (_proofs.isNotEmpty && e.receiptFile != null)
                 const SizedBox(height: 16),
               if (e.receiptFile != null)
                 _attachmentWidget(
@@ -696,8 +587,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                     overflow: TextOverflow.ellipsis)),
             OutlinedButton.icon(
               icon: const Icon(Icons.upload, size: 14),
-              label: const Text('Replace', style: TextStyle(fontSize: 12)),
-              onPressed: _uploadProof,
+              label: const Text('Manage', style: TextStyle(fontSize: 12)),
+              onPressed: _manageProofs,
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.orange,
                 side: const BorderSide(color: Colors.orange),
@@ -718,7 +609,8 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
           const SizedBox(height: 10),
           // Inline image — fetched with auth headers
           FutureBuilder<Uint8List?>(
-            future: _fetchImageBytes(url),
+            initialData: ProofImageCache.instance.peek(url),
+            future: _imageFuture(url),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return Container(
@@ -752,7 +644,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
               }
               final bytes = snap.data!;
               return GestureDetector(
-                onTap: () => _showFullScreenImage(bytes, filename),
+                onTap: () => _showFullScreenImage(bytes, filename, url),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
@@ -808,7 +700,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
     );
   }
 
-  void _showFullScreenImage(Uint8List bytes, String filename) {
+  void _showFullScreenImage(Uint8List bytes, String filename, String url) {
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -834,7 +726,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                 onPressed: () {
                   Navigator.pop(context);
                   _viewAttachment(
-                    '${_api.baseUrl}/api/finance/expenses/${widget.expenseId}/proof',
+                    url,
                     filename,
                     download: true,
                   );
@@ -904,9 +796,9 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
                 overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
         OutlinedButton.icon(
-          onPressed: _uploadProof,
+          onPressed: _manageProofs,
           icon: const Icon(Icons.upload, size: 14),
-          label: const Text('Replace', style: TextStyle(fontSize: 12)),
+          label: const Text('Manage', style: TextStyle(fontSize: 12)),
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.orange,
             side: const BorderSide(color: Colors.orange),
@@ -1004,7 +896,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
       SizedBox(
         width: double.infinity,
         child: OutlinedButton.icon(
-          onPressed: () => Navigator.pop(context, _changed),
+          onPressed: () => Navigator.pop(context, _popResult()),
           icon: const Icon(Icons.arrow_back, size: 18),
           label: const Text('Back to List'),
           style: OutlinedButton.styleFrom(
@@ -1165,128 +1057,3 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
 // =============================================================================
 //  PROOF SOURCE SHEET (for detail page)
 // =============================================================================
-
-class _DetailProofSourceSheet extends StatelessWidget {
-  final bool hasExisting;
-  const _DetailProofSourceSheet({required this.hasExisting});
-
-  @override
-  Widget build(BuildContext context) {
-    const teal = Color(0xFF16A085);
-    const navy = Color(0xFF0D1B3E);
-    const purple = Color(0xFF9B59B6);
-
-    return Container(
-      width: 360,
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          const Icon(Icons.verified_outlined, color: teal, size: 22),
-          const SizedBox(width: 10),
-          Text(
-            hasExisting ? 'Replace Proof' : 'Upload Proof',
-            style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1A202C)),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        Text(
-          'Choose how to add your proof document',
-          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-        ),
-        const SizedBox(height: 20),
-        _DetailSourceTile(
-          icon: Icons.camera_alt_rounded,
-          color: navy,
-          title: 'Take Photo',
-          subtitle: 'Use camera to capture the receipt',
-          onTap: () => Navigator.pop(context, 'camera'),
-        ),
-        const SizedBox(height: 10),
-        _DetailSourceTile(
-          icon: Icons.folder_open_rounded,
-          color: purple,
-          title: 'Choose File',
-          subtitle: 'Images (JPG, PNG, WEBP) or PDF — max 10 MB',
-          onTap: () => Navigator.pop(context, 'file'),
-        ),
-        const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
-          ),
-        ]),
-      ]),
-    );
-  }
-}
-
-class _DetailSourceTile extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title, subtitle;
-  final VoidCallback onTap;
-  const _DetailSourceTile({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.22)),
-        ),
-        child: Row(children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [color.withOpacity(0.8), color],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Icon(icon, color: Colors.white, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 3),
-                Text(subtitle,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right, color: Colors.grey[400]),
-        ]),
-      ),
-    );
-  }
-}

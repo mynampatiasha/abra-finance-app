@@ -19,7 +19,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html;
@@ -28,6 +27,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import '../../../../core/utils/export_helper.dart';
+import '../../../../core/utils/open_downloaded_file.dart';
 import '../../../../core/services/expenses_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/billing_vendors_service.dart';
@@ -35,6 +35,7 @@ import '../../../../core/services/billing_customers_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
+import '../widgets/expense_proof_manager.dart';
 import 'new_expenses.dart';
 import 'expense_detail_page.dart';
 
@@ -184,9 +185,14 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     try {
       final resp = await _expenseService.getExpenseStatistics();
       if (resp['success'] == true) {
+        if (!mounted) return;
         setState(() => _stats = ExpenseStats.fromJson(resp['data']));
       }
-    } catch (_) {}
+    } catch (e) {
+      // Never leave the cards at ₹0.00 without saying why.
+      debugPrint('Expense summary cards failed to load: $e');
+      if (mounted) _showError('Could not load the summary cards');
+    }
   }
 
   Future<void> _refresh() async {
@@ -319,7 +325,11 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
       MaterialPageRoute(
           builder: (_) => ExpenseDetailPage(expenseId: expense.id)),
     ).then((result) {
-      if (result == true) _loadExpenses();
+      if (result == true) {
+        _loadExpenses(); // something other than proofs changed
+      } else if (result is List<ProofFile>) {
+        _applyProofs(expense.id, result); // only the proofs changed
+      }
     });
   }
 
@@ -367,9 +377,11 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             ..click();
           html.Url.revokeObjectUrl(blobUrl);
         } else {
-          final uri = Uri.parse(url);
-          if (await canLaunchUrl(uri))
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          // Phone: open the file already downloaded with the login, not the plain
+          // web address (a browser has no token and the server refuses it).
+          final opened = await openDownloadedFile(
+              response.bodyBytes, expense.receiptFile!.originalName);
+          if (!opened) _showError('No app found to open this file');
         }
       } else {
         _showError('Download failed (${response.statusCode})');
@@ -398,7 +410,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         'Paid Via: ${expense.paidThrough}\n'
         'Customer: ${expense.customerName ?? '-'}\n'
         'Billable: ${expense.isBillable ? 'Yes' : 'No'}\n'
-        'Proof   : ${expense.proofFile != null ? '✅ Attached (${expense.proofFile!.originalName})' : '❌ Not uploaded'}';
+        'Proof   : ${expense.proofFiles.isNotEmpty ? '✅ Attached (${expense.proofFiles.length} file${expense.proofFiles.length == 1 ? '' : 's'})' : '❌ Not uploaded'}';
     try {
       await Share.share(text, subject: 'Expense: ${expense.expenseAccount}');
     } catch (e) {
@@ -408,153 +420,42 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
   // ── PROOF UPLOAD (NEW) ────────────────────────────────────────────────────
 
-  Future<void> _uploadProof(Expense expense) async {
-    // If proof already exists → confirm replacement
-    if (expense.proofFile != null) {
-      final replace = await _confirmDialog(
-        title: 'Replace Existing Proof',
-        message:
-            'A proof file "${expense.proofFile!.originalName}" is already attached. '
-            'Do you want to replace it with a new file?',
-        confirmLabel: 'Replace',
-        confirmColor: _orange,
-      );
-      if (replace != true) return;
+  // Show a changed proof list on that one expense's row — without reloading
+  // every expense (thousands of records) or the cards.
+  void _applyProofs(String expenseId, List<ProofFile> proofs) {
+    for (final e in _expenses) {
+      if (e.id == expenseId) e.setProofs(proofs);
     }
+    _applyFilters(); // the "With / Without Proof" filter may now include / exclude it
+  }
 
-    // Show centered dialog: Camera or File
-    if (!mounted) return;
-    final source = await showDialog<String>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: _ProofSourceSheet(hasExisting: expense.proofFile != null),
-      ),
+  Future<void> _uploadProof(Expense expense) async {
+    // Choose camera / several files, check (max 10 per expense, 10 MB each) and
+    // upload them all in one request — they are ADDED to the existing proofs.
+    final result = await pickAndUploadProofs(
+      context,
+      api: _apiService,
+      expenseId: expense.id,
+      existingCount: expense.proofFiles.length,
+      onError: _showError,
+      onSuccess: _showSuccess,
     );
-    if (source == null) return;
-
-    Uint8List? bytes;
-    String? fileName;
-    String? mimeType;
-
-    if (source == 'camera') {
-      if (kIsWeb) {
-        // Use browser native camera via html input
-        final completer = Completer<void>();
-        final input = html.FileUploadInputElement()
-          ..accept = 'image/*'
-          ..setAttribute('capture', 'environment');
-        input.click();
-        input.onChange.listen((e) {
-          final file = input.files?.first;
-          if (file == null) {
-            completer.complete();
-            return;
-          }
-          final reader = html.FileReader();
-          reader.readAsArrayBuffer(file);
-          reader.onLoad.listen((_) {
-            bytes = Uint8List.fromList(reader.result as List<int>);
-            fileName = file.name.isNotEmpty
-                ? file.name
-                : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
-            mimeType = file.type.isNotEmpty ? file.type : 'image/jpeg';
-            completer.complete();
-          });
-          reader.onError.listen((_) => completer.complete());
-        });
-        await completer.future;
-        if (bytes == null) return;
-      } else {
-        try {
-          final picker = ImagePicker();
-          final picked = await picker.pickImage(
-            source: ImageSource.camera,
-            imageQuality: 85,
-            maxWidth: 2048,
-            maxHeight: 2048,
-          );
-          if (picked == null) return;
-          bytes = await picked.readAsBytes();
-          fileName = picked.name.isNotEmpty
-              ? picked.name
-              : 'proof_${DateTime.now().millisecondsSinceEpoch}.jpg';
-          mimeType = 'image/jpeg';
-        } catch (e) {
-          _showError('Could not open camera: $e');
-          return;
-        }
+    if (result == null) return;
+    // The server's reply has the full list. (An older server's reply has none:
+    // ask for just this expense's proofs; only if that fails reload the list.)
+    final wasEmpty = expense.proofFiles.isEmpty;
+    final list = result.proofs ?? await fetchExpenseProofs(_apiService, expense.id);
+    if (!mounted) return;
+    if (list != null) {
+      _applyProofs(expense.id, list);
+      // The first proof of an expense: open the Proofs window so the new file
+      // can be seen (view / delete / add more) straight away.
+      if (wasEmpty && list.isNotEmpty) {
+        expense.setProofs(list); // make sure this very object has them, so the window opens (not another upload)
+        _openProof(expense);
       }
     } else {
-      // File picker — image or PDF
-      try {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
-          allowMultiple: false,
-          withData: true,
-        );
-        if (result == null || result.files.isEmpty) return;
-        final file = result.files.first;
-        bytes = file.bytes;
-        fileName = file.name;
-        // Determine mime type from extension
-        final ext = (file.extension ?? '').toLowerCase();
-        mimeType = ext == 'pdf' ? 'application/pdf' : 'image/$ext';
-        if (bytes == null) {
-          _showError('Could not read file');
-          return;
-        }
-      } catch (e) {
-        _showError('File picker error: $e');
-        return;
-      }
-    }
-
-    // Size check — 10 MB
-    const maxBytes = 10 * 1024 * 1024;
-    final nonNullBytes = bytes!;
-    if (nonNullBytes.length > maxBytes) {
-      _showError(
-          'File is too large (${(nonNullBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Maximum allowed is 10 MB.');
-      return;
-    }
-
-    // Upload to backend
-    setState(() => _isLoading = true);
-    try {
-      final headers = await _apiService.getHeaders();
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse(
-            '${_apiService.baseUrl}/api/finance/expenses/${expense.id}/proof'),
-      );
-      headers.forEach((k, v) {
-        if (k.toLowerCase() != 'content-type') request.headers[k] = v;
-      });
-      request.files.add(http.MultipartFile.fromBytes(
-        'proof', nonNullBytes,
-        filename: fileName,
-        // contentType is inferred from filename by the backend multer filter
-      ));
-
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
-      setState(() => _isLoading = false);
-
-      if (response.statusCode == 200) {
-        final body = json.decode(response.body);
-        _showSuccess(
-            '✅ Proof uploaded: ${body['data']?['originalName'] ?? fileName}');
-        _loadAll(); // Reload to reflect proofFile in list
-      } else {
-        final err = json.decode(response.body);
-        _showError('Upload failed: ${err['message'] ?? response.statusCode}');
-      }
-    } catch (e) {
-      setState(() => _isLoading = false);
-      _showError('Upload error: $e');
+      _loadExpenses();
     }
   }
 
@@ -679,7 +580,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             e.isBillable ? 'Yes' : 'No',
             e.project ?? '',
             e.notes ?? '',
-            e.proofFile != null ? 'Yes (${e.proofFile!.originalName})' : 'No',
+            e.proofFiles.isNotEmpty ? 'Yes (${e.proofFiles.length})' : 'No',
           ];
         }),
       ];
@@ -1715,7 +1616,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
                               Icons.verified_outlined,
                               _teal,
                               expense.proofFile != null
-                                  ? 'View / Replace Proof'
+                                  ? 'Proofs (${expense.proofFiles.length})'
                                   : 'Upload Proof'),
                           _menuItem('edit', Icons.edit_outlined, _navy, 'Edit'),
                           if (expense.receiptFile != null)
@@ -1915,7 +1816,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
                         expense.proofFile != null
                             ? Tooltip(
                                 message:
-                                    'Proof: ${expense.proofFile!.originalName}',
+                                    (expense.proofFiles.length > 1 ? 'Proofs: ${expense.proofFiles.length} files' : 'Proof: ${expense.proofFile!.originalName}'),
                                 child: InkWell(
                                   onTap: () => _openProof(expense),
                                   child: Container(
@@ -2152,7 +2053,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             child: Center(
               child: expense.proofFile != null
                   ? Tooltip(
-                      message: 'Proof: ${expense.proofFile!.originalName}',
+                      message: (expense.proofFiles.length > 1 ? 'Proofs: ${expense.proofFiles.length} files' : 'Proof: ${expense.proofFile!.originalName}'),
                       child: InkWell(
                         onTap: () => _openProof(expense),
                         child: Container(
@@ -2232,7 +2133,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
                       Icons.verified_outlined,
                       _teal, // NEW
                       expense.proofFile != null
-                          ? 'View / Replace Proof'
+                          ? 'Proofs (${expense.proofFiles.length})'
                           : 'Upload Proof'),
                   _menuItem('edit', Icons.edit_outlined, _navy, 'Edit'),
                   if (expense.receiptFile != null)
@@ -2271,53 +2172,32 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     );
   }
 
-  /// Open / view the proof (image inline, PDF in browser/external)
+  /// Manage the proofs of an expense — list, view, delete, add more.
   Future<void> _openProof(Expense expense) async {
-    if (expense.proofFile == null) {
+    if (expense.proofFiles.isEmpty) {
       _uploadProof(expense);
       return;
     }
-    final url =
-        '${_apiService.baseUrl}/api/finance/expenses/${expense.id}/proof';
-    if (expense.proofFile!.isImage) {
-      showDialog(
-        context: context,
-        builder: (_) => _ProofPreviewDialog(
-          proofFile: expense.proofFile!,
-          proofUrl: url,
-          apiService: _apiService,
-          onReplace: () {
-            Navigator.pop(context);
-            _uploadProof(expense);
-          },
-        ),
-      );
+    final number = '${expense.expenseNumber}';
+    final list = await showDialog<List<ProofFile>>(
+      context: context,
+      barrierDismissible: false, // closes through Done / X / back, which hand back the list
+      builder: (_) => ExpenseProofManagerDialog(
+        api: _apiService,
+        expenseId: expense.id,
+        title: (number.isEmpty || number == 'null')
+            ? expense.expenseAccount
+            : '${expense.expenseAccount} • $number',
+        initialProofs: expense.proofFiles,
+        onError: _showError,
+        onSuccess: _showSuccess,
+      ),
+    );
+    if (!mounted) return;
+    if (list != null) {
+      _applyProofs(expense.id, list); // just this row — no full reload
     } else {
-      // PDF — fetch with auth then open as blob
-      try {
-        setState(() => _isLoading = true);
-        final headers = await _apiService.getHeaders();
-        final response = await http.get(Uri.parse(url), headers: headers);
-        setState(() => _isLoading = false);
-        if (response.statusCode == 200) {
-          if (kIsWeb) {
-            final blob = html.Blob([response.bodyBytes], 'application/pdf');
-            final blobUrl = html.Url.createObjectUrlFromBlob(blob);
-            html.window.open(blobUrl, '_blank');
-            Future.delayed(const Duration(seconds: 30),
-                () => html.Url.revokeObjectUrl(blobUrl));
-          } else {
-            final uri = Uri.parse(url);
-            if (await canLaunchUrl(uri))
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        } else {
-          _showError('Could not open proof (${response.statusCode})');
-        }
-      } catch (e) {
-        setState(() => _isLoading = false);
-        _showError('Could not open proof: $e');
-      }
+      _loadExpenses();
     }
   }
 
@@ -2537,127 +2417,6 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
 // =============================================================================
 //  PROOF SOURCE BOTTOM SHEET
-// =============================================================================
-
-class _ProofSourceSheet extends StatelessWidget {
-  final bool hasExisting;
-  const _ProofSourceSheet({required this.hasExisting});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 360,
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Title row — matches logout card style
-        Row(children: [
-          const Icon(Icons.verified_outlined, color: _teal, size: 22),
-          const SizedBox(width: 10),
-          Text(
-            hasExisting ? 'Replace Proof' : 'Upload Proof',
-            style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1A202C)),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        Text(
-          'Choose how to add your proof document',
-          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-        ),
-        const SizedBox(height: 20),
-        _SourceTile(
-          icon: Icons.camera_alt_rounded,
-          color: _navy,
-          title: 'Take Photo',
-          subtitle: 'Use camera to capture the receipt',
-          onTap: () => Navigator.pop(context, 'camera'),
-        ),
-        const SizedBox(height: 10),
-        _SourceTile(
-          icon: Icons.folder_open_rounded,
-          color: _purple,
-          title: 'Choose File',
-          subtitle: 'Images (JPG, PNG, WEBP) or PDF — max 10 MB',
-          onTap: () => Navigator.pop(context, 'file'),
-        ),
-        const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
-          ),
-        ]),
-      ]),
-    );
-  }
-}
-
-class _SourceTile extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title, subtitle;
-  final VoidCallback onTap;
-  const _SourceTile(
-      {required this.icon,
-      required this.color,
-      required this.title,
-      required this.subtitle,
-      required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.22)),
-        ),
-        child: Row(children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                  colors: [color.withOpacity(0.8), color],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                    color: color.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3))
-              ],
-            ),
-            child: Icon(icon, color: Colors.white, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 3),
-                Text(subtitle,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-              ])),
-          Icon(Icons.chevron_right, color: Colors.grey[400]),
-        ]),
-      ),
-    );
-  }
-}
-
-// =============================================================================
-//  PROOF PREVIEW DIALOG (image)
 // =============================================================================
 
 class _ProofPreviewDialog extends StatefulWidget {
@@ -3301,11 +3060,14 @@ class _BulkImportExpensesDialogState extends State<BulkImportExpensesDialog> {
             ..click();
           html.Url.revokeObjectUrl(url);
         } else {
-          final templateUrl =
-              '${widget.apiService.baseUrl}/api/finance/expenses/import/template';
-          final uri = Uri.parse(templateUrl);
-          if (await canLaunchUrl(uri))
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          // Phone: open the template already downloaded with the login.
+          final opened = await openDownloadedFile(
+              response.bodyBytes, 'expenses_import_template.xlsx');
+          if (!opened) {
+            setState(() => _downloading = false);
+            _showSnack('No app found to open the template', _red);
+            return;
+          }
         }
         setState(() => _downloading = false);
         _showSnack('Template downloaded!', _green);
@@ -4012,13 +3774,27 @@ class ExpenseStats {
     required this.expensesByVendor,
   });
 
+  // The server sends whole amounts such as 800 and decimals such as 800.5. On a
+  // phone a whole number arrives as an int, so a strict "as double" / Map<String,
+  // double>.from throws there (and the cards showed ₹0.00). Read every number as
+  // a num, whichever form it has.
+  static double _num(dynamic v) =>
+      v is num ? v.toDouble() : (double.tryParse('${v ?? ''}') ?? 0.0);
+
+  static Map<String, double> _numMap(dynamic v) {
+    final out = <String, double>{};
+    if (v is Map) {
+      v.forEach((k, val) => out['$k'] = _num(val));
+    }
+    return out;
+  }
+
   factory ExpenseStats.fromJson(Map<String, dynamic> j) => ExpenseStats(
-        totalExpenses: (j['totalExpenses'] as num).toDouble(),
-        totalBillable: (j['totalBillable'] as num).toDouble(),
-        expenseCount: j['expenseCount'] as int,
-        expensesByAccount:
-            Map<String, double>.from(j['expensesByAccount'] ?? {}),
-        expensesByVendor: Map<String, double>.from(j['expensesByVendor'] ?? {}),
+        totalExpenses: _num(j['totalExpenses']),
+        totalBillable: _num(j['totalBillable']),
+        expenseCount: _num(j['expenseCount']).toInt(),
+        expensesByAccount: _numMap(j['expensesByAccount']),
+        expensesByVendor: _numMap(j['expensesByVendor']),
       );
 }
 

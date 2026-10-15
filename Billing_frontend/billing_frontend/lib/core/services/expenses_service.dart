@@ -589,7 +589,15 @@ class Expense {
   final bool isItemized;
   final List<ItemizedExpenseData> itemizedExpenses;
   final ReceiptFile? receiptFile;
-  final ProofFile? proofFile;
+  // The proofs are the only fields that can change on screen without reloading
+  // the whole expense (upload / delete), so they are not final.
+  ProofFile? proofFile; // the first proof (kept for older code / app versions)
+  List<ProofFile> proofFiles; // every proof of this expense (max 10)
+
+  void setProofs(List<ProofFile> list) {
+    proofFiles = list;
+    proofFile = list.isEmpty ? null : list.first;
+  }
   final String createdAt;
   final String updatedAt;
 
@@ -615,6 +623,7 @@ class Expense {
     required this.itemizedExpenses,
     this.receiptFile,
     this.proofFile,
+    this.proofFiles = const [],
     required this.createdAt,
     required this.updatedAt,
   });
@@ -695,9 +704,10 @@ class Expense {
         receiptFile: json['receiptFile'] != null
             ? ReceiptFile.fromJson(json['receiptFile'])
             : null,
-        proofFile: json['proofFile'] != null
-            ? ProofFile.fromJson(json['proofFile'] as Map<String, dynamic>)
+        proofFile: _proofListFromJson(json).isNotEmpty
+            ? _proofListFromJson(json).first
             : null,
+        proofFiles: _proofListFromJson(json),
         createdAt: _parseString(json['createdAt'], ''),
         updatedAt: _parseString(json['updatedAt'], ''),
       );
@@ -731,6 +741,7 @@ class Expense {
       'itemizedExpenses': itemizedExpenses.map((e) => e.toJson()).toList(),
       'receiptFile': receiptFile?.toJson(),
       'proofFile': proofFile?.toJson(),
+      'proofFiles': proofFiles.map((p) => p.toJson()).toList(),
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -809,6 +820,23 @@ class ReceiptFile {
   }
 }
 
+/// All proofs of an expense: the new `proofFiles` list, or — for an expense saved
+/// before several proofs were allowed — its single old `proofFile`.
+List<ProofFile> _proofListFromJson(Map<String, dynamic> json) {
+  final list = json['proofFiles'];
+  if (list is List && list.isNotEmpty) {
+    return list
+        .whereType<Map>()
+        .map((e) => ProofFile.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+  final single = json['proofFile'];
+  if (single is Map) {
+    return [ProofFile.fromJson(Map<String, dynamic>.from(single))];
+  }
+  return const [];
+}
+
 class ProofFile {
   final String filename;
   final String originalName;
@@ -840,6 +868,26 @@ class ProofFile {
         'uploadedAt': uploadedAt,
       };
 
-  bool get isImage => mimetype.startsWith('image/');
-  bool get isPdf => mimetype == 'application/pdf';
+  // The phone app used to upload files without a type, so older proofs are stored
+  // as "application/octet-stream". A clear image / PDF type wins; otherwise the
+  // file name's extension decides (so those proofs show as pictures, not "PDF").
+  String get _ext {
+    for (final n in [originalName, filename]) {
+      final m = RegExp(r'\.([A-Za-z0-9]{2,5})$').firstMatch(n);
+      if (m != null) return m.group(1)!.toLowerCase();
+    }
+    return '';
+  }
+
+  bool get isImage {
+    if (mimetype.startsWith('image/')) return true;
+    if (mimetype == 'application/pdf') return false;
+    return const ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(_ext);
+  }
+
+  bool get isPdf {
+    if (mimetype == 'application/pdf') return true;
+    if (mimetype.startsWith('image/')) return false;
+    return _ext == 'pdf';
+  }
 }
