@@ -1075,11 +1075,17 @@ const getCustomerMails = async (req, res) => {
       const orConditions = [{ customerId: { $in: customerIdValues } }];
       if (customer.primaryEmail) orConditions.push({ customerEmail: customer.primaryEmail });
 
+      // Both conditions must hold: the invoice belongs to THIS customer, and it has
+      // some mail / reminder history. (Two "$or" keys in one object literal make
+      // JavaScript keep only the last one, which dropped the customer condition and
+      // showed every customer's mails on every customer's page.)
       const invoices = await Invoice.find({
-        $or: orConditions,
-        $or: [
-          { 'emailsSent.0': { $exists: true } },
-          { 'reminderLog.0': { $exists: true } },
+        $and: [
+          { $or: orConditions },
+          { $or: [
+            { 'emailsSent.0': { $exists: true } },
+            { 'reminderLog.0': { $exists: true } },
+          ] },
         ],
         ...req.orgFilter,
       }).lean();
@@ -1087,6 +1093,14 @@ const getCustomerMails = async (req, res) => {
       for (const inv of invoices) {
         // ── Email entries ──────────────────────────────────────────────────
         for (const email of (inv.emailsSent || [])) {
+          // A reminder email is recorded twice: here (emailsSent) and in reminderLog.
+          // The reminder log is the fuller record (it also holds failures), so when
+          // it has the same send, show that one only — not the same mail twice.
+          if (email.emailType === 'reminder' &&
+              (inv.reminderLog || []).some(l => l.channel === 'email' &&
+                Math.abs(new Date(l.sentAt) - new Date(email.sentAt)) < 120000)) {
+            continue;
+          }
           mails.push({
             invoiceNumber: inv.invoiceNumber,
             invoiceId:     inv._id,
