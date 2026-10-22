@@ -57,6 +57,7 @@ function _getPooledTransporter(smtp) {
 async function getTransporter(orgId, branchId, db) {
   console.log('🔍 mailer: orgId=', orgId, 'branchId=', branchId);
   let smtp = null;
+  let savedLogin = false; // true when the branch / organisation's OWN mail login is used
 
   try {
     // 1. Try branch SMTP first
@@ -70,6 +71,7 @@ async function getTransporter(orgId, branchId, db) {
           pass:     decrypt(branch.smtpPasswordEnc),
           fromName: branch.smtpFromName || branch.branchName || '',
         };
+        savedLogin = true;
       }
     }
 
@@ -84,6 +86,7 @@ async function getTransporter(orgId, branchId, db) {
           pass:     decrypt(org.smtpPasswordEnc),
           fromName: org.smtpFromName || org.orgName || '',
         };
+        savedLogin = true;
       }
     }
   } catch (e) {
@@ -107,15 +110,32 @@ async function getTransporter(orgId, branchId, db) {
 
   console.log('📧 mailer: using smtp user=', smtp.user, 'host=', smtp.host);
   const fromAddress = `"${smtp.fromName}" <${smtp.user}>`;
-  return { transporter, fromAddress };
+  // copyTo: the sender's own mailbox, only when a saved branch / organisation login
+  // is used. The default (.env) Gmail sender is left out: Gmail already keeps its own
+  // Sent copy, so a copy there would only create a duplicate in its Inbox.
+  return { transporter, fromAddress, copyTo: savedLogin ? smtp.user : null };
+}
+
+// A message sent through SMTP is not saved in the mailbox's "Sent" folder (only a mail
+// program does that). So the sender's own mailbox is added as a hidden (BCC) recipient;
+// a filter on the mailbox moves those copies into "Sent". Switch off with
+// MAIL_COPY_TO_SENDER=false. A problem with the copy never stops the real email.
+function _copyRecipient(copyTo, to, cc) {
+  if (!copyTo) return undefined;
+  if (String(process.env.MAIL_COPY_TO_SENDER || 'true').toLowerCase() === 'false') return undefined;
+  const mine = String(copyTo).trim().toLowerCase();
+  const listed = [to, cc].some((v) => String(Array.isArray(v) ? v.join(',') : (v || '')).toLowerCase().includes(mine));
+  return listed ? undefined : copyTo; // already a visible recipient → no second copy
 }
 
 async function sendMail({ orgId, branchId, db, to, cc, subject, html, text, attachments }) {
-  const { transporter, fromAddress } = await getTransporter(orgId, branchId, db);
+  const { transporter, fromAddress, copyTo } = await getTransporter(orgId, branchId, db);
+  const bcc = _copyRecipient(copyTo, to, cc);
   return transporter.sendMail({
     from:        fromAddress,
     to,
     ...(cc ? { cc } : {}),
+    ...(bcc ? { bcc } : {}),
     subject,
     html,
     text,
@@ -131,4 +151,4 @@ function closeAll() {
   }
 }
 
-module.exports = { getTransporter, sendMail, closeAll };
+module.exports = { getTransporter, sendMail, closeAll, _copyRecipient };
