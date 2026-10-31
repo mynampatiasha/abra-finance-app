@@ -29,6 +29,7 @@ import '../../../../core/utils/export_helper.dart';
 import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/tms_service.dart';
 import '../app_top_bar.dart';
+import '../widgets/mobile_page_bar.dart';
 import 'new_invoice.dart';
 import 'invoice_detail_page.dart';
 import 'new_recurring_invoice.dart';
@@ -131,11 +132,21 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   //  DATA
   // ==========================================================================
 
-  Future<void> _loadInvoices() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  // Counts the loads, so a reply that arrives late (after a newer load was
+  // started) is ignored and can never overwrite newer data.
+  int _loadSeq = 0;
+
+  // [silent] = after an edit / upload / delete: fetch the fresh page in the
+  // background and swap it in. The table is never replaced by a spinner, so the
+  // place the user was working (column, row, ticks) stays exactly as it was.
+  Future<void> _loadInvoices({bool silent = false}) async {
+    final seq = ++_loadSeq;
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
     try {
       final response = await InvoiceService.getInvoices(
         status: _selectedStatus == 'All' ? null : _selectedStatus,
@@ -145,13 +156,37 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
         toDate: _toDate,
         search: _searchQuery,
       );
+      if (!mounted || seq != _loadSeq) return;
+      // the page we are on is gone (its last invoice was deleted): go to the last page
+      if (response.invoices.isEmpty &&
+          _currentPage > 1 &&
+          _currentPage > response.pagination.pages &&
+          response.pagination.pages >= 1) {
+        _currentPage = response.pagination.pages;
+        return _loadInvoices(silent: silent);
+      }
       setState(() {
         _invoices = response.invoices;
         _totalPages = response.pagination.pages;
         _totalInvoices = response.pagination.total;
         _isLoading = false;
+        _errorMessage = null;
+        if (silent) {
+          // keep the ticks that are still on this page
+          final here = _invoices.map((i) => i.id).toSet();
+          _selectedInvoices.removeWhere((id) => !here.contains(id));
+          _selectAll = _selectedInvoices.isNotEmpty &&
+              _selectedInvoices.length == _invoices.length;
+        }
       });
     } catch (e) {
+      if (!mounted || seq != _loadSeq) return;
+      if (silent) {
+        // the table on screen is still good: keep it and just say so
+        if (_isLoading) setState(() => _isLoading = false);
+        _snackError('Could not refresh the list: $e');
+        return;
+      }
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
@@ -162,15 +197,17 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   Future<void> _loadStats() async {
     try {
       final stats = await InvoiceService.getStats(search: _searchQuery);
+      if (!mounted) return;
       setState(() => _stats = stats);
     } catch (e) {
       debugPrint('Stats error: $e');
     }
   }
 
-  Future<void> _refreshData() async {
-    await Future.wait([_loadInvoices(), _loadStats()]);
-    _snackSuccess('Data refreshed successfully');
+  Future<void> _refreshData({bool silent = false}) async {
+    await Future.wait([_loadInvoices(silent: silent), _loadStats()]);
+    // the Refresh button says it worked; after an edit / upload the action's own message is enough
+    if (!silent) _snackSuccess('Data refreshed successfully');
   }
 
   void _filterByStatus(String status) {
@@ -210,7 +247,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   void _openNewInvoice() async {
     final result = await Navigator.push(
         context, MaterialPageRoute(builder: (_) => const NewInvoiceScreen()));
-    if (result == true) _refreshData();
+    if (result == true) _refreshData(silent: true);
   }
 
   void _openEditInvoice(String invoiceId) async {
@@ -221,13 +258,13 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
         context,
         MaterialPageRoute(
             builder: (_) => NewInvoiceScreen(invoiceId: invoiceId)));
-    if (result == true) _refreshData();
+    if (result == true) _refreshData(silent: true);
   }
 
   void _openAutomationPage() async {
     final result = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => const InvoiceAutomationListPage()));
-    if (result == true) _refreshData(); // Refresh if drafts were created
+    if (result == true) _refreshData(silent: true); // Refresh if drafts were created
   }
 
   // ==========================================================================
@@ -240,7 +277,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       MaterialPageRoute(
           builder: (_) => InvoiceDetailPage(invoiceId: invoice.id)),
     ).then((result) {
-      if (result == true) _refreshData();
+      if (result == true) _refreshData(silent: true);
     });
   }
 
@@ -277,7 +314,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       try {
         await InvoiceService.deleteInvoice(invoice.id);
         _snackSuccess('Invoice deleted successfully');
-        _refreshData();
+        _refreshData(silent: true);
       } catch (e) {
         _snackError('Failed to delete invoice: $e');
       }
@@ -288,7 +325,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     try {
       await InvoiceService.sendInvoice(invoice.id);
       _snackSuccess('Invoice sent to ${invoice.customerEmail}');
-      _refreshData();
+      _refreshData(silent: true);
     } catch (e) {
       _snackError('Failed to send invoice: $e');
     }
@@ -322,7 +359,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     try {
       await InvoiceService.markInvoiceAsSent(invoice.id);
       _snackSuccess('Invoice marked as sent');
-      _refreshData();
+      _refreshData(silent: true);
     } catch (e) {
       _snackError('Failed to mark as sent: $e');
     }
@@ -431,7 +468,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     try {
       await InvoiceService.pauseReminder(invoice.id);
       _snackSuccess('Reminders paused for ${invoice.invoiceNumber}');
-      _refreshData();
+      _refreshData(silent: true);
     } catch (e) {
       _snackError('Failed to pause reminders: $e');
     }
@@ -441,7 +478,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
     try {
       await InvoiceService.resumeReminder(invoice.id);
       _snackSuccess('Reminders resumed for ${invoice.invoiceNumber}');
-      _refreshData();
+      _refreshData(silent: true);
     } catch (e) {
       _snackError('Failed to resume reminders: $e');
     }
@@ -505,7 +542,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
             invoice.id, channel, reminderType);
         _snackSuccess(
             '✅ ${channel == 'email' ? 'Email' : 'WhatsApp'} reminder sent successfully!');
-        _refreshData();
+        _refreshData(silent: true);
       }
     } catch (e) {
       _snackError('Failed to send reminder: $e');
@@ -761,6 +798,24 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           children: [
             _buildTopBar(),
             if (_stats != null) _buildStatsCards(),
+            // phones: the page numbers (and a jump-to-page list) at the top too,
+            // so nobody has to scroll down to change page
+            LayoutBuilder(builder: (_, c) {
+              if (c.maxWidth >= 732 ||
+                  _totalInvoices == 0 ||
+                  _errorMessage != null) {
+                return const SizedBox.shrink();
+              }
+              return MobilePageBar(
+                currentPage: _currentPage,
+                totalPages: _totalPages,
+                summary: _pageSummary(),
+                onPage: (p) {
+                  setState(() => _currentPage = p);
+                  _loadInvoices();
+                },
+              );
+            }),
             _isLoading
                 ? const SizedBox(
                     height: 400,
@@ -860,10 +915,12 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
 
   Widget _topBarTablet() =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+        SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
           _statusDropdown(),
           const SizedBox(width: 10),
-          _searchField(width: 200),
+          _searchField(width: 220),
           const SizedBox(width: 8),
           _dateChip(
               label: _fromDate != null
@@ -891,9 +948,11 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
               tooltip: 'View Process',
               color: _blue,
               bg: _blue.withOpacity(0.10)),
-        ]),
+        ])),
         const SizedBox(height: 10),
-        Row(children: [
+        SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
           _buildViewToggle(),
           const SizedBox(width: 10),
           _newInvoiceButton(),
@@ -909,22 +968,24 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           const SizedBox(width: 8),
           _actionBtn('Reminders', Icons.notifications_active_outlined, _orange,
               _openReminderSettings),
-        ]),
+        ])),
       ]);
 
   Widget _topBarMobile() =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // the search box gets the whole row, so there is room to type and read
         Row(children: [
-          _statusDropdown(),
-          const SizedBox(width: 8),
           Expanded(child: _searchField(width: double.infinity)),
-          const SizedBox(width: 8),
-          _newInvoiceButton(compact: true),
         ]),
         const SizedBox(height: 10),
+        // everything else slides sideways
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(children: [
+            _newInvoiceButton(compact: true),
+            const SizedBox(width: 8),
+            _statusDropdown(),
+            const SizedBox(width: 8),
             _buildViewToggle(),
             const SizedBox(width: 8),
             _dateChip(
@@ -2198,6 +2259,10 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
   //  PAGINATION
   // ==========================================================================
 
+  String _pageSummary() =>
+      'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–'
+      '${(_currentPage * _itemsPerPage).clamp(0, _totalInvoices)} of $_totalInvoices';
+
   Widget _buildPagination() {
     List<int> pages;
     if (_totalPages <= 5) {
@@ -2220,8 +2285,7 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
           runSpacing: 8,
           children: [
             Text(
-              'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–'
-              '${(_currentPage * _itemsPerPage).clamp(0, _totalInvoices)} of $_totalInvoices',
+              _pageSummary(),
               style: TextStyle(
                   fontSize: 13,
                   color: Colors.grey[600],
