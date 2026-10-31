@@ -1,6 +1,6 @@
 // =============================================================================
 // EXPENSE PROOFS — several proofs per expense
-//   • up to 10 files per expense, images or PDF, 10 MB each
+//   • any number of files per expense, images or PDF, any size
 //   • add many at once (or take a photo, repeat), view, and delete any of them
 // Shared by the expenses list page and the expense detail page.
 // =============================================================================
@@ -23,9 +23,6 @@ import 'package:universal_html/html.dart' as html;
 
 import '../../../core/services/api_service.dart';
 import '../../../core/services/expenses_service.dart';
-
-const int kMaxProofsPerExpense = 10;
-const int _kMaxProofBytes = 10 * 1024 * 1024;
 
 const Color _pmTeal = Color(0xFF16A085);
 const Color _pmNavy = Color(0xFF1e3a8a);
@@ -153,13 +150,6 @@ Future<ProofUploadResult?> pickAndUploadProofs(
   required void Function(String) onError,
   required void Function(String) onSuccess,
 }) async {
-  final room = kMaxProofsPerExpense - existingCount;
-  if (room <= 0) {
-    onError('This expense already has $kMaxProofsPerExpense proofs (the '
-        'maximum). Delete one to add another.');
-    return null;
-  }
-
   final source = await showDialog<String>(
     context: context,
     builder: (_) => Dialog(
@@ -241,20 +231,6 @@ Future<ProofUploadResult?> pickAndUploadProofs(
     }
   }
 
-  if (picked.length > room) {
-    onError('You can add only $room more file${room == 1 ? '' : 's'} to this '
-        'expense (maximum $kMaxProofsPerExpense). You selected ${picked.length}.');
-    return null;
-  }
-  for (final f in picked) {
-    if (f.value.length > _kMaxProofBytes) {
-      onError('"${f.key}" is too large '
-          '(${(f.value.length / 1024 / 1024).toStringAsFixed(1)} MB). '
-          'Maximum allowed is 10 MB per file.');
-      return null;
-    }
-  }
-
   // progress while uploading
   var progressOpen = false;
   if (context.mounted) {
@@ -330,7 +306,6 @@ class _ProofSourceSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final room = kMaxProofsPerExpense - existingCount;
     return Container(
       width: 360,
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
@@ -348,7 +323,9 @@ class _ProofSourceSheet extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'You can add $room more (maximum $kMaxProofsPerExpense per expense).',
+            existingCount == 0
+                ? 'Add as many files as you need.'
+                : 'This expense has $existingCount proof${existingCount == 1 ? '' : 's'} so far. Add as many more as you need.',
             style: TextStyle(fontSize: 13, color: Colors.grey[600]),
           ),
         ),
@@ -365,7 +342,7 @@ class _ProofSourceSheet extends StatelessWidget {
           icon: Icons.folder_open_rounded,
           color: _pmPurple,
           title: 'Choose Files',
-          subtitle: 'Select one or many — images (JPG, PNG, WEBP) or PDF, max 10 MB each',
+          subtitle: 'Select one or many — images (JPG, PNG, WEBP) or PDF, any size',
           onTap: () => Navigator.pop(context, 'file'),
         ),
         const SizedBox(height: 16),
@@ -586,7 +563,6 @@ class _ExpenseProofManagerDialogState extends State<ExpenseProofManagerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final full = _proofs.length >= kMaxProofsPerExpense;
     return WillPopScope(
       onWillPop: () async {
         Navigator.pop(context, _proofs);
@@ -614,7 +590,7 @@ class _ExpenseProofManagerDialogState extends State<ExpenseProofManagerDialog> {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text('Expense Proofs (${_proofs.length}/$kMaxProofsPerExpense)',
+                    Text('Expense Proofs (${_proofs.length})',
                         style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -691,12 +667,12 @@ class _ExpenseProofManagerDialogState extends State<ExpenseProofManagerDialog> {
             child: Row(children: [
               Expanded(
                   child: OutlinedButton.icon(
-                onPressed: (_busy || full) ? null : _add,
+                onPressed: _busy ? null : _add,
                 icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                label: Text(full ? 'Maximum reached' : 'Add proofs'),
+                label: const Text('Add proofs'),
                 style: OutlinedButton.styleFrom(
                     foregroundColor: _pmTeal,
-                    side: BorderSide(color: full ? Colors.grey : _pmTeal),
+                    side: const BorderSide(color: _pmTeal),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8))),
               )),

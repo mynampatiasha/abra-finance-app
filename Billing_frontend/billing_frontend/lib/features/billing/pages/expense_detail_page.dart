@@ -135,7 +135,7 @@ class _ExpenseDetailPageState extends State<ExpenseDetailPage> {
   // ── Upload / Replace proof ─────────────────────────────────────────────────
   Future<void> _uploadProof() async {
     if (_expense == null) return;
-    // Choose camera / several files, check (max 10 per expense, 10 MB each) and
+    // Choose camera / several files, check (any number, any size) and
     // upload them all in one request — they are ADDED to the existing proofs.
     final result = await pickAndUploadProofs(
       context,

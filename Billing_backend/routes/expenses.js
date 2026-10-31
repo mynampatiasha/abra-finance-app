@@ -352,7 +352,7 @@ const proofFileFilter = (req, file, cb) => {
 const proofUpload = multer({
   storage:    proofStorage,
   fileFilter: proofFileFilter,
-  limits:     { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  // no limit on the size of a proof file or on how many are sent together
 });
 
 // ============================================================================
@@ -1562,14 +1562,12 @@ router.get('/health', async (req, res) => {
 // ============================================================================
 
 // ============================================================================
-// PROOF FILES — several per expense (max 10, images or PDF, 10 MB each)
+// PROOF FILES — as many per expense as needed (images or PDF, any size)
 // An expense saved before this feature has a single `proofFile`; it is treated
 // as the first item of the list and moved into `proofFiles` the first time the
 // list is changed. `proofFile` is kept equal to the first proof so older app
 // versions keep working.
 // ============================================================================
-
-const MAX_PROOFS_PER_EXPENSE = 10;
 
 function allProofs(expense) {
   if (expense.proofFiles && expense.proofFiles.length) {
@@ -1656,11 +1654,9 @@ function sendProofFile(res, proof) {
 
 // multer errors → a clear JSON message instead of a 500
 function proofUploadMiddleware(req, res, next) {
-  proofUpload.array('proof', MAX_PROOFS_PER_EXPENSE)(req, res, (err) => {
+  proofUpload.array('proof')(req, res, (err) => {
     if (!err) return next();
-    let message = err.message || 'Upload failed';
-    if (err.code === 'LIMIT_UNEXPECTED_FILE') message = `You can upload at most ${MAX_PROOFS_PER_EXPENSE} files at a time`;
-    if (err.code === 'LIMIT_FILE_SIZE')       message = 'Each proof file must be 10 MB or smaller';
+    const message = err.message || 'Upload failed';
     return res.status(400).json({ success: false, message });
   });
 }
@@ -1683,14 +1679,6 @@ router.post('/:id/proof', proofUploadMiddleware, async (req, res) => {
     }
 
     const existing = allProofs(expense);
-    if (existing.length + files.length > MAX_PROOFS_PER_EXPENSE) {
-      discard();
-      const room = Math.max(0, MAX_PROOFS_PER_EXPENSE - existing.length);
-      return res.status(400).json({
-        success: false,
-        message: `An expense can have at most ${MAX_PROOFS_PER_EXPENSE} proof files. This one has ${existing.length}, so you can add ${room} more.`,
-      });
-    }
 
     const added = files.map((f, i) => ({
       filename:     f.filename,

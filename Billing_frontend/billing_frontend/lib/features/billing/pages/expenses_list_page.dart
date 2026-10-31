@@ -5,7 +5,7 @@ import 'package:abra_finance/core/utils/app_snackbar.dart';
 //   1. ProofFile model added
 //   2. Expense model gains proofFile field
 //   3. _proofFilter state + "Proof" filter chip in all 3 top-bar breakpoints
-//   4. _uploadProof()  — bottom sheet: Camera | Choose File (10 MB, img/pdf)
+//   4. _uploadProof()  — bottom sheet: Camera | Choose File (any size, img/pdf)
 //                        confirmation dialog if proof already exists
 //   5. 3-dot PopupMenu gains "Upload Proof" item (after View Details)
 //   6. ExpenseDetailsDialog gains a "Proof" section at the bottom
@@ -36,6 +36,9 @@ import '../../../../core/services/tms_service.dart';
 import '../../../../core/permissions_finance.dart';
 import '../app_top_bar.dart';
 import '../widgets/expense_proof_manager.dart';
+import '../widgets/expense_search.dart';
+import '../widgets/highlighted_text.dart';
+import '../widgets/mobile_page_bar.dart';
 import 'new_expenses.dart';
 import 'expense_detail_page.dart';
 
@@ -99,22 +102,16 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     'Rejected',
     'Paid'
   ];
-  final List<String> _accountFilters = [
-    'All',
-    'Fuel',
-    'Office Supplies',
-    'Travel & Conveyance',
-    'Advertising & Marketing',
-    'Meals & Entertainment',
-    'Utilities',
-    'Rent',
-    'Professional Fees',
-    'Insurance',
-    'Other Expenses',
-  ];
+  // The accounts that really are on the expenses (with how many each), built
+  // after the list loads. Nothing is typed in by hand any more.
+  List<AccountOption> _accountOptions = [];
+  // STRICT = the exact phrase in the columns shown; LOOSE = any word, anywhere.
+  SearchMode _searchMode = SearchMode.strict;
 
   // ── search ────────────────────────────────────────────────────────────────
   final TextEditingController _searchController = TextEditingController();
+  // The searchable text of each expense, built once and reused while typing.
+  final ExpenseSearchIndex _searchIndex = ExpenseSearchIndex();
 
   // ── pagination ────────────────────────────────────────────────────────────
   int _currentPage = 1;
@@ -150,30 +147,51 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
   // ── loaders ───────────────────────────────────────────────────────────────
 
-  Future<void> _loadAll() async {
-    await Future.wait([_loadExpenses(), _loadStats()]);
+  // [silent] = after an edit / upload / delete: fetch the fresh list in the
+  // background and swap it in. The table is never replaced by a spinner, so the
+  // place the user was working (column, row, page, ticks) stays exactly as it was.
+  Future<void> _loadAll({bool silent = false}) async {
+    await Future.wait([_loadExpenses(silent: silent), _loadStats()]);
   }
 
-  Future<void> _loadExpenses() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  Future<void> _loadExpenses({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
     try {
       final resp = await _expenseService.getAllExpenses();
+      if (!mounted) return;
       if (resp['success'] == true) {
         setState(() {
           _expenses =
               (resp['data'] as List).map((e) => Expense.fromJson(e)).toList();
+          _searchIndex.clear(); // new data: rebuild the searchable text
+          _accountOptions = ExpenseSearch.accountOptions(_expenses);
+          if (_selectedAccount != 'All' &&
+              !_accountOptions.any((o) => o.name == _selectedAccount)) {
+            _selectedAccount = 'All';
+          }
           _isLoading = false;
-          _selectedIds.clear();
-          _selectAll = false;
+          _errorMessage = null;
+          if (!silent) {
+            _selectedIds.clear();
+            _selectAll = false;
+          }
         });
-        _applyFilters();
+        _applyFilters(keepSelection: silent);
       } else {
         throw Exception(resp['message'] ?? 'Failed to load expenses');
       }
     } catch (e) {
+      if (silent) {
+        // the table on screen is still good: keep it and just say so
+        if (mounted) _showError('Could not refresh the list: $e');
+        return;
+      }
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
@@ -202,17 +220,21 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
   // ── filtering ─────────────────────────────────────────────────────────────
 
-  void _applyFilters() {
-    final q = _searchController.text.toLowerCase();
+  void _applyFilters({bool keepSelection = false}) {
+    final query = _searchController.text;
+    final words = ExpenseSearch.tokens(query);
+    final strict = _searchMode == SearchMode.strict;
     setState(() {
       _filtered = _expenses.where((e) {
-        // text search
-        if (q.isNotEmpty &&
-            !e.expenseAccount.toLowerCase().contains(q) &&
-            !(e.vendor?.toLowerCase().contains(q) ?? false) &&
-            !(e.customerName?.toLowerCase().contains(q) ?? false) &&
-            !(e.invoiceNumber?.toLowerCase().contains(q) ?? false))
-          return false;
+        // text search: STRICT = the exact phrase inside one of the shown columns,
+        // LOOSE = every word found somewhere on the expense
+        if (query.trim().isNotEmpty) {
+          final found = strict
+              ? ExpenseSearch.matchesStrict(_searchIndex.strictFor(e), query)
+              : (words.isEmpty ||
+                  ExpenseSearch.matches(_searchIndex.textFor(e), words));
+          if (!found) return false;
+        }
         // status filter — match against paidThrough as a proxy since Expense has no status field,
         // but the status dropdown maps to logical states derived from the expense data
         if (_selectedStatus != 'All') {
@@ -247,8 +269,16 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
       }).toList();
       _totalPages = (_filtered.length / _itemsPerPage).ceil().clamp(1, 9999);
       if (_currentPage > _totalPages) _currentPage = _totalPages;
-      _selectedIds.clear();
-      _selectAll = false;
+      if (keepSelection) {
+        // keep the ticks that are still on the list
+        final still = _filtered.map((e) => e.id).toSet();
+        _selectedIds.removeWhere((id) => !still.contains(id));
+        _selectAll = _selectedIds.isNotEmpty &&
+            _selectedIds.length == _currentPageItems.length;
+      } else {
+        _selectedIds.clear();
+        _selectAll = false;
+      }
     });
   }
 
@@ -305,7 +335,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   void _openNew() async {
     final ok = await Navigator.push(
         context, MaterialPageRoute(builder: (_) => const NewExpensePage()));
-    if (ok == true) _loadAll();
+    if (ok == true) _loadAll(silent: true);
   }
 
   void _openEdit(String id) async {
@@ -314,7 +344,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
     final ok = await Navigator.push(context,
         MaterialPageRoute(builder: (_) => NewExpensePage(expenseId: id)));
-    if (ok == true) _loadAll();
+    if (ok == true) _loadAll(silent: true);
   }
 
   // ── view details ──────────────────────────────────────────────────────────
@@ -326,7 +356,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
           builder: (_) => ExpenseDetailPage(expenseId: expense.id)),
     ).then((result) {
       if (result == true) {
-        _loadExpenses(); // something other than proofs changed
+        _loadExpenses(silent: true); // something other than proofs changed
       } else if (result is List<ProofFile>) {
         _applyProofs(expense.id, result); // only the proofs changed
       }
@@ -350,7 +380,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     try {
       await _expenseService.deleteExpense(expense.id);
       _showSuccess('Expense deleted');
-      _loadAll();
+      _loadAll(silent: true);
     } catch (e) {
       _showError('Failed to delete: $e');
     }
@@ -426,11 +456,12 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     for (final e in _expenses) {
       if (e.id == expenseId) e.setProofs(proofs);
     }
-    _applyFilters(); // the "With / Without Proof" filter may now include / exclude it
+    _searchIndex.invalidate(expenseId); // proof file names are searchable
+    _applyFilters(keepSelection: true); // the "With / Without Proof" filter may now include / exclude it
   }
 
   Future<void> _uploadProof(Expense expense) async {
-    // Choose camera / several files, check (max 10 per expense, 10 MB each) and
+    // Choose camera / several files, check (any number, any size) and
     // upload them all in one request — they are ADDED to the existing proofs.
     final result = await pickAndUploadProofs(
       context,
@@ -455,7 +486,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         _openProof(expense);
       }
     } else {
-      _loadExpenses();
+      _loadExpenses(silent: true);
     }
   }
 
@@ -793,6 +824,22 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         child: Column(children: [
           _buildTopBar(),
           _buildStatsCards(),
+          // phones: the page numbers (and a jump-to-page list) at the top too,
+          // so nobody has to scroll down to change page
+          LayoutBuilder(builder: (_, c) {
+            if (c.maxWidth >= 732 || _isLoading || _filtered.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            return MobilePageBar(
+              currentPage: _currentPage,
+              totalPages: _totalPages,
+              summary: _pageSummary(),
+              onPage: (p) {
+                setState(() => _currentPage = p);
+                _applyFilters();
+              },
+            );
+          }),
           _isLoading
               ? const SizedBox(
                   height: 400,
@@ -916,6 +963,8 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         _proofFilterChip(), // NEW
         const SizedBox(width: 10),
         _searchField(width: 200),
+        const SizedBox(width: 6),
+        _searchModeButton(),
         const SizedBox(width: 10),
         _dateChip(
             label: _fromDate != null
@@ -963,14 +1012,18 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
 
   Widget _topBarTablet() =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+        SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
           _statusDropdown(),
           const SizedBox(width: 8),
           _accountDropdown(),
           const SizedBox(width: 8),
           _proofFilterChip(), // NEW
           const SizedBox(width: 8),
-          _searchField(width: 150),
+          _searchField(width: 220),
+          const SizedBox(width: 4),
+          _searchModeButton(),
           const SizedBox(width: 8),
           _dateChip(
               label: _fromDate != null
@@ -1003,9 +1056,11 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
               tooltip: 'View Process',
               color: _navy,
               bg: _navy.withOpacity(0.08)),
-        ]),
+        ])),
         const SizedBox(height: 10),
-        Row(children: [
+        SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
           _buildViewToggle(),
           const SizedBox(width: 8),
           _actionBtn('New Expense', Icons.add_rounded, _navy, _openNew),
@@ -1018,22 +1073,24 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
           const SizedBox(width: 8),
           _actionBtn('Raise Ticket', Icons.confirmation_number_rounded, _orange,
               () => _raiseTicket()),
-        ]),
+        ])),
       ]);
 
   Widget _topBarMobile() =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          _statusDropdown(),
-          const SizedBox(width: 8),
           Expanded(child: _searchField(width: double.infinity)),
-          const SizedBox(width: 8),
-          _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+          const SizedBox(width: 6),
+          _searchModeButton(),
         ]),
         const SizedBox(height: 10),
         SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
+              _actionBtn('New', Icons.add_rounded, _navy, _openNew),
+              const SizedBox(width: 8),
+              _statusDropdown(),
+              const SizedBox(width: 8),
               _accountDropdown(),
               const SizedBox(width: 8),
               _proofFilterChip(), // NEW
@@ -1126,10 +1183,16 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             icon: const Icon(Icons.expand_more, size: 18, color: _navy),
             style: const TextStyle(
                 fontSize: 13, fontWeight: FontWeight.w600, color: _navy),
-            items: _accountFilters
-                .map((s) => DropdownMenuItem(
-                    value: s, child: Text(s == 'All' ? 'All Accounts' : s)))
-                .toList(),
+            items: [
+              DropdownMenuItem(
+                  value: 'All', child: Text('All Accounts (${_expenses.length})')),
+              ..._accountOptions.map((o) => DropdownMenuItem(
+                  value: o.name,
+                  child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 240),
+                      child: Text('${o.name} (${o.count})',
+                          overflow: TextOverflow.ellipsis)))),
+            ],
             onChanged: (v) {
               if (v != null) {
                 setState(() {
@@ -1143,12 +1206,60 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
         ),
       );
 
+  // Strict / Loose switch for the search box
+  Widget _searchModeButton() => PopupMenuButton<SearchMode>(
+        tooltip: 'Search type',
+        onSelected: (m) {
+          if (m == _searchMode) return;
+          setState(() {
+            _searchMode = m;
+            _currentPage = 1;
+          });
+          _applyFilters();
+        },
+        itemBuilder: (_) => [
+          CheckedPopupMenuItem(
+            value: SearchMode.strict,
+            checked: _searchMode == SearchMode.strict,
+            child: const Text(
+                'Strict: the exact words, in the columns shown.\nA number must be the whole amount (560 does not find 78560).',
+                style: TextStyle(fontSize: 12.5)),
+          ),
+          CheckedPopupMenuItem(
+            value: SearchMode.loose,
+            checked: _searchMode == SearchMode.loose,
+            child: const Text(
+                'Loose: any word, anywhere (notes, tags, items, files too).\nA number can be part of a bigger number.',
+                style: TextStyle(fontSize: 12.5)),
+          ),
+        ],
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              color: _searchMode == SearchMode.strict
+                  ? _navy.withOpacity(0.08)
+                  : const Color(0xFFFFF4E0),
+              border: Border.all(color: const Color(0xFFDDE3EE)),
+              borderRadius: BorderRadius.circular(10)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(_searchMode == SearchMode.strict ? 'Strict' : 'Loose',
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w700, color: _navy)),
+            const Icon(Icons.arrow_drop_down, size: 18, color: _navy),
+          ]),
+        ),
+      );
+
   Widget _searchField({required double width}) {
     final field = TextField(
       controller: _searchController,
       style: const TextStyle(fontSize: 14),
       decoration: InputDecoration(
-        hintText: 'Search expenses…',
+        hintText: _searchMode == SearchMode.strict
+            ? 'Exact search…'
+            : 'Loose search…',
         hintStyle: TextStyle(fontSize: 14, color: Colors.grey[400]),
         prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey[400]),
         suffixIcon: _searchController.text.isNotEmpty
@@ -1922,6 +2033,8 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
                                 checkColor: const Color(0xFF0D1B3E),
                                 onChanged: _toggleSelectAll))),
                     const DataColumn(
+                        label: SizedBox(width: 90, child: Text('EXPENSE #'))),
+                    const DataColumn(
                         label: SizedBox(width: 90, child: Text('DATE'))),
                     const DataColumn(
                         label: SizedBox(
@@ -1966,6 +2079,21 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
       expDate = DateTime.parse(expense.date);
     } catch (_) {}
 
+    // colour the part of each cell that the search found
+    final q = _searchController.text;
+    final strict = _searchMode == SearchMode.strict;
+    Widget hl(String t, TextStyle st,
+            {FieldKind kind = FieldKind.text, String? rawDate}) =>
+        HighlightedText(t,
+            query: q, strict: strict, style: st, kind: kind, rawDate: rawDate);
+    // the invoice number is not a column: when it is what matched, say so under the number
+    final inv = expense.invoiceNumber ?? '';
+    final invFound = q.trim().isNotEmpty &&
+        inv.isNotEmpty &&
+        ExpenseSearch.highlightRanges(inv, q,
+                strict: strict, kind: FieldKind.serial)
+            .isNotEmpty;
+
     return DataRow(
       selected: isSel,
       color: WidgetStateProperty.resolveWith((s) {
@@ -1978,52 +2106,69 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
             Checkbox(value: isSel, onChanged: (_) => _toggleRow(expense.id))),
         DataCell(SizedBox(
             width: 90,
-            child: Text(
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  hl(
+                      expense.expenseNumber ?? '-',
+                      const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _navy),
+                      kind: FieldKind.serial),
+                  if (invFound)
+                    hl('Inv: $inv',
+                        TextStyle(fontSize: 10, color: Colors.grey[700]),
+                        kind: FieldKind.serial),
+                ]))),
+        DataCell(SizedBox(
+            width: 90,
+            child: hl(
                 expDate != null
                     ? DateFormat('dd/MM/yyyy').format(expDate)
                     : expense.date,
-                style: const TextStyle(fontSize: 12)))),
+                const TextStyle(fontSize: 12),
+                kind: FieldKind.date,
+                rawDate: expense.date))),
         DataCell(SizedBox(
             width: 150,
             child: InkWell(
               onTap: () => _openEdit(expense.id),
-              child: Text(expense.expenseAccount,
-                  style: const TextStyle(
+              child: hl(
+                  expense.expenseAccount,
+                  const TextStyle(
                       color: _navy,
                       fontWeight: FontWeight.w600,
                       fontSize: 12,
-                      decoration: TextDecoration.underline),
-                  overflow: TextOverflow.ellipsis),
+                      decoration: TextDecoration.underline)),
             ))),
         DataCell(SizedBox(
             width: 120,
-            child: Text(expense.vendor ?? '-',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                overflow: TextOverflow.ellipsis))),
+            child: hl(expense.vendor ?? '-',
+                TextStyle(fontSize: 12, color: Colors.grey[600])))),
         DataCell(SizedBox(
             width: 130,
-            child: Text(expense.customerName ?? '-',
-                style: const TextStyle(fontSize: 12),
-                overflow: TextOverflow.ellipsis))),
+            child: hl(expense.customerName ?? '-',
+                const TextStyle(fontSize: 12)))),
         DataCell(SizedBox(
             width: 90,
-            child: Text('₹${expense.amount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w500)))),
+            child: hl('₹${expense.amount.toStringAsFixed(2)}',
+                const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                kind: FieldKind.money))),
         DataCell(SizedBox(
             width: 80,
-            child: Text('₹${expense.tax.toStringAsFixed(2)}',
-                style: const TextStyle(fontSize: 12)))),
+            child: hl('₹${expense.tax.toStringAsFixed(2)}',
+                const TextStyle(fontSize: 12),
+                kind: FieldKind.money))),
         DataCell(SizedBox(
             width: 90,
-            child: Text('₹${expense.total.toStringAsFixed(2)}',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600)))),
+            child: hl('₹${expense.total.toStringAsFixed(2)}',
+                const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                kind: FieldKind.money))),
         DataCell(SizedBox(
             width: 120,
-            child: Text(expense.paidThrough,
-                style: const TextStyle(fontSize: 12),
-                overflow: TextOverflow.ellipsis))),
+            child: hl(expense.paidThrough, const TextStyle(fontSize: 12)))),
 
         // Receipt
         DataCell(SizedBox(
@@ -2197,7 +2342,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
     if (list != null) {
       _applyProofs(expense.id, list); // just this row — no full reload
     } else {
-      _loadExpenses();
+      _loadExpenses(silent: true);
     }
   }
 
@@ -2215,6 +2360,10 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
   }
 
   // ── pagination ────────────────────────────────────────────────────────────
+
+  String _pageSummary() =>
+      'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–${(_currentPage * _itemsPerPage).clamp(0, _filtered.length)} of ${_filtered.length}'
+      '${_filtered.length != _expenses.length ? ' (filtered from ${_expenses.length})' : ''}';
 
   Widget _buildPagination() {
     List<int> pages;
@@ -2237,8 +2386,7 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
           runSpacing: 8,
           children: [
             Text(
-              'Showing ${(_currentPage - 1) * _itemsPerPage + 1}–${(_currentPage * _itemsPerPage).clamp(0, _filtered.length)} of ${_filtered.length}'
-              '${_filtered.length != _expenses.length ? ' (filtered from ${_expenses.length})' : ''}',
+              _pageSummary(),
               style: TextStyle(
                   fontSize: 13,
                   color: Colors.grey[600],
